@@ -1,0 +1,94 @@
+server:
+  port: ${SERVER_PORT:8040}
+
+spring:
+  application:
+    name: iqc-platform
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${REGISTER_HOST:localhost}:${REGISTER_PORT:8848}
+        ip: ${NACOS_DISCOVERY_IP:}
+      config:
+        server-addr: ${REGISTER_HOST:localhost}:${REGISTER_PORT:8848}
+        file-extension: yml
+  config:
+    import: optional:nacos:${OPENSABRE_COMMON_CONFIG_DATA_ID:opensabre-common.yml}?group=${OPENSABRE_COMMON_CONFIG_GROUP:DEFAULT_GROUP}&refreshEnabled=true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:${DATASOURCE_DBTYPE:mysql}://${DATASOURCE_HOST:localhost}:${DATASOURCE_PORT:3306}/iqc_platform?characterEncoding=UTF-8&useUnicode=true&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${DATASOURCE_USERNAME:root}
+    password: ${DATASOURCE_PASSWORD:root123}
+  servlet:
+    multipart:
+      max-file-size: ${IQC_CONVERSATION_MAX_FILE_SIZE:20MB}
+      max-request-size: ${IQC_CONVERSATION_MAX_REQUEST_SIZE:20MB}
+
+opensabre:
+  governance:
+    sysadmin:
+      service-id: ${SYSADMIN_SERVICE_ID:base-sysadmin}
+    usage:
+      transport: ${GOVERNANCE_USAGE_TRANSPORT:EDA}
+    audit:
+      enabled: true
+    dictionary:
+      enabled: true
+      registration-enabled: ${DICTIONARY_REGISTRATION_ENABLED:true}
+      registration-token: ${DICTIONARY_REGISTRATION_TOKEN:${GOVERNANCE_REGISTRATION_TOKEN:}}
+    error-catalog:
+      enabled: true
+      registration-token: ${ERROR_CATALOG_REGISTRATION_TOKEN:${GOVERNANCE_REGISTRATION_TOKEN:}}
+  resource-registration:
+    enabled: ${RESOURCE_REGISTRATION_ENABLED:true}
+    registration-token: "${RESOURCE_REGISTRATION_TOKEN:}"
+
+jasypt:
+  encryptor:
+    password: ${JASYPT_ENCRYPTOR_PASSWORD:?JASYPT_ENCRYPTOR_PASSWORD is required}
+
+mybatis-plus:
+  global-config:
+    db-config:
+      table-prefix: iqc_
+
+iqc:
+  organization:
+    service-id: ${ORGANIZATION_SERVICE_ID:base-organization}
+  conversation:
+    max-file-size-bytes: ${IQC_CONVERSATION_MAX_FILE_SIZE_BYTES:20971520}
+  llm:
+    enabled: ${IQC_LLM_ENABLED:false}
+    provider: ${IQC_LLM_PROVIDER:spring-ai}
+    endpoint: ${IQC_LLM_ENDPOINT:}
+    path: ${IQC_LLM_PATH:/v1/chat/completions}
+    api-key: ${IQC_LLM_API_KEY:}
+    model: ${IQC_LLM_MODEL:}
+    connect-timeout-millis: ${IQC_LLM_CONNECT_TIMEOUT_MILLIS:3000}
+    read-timeout-millis: ${IQC_LLM_READ_TIMEOUT_MILLIS:15000}
+    max-attempts: ${IQC_LLM_MAX_ATTEMPTS:2}
+    retry-backoff-millis: ${IQC_LLM_RETRY_BACKOFF_MILLIS:200}
+    rate-limit-max-count: ${IQC_LLM_RATE_LIMIT_MAX_COUNT:120}
+    rate-limit-period: ${IQC_LLM_RATE_LIMIT_PERIOD:60}
+
+logging:
+  level:
+    io.github.opensabre.iqc: INFO
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,opensabreGovernanceRegistration
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when_authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}

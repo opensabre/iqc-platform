@@ -1,0 +1,17 @@
+ALTER TABLE `iqc_conversation`
+    ADD COLUMN `employee_id` varchar(128) DEFAULT NULL AFTER `external_id`,
+    ADD COLUMN `employee_name` varchar(128) DEFAULT NULL AFTER `employee_id`,
+    ADD COLUMN `employee_group_id` varchar(64) DEFAULT NULL AFTER `employee_name`,
+    ADD COLUMN `customer_external_id` varchar(128) DEFAULT NULL AFTER `employee_group_id`,
+    ADD COLUMN `customer_name` varchar(128) DEFAULT NULL AFTER `customer_external_id`,
+    ADD COLUMN `customer_contact_masked` varchar(128) DEFAULT NULL AFTER `customer_name`,
+    ADD COLUMN `channel` varchar(32) DEFAULT NULL AFTER `customer_contact_masked`,
+    ADD COLUMN `started_time` datetime DEFAULT NULL AFTER `channel`,
+    ADD COLUMN `ended_time` datetime DEFAULT NULL AFTER `started_time`,
+    ADD COLUMN `business_type` varchar(64) DEFAULT NULL AFTER `ended_time`,
+    ADD COLUMN `business_no` varchar(128) DEFAULT NULL AFTER `business_type`,
+    ADD COLUMN `tags_json` text AFTER `business_no`,
+    ADD INDEX `idx_iqc_conversation_employee` (`employee_id`, `started_time`),
+    ADD INDEX `idx_iqc_conversation_customer` (`customer_external_id`, `started_time`),
+    ADD INDEX `idx_iqc_conversation_channel` (`channel`, `started_time`),
+    ADD INDEX `idx_iqc_conversation_business` (`business_type`, `business_no`);
