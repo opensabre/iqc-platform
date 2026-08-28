@@ -75,6 +75,15 @@ auth_mode: AUTHENTICATED
 
 ## 6. 发布门禁
 
+### CI 自动化
+
+后端仓库的 `.github/workflows/docker_publish.yml` 在 Pull Request 和 `main`/`v*` 推送时执行
+Maven Verify，并上传测试报告；`main` 或版本标签通过测试后，使用父 POM 的 Jib 配置构建并推送
+`ccr.ccs.tencentyun.com/opensabre/iqc-platform` 镜像。前端仓库的
+`.github/workflows/docker-build.yml` 执行类型检查、单元测试、生产构建和构建产物归档，推送事件
+通过后构建并推送多架构 `iqc-platform-admin` Docker 镜像。两个仓库都要求配置
+`DOCKER_CLOUD_SECRET_ID` 和 `DOCKER_CLOUD_SECRET_KEY`，Pull Request 不执行镜像推送。
+
 - `iqc-platform`: `mvn test`、`mvn -DskipTests package` 通过。
 - `iqc-platform-admin`: `pnpm type-check`、`pnpm build` 通过。
 - IQC 服务已注册到 Nacos，健康检查返回 UP，网关发布后可访问 `/api/iqc/bootstrap`。

@@ -1,0 +1,79 @@
+name: Test, Build and Push with Jib
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iqc-platform-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Maven Verify
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7.0.1
+      - name: Set up JDK
+        uses: actions/setup-java@v5.6.0
+        with:
+          java-version: "25"
+          distribution: temurin
+          cache: maven
+      - name: Run tests
+        run: mvn --batch-mode --no-transfer-progress verify
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: iqc-platform-test-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            target/surefire-reports/
+            target/failsafe-reports/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  build-and-push:
+    name: Build and Push Image
+    if: github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY_URL: "ccr.ccs.tencentyun.com/opensabre"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7.0.1
+      - name: Set up JDK
+        uses: actions/setup-java@v5.6.0
+        with:
+          java-version: "25"
+          distribution: temurin
+          cache: maven
+      - name: Build and push with Jib
+        run: >-
+          mvn --batch-mode --no-transfer-progress
+          -DskipTests
+          compile
+          jib:build
+          -Dsecret.id=${{ secrets.DOCKER_CLOUD_SECRET_ID }}
+          -Dsecret.key=${{ secrets.DOCKER_CLOUD_SECRET_KEY }}
