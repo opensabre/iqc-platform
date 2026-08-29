@@ -13,10 +13,12 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.format.annotation.DateTimeFormat;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -43,8 +45,9 @@ public class IqcDashboardController {
     @GetMapping
     @ResourcePermission(code = "iqc:dashboard:view", name = "查看质检总览", type = "iqc", description = "查看质检总览")
     @RateLimit(sceneCode = "iqc-dashboard-query", maxCount = 30, period = 60)
-    public Map<String, Object> stats(@RequestParam(required = false) LocalDate from,
-                                     @RequestParam(required = false) LocalDate to) {
+    public Map<String, Object> stats(
+            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime from,
+            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime to) {
         var conversationQuery = Wrappers.<io.github.opensabre.iqc.conversation.model.Conversation>lambdaQuery();
         var taskQuery = Wrappers.<InspectionTask>lambdaQuery();
         if (!dataScope.canViewAll()) {
@@ -63,8 +66,8 @@ public class IqcDashboardController {
         var resultQuery = Wrappers.<InspectionResult>lambdaQuery()
                 .select(InspectionResult::getScore, InspectionResult::getResultStatus, InspectionResult::getRiskLevel, InspectionResult::getCreatedTime)
                 .in(InspectionResult::getTaskId, visibleTaskIds);
-        if (from != null) resultQuery.ge(InspectionResult::getCreatedTime, java.util.Date.from(from.atStartOfDay(ZoneId.systemDefault()).toInstant()));
-        if (to != null) resultQuery.lt(InspectionResult::getCreatedTime, java.util.Date.from(to.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant()));
+        if (from != null) resultQuery.ge(InspectionResult::getCreatedTime, java.util.Date.from(from.atZone(ZoneId.systemDefault()).toInstant()));
+        if (to != null) resultQuery.lt(InspectionResult::getCreatedTime, java.util.Date.from(to.plusSeconds(1).atZone(ZoneId.systemDefault()).toInstant()));
         var results = visibleTaskIds.isEmpty() ? java.util.List.<InspectionResult>of() : resultMapper.selectList(resultQuery);
         long hitCount = results.stream().filter(item -> "HIT".equals(item.getResultStatus())).count();
         long highRiskCount = results.stream().filter(item -> "HIGH".equalsIgnoreCase(item.getRiskLevel())).count();

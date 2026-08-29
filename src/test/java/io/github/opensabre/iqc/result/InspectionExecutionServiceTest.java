@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.opensabre.governance.usage.UsageCounterRecorder;
 import io.github.opensabre.iqc.conversation.dao.ConversationMessageMapper;
+import io.github.opensabre.iqc.conversation.dao.ConversationMapper;
 import io.github.opensabre.iqc.conversation.model.ConversationMessage;
 import io.github.opensabre.iqc.result.dao.InspectionResultMapper;
 import io.github.opensabre.iqc.result.llm.LlmQualityProvider;
@@ -36,7 +37,7 @@ class InspectionExecutionServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final LlmQualityProvider llmProvider = mock(LlmQualityProvider.class);
     private final InspectionExecutionService service = new InspectionExecutionService(
-            mock(InspectionTaskMapper.class), mock(ConversationMessageMapper.class), mock(InspectionResultMapper.class),
+            mock(InspectionTaskMapper.class), mock(ConversationMapper.class), mock(ConversationMessageMapper.class), mock(InspectionResultMapper.class),
             objectMapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class), mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class));
 
     @Test
@@ -135,7 +136,7 @@ class InspectionExecutionServiceTest {
             message.setConversationId("message-1".equals(message.getId()) ? "conversation-1" : "conversation-2");
             return message;
         });
-        InspectionExecutionService concurrentService = new InspectionExecutionService(tasks, messages, results, objectMapper,
+        InspectionExecutionService concurrentService = new InspectionExecutionService(tasks, mock(ConversationMapper.class), messages, results, objectMapper,
                 executions, items, mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class));
 
         InspectionTask completed = concurrentService.run("task-1", "execution-1");

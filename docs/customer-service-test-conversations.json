@@ -1,0 +1,287 @@
+{
+  "batchNo": "IQC-CS-DEMO-20260829",
+  "conversations": [
+    {
+      "externalId": "CS-DEMO-001",
+      "title": "订单物流查询-001",
+      "channel": "WEB",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-ORDER-001",
+      "tags": ["正常服务", "物流查询"],
+      "messages": [
+        {"role":"user","time":"09:00:01","content":"你好，我想查询一下订单 DEMO-ORDER-001 的物流。"},
+        {"role":"agent","time":"09:00:08","content":"您好，我来帮您查询，请稍等。订单已于今天上午发出，预计明天送达。"},
+        {"role":"user","time":"09:00:25","content":"好的，谢谢。"},
+        {"role":"agent","time":"09:00:31","content":"不客气，后续如有物流问题欢迎随时联系我们，祝您生活愉快。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-002",
+      "title": "商品尺寸咨询-002",
+      "channel": "APP",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-ORDER-002",
+      "tags": ["正常服务", "商品咨询"],
+      "messages": [
+        {"role":"user","time":"09:12:02","content":"请问这款外套的 M 码适合多高的人穿？"},
+        {"role":"agent","time":"09:12:15","content":"您好，M 码衣长约 68 厘米，建议身高 160 到 170 厘米的顾客选择。您也可以参考详情页尺码表。"},
+        {"role":"user","time":"09:12:40","content":"我 165 厘米，平时穿 M，应该可以吧？"},
+        {"role":"agent","time":"09:12:51","content":"是的，按您提供的信息 M 码可以优先考虑；如果肩宽或喜欢宽松版型，建议对照具体尺寸确认。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-003",
+      "title": "退款进度查询-003",
+      "channel": "PHONE",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-ORDER-003",
+      "tags": ["售后", "退款"],
+      "messages": [
+        {"role":"user","time":"09:25:10","content":"我上周申请的退款还没有到账，能帮忙看一下吗？"},
+        {"role":"agent","time":"09:25:22","content":"您好，给您带来等待了。我查询到退款已经审核通过，原路退回银行卡通常需要 1 到 3 个工作日。"},
+        {"role":"user","time":"09:25:44","content":"那我再等两天，如果还没到账怎么办？"},
+        {"role":"agent","time":"09:25:55","content":"如果两个工作日后仍未到账，请回复本工单，我们会继续为您核查并反馈处理进度。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-004",
+      "title": "发票开具咨询-004",
+      "channel": "WEB",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-ORDER-004",
+      "tags": ["正常服务", "发票"],
+      "messages": [
+        {"role":"user","time":"09:40:02","content":"订单完成后可以开电子发票吗？"},
+        {"role":"agent","time":"09:40:16","content":"您好，可以开具电子普通发票。订单完成后进入订单详情，点击申请发票并填写抬头信息即可。"},
+        {"role":"user","time":"09:40:31","content":"大概多久可以收到？"},
+        {"role":"agent","time":"09:40:39","content":"提交申请后一般会在 24 小时内发送到您填写的邮箱。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-005",
+      "title": "优惠券使用咨询-005",
+      "channel": "APP",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-ORDER-005",
+      "tags": ["促销咨询", "正常服务"],
+      "messages": [
+        {"role":"user","time":"10:02:03","content":"我的优惠券为什么结算时不能使用？"},
+        {"role":"agent","time":"10:02:18","content":"您好，我帮您查看一下。该优惠券需要订单金额满 100 元，且不适用于特价商品。"},
+        {"role":"user","time":"10:02:35","content":"明白了，我调整一下商品。"},
+        {"role":"agent","time":"10:02:42","content":"好的，如果调整后仍无法使用，请把订单截图发给我们，我会继续协助您。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-006",
+      "title": "账号登录异常-006",
+      "channel": "WEB",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-TICKET-006",
+      "tags": ["账号问题", "正常服务"],
+      "messages": [
+        {"role":"user","time":"10:18:01","content":"我换了手机，现在无法登录账号。"},
+        {"role":"agent","time":"10:18:14","content":"您好，请先确认使用的是注册手机号，并尝试点击忘记密码获取验证码。"},
+        {"role":"user","time":"10:18:32","content":"可以了，原来是手机号输错了一位。"},
+        {"role":"agent","time":"10:18:39","content":"好的，问题已解决。请妥善保管账号信息，如需帮助欢迎再次联系我们。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-007",
+      "title": "配送地址修改-007",
+      "channel": "PHONE",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-ORDER-007",
+      "tags": ["订单修改", "服务闭环"],
+      "messages": [
+        {"role":"user","time":"10:35:04","content":"我刚下单，想修改收货地址。"},
+        {"role":"agent","time":"10:35:18","content":"您好，我查询到订单还未出库，可以为您提交地址修改申请。请提供新的收货城市和街道。"},
+        {"role":"user","time":"10:35:41","content":"改成上海市浦东新区世纪大道 100 号。"},
+        {"role":"agent","time":"10:35:56","content":"已为您提交修改，订单页面稍后会更新。修改成功后我们会再次通知您。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-008",
+      "title": "产品保修范围-008",
+      "channel": "WEB",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-ORDER-008",
+      "tags": ["售后咨询", "产品咨询"],
+      "messages": [
+        {"role":"user","time":"10:52:10","content":"这款设备的保修期是多久？人为损坏可以保修吗？"},
+        {"role":"agent","time":"10:52:25","content":"您好，设备提供一年有限保修。非人为质量问题可以按政策申请售后，人为损坏通常不在免费保修范围内。"},
+        {"role":"user","time":"10:52:47","content":"需要准备什么材料？"},
+        {"role":"agent","time":"10:52:55","content":"请准备订单号和故障照片，提交售后申请后会有专员进一步检测并告知处理方案。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-009",
+      "title": "重复扣款投诉-009",
+      "channel": "APP",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-PAY-009",
+      "tags": ["投诉", "支付问题"],
+      "messages": [
+        {"role":"user","time":"11:10:02","content":"我刚才支付一次，银行卡却显示扣了两笔。"},
+        {"role":"agent","time":"11:10:20","content":"很抱歉给您造成困扰。我先为您核对支付记录，请稍等。"},
+        {"role":"user","time":"11:10:43","content":"好的，希望尽快处理。"},
+        {"role":"agent","time":"11:11:01","content":"已确认其中一笔是支付处理中状态，通常会在 1 到 2 个工作日内自动原路退回。我已登记跟进单，退回后会发送通知。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-010",
+      "title": "安装服务预约-010",
+      "channel": "PHONE",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-SERVICE-010",
+      "tags": ["安装服务", "预约"],
+      "messages": [
+        {"role":"user","time":"11:28:02","content":"我想预约周六上门安装。"},
+        {"role":"agent","time":"11:28:15","content":"您好，我查询了您所在区域，周六上午 9 点到 12 点有预约名额。需要帮您登记吗？"},
+        {"role":"user","time":"11:28:29","content":"可以，麻烦安排一下。"},
+        {"role":"agent","time":"11:28:42","content":"已为您预约周六上午安装，师傅会提前电话联系，请保持电话畅通。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-011",
+      "title": "会员权益咨询-011",
+      "channel": "WEB",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-MEMBER-011",
+      "tags": ["会员", "正常服务"],
+      "messages": [
+        {"role":"user","time":"13:02:04","content":"会员积分什么时候过期？"},
+        {"role":"agent","time":"13:02:16","content":"您好，积分有效期以积分明细页面展示为准，通常为获得后 12 个月。"},
+        {"role":"user","time":"13:02:31","content":"在哪里可以查看明细？"},
+        {"role":"agent","time":"13:02:40","content":"打开 App，进入我的会员，再点击积分明细即可查看获得和到期时间。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-012",
+      "title": "发货延迟咨询-012",
+      "channel": "APP",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-ORDER-012",
+      "tags": ["物流", "时效咨询"],
+      "messages": [
+        {"role":"user","time":"13:20:01","content":"订单已经两天没有发货了，什么时候能发？"},
+        {"role":"agent","time":"13:20:15","content":"您好，抱歉让您久等了。我查询到商品正在仓库备货，预计今天 18 点前发出。"},
+        {"role":"user","time":"13:20:34","content":"如果今天还没发，可以取消吗？"},
+        {"role":"agent","time":"13:20:43","content":"可以，如果今天 18 点后仍未发出，您可以申请取消；我也会为您关注发货状态。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-013",
+      "title": "商品质量反馈-013",
+      "channel": "PHONE",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-ORDER-013",
+      "tags": ["质量反馈", "售后"],
+      "messages": [
+        {"role":"user","time":"13:45:02","content":"收到的商品有划痕，我想申请换货。"},
+        {"role":"agent","time":"13:45:19","content":"很抱歉商品没有达到您的预期。我可以为您登记换货，请上传划痕照片和外包装照片。"},
+        {"role":"user","time":"13:45:40","content":"照片已经上传了。"},
+        {"role":"agent","time":"13:45:52","content":"已收到材料，换货申请已提交审核。审核结果会在 24 小时内通知您，请留意站内消息。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-014",
+      "title": "服务评价咨询-014",
+      "channel": "WEB",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-TICKET-014",
+      "tags": ["服务评价", "正常服务"],
+      "messages": [
+        {"role":"user","time":"14:06:10","content":"刚才的问题已经解决了，在哪里评价服务？"},
+        {"role":"agent","time":"14:06:23","content":"感谢您的认可。您可以在本次服务结束页面点击星级评价，也可以在订单详情中找到服务评价入口。"},
+        {"role":"user","time":"14:06:38","content":"找到了，谢谢。"},
+        {"role":"agent","time":"14:06:45","content":"不客气，感谢您的反馈，祝您今天愉快。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-015",
+      "title": "账号注销咨询-015",
+      "channel": "APP",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-ACCOUNT-015",
+      "tags": ["账号服务", "流程咨询"],
+      "messages": [
+        {"role":"user","time":"14:30:03","content":"我想注销账号，需要怎么操作？"},
+        {"role":"agent","time":"14:30:19","content":"您好，您可以进入设置、账号与安全、注销账号，按页面提示完成申请。注销前请确认没有未完成订单。"},
+        {"role":"user","time":"14:30:42","content":"注销后还能恢复吗？"},
+        {"role":"agent","time":"14:30:51","content":"账号注销完成后通常无法恢复，建议您确认无误后再提交申请。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-016",
+      "title": "异常话术-私下引流-016",
+      "channel": "WEB",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-RISK-016",
+      "tags": ["风险样本", "私下引流"],
+      "messages": [
+        {"role":"user","time":"15:02:01","content":"这个商品还能便宜一点吗？"},
+        {"role":"agent","time":"15:02:12","content":"平台价格不能改，不过你可以加我微信，我给你发个人优惠链接。"},
+        {"role":"user","time":"15:02:27","content":"需要私下转账吗？"},
+        {"role":"agent","time":"15:02:35","content":"对，私下转账给我就可以，我再帮你安排发货。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-017",
+      "title": "异常话术-消极服务-017",
+      "channel": "PHONE",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-RISK-017",
+      "tags": ["风险样本", "服务态度"],
+      "messages": [
+        {"role":"user","time":"15:20:04","content":"我的退款什么时候到账？已经等很久了。"},
+        {"role":"agent","time":"15:20:15","content":"不知道，你自己看订单状态。"},
+        {"role":"user","time":"15:20:29","content":"订单里没有说明，我还能找谁处理？"},
+        {"role":"agent","time":"15:20:38","content":"没办法，不归我管，你自己联系别的部门。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-018",
+      "title": "异常话术-过度承诺-018",
+      "channel": "APP",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-RISK-018",
+      "tags": ["风险样本", "承诺"],
+      "messages": [
+        {"role":"user","time":"15:42:01","content":"这个申请审核能通过吗？大概多久有结果？"},
+        {"role":"agent","time":"15:42:14","content":"放心吧，百分百能通过，今天一定给你安排成功。"},
+        {"role":"user","time":"15:42:29","content":"如果没有通过怎么办？"},
+        {"role":"agent","time":"15:42:37","content":"不可能不通过，我们保证成功。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-019",
+      "title": "正常与异常混合-019",
+      "channel": "WEB",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-RISK-019",
+      "tags": ["风险样本", "闭环缺失"],
+      "messages": [
+        {"role":"user","time":"16:05:02","content":"我收到的商品少了一个配件，怎么办？"},
+        {"role":"agent","time":"16:05:18","content":"你自己看一下包装，没办法，我这边也不清楚。"},
+        {"role":"user","time":"16:05:35","content":"可以帮我登记补发吗？"},
+        {"role":"agent","time":"16:05:43","content":"你再联系其他客服吧。"}
+      ]
+    },
+    {
+      "externalId": "CS-DEMO-020",
+      "title": "正常售后闭环-020",
+      "channel": "PHONE",
+      "businessType": "CUSTOMER_SERVICE",
+      "businessNo": "DEMO-ORDER-020",
+      "tags": ["正常服务", "服务闭环", "售后"],
+      "messages": [
+        {"role":"user","time":"16:30:01","content":"耳机左边没有声音，想申请售后。"},
+        {"role":"agent","time":"16:30:18","content":"您好，很抱歉影响您的使用。我先帮您排查，请确认耳机和设备已重新连接，并检查左右声道设置。"},
+        {"role":"user","time":"16:30:45","content":"检查后还是没有声音。"},
+        {"role":"agent","time":"16:30:58","content":"了解，已为您登记换新申请，单号 DEMO-SERVICE-020。审核通过后我们会安排上门取件，预计明天前通知您。"},
+        {"role":"user","time":"16:31:16","content":"好的，谢谢你的帮助。"},
+        {"role":"agent","time":"16:31:24","content":"不客气，本次售后申请已完成登记。请留意短信和订单消息，祝您生活愉快。"}
+      ]
+    }
+  ]
+}

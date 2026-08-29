@@ -3,7 +3,9 @@ package io.github.opensabre.iqc.result;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.github.opensabre.iqc.conversation.dao.ConversationMessageMapper;
+import io.github.opensabre.iqc.conversation.dao.ConversationMapper;
 import io.github.opensabre.iqc.conversation.model.ConversationMessage;
+import io.github.opensabre.iqc.conversation.model.Conversation;
 import io.github.opensabre.iqc.result.dao.InspectionResultMapper;
 import io.github.opensabre.iqc.result.model.InspectionResult;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -45,6 +47,7 @@ import java.util.concurrent.Future;
 @Slf4j
 public class InspectionExecutionService {
     private final InspectionTaskMapper taskMapper;
+    private final ConversationMapper conversationMapper;
     private final ConversationMessageMapper messageMapper;
     private final InspectionResultMapper resultMapper;
     private final ObjectMapper objectMapper;
@@ -275,7 +278,15 @@ public class InspectionExecutionService {
         if (maxScore != null) resultQuery.le(InspectionResult::getScore, maxScore);
         if (speakerRole != null && !speakerRole.isBlank()) resultQuery.eq(InspectionResult::getSpeakerRole, speakerRole);
         if (riskLevel != null && !riskLevel.isBlank()) resultQuery.eq(InspectionResult::getRiskLevel, riskLevel);
-        return IqcPage.from(resultMapper.selectPage(new Page<>(Math.max(1, current), Math.min(Math.max(1, size), 100)), resultQuery.orderByAsc(InspectionResult::getCreatedTime)));
+        var resultPage = resultMapper.selectPage(new Page<>(Math.max(1, current), Math.min(Math.max(1, size), 100)), resultQuery.orderByAsc(InspectionResult::getCreatedTime));
+        List<String> conversationIds = resultPage.getRecords().stream().map(InspectionResult::getConversationId)
+                .filter(java.util.Objects::nonNull).distinct().toList();
+        if (!conversationIds.isEmpty()) {
+            Map<String, String> names = conversationMapper.selectBatchIds(conversationIds).stream()
+                    .collect(java.util.stream.Collectors.toMap(Conversation::getId, Conversation::getSourceFileName, (left, right) -> left));
+            resultPage.getRecords().forEach(result -> result.setSourceFileName(names.get(result.getConversationId())));
+        }
+        return IqcPage.from(resultPage);
     }
 
     public String exportCsv(String taskId) {

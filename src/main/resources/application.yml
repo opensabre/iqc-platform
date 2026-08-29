@@ -27,6 +27,11 @@ spring:
     multipart:
       max-file-size: ${IQC_CONVERSATION_MAX_FILE_SIZE:20MB}
       max-request-size: ${IQC_CONVERSATION_MAX_REQUEST_SIZE:20MB}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${AUTH_ISSUER_URI:${opensabre.oauth2.issuer-uri:http://base-authorization:8000}}
 
 opensabre:
   governance:

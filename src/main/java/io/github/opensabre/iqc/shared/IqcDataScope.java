@@ -2,7 +2,12 @@ package io.github.opensabre.iqc.shared;
 
 import io.github.opensabre.common.core.util.UserContextHolder;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
+
+import java.util.Set;
+import java.util.Locale;
 
 /** IQC 只保存业务归属，不复制 OpenSabre 组织主数据。 */
 @Component
@@ -19,8 +24,40 @@ public class IqcDataScope {
     }
 
     public boolean canViewAll() {
-        return userContext.getRoles().stream().anyMatch(role -> role.equalsIgnoreCase("ADMIN") || role.equalsIgnoreCase("SUPER_ADMIN"))
-                || userContext.getScopes().contains("iqc:result:all");
+        return effectiveRoles().stream().map(this::normalizeRole)
+                        .anyMatch(role -> role.equals("ADMIN") || role.equals("SUPER_ADMIN"))
+                || effectiveScopes().contains("iqc:result:all");
+    }
+
+    /** Uses the trusted internal context first, then the verified external JWT context. */
+    private Set<String> effectiveRoles() {
+        Set<String> roles = userContext.getRoles();
+        if (!roles.isEmpty()) return roles;
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null) return Set.of();
+        return authentication.getAuthorities().stream()
+                .map(authority -> authority.getAuthority())
+                .filter(value -> value != null && !value.isBlank())
+                .map(value -> value.startsWith("ROLE_") ? value.substring(5) : value)
+                .filter(value -> !value.startsWith("SCOPE_"))
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    private Set<String> effectiveScopes() {
+        Set<String> scopes = userContext.getScopes();
+        if (!scopes.isEmpty()) return scopes;
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null) return Set.of();
+        return authentication.getAuthorities().stream()
+                .map(authority -> authority.getAuthority())
+                .filter(value -> value != null && value.startsWith("SCOPE_"))
+                .map(value -> value.substring(6))
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    private String normalizeRole(String role) {
+        String normalized = role.startsWith("ROLE_") ? role.substring(5) : role;
+        return normalized.toUpperCase(Locale.ROOT);
     }
 
     public String groupId() {
