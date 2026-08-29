@@ -76,6 +76,12 @@ public class InspectionResultController {
         return batchResultQueryService.conversationDetail(id, conversationId);
     }
 
+    @GetMapping("/conversations/{conversationId}/result-detail")
+    @ResourcePermission(code = "iqc:result:view", name = "查看会话质检明细", type = "iqc", description = "查看会话全部质检结果和标注")
+    public ConversationResultDetail conversationResultDetail(@PathVariable String conversationId) {
+        return batchResultQueryService.conversationDetail(conversationId);
+    }
+
     @GetMapping(value = "/results/export", produces = "text/csv")
     @ResourcePermission(code = "iqc:result:export", name = "导出质检结果", type = "iqc", description = "导出质检结果")
     @Audit(operationType = OperationType.EXPORT, description = "导出 IQC 质检结果", module = "IQC_RESULT")

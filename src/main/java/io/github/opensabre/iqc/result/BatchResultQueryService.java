@@ -76,6 +76,22 @@ public class BatchResultQueryService {
         return new ConversationResultDetail(conversation, conversationSummary(conversationId, conversation, results), messages, results);
     }
 
+    /** Returns all visible inspection results for one conversation across tasks. */
+    public ConversationResultDetail conversationDetail(String conversationId) {
+        Conversation conversation = conversationMapper.selectById(conversationId);
+        if (conversation == null) throw IqcException.notFound("会话不存在: " + conversationId);
+        List<InspectionResult> allResults = resultMapper.selectList(Wrappers.<InspectionResult>lambdaQuery()
+                .eq(InspectionResult::getConversationId, conversationId).orderByAsc(InspectionResult::getCreatedTime));
+        List<InspectionResult> visibleResults = allResults.stream().filter(result -> {
+            InspectionTask task = taskMapper.selectById(result.getTaskId());
+            return task != null && dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId());
+        }).toList();
+        if (visibleResults.isEmpty()) throw IqcException.notFound("会话质检结果不存在: " + conversationId);
+        List<ConversationMessage> messages = messageMapper.selectList(Wrappers.<ConversationMessage>lambdaQuery()
+                .eq(ConversationMessage::getConversationId, conversationId).orderByAsc(ConversationMessage::getSequenceNo));
+        return new ConversationResultDetail(conversation, conversationSummary(conversationId, conversation, visibleResults), messages, visibleResults);
+    }
+
     private InspectionTask requireTask(String taskId) {
         InspectionTask task = taskMapper.selectById(taskId);
         if (task == null) throw IqcException.notFound("质检任务不存在: " + taskId);
