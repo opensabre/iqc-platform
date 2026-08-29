@@ -20,7 +20,7 @@ mvn -DskipTests -Djib.to.image=iqc-platform:local jib:dockerBuild
 - `DATASOURCE_*`：IQC 数据库连接
 - `REGISTER_HOST/REGISTER_PORT`：Nacos 注册中心
 - `GOVERNANCE_USAGE_TRANSPORT`：使用量计次传输方式
-- `GOVERNANCE_REGISTRATION_TOKEN`：字典/错误码/资源注册令牌
+- `opensabre.governance.registration-token`：Nacos 公共配置中的字典/错误码/资源注册令牌，支持 `ENC(...)`
 
 TXT 导入接口会保存会话与消息，并以文件 SHA-256 指纹保证重复提交幂等；质检任务执行时保存 Agent/规则快照，结果按 TaskItem 和执行 attempt 追踪。数据范围通过 `opensabre-starter-rpc` 调用 `base-organization` 获取当前用户 `groupId`，IQC 只保存业务归属快照。
 

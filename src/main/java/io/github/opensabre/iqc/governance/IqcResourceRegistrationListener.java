@@ -36,7 +36,7 @@ public class IqcResourceRegistrationListener {
 
     private void registerOnce() {
         String application = environment.getProperty("spring.application.name", "iqc-platform");
-        String token = environment.getProperty("opensabre.resource-registration.registration-token", "");
+        String token = environment.getProperty("opensabre.governance.registration-token", "");
         if (token.isBlank()) throw new IllegalStateException("IQC resource registration token is missing");
         ResourceMappingSnapshot snapshot = ResourceMappingSnapshot.builder()
                 .application(application)

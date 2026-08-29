@@ -25,7 +25,7 @@ class IqcResourceRegistrationListenerTest {
         GovernanceRegistrationCoordinator coordinator = mock(GovernanceRegistrationCoordinator.class);
         MockEnvironment environment = new MockEnvironment()
                 .withProperty("spring.application.name", "iqc-platform")
-                .withProperty("opensabre.resource-registration.registration-token", "registration-secret");
+                .withProperty("opensabre.governance.registration-token", "registration-secret");
         when(mappings.getMappingInfo()).thenReturn(Set.of(RestMappingInfo.builder()
                 .url("/api/iqc/config/agents").method("GET").code("iqc:agent:view").declaredPermission(true).build()));
         when(client.registerResources(eq("iqc-platform"), eq(true), eq("registration-secret"), any()))

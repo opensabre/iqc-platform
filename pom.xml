@@ -7,11 +7,11 @@
     <parent>
         <groupId>io.github.opensabre</groupId>
         <artifactId>opensabre-base-dependencies</artifactId>
-        <version>1.1.1</version>
+        <version>1.1.2</version>
     </parent>
 
     <artifactId>iqc-platform</artifactId>
-    <version>1.1.1</version>
+    <version>1.1.2</version>
     <name>iqc-platform</name>
     <description>睿检智能质检平台业务服务</description>
 

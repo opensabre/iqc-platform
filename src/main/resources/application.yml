@@ -44,13 +44,10 @@ opensabre:
     dictionary:
       enabled: true
       registration-enabled: ${DICTIONARY_REGISTRATION_ENABLED:true}
-      registration-token: ${DICTIONARY_REGISTRATION_TOKEN:${GOVERNANCE_REGISTRATION_TOKEN:}}
     error-catalog:
       enabled: true
-      registration-token: ${ERROR_CATALOG_REGISTRATION_TOKEN:${GOVERNANCE_REGISTRATION_TOKEN:}}
   resource-registration:
     enabled: ${RESOURCE_REGISTRATION_ENABLED:true}
-    registration-token: "${RESOURCE_REGISTRATION_TOKEN:}"
 
 jasypt:
   encryptor:
@@ -83,6 +80,8 @@ iqc:
 logging:
   level:
     io.github.opensabre.iqc: INFO
+  pattern:
+    level: '%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-},%X{parentSpanId:-}]'
 
 management:
   endpoints:
