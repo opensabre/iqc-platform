@@ -56,7 +56,6 @@ public class QualityOperationsController {
 
     @GetMapping("/report")
     @ResourcePermission(code="iqc:report:view", name="查看质检报表", type="iqc", description="查看基于人工复核的质量报表")
-    @Audit(operationType=OperationType.QUERY, description="查询 IQC 质量运营报表", module="IQC_QUALITY_OPERATIONS")
     public Map<String, Object> report() { return service.report(); }
 
     public record FeedbackRequest(String feedbackType, String comment, String evidenceJson) { }

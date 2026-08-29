@@ -2,8 +2,6 @@ package io.github.opensabre.iqc.rest;
 
 import io.github.opensabre.boot.annotations.ResourcePermission;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import io.github.opensabre.governance.audit.annotations.Audit;
-import io.github.opensabre.governance.audit.annotations.OperationType;
 import io.github.opensabre.governance.ratelimit.annotations.RateLimit;
 import io.github.opensabre.iqc.conversation.dao.ConversationMapper;
 import io.github.opensabre.iqc.result.dao.InspectionResultMapper;
@@ -44,7 +42,6 @@ public class IqcDashboardController {
 
     @GetMapping
     @ResourcePermission(code = "iqc:dashboard:view", name = "查看质检总览", type = "iqc", description = "查看质检总览")
-    @Audit(operationType = OperationType.QUERY, description = "查询 IQC 总览指标", module = "IQC_DASHBOARD")
     @RateLimit(sceneCode = "iqc-dashboard-query", maxCount = 30, period = 60)
     public Map<String, Object> stats(@RequestParam(required = false) LocalDate from,
                                      @RequestParam(required = false) LocalDate to) {

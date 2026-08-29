@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.opensabre.iqc.governance.IqcException;
 import io.github.opensabre.iqc.skill.dao.IqcSkillMapper;
+import io.github.opensabre.iqc.skill.dao.IqcSkillVersionMapper;
 import io.github.opensabre.iqc.skill.model.IqcSkill;
+import io.github.opensabre.iqc.skill.model.IqcSkillVersion;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,9 +17,10 @@ import java.util.List;
 public class IqcSkillService {
     private final IqcSkillMapper mapper;
     private final ObjectMapper objectMapper;
+    private final IqcSkillVersionMapper versionMapper;
 
-    public IqcSkillService(IqcSkillMapper mapper, ObjectMapper objectMapper) {
-        this.mapper = mapper; this.objectMapper = objectMapper;
+    public IqcSkillService(IqcSkillMapper mapper, ObjectMapper objectMapper, IqcSkillVersionMapper versionMapper) {
+        this.mapper = mapper; this.objectMapper = objectMapper; this.versionMapper = versionMapper;
     }
 
     /** Lists Skills with enabled items first and newest items first. */
@@ -34,7 +37,7 @@ public class IqcSkillService {
         if (findByCode(code) != null) throw IqcException.invalidState("Skill 编码已存在: " + code);
         IqcSkill skill = new IqcSkill();
         apply(skill, name, code, description, instructions, inputSchemaJson, outputSchemaJson);
-        skill.setStatus("ENABLED"); skill.setVersionNo(1); mapper.insert(skill);
+        skill.setStatus("ENABLED"); skill.setVersionNo(1); mapper.insert(skill); snapshot(skill);
         return skill;
     }
 
@@ -45,14 +48,42 @@ public class IqcSkillService {
         IqcSkill skill = require(id);
         validate(name, skill.getCode(), instructions, inputSchemaJson, outputSchemaJson);
         apply(skill, name, skill.getCode(), description, instructions, inputSchemaJson, outputSchemaJson);
-        skill.setVersionNo(skill.getVersionNo() + 1); mapper.updateById(skill);
+        skill.setVersionNo(skill.getVersionNo() + 1); mapper.updateById(skill); snapshot(skill);
         return skill;
     }
 
     /** Changes availability without deleting historical references. */
     @Transactional
     public IqcSkill setEnabled(String id, boolean enabled) {
-        IqcSkill skill = require(id); skill.setStatus(enabled ? "ENABLED" : "DISABLED"); mapper.updateById(skill); return skill;
+        IqcSkill skill = require(id);
+        String status = enabled ? "ENABLED" : "DISABLED";
+        if (status.equals(skill.getStatus())) return skill;
+        skill.setStatus(status); skill.setVersionNo(skill.getVersionNo() + 1); mapper.updateById(skill); snapshot(skill); return skill;
+    }
+
+    public List<IqcSkillVersion> versions(String id) {
+        require(id);
+        return versionMapper.selectList(Wrappers.<IqcSkillVersion>lambdaQuery()
+                .eq(IqcSkillVersion::getSkillId, id).orderByDesc(IqcSkillVersion::getVersionNo));
+    }
+
+    @Transactional
+    public IqcSkill rollback(String id, int versionNo) {
+        IqcSkill skill = require(id);
+        IqcSkillVersion version = versionMapper.selectOne(Wrappers.<IqcSkillVersion>lambdaQuery()
+                .eq(IqcSkillVersion::getSkillId, id).eq(IqcSkillVersion::getVersionNo, versionNo));
+        if (version == null) throw IqcException.notFound("Skill 版本不存在: " + versionNo);
+        apply(skill, version.getName(), skill.getCode(), version.getDescription(), version.getInstructions(),
+                version.getInputSchemaJson(), version.getOutputSchemaJson());
+        skill.setStatus(version.getStatus()); skill.setVersionNo(skill.getVersionNo() + 1);
+        mapper.updateById(skill); snapshot(skill); return skill;
+    }
+
+    private void snapshot(IqcSkill skill) {
+        IqcSkillVersion version = new IqcSkillVersion(); version.setSkillId(skill.getId()); version.setVersionNo(skill.getVersionNo());
+        version.setName(skill.getName()); version.setCode(skill.getCode()); version.setDescription(skill.getDescription());
+        version.setInstructions(skill.getInstructions()); version.setInputSchemaJson(skill.getInputSchemaJson());
+        version.setOutputSchemaJson(skill.getOutputSchemaJson()); version.setStatus(skill.getStatus()); versionMapper.insert(version);
     }
 
     private IqcSkill findByCode(String code) {

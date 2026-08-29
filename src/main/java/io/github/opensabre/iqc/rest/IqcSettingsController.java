@@ -1,8 +1,6 @@
 package io.github.opensabre.iqc.rest;
 
 import io.github.opensabre.boot.annotations.ResourcePermission;
-import io.github.opensabre.governance.audit.annotations.Audit;
-import io.github.opensabre.governance.audit.annotations.OperationType;
 import io.github.opensabre.governance.ratelimit.annotations.RateLimit;
 import io.github.opensabre.iqc.result.llm.LlmQualityProperties;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,7 +22,6 @@ public class IqcSettingsController {
 
     @GetMapping
     @ResourcePermission(code = "iqc:settings:view", name = "查看系统设置", type = "iqc", description = "查看 IQC 模型和治理配置状态")
-    @Audit(operationType = OperationType.QUERY, description = "查询 IQC 系统设置", module = "IQC_SETTINGS")
     @RateLimit(sceneCode = "iqc-settings-query", maxCount = 60, period = 60)
     public Map<String, Object> settings() {
         Map<String, Object> model = new LinkedHashMap<>();

@@ -33,7 +33,6 @@ public class QualityConfigController {
 
     @GetMapping("/agents")
     @ResourcePermission(code = "iqc:agent:view", name = "查看 Agent", type = "iqc", description = "查询 Agent")
-    @Audit(operationType = OperationType.QUERY, description = "查询 IQC Agent", module = "IQC_AGENT")
     public List<QualityAgent> agents() { return agentService.list(); }
 
     @PostMapping("/agents")
@@ -64,7 +63,6 @@ public class QualityConfigController {
 
     @GetMapping("/agents/{id}/versions")
     @ResourcePermission(code = "iqc:agent:view", name = "查看 Agent 版本", type = "iqc", description = "查询 Agent 版本")
-    @Audit(operationType = OperationType.QUERY, description = "查询 IQC Agent 版本", module = "IQC_AGENT")
     public List<QualityAgentVersion> agentVersions(@PathVariable String id) { return agentService.versions(id); }
 
     @PostMapping("/agents/{id}/versions")
@@ -79,7 +77,6 @@ public class QualityConfigController {
 
     @GetMapping("/agents/{id}/versions/compare")
     @ResourcePermission(code = "iqc:agent:view", name = "比较 Agent 版本", type = "iqc", description = "比较 Agent 版本配置差异")
-    @Audit(operationType = OperationType.QUERY, description = "比较 IQC Agent 版本", module = "IQC_AGENT")
     public QualityAgentService.AgentVersionComparison compareAgentVersions(@PathVariable String id,
             @RequestParam int fromVersion, @RequestParam int toVersion) {
         return agentService.compare(id, fromVersion, toVersion);
@@ -87,14 +84,12 @@ public class QualityConfigController {
 
     @GetMapping("/agents/{id}/versions/{versionNo}/effect")
     @ResourcePermission(code = "iqc:agent:view", name = "查看 Agent 版本效果", type = "iqc", description = "查询 Agent 版本历史效果")
-    @Audit(operationType = OperationType.QUERY, description = "查询 IQC Agent 版本效果", module = "IQC_AGENT")
     public AgentEffectService.AgentEffectReport agentEffect(@PathVariable String id, @PathVariable int versionNo) {
         return agentEffectService.report(id, versionNo);
     }
 
     @GetMapping("/rules")
     @ResourcePermission(code = "iqc:rule:view", name = "查看规则", type = "iqc", description = "查询质检规则")
-    @Audit(operationType = OperationType.QUERY, description = "查询 IQC 规则", module = "IQC_RULE")
     public List<QualityRule> rules() { return ruleService.list(); }
 
     @PostMapping("/rules")
@@ -120,7 +115,6 @@ public class QualityConfigController {
 
     @GetMapping("/rules/{id}/versions")
     @ResourcePermission(code = "iqc:rule:view", name = "查看规则版本", type = "iqc", description = "查询规则版本")
-    @Audit(operationType = OperationType.QUERY, description = "查询 IQC 规则版本", module = "IQC_RULE")
     public List<QualityRuleVersion> ruleVersions(@PathVariable String id) { return ruleService.versions(id); }
 
     @PostMapping("/rules/{id}/versions")
@@ -130,7 +124,6 @@ public class QualityConfigController {
 
     @PostMapping("/rules/{id}/test")
     @ResourcePermission(code = "iqc:rule:test", name = "测试规则", type = "iqc", description = "测试质检规则")
-    @Audit(operationType = OperationType.QUERY, description = "测试 IQC 规则", module = "IQC_RULE")
     @RateLimit(sceneCode = "iqc-rule-test", maxCount = 60, period = 60)
     public QualityRuleService.RuleTestResult testRule(@PathVariable String id, @RequestBody RuleTestRequest request) {
         return ruleService.test(id, request.content());

@@ -47,7 +47,6 @@ public class InspectionResultController {
 
     @GetMapping("/results")
     @ResourcePermission(code = "iqc:result:view", name = "查看质检结果", type = "iqc", description = "查询质检结果")
-    @Audit(operationType = OperationType.QUERY, description = "查询 IQC 质检结果", module = "IQC_RESULT")
     @RateLimit(sceneCode = "iqc-result-query", maxCount = 60, period = 60)
     public IqcPage<InspectionResult> results(@RequestParam(defaultValue = "1") long current,
                                           @RequestParam(defaultValue = "20") long size,
@@ -65,17 +64,14 @@ public class InspectionResultController {
 
     @GetMapping("/results/{id}")
     @ResourcePermission(code = "iqc:result:view", name = "查看质检结果详情", type = "iqc", description = "查看质检结果详情")
-    @Audit(operationType = OperationType.QUERY, description = "查看 IQC 结果详情", module = "IQC_RESULT")
     public Map<String, Object> resultDetail(@PathVariable String id) { return executionService.detail(id); }
 
     @GetMapping("/tasks/{id}/result-summary")
     @ResourcePermission(code = "iqc:result:view", name = "查看批次质检结果", type = "iqc", description = "查看质检批次及会话汇总结果")
-    @Audit(operationType = OperationType.QUERY, description = "查看 IQC 批次结果汇总", module = "IQC_RESULT")
     public BatchResultSummary batchSummary(@PathVariable String id) { return batchResultQueryService.summary(id); }
 
     @GetMapping("/tasks/{id}/conversations/{conversationId}/result-detail")
     @ResourcePermission(code = "iqc:result:view", name = "查看会话质检明细", type = "iqc", description = "查看批次内会话记录和质检标注")
-    @Audit(operationType = OperationType.QUERY, description = "查看 IQC 会话质检明细", module = "IQC_RESULT")
     public ConversationResultDetail conversationResultDetail(@PathVariable String id, @PathVariable String conversationId) {
         return batchResultQueryService.conversationDetail(id, conversationId);
     }

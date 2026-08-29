@@ -23,7 +23,6 @@ public class IqcTemplateController {
 
     @GetMapping
     @ResourcePermission(code = "iqc:template:view", name = "查看质检模板", type = "iqc", description = "查询内置质检模板")
-    @Audit(operationType = OperationType.QUERY, description = "查询 IQC 内置质检模板", module = "IQC_TEMPLATE")
     @RateLimit(sceneCode = "iqc-template-query", maxCount = 60, period = 60)
     public List<IqcTemplateService.QualityTemplate> list() { return templateService.list(); }
 

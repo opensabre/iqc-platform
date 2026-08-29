@@ -1,8 +1,6 @@
 package io.github.opensabre.iqc.rest;
 
 import io.github.opensabre.boot.annotations.ResourcePermission;
-import io.github.opensabre.governance.audit.annotations.Audit;
-import io.github.opensabre.governance.audit.annotations.OperationType;
 import io.github.opensabre.governance.dictionary.DictionaryItem;
 import io.github.opensabre.governance.dictionary.DictionaryService;
 import io.github.opensabre.governance.ratelimit.annotations.RateLimit;
@@ -27,7 +25,6 @@ public class IqcDictionaryController {
 
     @GetMapping
     @ResourcePermission(code = "iqc:dictionary:view", name = "查看 IQC 字典", type = "iqc", description = "读取 IQC 字典选项")
-    @Audit(operationType = OperationType.QUERY, description = "查询 IQC 字典", module = "IQC_DICTIONARY")
     @RateLimit(sceneCode = "iqc-dictionary-query", maxCount = 60, period = 60)
     public Map<String, List<DictionaryItem>> items(@RequestParam String codes) {
         Map<String, List<DictionaryItem>> result = new LinkedHashMap<>();

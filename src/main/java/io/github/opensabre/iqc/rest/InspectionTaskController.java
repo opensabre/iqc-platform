@@ -29,7 +29,6 @@ public class InspectionTaskController {
 
     @GetMapping
     @ResourcePermission(code = "iqc:task:view", name = "查看质检任务", type = "iqc", description = "查询质检任务")
-    @Audit(operationType = OperationType.QUERY, description = "查询 IQC 质检任务", module = "IQC_TASK")
     @RateLimit(sceneCode = "iqc-task-query", maxCount = 60, period = 60)
     public IqcPage<InspectionTask> list(@RequestParam(defaultValue = "1") long current,
                                        @RequestParam(defaultValue = "20") long size) {
@@ -38,7 +37,6 @@ public class InspectionTaskController {
 
     @GetMapping("/{id}")
     @ResourcePermission(code = "iqc:task:view", name = "查看质检任务详情", type = "iqc", description = "查看质检任务详情")
-    @Audit(operationType = OperationType.QUERY, description = "查看 IQC 质检任务详情", module = "IQC_TASK")
     public InspectionTask get(@PathVariable String id) {
         return taskService.get(id);
     }

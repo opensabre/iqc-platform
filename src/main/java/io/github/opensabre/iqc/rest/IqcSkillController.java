@@ -6,6 +6,7 @@ import io.github.opensabre.governance.audit.annotations.OperationType;
 import io.github.opensabre.governance.ratelimit.annotations.RateLimit;
 import io.github.opensabre.iqc.skill.IqcSkillService;
 import io.github.opensabre.iqc.skill.model.IqcSkill;
+import io.github.opensabre.iqc.skill.model.IqcSkillVersion;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -19,7 +20,6 @@ public class IqcSkillController {
 
     @GetMapping
     @ResourcePermission(code = "iqc:skill:view", name = "查看 Skill", type = "iqc", description = "查询 Agent Skill 资产")
-    @Audit(operationType = OperationType.QUERY, description = "查询 IQC Skill", module = "IQC_SKILL")
     public List<IqcSkill> list() { return service.list(); }
 
     @PostMapping
@@ -42,6 +42,15 @@ public class IqcSkillController {
     @ResourcePermission(code = "iqc:skill:manage", name = "管理 Skill", type = "iqc", description = "停用 Agent Skill 资产")
     @Audit(operationType = OperationType.UPDATE, description = "停用 IQC Skill", module = "IQC_SKILL")
     public IqcSkill disable(@PathVariable String id) { return service.setEnabled(id, false); }
+
+    @GetMapping("/{id}/versions")
+    @ResourcePermission(code = "iqc:skill:view", name = "查看 Skill 版本", type = "iqc", description = "查询 Skill 历史版本")
+    public List<IqcSkillVersion> versions(@PathVariable String id) { return service.versions(id); }
+
+    @PostMapping("/{id}/versions/{versionNo}/rollback")
+    @ResourcePermission(code = "iqc:skill:manage", name = "管理 Skill", type = "iqc", description = "回滚 Skill 历史版本")
+    @Audit(operationType = OperationType.UPDATE, description = "回滚 IQC Skill", module = "IQC_SKILL")
+    public IqcSkill rollback(@PathVariable String id, @PathVariable int versionNo) { return service.rollback(id, versionNo); }
 
     public record SkillRequest(String name, String code, String description, String instructions,
                                String inputSchemaJson, String outputSchemaJson) { }
