@@ -7,6 +7,8 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -24,15 +26,20 @@ public class SnapshotChatModelRouter {
 
     /** Uses the deployment default for legacy Agents and ordered snapshot models for schema 2.0. */
     public ChatResponse call(Prompt prompt, JsonNode agentSnapshot) {
+        return call(prompt, agentSnapshot, new ToolCallback[0]);
+    }
+    public ChatResponse call(Prompt prompt, JsonNode agentSnapshot, ToolCallback[] callbacks) {
+        Prompt executablePrompt = callbacks.length == 0 ? prompt : new Prompt(prompt.getInstructions(),
+                ToolCallingChatOptions.builder().toolCallbacks(callbacks).build());
         JsonNode config=config(agentSnapshot);
         if(!"2.0".equals(config.path("schemaVersion").asText())||config.path("assetSnapshots").isMissingNode()) {
             if(defaultModel==null) throw new IllegalStateException("系统默认模型未启用");
-            return defaultModel.call(prompt);
+            return defaultModel.call(executablePrompt);
         }
         List<JsonNode> candidates=new ArrayList<>(); candidates.add(config.path("assetSnapshots").path("primaryModel"));
         config.path("assetSnapshots").path("fallbackModels").forEach(candidates::add);
         RuntimeException last=null;
-        for(JsonNode candidate:candidates) try{return create(candidate).call(prompt);}catch(RuntimeException exception){last=exception;}
+        for(JsonNode candidate:candidates) try{return create(candidate).call(executablePrompt);}catch(RuntimeException exception){last=exception;}
         throw last==null?new IllegalStateException("Agent 没有可用模型快照"):last;
     }
     public ChatModel create(JsonNode model) {

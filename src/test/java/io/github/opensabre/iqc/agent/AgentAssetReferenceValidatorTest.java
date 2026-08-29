@@ -8,8 +8,8 @@ import io.github.opensabre.iqc.skill.dao.IqcSkillMapper;
 import org.junit.jupiter.api.Test;
 import java.util.List;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.*;
 
 class AgentAssetReferenceValidatorTest {
     @Test
@@ -20,5 +20,22 @@ class AgentAssetReferenceValidatorTest {
         AgentConfiguration config=new AgentConfiguration("2.0","prompt",null,null,null,null,"model-1",List.of(),List.of(),List.of(),null);
         var validator=new AgentAssetReferenceValidator(models,mock(IqcMcpServerMapper.class),mock(IqcSkillMapper.class));
         assertThatThrownBy(()->validator.validate(config)).isInstanceOf(IqcException.class).hasMessageContaining("已停用");
+    }
+
+    @Test
+    void ruleOnlyCreatesEmptyAssetSnapshotWithoutResolvingAssets() {
+        IqcModelProfileMapper models=mock(IqcModelProfileMapper.class);
+        IqcMcpServerMapper mcps=mock(IqcMcpServerMapper.class);
+        IqcSkillMapper skills=mock(IqcSkillMapper.class);
+        AgentConfiguration config=new AgentConfiguration("2.0","RULE_ONLY","",null,null,null,null,
+                null,List.of(),List.of(),List.of(),null);
+
+        AgentConfiguration.AssetSnapshots snapshot=new AgentAssetReferenceValidator(models,mcps,skills).snapshot(config);
+
+        assertThat(snapshot.primaryModel()).isNull();
+        assertThat(snapshot.fallbackModels()).isEmpty();
+        assertThat(snapshot.mcpServers()).isEmpty();
+        assertThat(snapshot.skills()).isEmpty();
+        verifyNoInteractions(models,mcps,skills);
     }
 }

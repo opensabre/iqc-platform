@@ -15,6 +15,7 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -36,16 +37,26 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
     private final GovernanceRateLimiter rateLimiter;
     private final UsageCounterRecorder usageCounterRecorder;
     private final LlmQualityProperties properties;
+    private final SnapshotMcpToolProvider mcpTools;
 
+    @Autowired
     public SpringAiLlmQualityProvider(ChatModel chatModel, SnapshotChatModelRouter modelRouter, ObjectMapper objectMapper,
                                       GovernanceRateLimiter rateLimiter, UsageCounterRecorder usageCounterRecorder,
-                                      LlmQualityProperties properties) {
+                                      LlmQualityProperties properties, SnapshotMcpToolProvider mcpTools) {
         this.chatModel = chatModel;
         this.modelRouter = modelRouter;
         this.objectMapper = objectMapper;
         this.rateLimiter = rateLimiter;
         this.usageCounterRecorder = usageCounterRecorder;
         this.properties = properties;
+        this.mcpTools = mcpTools;
+    }
+
+    SpringAiLlmQualityProvider(ChatModel chatModel, SnapshotChatModelRouter modelRouter, ObjectMapper objectMapper,
+                               GovernanceRateLimiter rateLimiter, UsageCounterRecorder usageCounterRecorder,
+                               LlmQualityProperties properties) {
+        this(chatModel, modelRouter, objectMapper, rateLimiter, usageCounterRecorder, properties,
+                new SnapshotMcpToolProvider(objectMapper, reference -> ""));
     }
 
     /** Evaluates one message with bounded retries, rate limiting, usage reporting and safe failure output. */
@@ -56,13 +67,19 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
 
     @Override
     public LlmEvaluation evaluate(String content, JsonNode rule, JsonNode agentSnapshot, String recordId) {
+        return evaluate(content, rule, agentSnapshot, null, recordId);
+    }
+
+    @Override
+    public LlmEvaluation evaluate(String content, JsonNode rule, JsonNode agentSnapshot,
+                                  JsonNode preRuleFindings, String recordId) {
         String stableId = recordId == null || recordId.isBlank() ? stableId(content, rule) : recordId;
         String usageId = "llm-call:" + stableId;
         String ruleId = rule.path("id").asText("unknown");
         recordUsage(usageId, ruleId, "attempt", UsageOutcome.ATTEMPT);
         try {
             enforceRateLimit();
-            LlmEvaluation result = callWithRetry(content, rule, agentSnapshot);
+            LlmEvaluation result = callWithRetry(content, rule, agentSnapshot, preRuleFindings);
             recordUsage(usageId, ruleId, "success", UsageOutcome.SUCCESS);
             return result;
         } catch (RuntimeException exception) {
@@ -71,14 +88,21 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
         }
     }
 
-    private LlmEvaluation callWithRetry(String content, JsonNode rule, JsonNode agentSnapshot) {
+    private LlmEvaluation callWithRetry(String content, JsonNode rule, JsonNode agentSnapshot,
+                                        JsonNode preRuleFindings) {
         RuntimeException last = null;
         int attempts = Math.max(1, Math.min(properties.getMaxAttempts(), 3));
         for (int attempt = 1; attempt <= attempts; attempt++) {
             try {
+                String context = preRuleFindings == null ? "无" : preRuleFindings.toString();
                 Prompt prompt = new Prompt(List.of(new SystemMessage(agentSystemPrompt(agentSnapshot)),
-                        new UserMessage("规则配置:" + rule + "\n待质检话术:" + LlmTextSanitizer.sanitize(content))));
-                ChatResponse response = modelRouter == null ? chatModel.call(prompt) : modelRouter.call(prompt, agentSnapshot);
+                        new UserMessage("规则配置:" + rule + "\n本地预检结果:" + context
+                                + "\n待质检话术:" + LlmTextSanitizer.sanitize(content))));
+                ChatResponse response;
+                try (SnapshotMcpToolProvider.Session tools = mcpTools.open(agentSnapshot)) {
+                    response = modelRouter == null ? chatModel.call(prompt)
+                            : modelRouter.call(prompt, agentSnapshot, tools.callbacks());
+                }
                 String text = response == null || response.getResult() == null
                         ? null : response.getResult().getOutput().getText();
                 return parseEvaluation(text);

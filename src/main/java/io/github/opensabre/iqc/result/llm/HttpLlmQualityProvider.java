@@ -49,6 +49,12 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
 
     @Override
     public LlmEvaluation evaluate(String content, JsonNode rule, String recordId) {
+        return evaluate(content, rule, null, null, recordId);
+    }
+
+    @Override
+    public LlmEvaluation evaluate(String content, JsonNode rule, JsonNode agentSnapshot,
+                                  JsonNode preRuleFindings, String recordId) {
         String stableId = recordId == null || recordId.isBlank() ? stableId(content, rule) : recordId;
         String usageId = "llm-call:" + stableId;
         String ruleId = rule.path("id").asText("unknown");
@@ -69,7 +75,7 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
             if (decision != null && !decision.allowed()) {
                 throw new IllegalStateException("LLM 调用达到限次: " + decision.errorMessage());
             }
-            LlmEvaluation evaluation = callWithRetry(content, rule);
+            LlmEvaluation evaluation = callWithRetry(content, rule, preRuleFindings);
             usageCounterRecorder.record(new UsageRecord(usageId + ":success", null, "iqc-platform", "LLM_CALL",
                     ruleId, "QUALITY_EVALUATION", UsageOutcome.SUCCESS));
             return evaluation;
@@ -80,7 +86,7 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
         }
     }
 
-    private LlmEvaluation callWithRetry(String content, JsonNode rule) {
+    private LlmEvaluation callWithRetry(String content, JsonNode rule, JsonNode preRuleFindings) {
         RuntimeException last = null;
         int attempts = Math.max(1, Math.min(properties.getMaxAttempts(), 3));
         for (int attempt = 1; attempt <= attempts; attempt++) {
@@ -90,7 +96,7 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
                                 "response_format", Map.of("type", "json_object"),
                                 "messages", List.of(
                                         Map.of("role", "system", "content", "你是质检规则执行器。只返回 JSON，不要 Markdown。格式必须是 {\\\"hit\\\":true或false,\\\"reason\\\":\\\"简短理由\\\"}。"),
-                                        Map.of("role", "user", "content", prompt(content, rule)))))
+                                Map.of("role", "user", "content", prompt(content, rule, preRuleFindings)))))
                         .retrieve().body(JsonNode.class);
                 return parseEvaluation(response);
             } catch (RestClientException | IllegalArgumentException exception) {
@@ -122,8 +128,10 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
         return new LlmEvaluation(true, json.get("hit").asBoolean(), reason);
     }
 
-    private String prompt(String content, JsonNode rule) {
-        return "规则配置:" + rule.toString() + "\\n待质检话术:" + LlmTextSanitizer.sanitize(content);
+    private String prompt(String content, JsonNode rule, JsonNode preRuleFindings) {
+        return "规则配置:" + rule.toString() + "\\n本地预检结果:"
+                + (preRuleFindings == null ? "无" : preRuleFindings.toString())
+                + "\\n待质检话术:" + LlmTextSanitizer.sanitize(content);
     }
 
     private String stripFence(String value) {

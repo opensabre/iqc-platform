@@ -13,6 +13,12 @@ public interface LlmQualityProvider {
         return evaluate(content, rule, recordId);
     }
 
+    /** Evaluates with deterministic pre-rule findings supplied by RULE_THEN_LLM mode. */
+    default LlmEvaluation evaluate(String content, JsonNode rule, JsonNode agentSnapshot,
+                                   JsonNode preRuleFindings, String recordId) {
+        return evaluate(content, rule, agentSnapshot, recordId);
+    }
+
     LlmEvaluation evaluate(String content, JsonNode rule, String recordId);
 
     record LlmEvaluation(boolean supported, boolean hit, String reason) {
