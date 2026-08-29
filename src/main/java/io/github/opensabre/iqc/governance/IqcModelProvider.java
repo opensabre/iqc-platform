@@ -8,8 +8,6 @@ import io.github.opensabre.governance.dictionary.OpenSabreDictionary;
 public enum IqcModelProvider implements DictionaryEnum {
     SPRING_AI("SPRING_AI", "Spring AI / OpenAI 兼容"),
     OPENAI("OPENAI", "OpenAI"),
-    AZURE_OPENAI("AZURE_OPENAI", "Azure OpenAI"),
-    ANTHROPIC("ANTHROPIC", "Anthropic"),
     DASHSCOPE("DASHSCOPE", "阿里云百炼"),
     OLLAMA("OLLAMA", "Ollama 本地模型");
 

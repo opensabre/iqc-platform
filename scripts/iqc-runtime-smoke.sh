@@ -50,7 +50,7 @@ for path in \
   "/api/iqc/config/rules" \
   "/api/iqc/templates" \
   "/api/iqc/settings" \
-  "/api/iqc/dictionaries?codes=iqc_rule_type,iqc_risk_level,iqc_target_role,iqc_result_status,iqc_task_status" \
+  "/api/iqc/dictionaries?codes=iqc_rule_type,iqc_rule_category,iqc_risk_level,iqc_target_role,iqc_result_status,iqc_task_status" \
   "/actuator/opensabreGovernanceRegistration"; do
   request "$path"
 done
