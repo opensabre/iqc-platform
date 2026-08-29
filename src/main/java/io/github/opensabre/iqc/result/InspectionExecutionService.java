@@ -11,6 +11,7 @@ import io.github.opensabre.iqc.result.model.InspectionResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.opensabre.iqc.task.dao.InspectionTaskMapper;
 import io.github.opensabre.iqc.task.model.InspectionTask;
 import io.github.opensabre.iqc.task.dao.TaskExecutionMapper;
@@ -362,7 +363,50 @@ public class InspectionExecutionService {
         }
         if (rules.isEmpty()) return evaluateSingle(task, message, null);
 
-        List<InspectionResult> evaluated = rules.stream().map(rule -> evaluateSingle(task, message, rule)).toList();
+        JsonNode agentSnapshot = readSnapshot(task.getAgentSnapshotJson());
+        String mode = qualityMode(agentSnapshot);
+        List<JsonNode> localRules = rules.stream().filter(rule -> !"LLM".equalsIgnoreCase(rule.path("ruleType").asText())).toList();
+        List<JsonNode> llmRules = rules.stream().filter(rule -> "LLM".equalsIgnoreCase(rule.path("ruleType").asText())).toList();
+        List<InspectionResult> evaluated = new ArrayList<>();
+
+        if ("RULE_ONLY".equals(mode)) {
+            localRules.forEach(rule -> evaluated.add(evaluateSingle(task, message, rule, null)));
+        } else if ("RULE_THEN_LLM".equals(mode)) {
+            localRules.forEach(rule -> evaluated.add(evaluateSingle(task, message, rule, null)));
+            ArrayNode preRuleFindings = objectMapper.createArrayNode();
+            evaluated.forEach(item -> {
+                if ("HIT".equals(item.getResultStatus())) {
+                    ObjectNode finding = objectMapper.createObjectNode();
+                    finding.put("ruleId", item.getRuleId()); finding.put("status", item.getResultStatus());
+                    finding.put("reason", item.getReason()); finding.put("evidence", item.getEvidence());
+                    preRuleFindings.add(finding);
+                }
+            });
+            if (preRuleFindings.isEmpty()) {
+                llmRules.forEach(rule -> evaluated.add(notEvaluated(task, message, rule, "本地规则未命中，跳过 LLM 复核")));
+            } else {
+                // A local hit is only a candidate in this mode; final scoring is decided by LLM confirmation.
+                evaluated.stream().filter(item -> "HIT".equals(item.getResultStatus()))
+                        .forEach(this::markCandidate);
+                llmRules.forEach(rule -> evaluated.add(evaluateSingle(task, message, rule, preRuleFindings)));
+            }
+        } else if ("AGENT_LLM".equals(mode)) {
+            // Agent mode delegates semantic checks to LLM rules; deterministic rules are not part of this mode.
+            if (llmRules.isEmpty()) {
+                ObjectNode agentRule = objectMapper.createObjectNode();
+                agentRule.put("id", "agent:" + task.getAgentId());
+                agentRule.put("name", "Agent 综合质检"); agentRule.put("ruleType", "LLM");
+                agentRule.put("expression", "根据 Agent 提示词、Skill 和可用能力进行综合质检");
+                agentRule.put("targetRole", "all"); agentRule.put("deduction", 0); agentRule.put("riskLevel", "MEDIUM");
+                evaluated.add(evaluateSingle(task, message, agentRule, null));
+            } else {
+                llmRules.forEach(rule -> evaluated.add(evaluateSingle(task, message, rule, null)));
+            }
+        } else {
+            // Legacy tasks retain the historical independent rule execution semantics.
+            rules.forEach(rule -> evaluated.add(evaluateSingle(task, message, rule, null)));
+        }
+        if (evaluated.isEmpty()) return notEvaluated(task, message, null, "当前模式没有可执行规则");
         InspectionResult aggregate = evaluated.get(0);
         boolean anyHit = evaluated.stream().anyMatch(item -> "HIT".equals(item.getResultStatus()));
         boolean allHit = evaluated.stream().allMatch(item -> "HIT".equals(item.getResultStatus()));
@@ -414,6 +458,11 @@ public class InspectionExecutionService {
     }
 
     private InspectionResult evaluateSingle(InspectionTask task, ConversationMessage message, JsonNode rule) {
+        return evaluateSingle(task, message, rule, null);
+    }
+
+    private InspectionResult evaluateSingle(InspectionTask task, ConversationMessage message, JsonNode rule,
+                                            JsonNode preRuleFindings) {
         InspectionResult result = new InspectionResult();
         result.setTaskId(task.getId()); result.setConversationId(message.getConversationId()); result.setMessageId(message.getId());
         result.setRuleId(rule == null ? null : rule.path("id").asText(null)); result.setSpeakerRole(message.getSpeakerRole());
@@ -431,9 +480,10 @@ public class InspectionExecutionService {
             String ruleType = rule.path("ruleType").asText();
             String expression = rule.path("expression").asText();
             if ("LLM".equalsIgnoreCase(ruleType)) {
-                LlmQualityProvider.LlmEvaluation evaluation = llmQualityProvider.evaluate(message.getContent(), rule,
-                        readSnapshot(task.getAgentSnapshotJson()),
-                        "inspection-message:" + task.getId() + ":" + message.getId() + ":rule:" + rule.path("id").asText("unknown"));
+                String recordId = "inspection-message:" + task.getId() + ":" + message.getId() + ":rule:" + rule.path("id").asText("unknown");
+                LlmQualityProvider.LlmEvaluation evaluation = preRuleFindings == null
+                        ? llmQualityProvider.evaluate(message.getContent(), rule, readSnapshot(task.getAgentSnapshotJson()), recordId)
+                        : llmQualityProvider.evaluate(message.getContent(), rule, readSnapshot(task.getAgentSnapshotJson()), preRuleFindings, recordId);
                 if (!evaluation.supported()) {
                     result.setResultStatus("ERROR"); result.setScore(0); result.setRiskLevel("HIGH"); result.setDeduction(0);
                     result.setReason(evaluation.reason()); result.setFindingJson("[]"); result.setEvidenceJson("[]"); result.setSuggestionJson("[]");
@@ -466,6 +516,38 @@ public class InspectionExecutionService {
             result.setResultStatus("ERROR"); result.setScore(0); result.setRiskLevel("HIGH"); result.setDeduction(0); result.setReason("规则执行失败: " + exception.getMessage());
         }
         return result;
+    }
+
+    private InspectionResult notEvaluated(InspectionTask task, ConversationMessage message, JsonNode rule, String reason) {
+        InspectionResult result = new InspectionResult();
+        result.setTaskId(task.getId()); result.setConversationId(message.getConversationId()); result.setMessageId(message.getId());
+        result.setRuleId(rule == null ? null : rule.path("id").asText(null)); result.setSpeakerRole(message.getSpeakerRole());
+        result.setResultStatus("NOT_EVALUATED"); result.setScore(100); result.setRiskLevel("LOW"); result.setDeduction(0);
+        result.setReason(reason); result.setFindingJson("[]"); result.setEvidenceJson("[]"); result.setSuggestionJson("[]");
+        result.setRuleBreakdownJson(writeJson(List.of(breakdownDetail(result, rule, "NOT_EVALUATED", 0, reason))));
+        return result;
+    }
+
+    private void markCandidate(InspectionResult result) {
+        result.setResultStatus("CANDIDATE");
+        try {
+            JsonNode breakdown = objectMapper.readTree(result.getRuleBreakdownJson());
+            if (breakdown.isArray()) breakdown.forEach(item -> { if (item.isObject()) ((ObjectNode) item).put("status", "CANDIDATE"); });
+            result.setRuleBreakdownJson(breakdown.toString());
+        } catch (Exception ignored) {
+            // The original local evidence remains available even if its optional breakdown is malformed.
+        }
+    }
+
+    private String qualityMode(JsonNode agentSnapshot) {
+        if (agentSnapshot == null || agentSnapshot.isMissingNode()) return "LEGACY";
+        JsonNode config = agentSnapshot.path("configJson");
+        if (config.isTextual()) {
+            try { config = objectMapper.readTree(config.asText()); }
+            catch (Exception ignored) { return "LEGACY"; }
+        }
+        String mode = config.path("mode").asText("LEGACY").trim().toUpperCase();
+        return Set.of("RULE_ONLY", "RULE_THEN_LLM", "AGENT_LLM").contains(mode) ? mode : "LEGACY";
     }
 
     private List<String> conversationIds(InspectionTask task) {

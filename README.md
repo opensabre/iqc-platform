@@ -24,6 +24,8 @@ mvn -DskipTests -Djib.to.image=iqc-platform:local jib:dockerBuild
 
 TXT 导入接口会保存会话与消息，并以文件 SHA-256 指纹保证重复提交幂等；质检任务执行时保存 Agent/规则快照，结果按 TaskItem 和执行 attempt 追踪。数据范围通过 `opensabre-starter-rpc` 调用 `base-organization` 获取当前用户 `groupId`，IQC 只保存业务归属快照。
 
+Agent 支持 `RULE_ONLY`、`RULE_THEN_LLM` 和 `AGENT_LLM` 三种质检模式。规则+LLM 模式先运行本地规则，仅对命中候选调用模型，并把本地候选结果传给 LLM 复核；未配置模式的历史 Agent 保持兼容执行。
+
 会话中心支持 `POST /api/iqc/conversations/batch-import` 多文件批量导入并生成批次号，也支持 `POST /api/iqc/conversations/ingest` 以 JSON 接入单个会话。JSON 消息格式为 `{"externalId":"上游幂等号","batchNo":"可选批次号","title":"会话标题","messages":[{"role":"agent","time":"00:00:01","content":"您好"}]}`。
 
 模板目录、系统设置和操作日志入口已纳入独立前端；操作日志查询复用网关后的 `base-sysadmin` 审计 API，模型设置接口只返回脱敏状态信息。

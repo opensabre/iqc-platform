@@ -27,6 +27,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 class InspectionExecutionServiceTest {
@@ -110,6 +112,41 @@ class InspectionExecutionServiceTest {
 
         assertThat(result.getResultStatus()).isEqualTo("HIT");
         assertThat(result.getEvidenceJson()).contains("优惠");
+    }
+
+    @Test
+    void ruleThenLlmSkipsLlmWhenLocalRulesDoNotHit() {
+        JsonNode local = rule("r-local", "KEYWORD", "优惠", "all");
+        JsonNode llm = rule("r-llm", "LLM", "判断语义", "all");
+        InspectionTask task = task();
+        task.setAgentSnapshotJson("{\"configJson\":{\"mode\":\"RULE_THEN_LLM\"}}");
+
+        InspectionResult result = ReflectionTestUtils.invokeMethod(service, "evaluate", task,
+                message("agent", "您好，欢迎咨询"), objectMapper.createArrayNode().add(local).add(llm));
+
+        assertThat(result.getResultStatus()).isEqualTo("NOT_HIT");
+        verify(llmProvider, times(0)).evaluate(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.eq(llm), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void ruleThenLlmPassesLocalFindingsToLlmAfterCandidateHit() {
+        JsonNode local = rule("r-local", "KEYWORD", "优惠", "all");
+        JsonNode llm = rule("r-llm", "LLM", "判断语义", "all");
+        InspectionTask task = task();
+        task.setAgentSnapshotJson("{\"configJson\":{\"mode\":\"RULE_THEN_LLM\"}}");
+        when(llmProvider.evaluate(org.mockito.ArgumentMatchers.eq("今天有优惠"), org.mockito.ArgumentMatchers.eq(llm),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(new LlmQualityProvider.LlmEvaluation(true, false, "仅为正常优惠说明"));
+
+        InspectionResult result = ReflectionTestUtils.invokeMethod(service, "evaluate", task,
+                message("agent", "今天有优惠"), objectMapper.createArrayNode().add(local).add(llm));
+
+        assertThat(result.getResultStatus()).isEqualTo("NOT_HIT");
+        verify(llmProvider).evaluate(org.mockito.ArgumentMatchers.eq("今天有优惠"), org.mockito.ArgumentMatchers.eq(llm),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.argThat(value -> value.toString().contains("r-local")),
+                org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
