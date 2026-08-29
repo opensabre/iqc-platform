@@ -27,7 +27,7 @@
 
 至少配置 `SERVER_PORT=8040`、Nacos 的 `REGISTER_HOST/REGISTER_PORT`、MySQL 的 `DATASOURCE_*`、Redis 的 `REDIS_*`、`SYSADMIN_SERVICE_ID=base-sysadmin` 和治理传输配置。生产环境必须显式提供数据库密码、治理注册令牌和资源注册令牌，不得使用 `application.yml` 的本地默认值。
 
-启动后 IQC 会通过同一部署级 `GOVERNANCE_REGISTRATION_TOKEN`（可由各能力专用变量覆盖）向 OpenSabre 管理面上报：错误码目录和字典快照进入 `base-sysadmin`，HTTP 资源权限完整快照进入 `base-organization`，`@Audit` 事件进入 `base-sysadmin` 审计日志。`/actuator/opensabreGovernanceRegistration` 中 `error-catalog`、`dictionary`、`resource-permissions` 三项必须均为 `SUCCEEDED` 才允许发布。
+启动后 IQC 会使用 Nacos 公共配置 `opensabre.governance.registration-token` 向 OpenSabre 管理面上报。该值可保存为 Jasypt `ENC(...)` 密文，并由各应用共享的 `JASYPT_ENCRYPTOR_PASSWORD` 解密。错误码目录和字典快照进入 `base-sysadmin`，HTTP 资源权限完整快照进入 `base-organization`，`@Audit` 事件进入 `base-sysadmin` 审计日志。`/actuator/opensabreGovernanceRegistration` 中 `error-catalog`、`dictionary`、`resource-permissions` 三项必须均为 `SUCCEEDED` 才允许发布。
 
 一期 TXT 上传默认限制为 20 MiB，后端会独立校验 `.txt` 扩展名和字节大小；可通过 `IQC_CONVERSATION_MAX_FILE_SIZE_BYTES` 调整业务限制，并同步调整 `IQC_CONVERSATION_MAX_FILE_SIZE` / `IQC_CONVERSATION_MAX_REQUEST_SIZE` 的 Multipart 限制。
 
