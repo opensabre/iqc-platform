@@ -212,9 +212,10 @@ public class InspectionTaskService {
     }
 
     private String configuredRuleSetId(QualityAgent agent) {
+        if (agent.getConfigJson() == null || agent.getConfigJson().isBlank()) return null;
         try {
             JsonNode config = objectMapper.readTree(agent.getConfigJson());
-            return config.path("ruleSetId").asText(null);
+            return config == null ? null : config.path("ruleSetId").asText(null);
         } catch (Exception exception) {
             throw IqcException.invalidArgument("Agent 配置不是有效的结构化配置");
         }
