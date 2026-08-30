@@ -73,7 +73,7 @@ public class BatchResultQueryService {
         List<InspectionResult> results = resultMapper.selectList(Wrappers.<InspectionResult>lambdaQuery()
                 .eq(InspectionResult::getTaskId, taskId).eq(InspectionResult::getConversationId, conversationId)
                 .orderByAsc(InspectionResult::getCreatedTime));
-        return new ConversationResultDetail(conversation, conversationSummary(conversationId, conversation, results), messages, results);
+        return new ConversationResultDetail(conversation, task, conversationSummary(conversationId, conversation, results), messages, results);
     }
 
     /** Returns all visible inspection results for one conversation across tasks. */
@@ -87,9 +87,10 @@ public class BatchResultQueryService {
             return task != null && dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId());
         }).toList();
         if (visibleResults.isEmpty()) throw IqcException.notFound("会话质检结果不存在: " + conversationId);
+        InspectionTask task = taskMapper.selectById(visibleResults.get(0).getTaskId());
         List<ConversationMessage> messages = messageMapper.selectList(Wrappers.<ConversationMessage>lambdaQuery()
                 .eq(ConversationMessage::getConversationId, conversationId).orderByAsc(ConversationMessage::getSequenceNo));
-        return new ConversationResultDetail(conversation, conversationSummary(conversationId, conversation, visibleResults), messages, visibleResults);
+        return new ConversationResultDetail(conversation, task, conversationSummary(conversationId, conversation, visibleResults), messages, visibleResults);
     }
 
     private InspectionTask requireTask(String taskId) {
@@ -140,6 +141,6 @@ public class BatchResultQueryService {
     public record ConversationResultSummary(String conversationId, String sourceFileName, int messageCount,
                                             int resultCount, BigDecimal averageScore, long hitCount,
                                             long highRiskCount, long errorCount) { }
-    public record ConversationResultDetail(Conversation conversation, ConversationResultSummary summary,
+    public record ConversationResultDetail(Conversation conversation, InspectionTask task, ConversationResultSummary summary,
                                            List<ConversationMessage> messages, List<InspectionResult> results) { }
 }
