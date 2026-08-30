@@ -11,6 +11,7 @@ import io.github.opensabre.iqc.rule.model.QualityRule;
 import io.github.opensabre.iqc.rule.QualityRuleSetService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import io.github.opensabre.iqc.task.dao.InspectionTaskMapper;
 import io.github.opensabre.iqc.task.dao.TaskExecutionMapper;
 import io.github.opensabre.iqc.task.model.InspectionTask;
@@ -187,13 +188,17 @@ public class InspectionTaskService {
 
     private void snapshotAgentAndRules(InspectionTask task, String agentId, String ruleSetId, List<String> requestedRuleIds) {
         if (agentId == null || agentId.isBlank()) throw IqcException.invalidArgument("必须选择已发布 Agent");
-        List<String> ruleIds = requestedRuleIds == null ? new ArrayList<>() : requestedRuleIds.stream().filter(id -> id != null && !id.isBlank()).distinct().toList();
-        QualityRuleSetService.PublishedRuleSet publishedSet = null;
-        if (ruleIds.isEmpty() && ruleSetId != null && !ruleSetId.isBlank()) { publishedSet = ruleSetService.published(ruleSetId); ruleIds = publishedSet.ruleIds(); }
-        if (ruleIds.isEmpty()) throw IqcException.invalidArgument("至少选择一条已发布规则");
-        task.setRuleSetId(ruleSetId); task.setRuleIdsJson(writeSnapshot(ruleIds));
         QualityAgent agent = agentMapper.selectById(agentId);
         if (agent == null || !"PUBLISHED".equals(agent.getStatus())) throw IqcException.invalidArgument("只能选择已发布 Agent");
+        String effectiveRuleSetId = ruleSetId;
+        if ((effectiveRuleSetId == null || effectiveRuleSetId.isBlank()) && (requestedRuleIds == null || requestedRuleIds.isEmpty())) {
+            effectiveRuleSetId = configuredRuleSetId(agent);
+        }
+        List<String> ruleIds = requestedRuleIds == null ? new ArrayList<>() : requestedRuleIds.stream().filter(id -> id != null && !id.isBlank()).distinct().toList();
+        QualityRuleSetService.PublishedRuleSet publishedSet = null;
+        if (ruleIds.isEmpty() && effectiveRuleSetId != null && !effectiveRuleSetId.isBlank()) { publishedSet = ruleSetService.published(effectiveRuleSetId); ruleIds = publishedSet.ruleIds(); }
+        if (ruleIds.isEmpty()) throw IqcException.invalidArgument("至少选择一条已发布规则");
+        task.setRuleSetId(effectiveRuleSetId); task.setRuleIdsJson(writeSnapshot(ruleIds));
         task.setAgentSnapshotJson(writeSnapshot(agent));
         List<QualityRule> rules = new ArrayList<>();
         for (String ruleId : ruleIds) {
@@ -204,6 +209,15 @@ public class InspectionTaskService {
         if (publishedSet == null) task.setRuleSnapshotJson(writeSnapshot(rules));
         else task.setRuleSnapshotJson(writeSnapshot(Map.of("ruleSetId", publishedSet.id(), "ruleSetVersion", publishedSet.versionNo(),
                 "aggregationMode", publishedSet.aggregationMode(), "rules", rules)));
+    }
+
+    private String configuredRuleSetId(QualityAgent agent) {
+        try {
+            JsonNode config = objectMapper.readTree(agent.getConfigJson());
+            return config.path("ruleSetId").asText(null);
+        } catch (Exception exception) {
+            throw IqcException.invalidArgument("Agent 配置不是有效的结构化配置");
+        }
     }
 
     private ScheduledSelection readSelection(String json) {

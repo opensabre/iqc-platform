@@ -25,6 +25,7 @@ class AgentConfigurationModeTest {
 
     private AgentConfiguration config(String mode, String prompt, String modelId) {
         return new AgentConfiguration("2.0", mode, prompt, null, null, null, null,
-                modelId, List.of(), List.of(), List.of(), null);
+                modelId, List.of(), List.of(), List.of(), null,
+                "RULE_ONLY".equals(mode) ? "rule-set-1" : null);
     }
 }

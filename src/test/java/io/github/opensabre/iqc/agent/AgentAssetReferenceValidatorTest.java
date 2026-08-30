@@ -28,7 +28,7 @@ class AgentAssetReferenceValidatorTest {
         IqcMcpServerMapper mcps=mock(IqcMcpServerMapper.class);
         IqcSkillMapper skills=mock(IqcSkillMapper.class);
         AgentConfiguration config=new AgentConfiguration("2.0","RULE_ONLY","",null,null,null,null,
-                null,List.of(),List.of(),List.of(),null);
+                null,List.of(),List.of(),List.of(),null, "rule-set-1");
 
         AgentConfiguration.AssetSnapshots snapshot=new AgentAssetReferenceValidator(models,mcps,skills).snapshot(config);
 

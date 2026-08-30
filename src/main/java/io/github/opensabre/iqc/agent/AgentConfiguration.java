@@ -11,7 +11,8 @@ import java.util.Set;
 public record AgentConfiguration(String schemaVersion, String mode, String systemPrompt, String primaryModel,
                                  List<Model> models, List<McpServer> mcpServers, List<Skill> skills,
                                  String primaryModelProfileId, List<String> fallbackModelProfileIds,
-                                 List<String> mcpServerIds, List<String> skillIds, AssetSnapshots assetSnapshots) {
+                                 List<String> mcpServerIds, List<String> skillIds, AssetSnapshots assetSnapshots,
+                                 String ruleSetId) {
     public static final String CURRENT_SCHEMA = "2.0";
 
     /** Backward-compatible constructor for legacy callers that predate explicit execution modes. */
@@ -20,7 +21,7 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
                               String primaryModelProfileId, List<String> fallbackModelProfileIds,
                               List<String> mcpServerIds, List<String> skillIds, AssetSnapshots assetSnapshots) {
         this(schemaVersion, null, systemPrompt, primaryModel, models, mcpServers, skills,
-                primaryModelProfileId, fallbackModelProfileIds, mcpServerIds, skillIds, assetSnapshots);
+                primaryModelProfileId, fallbackModelProfileIds, mcpServerIds, skillIds, assetSnapshots, null);
     }
 
     /** Returns a usable baseline for new Agents without exposing provider credentials. */
@@ -28,7 +29,7 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
         return new AgentConfiguration("1.0", "RULE_ONLY",
                 "你是专业的客服质检 Agent。严格依据已发布规则判断，输出可追溯的理由和证据。",
                 "default", List.of(new Model("default", "SPRING_AI", "", "", 0.1, true)),
-                List.of(), List.of(), null, List.of(), List.of(), List.of(), null);
+                List.of(), List.of(), null, List.of(), List.of(), List.of(), null, null);
     }
 
     /** Validates cross-field references and bounds before a configuration enters version history. */
@@ -40,6 +41,7 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
         if (!ruleOnly && (systemPrompt == null || systemPrompt.isBlank())) throw IqcException.invalidArgument("默认提示词不能为空");
         if (systemPrompt != null && systemPrompt.length() > 8000) throw IqcException.invalidArgument("默认提示词不能超过 8000 字符");
         if (CURRENT_SCHEMA.equals(schemaVersion)) {
+            if (ruleOnly && blank(ruleSetId)) throw IqcException.invalidArgument("普通规则 Agent 必须选择规则集");
             if (!ruleOnly && blank(primaryModelProfileId)) throw IqcException.invalidArgument("当前质检模式必须选择主模型配置");
             ensureUnique(fallbackModelProfileIds, "备用模型"); ensureUnique(mcpServerIds, "MCP"); ensureUnique(skillIds, "Skill");
             if (!blank(primaryModelProfileId) && fallbackModelProfileIds != null && fallbackModelProfileIds.contains(primaryModelProfileId)) throw IqcException.invalidArgument("主模型不能同时作为备用模型");
@@ -105,6 +107,6 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
     /** Returns a copy with immutable asset details captured for approval and execution. */
     public AgentConfiguration withSnapshots(AssetSnapshots snapshots) {
         return new AgentConfiguration(schemaVersion, mode, systemPrompt, primaryModel, models, mcpServers, skills,
-                primaryModelProfileId, fallbackModelProfileIds, mcpServerIds, skillIds, snapshots);
+                primaryModelProfileId, fallbackModelProfileIds, mcpServerIds, skillIds, snapshots, ruleSetId);
     }
 }
