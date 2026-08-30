@@ -42,7 +42,7 @@ public class QualityConfigController {
     public QualityAgent createAgent(@RequestBody AgentRequest request) { return agentService.create(request.name(), request.code(), request.description(), request.configJson()); }
 
     @PostMapping("/agents/{id}/submit")
-    @ResourcePermission(code = "iqc:agent:manage", name = "提交 Agent 审批", type = "iqc", description = "提交 Agent 审批")
+    @ResourcePermission(code = "iqc:agent:submit", name = "提交 Agent 审批", type = "iqc", description = "提交 Agent 审批")
     @Audit(operationType = OperationType.UPDATE, description = "提交 IQC Agent 审批", module = "IQC_AGENT")
     public QualityAgent submitAgent(@PathVariable String id) { return agentService.submit(id); }
 
@@ -57,7 +57,7 @@ public class QualityConfigController {
     public QualityAgent rejectAgent(@PathVariable String id) { return agentService.reject(id); }
 
     @PostMapping("/agents/{id}/disable")
-    @ResourcePermission(code = "iqc:agent:manage", name = "停用 Agent", type = "iqc", description = "停用已发布 Agent")
+    @ResourcePermission(code = "iqc:agent:disable", name = "停用 Agent", type = "iqc", description = "停用已发布 Agent")
     @Audit(operationType = OperationType.UPDATE, description = "停用 IQC Agent", module = "IQC_AGENT")
     public QualityAgent disableAgent(@PathVariable String id) { return agentService.disable(id); }
 
@@ -66,12 +66,12 @@ public class QualityConfigController {
     public List<QualityAgentVersion> agentVersions(@PathVariable String id) { return agentService.versions(id); }
 
     @PostMapping("/agents/{id}/versions")
-    @ResourcePermission(code = "iqc:agent:manage", name = "创建 Agent 版本", type = "iqc", description = "创建 Agent 版本")
+    @ResourcePermission(code = "iqc:agent:version:manage", name = "创建 Agent 版本", type = "iqc", description = "创建 Agent 版本")
     @Audit(operationType = OperationType.CREATE, description = "创建 IQC Agent 版本", module = "IQC_AGENT")
     public QualityAgentVersion createAgentVersion(@PathVariable String id, @RequestBody AgentRequest request) { return agentService.createVersion(id, request.name(), request.code(), request.description(), request.configJson()); }
 
     @PostMapping("/agents/{id}/versions/{versionNo}/rollback")
-    @ResourcePermission(code = "iqc:agent:manage", name = "回滚 Agent 版本", type = "iqc", description = "基于历史版本创建新草稿")
+    @ResourcePermission(code = "iqc:agent:version:rollback", name = "回滚 Agent 版本", type = "iqc", description = "基于历史版本创建新草稿")
     @Audit(operationType = OperationType.UPDATE, description = "回滚 IQC Agent 版本", module = "IQC_AGENT")
     public QualityAgentVersion rollbackAgent(@PathVariable String id, @PathVariable int versionNo) { return agentService.rollback(id, versionNo); }
 
