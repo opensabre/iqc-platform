@@ -388,16 +388,21 @@ public class InspectionExecutionService {
                 // A local hit is only a candidate in this mode; final scoring is decided by LLM confirmation.
                 evaluated.stream().filter(item -> "HIT".equals(item.getResultStatus()))
                         .forEach(this::markCandidate);
-                llmRules.forEach(rule -> evaluated.add(evaluateSingle(task, message, rule, preRuleFindings)));
+                if (llmRules.isEmpty()) {
+                    // Rule+Agent mode always uses the Agent model to review local candidates.
+                    ObjectNode agentReviewRule = agentReviewRule(task, "复核本地规则候选结果");
+                    rules.add(agentReviewRule);
+                    evaluated.add(evaluateSingle(task, message, agentReviewRule, preRuleFindings));
+                } else {
+                    llmRules.forEach(rule -> evaluated.add(evaluateSingle(task, message, rule, preRuleFindings)));
+                }
             }
         } else if ("AGENT_LLM".equals(mode)) {
             // Agent mode delegates semantic checks to LLM rules; deterministic rules are not part of this mode.
             if (llmRules.isEmpty()) {
-                ObjectNode agentRule = objectMapper.createObjectNode();
-                agentRule.put("id", "agent:" + task.getAgentId());
-                agentRule.put("name", "Agent 综合质检"); agentRule.put("ruleType", "LLM");
-                agentRule.put("expression", "根据 Agent 提示词、Skill 和可用能力进行综合质检");
-                agentRule.put("targetRole", "all"); agentRule.put("deduction", 0); agentRule.put("riskLevel", "MEDIUM");
+                ObjectNode agentRule = agentReviewRule(task, "根据 Agent 提示词、Skill 和可用能力进行综合质检");
+                rules.clear();
+                rules.add(agentRule);
                 evaluated.add(evaluateSingle(task, message, agentRule, null));
             } else {
                 llmRules.forEach(rule -> evaluated.add(evaluateSingle(task, message, rule, null)));
@@ -436,6 +441,15 @@ public class InspectionExecutionService {
         aggregate.setFindingJson(findings.toString()); aggregate.setEvidenceJson(evidences.toString()); aggregate.setSuggestionJson(suggestions.toString());
         aggregate.setRuleBreakdownJson(breakdown.toString());
         return aggregate;
+    }
+
+    private ObjectNode agentReviewRule(InspectionTask task, String expression) {
+        ObjectNode rule = objectMapper.createObjectNode();
+        rule.put("id", "agent:" + task.getAgentId());
+        rule.put("name", "Agent 综合质检"); rule.put("ruleType", "LLM");
+        rule.put("expression", expression);
+        rule.put("targetRole", "all"); rule.put("deduction", 0); rule.put("riskLevel", "MEDIUM");
+        return rule;
     }
 
     private int compareRisk(String left, String right) {

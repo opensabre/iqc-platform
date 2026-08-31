@@ -6,7 +6,7 @@ import org.springframework.stereotype.Component;
 
 /** 未配置模型时显式失败，避免把 LLM 规则静默当成未命中。 */
 @Component
-@ConditionalOnProperty(prefix = "iqc.llm", name = "enabled", havingValue = "false", matchIfMissing = true)
+@ConditionalOnProperty(prefix = "iqc.llm", name = "provider", havingValue = "disabled")
 public class UnsupportedLlmQualityProvider implements LlmQualityProvider {
     @Override
     public LlmEvaluation evaluate(String content, JsonNode rule, String recordId) {

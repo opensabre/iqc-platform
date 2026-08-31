@@ -23,7 +23,7 @@ import java.util.Map;
 
 /** 调用 OpenAI-compatible chat completions，并严格校验模型返回的 JSON。 */
 @Component
-@ConditionalOnExpression("'${iqc.llm.enabled:false}' == 'true' && '${iqc.llm.provider:spring-ai}' == 'http'")
+@ConditionalOnExpression("'${iqc.llm.provider:spring-ai}' == 'http' && '${iqc.llm.endpoint:}' != '' && '${iqc.llm.model:}' != ''")
 public class HttpLlmQualityProvider implements LlmQualityProvider {
     private final RestClient restClient;
     private final ObjectMapper objectMapper;

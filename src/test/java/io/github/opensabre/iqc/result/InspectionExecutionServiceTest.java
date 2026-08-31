@@ -150,6 +150,29 @@ class InspectionExecutionServiceTest {
     }
 
     @Test
+    void ruleThenLlmUsesAgentReviewWhenOnlyLocalRulesAreConfigured() throws Exception {
+        JsonNode local = rule("r-local", "KEYWORD", "优惠", "all");
+        InspectionTask task = task();
+        task.setAgentId("agent-1");
+        task.setAgentSnapshotJson("{\"configJson\":{\"mode\":\"RULE_THEN_LLM\"}}");
+        when(llmProvider.evaluate(org.mockito.ArgumentMatchers.eq("今天有优惠"),
+                org.mockito.ArgumentMatchers.argThat(value -> "agent:agent-1".equals(value.path("id").asText())),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(new LlmQualityProvider.LlmEvaluation(true, true, "确认存在违规优惠承诺"));
+
+        InspectionResult result = ReflectionTestUtils.invokeMethod(service, "evaluate", task,
+                message("agent", "今天有优惠"), objectMapper.createArrayNode().add(local));
+
+        assertThat(result.getResultStatus()).isEqualTo("HIT");
+        assertThat(result.getReason()).contains("确认存在违规优惠承诺");
+        assertThat(objectMapper.readTree(result.getRuleBreakdownJson())).hasSize(2);
+        verify(llmProvider).evaluate(org.mockito.ArgumentMatchers.eq("今天有优惠"),
+                org.mockito.ArgumentMatchers.argThat(value -> "agent:agent-1".equals(value.path("id").asText())),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.argThat(value -> value.toString().contains("r-local")),
+                org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
     void configuredConcurrencyProcessesDifferentConversationsInParallel() {
         InspectionTaskMapper tasks = mock(InspectionTaskMapper.class);
         ConversationMessageMapper messages = mock(ConversationMessageMapper.class);

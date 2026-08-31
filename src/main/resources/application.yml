@@ -64,7 +64,6 @@ iqc:
   conversation:
     max-file-size-bytes: ${IQC_CONVERSATION_MAX_FILE_SIZE_BYTES:20971520}
   llm:
-    enabled: ${IQC_LLM_ENABLED:false}
     provider: ${IQC_LLM_PROVIDER:spring-ai}
     endpoint: ${IQC_LLM_ENDPOINT:}
     path: ${IQC_LLM_PATH:/v1/chat/completions}

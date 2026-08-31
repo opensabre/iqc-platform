@@ -7,7 +7,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @Data
 @ConfigurationProperties(prefix = "iqc.llm")
 public class LlmQualityProperties {
-    private boolean enabled;
     /** spring-ai is the Boot 4 compatible default; http remains available for rollback. */
     private String provider = "spring-ai";
     private String endpoint;

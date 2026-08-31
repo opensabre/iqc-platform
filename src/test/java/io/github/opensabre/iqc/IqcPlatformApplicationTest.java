@@ -4,7 +4,7 @@ import io.github.opensabre.governance.errorcatalog.ErrorCatalogProvider;
 import io.github.opensabre.governance.audit.aspect.AuditAspect;
 import io.github.opensabre.governance.dictionary.DictionaryProvider;
 import io.github.opensabre.governance.registration.GovernanceRegistrationEndpoint;
-import io.github.opensabre.iqc.result.llm.UnsupportedLlmQualityProvider;
+import io.github.opensabre.iqc.result.llm.SpringAiLlmQualityProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -21,7 +21,6 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.datasource.driver-class-name=org.h2.Driver",
         "spring.datasource.username=sa",
         "spring.datasource.password=",
-        "iqc.llm.enabled=false",
         "iqc.task.scheduler-enabled=false",
         "opensabre.governance.dictionary.registration-enabled=false",
         "opensabre.governance.error-catalog.enabled=false",
@@ -40,6 +39,6 @@ class IqcPlatformApplicationTest {
         assertThat(applicationContext.getBeansOfType(DictionaryProvider.class)).isNotEmpty();
         assertThat(applicationContext.getBeansOfType(AuditAspect.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(GovernanceRegistrationEndpoint.class)).hasSize(1);
-        assertThat(applicationContext.getBeansOfType(UnsupportedLlmQualityProvider.class)).hasSize(1);
+        assertThat(applicationContext.getBeansOfType(SpringAiLlmQualityProvider.class)).hasSize(1);
     }
 }

@@ -31,18 +31,19 @@
 
 一期 TXT 上传默认限制为 20 MiB，后端会独立校验 `.txt` 扩展名和字节大小；可通过 `IQC_CONVERSATION_MAX_FILE_SIZE_BYTES` 调整业务限制，并同步调整 `IQC_CONVERSATION_MAX_FILE_SIZE` / `IQC_CONVERSATION_MAX_REQUEST_SIZE` 的 Multipart 限制。
 
-### 可选 LLM 适配器
+### LLM 适配器
 
-IQC 默认不启用模型调用。启用时需配置 OpenAI-compatible chat completions 端点，并确认模型服务已纳入组织的敏感数据边界：
+Agent 2.0 任务是否调用模型由任务绑定的已发布 Agent 快照决定。模型端点、密钥和模型名称在 Agent 模型配置中维护，并应确认模型服务已纳入组织的敏感数据边界。以下全局配置仅作为历史 Agent 的兼容默认值：
 
 ```bash
-IQC_LLM_ENABLED=true
 IQC_LLM_PROVIDER=spring-ai
 IQC_LLM_ENDPOINT=https://model.example.com
 IQC_LLM_PATH=/v1/chat/completions
 IQC_LLM_API_KEY=通过配置中心/密钥系统注入
 IQC_LLM_MODEL=your-model
 ```
+
+Agent 2.0 不需要全局启用开关。设置 `IQC_LLM_PROVIDER=disabled` 可用于紧急停止全部模型调用。
 
 `spring-ai` 是默认运行时，基于 Spring AI 2.0，兼容当前 Spring Boot 4.1。DashScope/百炼可将
 `IQC_LLM_ENDPOINT` 配置为其 OpenAI-compatible 地址。紧急回退到原始协议适配器时设置

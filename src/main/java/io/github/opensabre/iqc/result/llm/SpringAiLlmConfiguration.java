@@ -13,7 +13,7 @@ import java.time.Duration;
 
 /** Creates the Spring AI 2 runtime without coupling IQC domain services to a model vendor. */
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnExpression("'${iqc.llm.enabled:false}' == 'true' && '${iqc.llm.provider:spring-ai}' == 'spring-ai'")
+@ConditionalOnExpression("'${iqc.llm.provider:spring-ai}' == 'spring-ai' && '${iqc.llm.endpoint:}' != '' && '${iqc.llm.api-key:}' != '' && '${iqc.llm.model:}' != ''")
 public class SpringAiLlmConfiguration {
 
     /** Builds an OpenAI-compatible model; DashScope and private gateways use the same protocol. */

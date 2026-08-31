@@ -25,7 +25,8 @@ public class IqcSettingsController {
     @RateLimit(sceneCode = "iqc-settings-query", maxCount = 60, period = 60)
     public Map<String, Object> settings() {
         Map<String, Object> model = new LinkedHashMap<>();
-        model.put("enabled", llmProperties.isEnabled());
+        model.put("enabled", true);
+        model.put("configurationSource", "AGENT_SNAPSHOT");
         model.put("provider", llmProperties.getProvider());
         model.put("endpointConfigured", llmProperties.getEndpoint() != null && !llmProperties.getEndpoint().isBlank());
         model.put("model", llmProperties.getModel() == null || llmProperties.getModel().isBlank() ? "未配置" : llmProperties.getModel());

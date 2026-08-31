@@ -11,7 +11,6 @@ class IqcSettingsControllerTest {
     @Test
     void settingsExposeSafeModelStateWithoutSecrets() {
         LlmQualityProperties properties = new LlmQualityProperties();
-        properties.setEnabled(true);
         properties.setEndpoint("https://model.example.test/v1/chat/completions");
         properties.setApiKey("secret-api-key");
         properties.setModel("quality-model");
@@ -21,6 +20,7 @@ class IqcSettingsControllerTest {
         assertThat(settings).containsKey("model");
         Map<?, ?> model = (Map<?, ?>) settings.get("model");
         assertThat(model.get("enabled")).isEqualTo(true);
+        assertThat(model.get("configurationSource")).isEqualTo("AGENT_SNAPSHOT");
         assertThat(model.get("endpointConfigured")).isEqualTo(true);
         assertThat(model.get("model")).isEqualTo("quality-model");
         assertThat(model.containsKey("apiKey")).isFalse();
