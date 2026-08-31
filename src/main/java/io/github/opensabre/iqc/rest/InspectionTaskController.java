@@ -31,8 +31,11 @@ public class InspectionTaskController {
     @ResourcePermission(code = "iqc:task:view", name = "查看质检任务", type = "iqc", description = "查询质检任务")
     @RateLimit(sceneCode = "iqc-task-query", maxCount = 60, period = 60)
     public IqcPage<InspectionTask> list(@RequestParam(defaultValue = "1") long current,
-                                       @RequestParam(defaultValue = "20") long size) {
-        return taskService.page(current, size);
+                                       @RequestParam(defaultValue = "20") long size,
+                                       @RequestParam(required = false) String keyword,
+                                       @RequestParam(required = false) String status,
+                                       @RequestParam(required = false) String taskType) {
+        return taskService.page(current, size, keyword, status, taskType);
     }
 
     @GetMapping("/{id}")

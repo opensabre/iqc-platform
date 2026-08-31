@@ -266,6 +266,11 @@ public class InspectionTaskService {
     }
 
     public IqcPage<InspectionTask> page(long current, long size) {
+        return page(current, size, null, null, null);
+    }
+
+    /** Pages visible tasks and applies the task-list business filters. */
+    public IqcPage<InspectionTask> page(long current, long size, String keyword, String status, String taskType) {
         Page<InspectionTask> page = new Page<>(safeCurrent(current), safeSize(size));
         var query = Wrappers.<InspectionTask>lambdaQuery().orderByDesc(InspectionTask::getCreatedTime);
         if (!dataScope.canViewAll()) {
@@ -273,6 +278,12 @@ public class InspectionTaskService {
             query.and(q -> q.eq(InspectionTask::getCreatedBy, dataScope.owner())
                     .or(groupId != null, nested -> nested.eq(InspectionTask::getOwnerGroupId, groupId)));
         }
+        if (keyword != null && !keyword.isBlank()) {
+            String normalized = keyword.trim();
+            query.and(q -> q.eq(InspectionTask::getId, normalized).or().like(InspectionTask::getName, normalized));
+        }
+        if (status != null && !status.isBlank()) query.eq(InspectionTask::getStatus, status.trim());
+        if (taskType != null && !taskType.isBlank()) query.eq(InspectionTask::getTaskType, taskType.trim());
         return IqcPage.from(taskMapper.selectPage(page, query));
     }
 
