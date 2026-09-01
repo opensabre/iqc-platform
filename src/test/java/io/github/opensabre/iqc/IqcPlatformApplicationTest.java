@@ -8,11 +8,17 @@ import io.github.opensabre.iqc.result.llm.SpringAiLlmQualityProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.ApplicationContext;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(properties = {
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "spring.cloud.nacos.discovery.enabled=false",
         "spring.cloud.nacos.config.enabled=false",
         "spring.cloud.discovery.enabled=false",
@@ -33,6 +39,9 @@ class IqcPlatformApplicationTest {
     @Autowired
     private ApplicationContext applicationContext;
 
+    @LocalServerPort
+    private int port;
+
     @Test
     void loadsWithOpenSabreGovernanceAndSafeLlmDefault() {
         assertThat(applicationContext.getBeansOfType(ErrorCatalogProvider.class)).isNotEmpty();
@@ -40,5 +49,13 @@ class IqcPlatformApplicationTest {
         assertThat(applicationContext.getBeansOfType(AuditAspect.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(GovernanceRegistrationEndpoint.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(SpringAiLlmQualityProvider.class)).hasSize(1);
+    }
+
+    @Test
+    void exposesOpenApiDocumentForGatewayDiscoveryWithoutAuthentication() throws Exception {
+        HttpResponse<Void> response = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/v3/api-docs")).GET().build(),
+                HttpResponse.BodyHandlers.discarding());
+        assertThat(response.statusCode()).isEqualTo(200);
     }
 }
