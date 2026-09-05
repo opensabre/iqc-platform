@@ -7,7 +7,7 @@
 | 组件 | 约定 |
 | --- | --- |
 | IQC 服务名 | `iqc-platform` |
-| 默认端口 | `8040`；`8030` 已被 `base-gateway-admin` 占用 |
+| 默认端口 | 业务端口 `8040`；管理端口 `18080`；`8030` 已被 `base-gateway-admin` 占用 |
 | 数据库 | MySQL schema `iqc_platform` |
 | 注册中心 | Nacos，服务注册名必须为 `iqc-platform` |
 | 组织服务 | `base-organization`，用于当前用户 `groupId` 和数据范围 |
@@ -25,7 +25,7 @@
 
 ## 3. 服务环境变量
 
-至少配置 `SERVER_PORT=8040`、Nacos 的 `REGISTER_HOST/REGISTER_PORT`、MySQL 的 `DATASOURCE_*`、Redis 的 `REDIS_*`、`SYSADMIN_SERVICE_ID=base-sysadmin` 和治理传输配置。生产环境必须显式提供数据库密码、治理注册令牌和资源注册令牌，不得使用 `application.yml` 的本地默认值。
+至少配置 `SERVER_PORT=8040`、`MANAGEMENT_SERVER_PORT=18080`、Nacos 的 `REGISTER_HOST/REGISTER_PORT`、MySQL 的 `DATASOURCE_*`、Redis 的 `REDIS_*`、`SYSADMIN_SERVICE_ID=base-sysadmin` 和治理传输配置。生产环境必须显式提供数据库密码、治理注册令牌和资源注册令牌，不得使用 `application.yml` 的本地默认值。管理端点地址为 `http://<iqc-platform实例地址>:18080/actuator/health`，该端口不承载业务 API。
 
 启动后 IQC 会使用 Nacos 公共配置 `opensabre.governance.registration-token` 向 OpenSabre 管理面上报。该值可保存为 Jasypt `ENC(...)` 密文，并由各应用共享的 `JASYPT_ENCRYPTOR_PASSWORD` 解密。错误码目录和字典快照进入 `base-sysadmin`，HTTP 资源权限完整快照进入 `base-organization`，`@Audit` 事件进入 `base-sysadmin` 审计日志。`/actuator/opensabreGovernanceRegistration` 中 `error-catalog`、`dictionary`、`resource-permissions` 三项必须均为 `SUCCEEDED` 才允许发布。
 

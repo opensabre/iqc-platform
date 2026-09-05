@@ -157,13 +157,15 @@ class InspectionTaskServiceTest {
         var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("rule-1"); rule.setStatus("PUBLISHED");
         when(ruleMapper.selectById("rule-1")).thenReturn(rule);
         when(ruleSetService.published("set-1")).thenReturn(
-                new QualityRuleSetService.PublishedRuleSet("set-1", 3, "ALL", List.of("rule-1")));
+                new QualityRuleSetService.PublishedRuleSet("set-1", "服务规范", "SERVICE_STANDARD", 3, "ALL", List.of("rule-1")));
 
         InspectionTask created = taskService.createBatch("set task", List.of("conversation-1"),
                 "agent-1", "set-1", List.of(), 1);
 
         var snapshot = new ObjectMapper().readTree(created.getRuleSnapshotJson());
         assertThat(created.getRuleSetId()).isEqualTo("set-1");
+        assertThat(snapshot.path("ruleSetName").asText()).isEqualTo("服务规范");
+        assertThat(snapshot.path("ruleSetCode").asText()).isEqualTo("SERVICE_STANDARD");
         assertThat(snapshot.path("ruleSetVersion").asInt()).isEqualTo(3);
         assertThat(snapshot.path("aggregationMode").asText()).isEqualTo("ALL");
         assertThat(snapshot.path("rules")).hasSize(1);

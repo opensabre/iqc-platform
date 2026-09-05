@@ -88,7 +88,7 @@ public class QualityRuleSetService {
     public PublishedRuleSet published(String id) {
         QualityRuleSet set = require(id);
         if (!"PUBLISHED".equals(set.getStatus())) throw IqcException.invalidArgument("只能选择已发布规则集");
-        return new PublishedRuleSet(set.getId(), set.getVersionNo(), set.getAggregationMode(),
+        return new PublishedRuleSet(set.getId(), set.getName(), set.getCode(), set.getVersionNo(), set.getAggregationMode(),
                 validateRules(readIds(set.getRuleIdsJson()), true));
     }
 
@@ -107,5 +107,6 @@ public class QualityRuleSetService {
     private String write(Object value) { try { return objectMapper.writeValueAsString(value); } catch (JsonProcessingException e) { throw new IllegalStateException("规则集快照生成失败", e); } }
     private List<String> readIds(String json) { try { return objectMapper.readValue(json, new TypeReference<>() { }); } catch (JsonProcessingException e) { throw IqcException.invalidArgument("规则集成员数据损坏", e); } }
     private QualityRuleSetVersion toVersion(QualityRuleSet set, int number) { QualityRuleSetVersion version = new QualityRuleSetVersion(); version.setRuleSetId(set.getId()); version.setVersionNo(number); version.setName(set.getName()); version.setCode(set.getCode()); version.setDescription(set.getDescription()); version.setRuleIdsJson(set.getRuleIdsJson()); version.setAggregationMode(set.getAggregationMode()); version.setStatus("DRAFT"); return version; }
-    public record PublishedRuleSet(String id, Integer versionNo, String aggregationMode, List<String> ruleIds) { }
+    public record PublishedRuleSet(String id, String name, String code, Integer versionNo,
+                                   String aggregationMode, List<String> ruleIds) { }
 }

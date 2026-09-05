@@ -207,7 +207,8 @@ public class InspectionTaskService {
             rules.add(rule);
         }
         if (publishedSet == null) task.setRuleSnapshotJson(writeSnapshot(rules));
-        else task.setRuleSnapshotJson(writeSnapshot(Map.of("ruleSetId", publishedSet.id(), "ruleSetVersion", publishedSet.versionNo(),
+        else task.setRuleSnapshotJson(writeSnapshot(Map.of("ruleSetId", publishedSet.id(), "ruleSetName", publishedSet.name(),
+                "ruleSetCode", publishedSet.code(), "ruleSetVersion", publishedSet.versionNo(),
                 "aggregationMode", publishedSet.aggregationMode(), "rules", rules)));
     }
 
