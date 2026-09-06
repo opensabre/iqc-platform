@@ -18,6 +18,7 @@ public enum IqcRuleType implements DictionaryEnum {
     ENDS_WITH("ENDS_WITH", "结尾匹配"),
     STRUCTURED("STRUCTURED", "结构化条件"),
     COMPOSITE("COMPOSITE", "组合规则"),
+    DLS("DLS", "DLS 会话规则"),
     LLM("LLM", "LLM 语义判断");
 
     private final String value;

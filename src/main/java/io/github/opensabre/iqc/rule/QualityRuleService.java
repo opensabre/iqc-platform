@@ -7,6 +7,7 @@ import io.github.opensabre.iqc.rule.model.QualityRule;
 import io.github.opensabre.iqc.rule.dao.QualityRuleVersionMapper;
 import io.github.opensabre.iqc.rule.model.QualityRuleVersion;
 import io.github.opensabre.iqc.governance.IqcException;
+import io.github.opensabre.iqc.rule.dls.DlsEngine;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -118,7 +119,16 @@ public class QualityRuleService {
             return new RuleTestResult(false, "NOT_SUPPORTED", null, "LLM 规则请在质检沙盒中选择模型测试");
         try {
             var message = new io.github.opensabre.iqc.conversation.model.ConversationMessage();
+            message.setId("rule-test-message");
+            message.setSequenceNo(1);
+            message.setSpeakerRole(rule.getTargetRole() == null || "all".equalsIgnoreCase(rule.getTargetRole()) ? "agent" : rule.getTargetRole());
             message.setContent(content);
+            if ("DLS".equalsIgnoreCase(rule.getRuleType())) {
+                DlsEngine.Evaluation evaluation = DlsEngine.evaluate(DlsEngine.compile(objectMapper, expression), List.of(message));
+                String matched = evaluation.evidence().stream().map(DlsEngine.Hit::text).distinct()
+                        .reduce((left, right) -> left + "；" + right).orElse(null);
+                return new RuleTestResult(evaluation.hit(), evaluation.hit() ? "HIT" : "NOT_HIT", matched, evaluation.reason());
+            }
             RuleMatcher.Match match = RuleMatcher.evaluate(objectMapper, rule.getRuleType(), expression, message);
             return new RuleTestResult(match.hit(), match.hit() ? "HIT" : "NOT_HIT", match.text(),
                     match.hit() ? "命中规则" : "未命中规则");

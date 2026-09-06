@@ -18,6 +18,7 @@ class IqcDictionaryTest {
     @Test
     void ruleTypeAndRiskLevelAreFrameworkDictionaries() {
         assertEquals("iqc_rule_type", IqcRuleType.class.getAnnotation(OpenSabreDictionary.class).code());
+        assertEquals("DLS 会话规则", IqcRuleType.DLS.label());
         assertEquals("iqc_risk_level", IqcRiskLevel.class.getAnnotation(OpenSabreDictionary.class).code());
     }
 
