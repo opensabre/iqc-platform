@@ -10,12 +10,16 @@ import io.github.opensabre.iqc.agent.model.QualityAgent;
 import io.github.opensabre.iqc.agent.model.QualityAgentVersion;
 import io.github.opensabre.iqc.rule.QualityRuleService;
 import io.github.opensabre.iqc.rule.QualityRuleSetService;
+import io.github.opensabre.iqc.rule.dls.DlsImportService;
 import io.github.opensabre.iqc.rule.model.QualityRule;
 import io.github.opensabre.iqc.rule.model.QualityRuleVersion;
 import io.github.opensabre.iqc.rule.model.QualityRuleSet;
 import io.github.opensabre.iqc.rule.model.QualityRuleSetVersion;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.http.MediaType;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.List;
 
 @RestController
@@ -25,10 +29,13 @@ public class QualityConfigController {
     private final AgentEffectService agentEffectService;
     private final QualityRuleService ruleService;
     private final QualityRuleSetService ruleSetService;
+    private final DlsImportService dlsImportService;
 
     public QualityConfigController(QualityAgentService agentService, AgentEffectService agentEffectService,
-                                   QualityRuleService ruleService, QualityRuleSetService ruleSetService) {
-        this.agentService = agentService; this.agentEffectService = agentEffectService; this.ruleService = ruleService; this.ruleSetService = ruleSetService;
+                                   QualityRuleService ruleService, QualityRuleSetService ruleSetService,
+                                   DlsImportService dlsImportService) {
+        this.agentService = agentService; this.agentEffectService = agentEffectService; this.ruleService = ruleService;
+        this.ruleSetService = ruleSetService; this.dlsImportService = dlsImportService;
     }
 
     @GetMapping("/agents")
@@ -97,6 +104,18 @@ public class QualityConfigController {
     @Audit(operationType = OperationType.CREATE, description = "创建 IQC 规则", module = "IQC_RULE")
     @RateLimit(sceneCode = "iqc-rule-create", maxCount = 30, period = 60)
     public QualityRule createRule(@RequestBody RuleRequest request) { return ruleService.create(request.name(), request.code(), request.category(), request.ruleType(), request.targetRole(), request.expression(), request.description(), request.deduction(), request.riskLevel(), request.veto()); }
+
+    /** Validates an XLSX DLS workbook and optionally creates one draft rule per populated sheet. */
+    @PostMapping(value = "/rules/import-dls", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @ResourcePermission(code = "iqc:rule:manage", name = "导入 DLS 规则", type = "iqc", description = "预检并导入 DLS Excel 规则库")
+    @Audit(operationType = OperationType.IMPORT, description = "导入 IQC DLS 规则", module = "IQC_RULE", request = false)
+    @RateLimit(sceneCode = "iqc-dls-rule-import", maxCount = 10, period = 60)
+    public DlsImportService.ImportResult importDls(@RequestPart("file") MultipartFile file,
+                                                   @RequestParam(defaultValue = "true") boolean excludeTests,
+                                                   @RequestParam(defaultValue = "false") boolean preview) throws IOException {
+        String fileName = file.getOriginalFilename() == null ? "dls.xlsx" : file.getOriginalFilename();
+        return dlsImportService.importWorkbook(file.getBytes(), fileName, excludeTests, preview);
+    }
 
     @PostMapping("/rules/{id}/submit")
     @ResourcePermission(code = "iqc:rule:manage", name = "提交规则审批", type = "iqc", description = "提交规则审批")

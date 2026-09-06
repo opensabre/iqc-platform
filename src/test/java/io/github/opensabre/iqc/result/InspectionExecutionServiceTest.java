@@ -6,6 +6,7 @@ import io.github.opensabre.governance.usage.UsageCounterRecorder;
 import io.github.opensabre.iqc.conversation.dao.ConversationMessageMapper;
 import io.github.opensabre.iqc.conversation.dao.ConversationMapper;
 import io.github.opensabre.iqc.conversation.model.ConversationMessage;
+import io.github.opensabre.iqc.rule.dls.DlsRuleDocument;
 import io.github.opensabre.iqc.result.dao.InspectionResultMapper;
 import io.github.opensabre.iqc.result.llm.LlmQualityProvider;
 import io.github.opensabre.iqc.result.model.InspectionResult;
@@ -112,6 +113,28 @@ class InspectionExecutionServiceTest {
 
         assertThat(result.getResultStatus()).isEqualTo("HIT");
         assertThat(result.getEvidenceJson()).contains("优惠");
+    }
+
+    @Test
+    void dlsRuleUsesConversationContextAndAnchorsOneResult() throws Exception {
+        DlsRuleDocument document = new DlsRuleDocument("1.0", null, List.of(
+                new DlsRuleDocument.Definition("slot_need", "SLOT", "我要投诉", "all"),
+                new DlsRuleDocument.Definition("slot_phone", "SLOT", "客服电话", "all"),
+                new DlsRuleDocument.Definition("rule_need", "RULE", "[slot_need]", "user"),
+                new DlsRuleDocument.Definition("rule_guide", "RULE", "[slot_phone]", "agent")
+        ), "引导回电", "[rule_need]%[rule_guide]");
+        ConversationMessage customer = message("user", "我要投诉"); customer.setId("customer"); customer.setSequenceNo(1);
+        ConversationMessage agent = message("agent", "请拨打客服电话"); agent.setId("agent"); agent.setSequenceNo(2);
+        JsonNode dls = rule("r-dls", "DLS", objectMapper.writeValueAsString(document), "all");
+
+        InspectionResult anchored = ReflectionTestUtils.invokeMethod(service, "evaluate", task(), customer,
+                objectMapper.createArrayNode().add(dls), List.of(customer, agent));
+        InspectionResult secondary = ReflectionTestUtils.invokeMethod(service, "evaluate", task(), agent,
+                objectMapper.createArrayNode().add(dls), List.of(customer, agent));
+
+        assertThat(anchored.getResultStatus()).isEqualTo("HIT");
+        assertThat(anchored.getEvidenceJson()).contains("rule_need").contains("rule_guide");
+        assertThat(secondary.getResultStatus()).isEqualTo("NOT_HIT");
     }
 
     @Test

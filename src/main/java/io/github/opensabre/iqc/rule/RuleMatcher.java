@@ -3,6 +3,7 @@ package io.github.opensabre.iqc.rule;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.opensabre.iqc.conversation.model.ConversationMessage;
+import io.github.opensabre.iqc.rule.dls.DlsEngine;
 
 import java.util.Arrays;
 import java.util.List;
@@ -33,6 +34,7 @@ public final class RuleMatcher {
                     content.endsWith(expression) ? content.length() - expression.length() : -1);
             case "STRUCTURED", "COMPOSITE" -> fromStructured(
                     StructuredConditionMatcher.evaluate(objectMapper, expression, message));
+            case "DLS" -> throw new IllegalArgumentException("DLS 规则必须使用完整会话执行");
             default -> throw new IllegalArgumentException("不支持本地执行的规则类型: " + ruleType);
         };
     }
@@ -40,10 +42,12 @@ public final class RuleMatcher {
     public static void validate(String ruleType, String expression, ObjectMapper objectMapper) {
         String type = normalizeType(ruleType);
         if (expression == null || expression.isBlank()) throw new IllegalArgumentException("规则表达式不能为空");
-        if (expression.length() > MAX_EXPRESSION_LENGTH) throw new IllegalArgumentException("规则表达式不能超过 16000 字符");
+        if (!"DLS".equals(type) && expression.length() > MAX_EXPRESSION_LENGTH)
+            throw new IllegalArgumentException("规则表达式不能超过 16000 字符");
         switch (type) {
             case "REGEX", "FORBIDDEN_REGEX", "REQUIRED_REGEX" -> Pattern.compile(expression);
             case "STRUCTURED", "COMPOSITE" -> StructuredConditionMatcher.validate(objectMapper, expression);
+            case "DLS" -> DlsEngine.compile(objectMapper, expression);
             case "KEYWORD", "CONTAINS", "FORBIDDEN_CONTAINS", "REQUIRED_CONTAINS",
                     "EQUALS", "NOT_EQUALS", "STARTS_WITH", "ENDS_WITH", "LLM" -> { }
             default -> throw new IllegalArgumentException("不支持的规则类型: " + ruleType);
