@@ -107,7 +107,7 @@ public class QualityConfigController {
 
     /** Validates an XLSX DLS workbook and optionally creates one draft rule per populated sheet. */
     @PostMapping(value = "/rules/import-dls", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @ResourcePermission(code = "iqc:rule:manage", name = "导入 DLS 规则", type = "iqc", description = "预检并导入 DLS Excel 规则库")
+    @ResourcePermission(code = "iqc:rule:import", name = "导入 DLS 规则", type = "iqc", description = "预检并导入 DLS Excel 规则库")
     @Audit(operationType = OperationType.IMPORT, description = "导入 IQC DLS 规则", module = "IQC_RULE", request = false)
     @RateLimit(sceneCode = "iqc-dls-rule-import", maxCount = 10, period = 60)
     public DlsImportService.ImportResult importDls(@RequestPart("file") MultipartFile file,
