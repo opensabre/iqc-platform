@@ -41,7 +41,7 @@ class InspectionExecutionServiceTest {
     private final LlmQualityProvider llmProvider = mock(LlmQualityProvider.class);
     private final InspectionExecutionService service = new InspectionExecutionService(
             mock(InspectionTaskMapper.class), mock(ConversationMapper.class), mock(ConversationMessageMapper.class), mock(InspectionResultMapper.class),
-            objectMapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class), mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class));
+            objectMapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class), mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class));
 
     @Test
     void keywordRuleOnlyAppliesToItsTargetSpeaker() {
@@ -220,7 +220,7 @@ class InspectionExecutionServiceTest {
             return message;
         });
         InspectionExecutionService concurrentService = new InspectionExecutionService(tasks, mock(ConversationMapper.class), messages, results, objectMapper,
-                executions, items, mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class));
+                executions, items, mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class));
 
         InspectionTask completed = concurrentService.run("task-1", "execution-1");
 

@@ -59,6 +59,7 @@ public class InspectionExecutionService {
     private final IqcDataScope dataScope;
     private final LlmQualityProvider llmQualityProvider;
     private final UsageCounterRecorder usageCounterRecorder;
+    private final HierarchicalResultService hierarchicalResultService;
     private final Map<String, DlsEngine.Compiled> dlsCompileCache = Collections.synchronizedMap(
             new LinkedHashMap<>(32, 0.75f, true) {
                 @Override protected boolean removeEldestEntry(Map.Entry<String, DlsEngine.Compiled> eldest) {
@@ -205,6 +206,7 @@ public class InspectionExecutionService {
             if (loaded != null) conversationMessagesById.put(item.getMessageId(), loaded);
         }
         List<ConversationMessage> conversationMessages = new ArrayList<>(conversationMessagesById.values());
+        List<InspectionResult> conversationResults = new ArrayList<>();
         for (TaskItem item : items) {
             InspectionTask current = taskMapper.selectById(task.getId());
             if (current == null || "CANCELLED".equals(current.getStatus())) {
@@ -219,6 +221,7 @@ public class InspectionExecutionService {
                 if (message == null) throw IqcException.notFound("会话消息不存在: " + item.getMessageId());
                 InspectionResult result = evaluate(task, message, ruleSnapshot, conversationMessages);
                 result.setExecutionId(executionId); resultMapper.insert(result); item.setResultId(result.getId());
+                conversationResults.add(result);
                 if (result.getResultStatus() != null && result.getResultStatus().endsWith("ERROR")) {
                     item.setStatus("FAILED"); item.setErrorMessage(result.getReason());
                     usageCounterRecorder.record(new UsageRecord(usageRecordId + ":failure", null, "iqc-platform", "INSPECTION_MESSAGE", item.getMessageId(), "QUALITY_CHECK", UsageOutcome.FAILURE));
@@ -232,6 +235,8 @@ public class InspectionExecutionService {
             }
             taskItemMapper.updateById(item);
         }
+        if (!conversationMessages.isEmpty() && !conversationResults.isEmpty())
+            hierarchicalResultService.materialize(task, executionId, ruleSnapshot, conversationMessages, conversationResults);
     }
 
     public List<InspectionResult> list(String taskId) {
@@ -660,6 +665,10 @@ public class InspectionExecutionService {
         detail.put("ruleId", result.getRuleId());
         detail.put("ruleName", rule == null ? null : rule.path("name").asText(null));
         detail.put("ruleCode", rule == null ? null : rule.path("code").asText(null));
+        detail.put("ruleVersion", rule == null ? null : rule.path("versionNo").asInt(0));
+        String ruleType = rule == null ? null : rule.path("ruleType").asText(null);
+        detail.put("ruleType", ruleType);
+        detail.put("evaluationScope", "DLS".equalsIgnoreCase(ruleType) ? "CONVERSATION" : "MESSAGE");
         detail.put("category", rule == null ? null : rule.path("category").asText(null));
         detail.put("veto", rule != null && rule.path("veto").asBoolean(false));
         detail.put("status", status); detail.put("deduction", deduction);

@@ -110,34 +110,57 @@ public class QualityRuleService {
     private void copyVersion(QualityRule rule, QualityRuleVersion version) { rule.setName(version.getName()); rule.setCode(version.getCode()); rule.setCategory(version.getCategory()); rule.setRuleType(version.getRuleType()); rule.setTargetRole(version.getTargetRole()); rule.setExpression(version.getExpression()); rule.setDescription(version.getDescription()); rule.setDeduction(version.getDeduction()); rule.setRiskLevel(version.getRiskLevel()); rule.setVeto(version.getVeto()); rule.setVersionNo(version.getVersionNo()); }
 
     public RuleTestResult test(String id, String content) {
+        return test(id, content, List.of());
+    }
+
+    /** Tests a single-message rule or a DLS rule against an ordered conversation. */
+    public RuleTestResult test(String id, String content, List<TestMessage> testMessages) {
         QualityRule rule = mapper.selectById(id);
         if (rule == null) throw IqcException.notFound("规则不存在: " + id);
-        if (content == null || content.isBlank()) throw IqcException.invalidArgument("测试文本不能为空");
+        boolean dls = "DLS".equalsIgnoreCase(rule.getRuleType());
+        if (!dls && (content == null || content.isBlank())) throw IqcException.invalidArgument("测试文本不能为空");
+        if (dls && (testMessages == null || testMessages.isEmpty()) && (content == null || content.isBlank()))
+            throw IqcException.invalidArgument("DLS 测试会话不能为空");
         String expression = rule.getExpression();
         if (expression == null || expression.isBlank()) throw IqcException.invalidArgument("规则表达式不能为空");
         if ("LLM".equalsIgnoreCase(rule.getRuleType()))
-            return new RuleTestResult(false, "NOT_SUPPORTED", null, "LLM 规则请在质检沙盒中选择模型测试");
+            return new RuleTestResult(false, "NOT_SUPPORTED", null, "LLM 规则请在质检沙盒中选择模型测试", List.of());
         try {
-            var message = new io.github.opensabre.iqc.conversation.model.ConversationMessage();
-            message.setId("rule-test-message");
-            message.setSequenceNo(1);
-            message.setSpeakerRole(rule.getTargetRole() == null || "all".equalsIgnoreCase(rule.getTargetRole()) ? "agent" : rule.getTargetRole());
-            message.setContent(content);
-            if ("DLS".equalsIgnoreCase(rule.getRuleType())) {
-                DlsEngine.Evaluation evaluation = DlsEngine.evaluate(DlsEngine.compile(objectMapper, expression), List.of(message));
+            List<io.github.opensabre.iqc.conversation.model.ConversationMessage> messages = testMessages == null || testMessages.isEmpty()
+                    ? List.of(testMessage("rule-test-message", 1,
+                    rule.getTargetRole() == null || "all".equalsIgnoreCase(rule.getTargetRole()) ? "agent" : rule.getTargetRole(), content))
+                    : java.util.stream.IntStream.range(0, testMessages.size()).mapToObj(index -> {
+                        TestMessage item = testMessages.get(index);
+                        return testMessage(item.id() == null || item.id().isBlank() ? "rule-test-message-" + (index + 1) : item.id(),
+                                item.sequenceNo() == null ? index + 1 : item.sequenceNo(), item.speakerRole(), item.content());
+                    }).toList();
+            var message = messages.get(0);
+            if (dls) {
+                DlsEngine.Evaluation evaluation = DlsEngine.evaluate(DlsEngine.compile(objectMapper, expression), messages);
                 String matched = evaluation.evidence().stream().map(DlsEngine.Hit::text).distinct()
                         .reduce((left, right) -> left + "；" + right).orElse(null);
-                return new RuleTestResult(evaluation.hit(), evaluation.hit() ? "HIT" : "NOT_HIT", matched, evaluation.reason());
+                return new RuleTestResult(evaluation.hit(), evaluation.hit() ? "HIT" : "NOT_HIT", matched, evaluation.reason(), evaluation.evidence());
             }
             RuleMatcher.Match match = RuleMatcher.evaluate(objectMapper, rule.getRuleType(), expression, message);
             return new RuleTestResult(match.hit(), match.hit() ? "HIT" : "NOT_HIT", match.text(),
-                    match.hit() ? "命中规则" : "未命中规则");
+                    match.hit() ? "命中规则" : "未命中规则", List.of());
         } catch (IllegalArgumentException exception) {
             String prefix = rule.getRuleType() != null && rule.getRuleType().toUpperCase().contains("REGEX")
                     ? "正则表达式无效: " : "规则表达式无效: ";
-            return new RuleTestResult(false, "ERROR", null, prefix + exception.getMessage());
+            return new RuleTestResult(false, "ERROR", null, prefix + exception.getMessage(), List.of());
         }
     }
 
-    public record RuleTestResult(boolean matched, String resultStatus, String matchedText, String reason) { }
+    private io.github.opensabre.iqc.conversation.model.ConversationMessage testMessage(
+            String id, int sequenceNo, String speakerRole, String content) {
+        var message = new io.github.opensabre.iqc.conversation.model.ConversationMessage();
+        message.setId(id); message.setSequenceNo(sequenceNo);
+        message.setSpeakerRole(speakerRole == null || speakerRole.isBlank() ? "agent" : speakerRole.toLowerCase());
+        message.setContent(content == null ? "" : content);
+        return message;
+    }
+
+    public record TestMessage(String id, Integer sequenceNo, String speakerRole, String content) { }
+    public record RuleTestResult(boolean matched, String resultStatus, String matchedText, String reason,
+                                 List<DlsEngine.Hit> evidence) { }
 }
