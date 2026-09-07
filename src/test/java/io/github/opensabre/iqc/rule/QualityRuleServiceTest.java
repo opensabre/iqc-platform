@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.opensabre.iqc.rule.model.QualityRule;
 import io.github.opensabre.iqc.rule.model.QualityRuleVersion;
 import io.github.opensabre.iqc.governance.IqcException;
+import io.github.opensabre.iqc.rule.dls.DlsRuleDocument;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -84,6 +85,27 @@ class QualityRuleServiceTest {
 
         assertThat(service.test("rule-1", "收益很高").matched()).isTrue();
         assertThat(service.test("rule-1", "收益与风险并存").matched()).isFalse();
+    }
+
+    @Test
+    void dlsTestUsesOrderedConversationAndReturnsRuleEvidence() throws Exception {
+        DlsRuleDocument document = new DlsRuleDocument("1.0", null, List.of(
+                new DlsRuleDocument.Definition("slot_complain", "SLOT", "我要投诉", "all"),
+                new DlsRuleDocument.Definition("slot_phone", "SLOT", "客服电话", "all"),
+                new DlsRuleDocument.Definition("rule_complain", "RULE", "[slot_complain]", "user"),
+                new DlsRuleDocument.Definition("rule_guide", "RULE", "[slot_phone]", "agent")
+        ), "投诉后引导", "[rule_complain]%[rule_guide]");
+        QualityRule rule = rule("DLS", new ObjectMapper().writeValueAsString(document));
+        when(mapper.selectById("rule-1")).thenReturn(rule);
+
+        QualityRuleService.RuleTestResult result = service.test("rule-1", null, List.of(
+                new QualityRuleService.TestMessage("m1", 1, "user", "我要投诉"),
+                new QualityRuleService.TestMessage("m2", 2, "agent", "请拨打客服电话")
+        ));
+
+        assertThat(result.matched()).isTrue();
+        assertThat(result.evidence()).extracting(io.github.opensabre.iqc.rule.dls.DlsEngine.Hit::definition)
+                .containsExactly("rule_complain", "rule_guide");
     }
 
     @Test

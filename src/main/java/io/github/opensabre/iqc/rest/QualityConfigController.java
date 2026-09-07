@@ -145,7 +145,10 @@ public class QualityConfigController {
     @ResourcePermission(code = "iqc:rule:test", name = "测试规则", type = "iqc", description = "测试质检规则")
     @RateLimit(sceneCode = "iqc-rule-test", maxCount = 60, period = 60)
     public QualityRuleService.RuleTestResult testRule(@PathVariable String id, @RequestBody RuleTestRequest request) {
-        return ruleService.test(id, request.content());
+        List<QualityRuleService.TestMessage> messages = request.messages() == null ? List.of() : request.messages().stream()
+                .map(message -> new QualityRuleService.TestMessage(message.id(), message.sequenceNo(), message.speakerRole(), message.content()))
+                .toList();
+        return ruleService.test(id, request.content(), messages);
     }
 
     @GetMapping("/rule-sets")
@@ -179,6 +182,7 @@ public class QualityConfigController {
 
     public record AgentRequest(String name, String code, String description, String configJson) { }
     public record RuleRequest(String name, String code, String category, String ruleType, String targetRole, String expression, String description, Integer deduction, String riskLevel, Boolean veto) { }
-    public record RuleTestRequest(String content) { }
+    public record RuleTestRequest(String content, List<RuleTestMessage> messages) { }
+    public record RuleTestMessage(String id, Integer sequenceNo, String speakerRole, String content) { }
     public record RuleSetRequest(String name, String code, String description, List<String> ruleIds, String aggregationMode) { }
 }

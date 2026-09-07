@@ -56,7 +56,7 @@ class InspectionTaskServiceTest {
     private final TaskItemMapper taskItemMapper = mock(TaskItemMapper.class);
     private final IqcDataScope dataScope = mock(IqcDataScope.class);
     private final InspectionExecutionService executionService = new InspectionExecutionService(taskMapper, conversationMapper, messageMapper, resultMapper,
-            new ObjectMapper(), executionMapper, taskItemMapper, dataScope, mock(io.github.opensabre.iqc.result.llm.LlmQualityProvider.class), mock(UsageCounterRecorder.class));
+            new ObjectMapper(), executionMapper, taskItemMapper, dataScope, mock(io.github.opensabre.iqc.result.llm.LlmQualityProvider.class), mock(UsageCounterRecorder.class), mock(io.github.opensabre.iqc.result.HierarchicalResultService.class));
     private final InspectionTaskService taskService = new InspectionTaskService(taskMapper, conversationMapper, agentMapper, ruleMapper, ruleSetService,
             new ObjectMapper(), executionMapper, dataScope);
 

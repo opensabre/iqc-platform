@@ -11,6 +11,7 @@ import io.github.opensabre.iqc.result.InspectionExecutionService;
 import io.github.opensabre.iqc.result.BatchResultQueryService;
 import io.github.opensabre.iqc.result.BatchResultQueryService.BatchResultSummary;
 import io.github.opensabre.iqc.result.BatchResultQueryService.ConversationResultDetail;
+import io.github.opensabre.iqc.result.HierarchicalResultService;
 import io.github.opensabre.iqc.result.model.InspectionResult;
 import io.github.opensabre.iqc.task.model.InspectionTask;
 import io.github.opensabre.iqc.shared.IqcPage;
@@ -28,10 +29,13 @@ public class InspectionResultController {
     private final InspectionExecutionService executionService;
     private final UsageCounterRecorder usageCounterRecorder;
     private final BatchResultQueryService batchResultQueryService;
+    private final HierarchicalResultService hierarchicalResultService;
 
     public InspectionResultController(InspectionExecutionService executionService, UsageCounterRecorder usageCounterRecorder,
-                                      BatchResultQueryService batchResultQueryService) {
-        this.executionService = executionService; this.usageCounterRecorder = usageCounterRecorder; this.batchResultQueryService = batchResultQueryService;
+                                      BatchResultQueryService batchResultQueryService,
+                                      HierarchicalResultService hierarchicalResultService) {
+        this.executionService = executionService; this.usageCounterRecorder = usageCounterRecorder;
+        this.batchResultQueryService = batchResultQueryService; this.hierarchicalResultService = hierarchicalResultService;
     }
 
     @PostMapping("/tasks/{id}/run")
@@ -74,6 +78,13 @@ public class InspectionResultController {
     @ResourcePermission(code = "iqc:result:view", name = "查看会话质检明细", type = "iqc", description = "查看批次内会话记录和质检标注")
     public ConversationResultDetail conversationResultDetail(@PathVariable String id, @PathVariable String conversationId) {
         return batchResultQueryService.conversationDetail(id, conversationId);
+    }
+
+    @GetMapping("/tasks/{id}/conversations/{conversationId}/result-hierarchy")
+    @ResourcePermission(code = "iqc:result:view", name = "查看分层质检结果", type = "iqc", description = "按会话、规则和消息证据查询质检结果")
+    public HierarchicalResultService.ResultHierarchy resultHierarchy(@PathVariable String id, @PathVariable String conversationId) {
+        batchResultQueryService.conversationDetail(id, conversationId);
+        return hierarchicalResultService.hierarchy(id, conversationId);
     }
 
     @GetMapping("/conversations/{conversationId}/result-detail")
