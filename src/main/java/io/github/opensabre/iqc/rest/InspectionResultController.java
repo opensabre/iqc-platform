@@ -22,6 +22,7 @@ import org.springframework.http.ResponseEntity;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/iqc")
@@ -82,9 +83,9 @@ public class InspectionResultController {
 
     @GetMapping("/tasks/{id}/conversations/{conversationId}/result-hierarchy")
     @ResourcePermission(code = "iqc:result:view", name = "查看分层质检结果", type = "iqc", description = "按会话、规则和消息证据查询质检结果")
-    public HierarchicalResultService.ResultHierarchy resultHierarchy(@PathVariable String id, @PathVariable String conversationId) {
+    public Optional<HierarchicalResultService.ResultHierarchy> resultHierarchy(@PathVariable String id, @PathVariable String conversationId) {
         batchResultQueryService.conversationDetail(id, conversationId);
-        return hierarchicalResultService.hierarchy(id, conversationId);
+        return Optional.ofNullable(hierarchicalResultService.hierarchy(id, conversationId));
     }
 
     @GetMapping("/conversations/{conversationId}/result-detail")
