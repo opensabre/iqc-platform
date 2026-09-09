@@ -93,9 +93,13 @@ public class InspectionExecutionService {
                 if (!previousItems.isEmpty()) {
                     retryMessageIds = new HashSet<>();
                     for (TaskItem previousItem : previousItems) {
-                        if ("SUCCEEDED".equals(previousItem.getStatus())) successfulMessages++;
-                        else retryMessageIds.add(previousItem.getMessageId());
+                        if (!"SUCCEEDED".equals(previousItem.getStatus())) retryMessageIds.add(previousItem.getMessageId());
                     }
+                    // A retry execution contains only the preceding attempt's unfinished subset.
+                    // Derive cumulative progress from the immutable task total so earlier successful
+                    // attempts are not lost after a second or later retry.
+                    successfulMessages = Math.max(0,
+                            (task.getTotalMessages() == null ? 0 : task.getTotalMessages()) - retryMessageIds.size());
                 }
             }
             int claimed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
