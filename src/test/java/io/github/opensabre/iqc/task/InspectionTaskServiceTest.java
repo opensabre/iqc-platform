@@ -63,6 +63,7 @@ class InspectionTaskServiceTest {
     @Test
     void retryOnlyQueuesFailedMessagesAndPreservesSuccessfulProgress() {
         InspectionTask task = task("PARTIAL_FAILED");
+        task.setTotalMessages(2);
         ConversationMessage successMessage = message("message-1", 1);
         ConversationMessage failedMessage = message("message-2", 2);
         TaskItem successItem = item("message-1", "SUCCEEDED");
@@ -82,6 +83,29 @@ class InspectionTaskServiceTest {
         assertThat(task.getProcessedMessages()).isEqualTo(1);
         assertThat(task.getFailedMessages()).isZero();
         assertThat(queued).isSameAs(task);
+    }
+
+    @Test
+    void repeatedRetryPreservesSuccessesFromAllEarlierAttempts() {
+        InspectionTask task = task("PARTIAL_FAILED");
+        task.setTotalMessages(52);
+        List<TaskItem> failedItems = java.util.stream.IntStream.rangeClosed(1, 9)
+                .mapToObj(index -> item("message-" + index, "FAILED"))
+                .toList();
+        List<ConversationMessage> failedMessages = java.util.stream.IntStream.rangeClosed(1, 9)
+                .mapToObj(index -> message("message-" + index, index))
+                .toList();
+        when(taskMapper.selectById("task-1")).thenReturn(task);
+        when(dataScope.canView(null, null)).thenReturn(true);
+        when(taskItemMapper.selectList(any())).thenReturn(failedItems);
+        when(messageMapper.selectList(any())).thenReturn(failedMessages);
+        when(taskMapper.update(any(), any())).thenReturn(1);
+
+        InspectionTask queued = executionService.queue("task-1");
+
+        verify(taskItemMapper, times(9)).insert(any(TaskItem.class));
+        assertThat(queued.getProcessedMessages()).isEqualTo(43);
+        assertThat(queued.getFailedMessages()).isZero();
     }
 
     @Test
