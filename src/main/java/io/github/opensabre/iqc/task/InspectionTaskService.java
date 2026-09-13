@@ -19,6 +19,7 @@ import io.github.opensabre.iqc.task.model.TaskExecution;
 import io.github.opensabre.iqc.shared.IqcDataScope;
 import io.github.opensabre.iqc.shared.IqcPage;
 import io.github.opensabre.iqc.governance.IqcException;
+import io.github.opensabre.iqc.label.LabelResolutionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,6 +42,50 @@ public class InspectionTaskService {
     private final ObjectMapper objectMapper;
     private final TaskExecutionMapper executionMapper;
     private final IqcDataScope dataScope;
+    private final LabelResolutionService labelResolutionService;
+
+    /** Creates a batch whose business label selection is resolved server-side into the existing rule snapshot. */
+    @Transactional
+    public InspectionTask createBatchWithLabels(String name, List<String> conversationIds, String agentId,
+                                                LabelResolutionService.LabelSelection selection, Integer concurrencyLimit,
+                                                LabelExecutionOptions options) {
+        LabelResolutionService.ResolvedSelection resolved = labelResolutionService.resolve(selection);
+        InspectionTask task = createBatch(name, conversationIds, agentId, null, resolved.ruleIds(), concurrencyLimit);
+        return applyLabelConfiguration(task, resolved, options);
+    }
+
+    /** Creates a scheduled label task while preserving creation-time taxonomy and rule versions. */
+    @Transactional
+    public InspectionTask createScheduledWithLabels(String name, ScheduledFilter filter, LocalDateTime scheduledTime,
+                                                    String agentId, LabelResolutionService.LabelSelection selection,
+                                                    Integer concurrencyLimit, LabelExecutionOptions options) {
+        LabelResolutionService.ResolvedSelection resolved = labelResolutionService.resolve(selection);
+        InspectionTask task = createScheduled(name, filter, scheduledTime, agentId, null, resolved.ruleIds(), concurrencyLimit);
+        return applyLabelConfiguration(task, resolved, options);
+    }
+
+    /** Creates a reproducible sampled task using a version-pinned label selection. */
+    @Transactional
+    public InspectionTask createSampledWithLabels(String name, ScheduledFilter filter, int sampleSize, String seed,
+                                                  String agentId, LabelResolutionService.LabelSelection selection,
+                                                  Integer concurrencyLimit, LabelExecutionOptions options) {
+        LabelResolutionService.ResolvedSelection resolved = labelResolutionService.resolve(selection);
+        InspectionTask task = createSampled(name, filter, sampleSize, seed, agentId, null, resolved.ruleIds(), concurrencyLimit);
+        return applyLabelConfiguration(task, resolved, options);
+    }
+
+    private InspectionTask applyLabelConfiguration(InspectionTask task, LabelResolutionService.ResolvedSelection resolved,
+                                                    LabelExecutionOptions requested) {
+        LabelExecutionOptions options = requested == null ? new LabelExecutionOptions(1, null, false, null) : requested;
+        int runCount = options.runCount() == null ? 1 : options.runCount();
+        if (runCount < 1 || runCount > 5) throw IqcException.invalidArgument("文档运行次数必须在 1 到 5 之间");
+        if (options.confidenceThreshold() != null && (options.confidenceThreshold().compareTo(java.math.BigDecimal.ZERO) < 0 || options.confidenceThreshold().compareTo(java.math.BigDecimal.ONE) > 0)) throw IqcException.invalidArgument("置信度阈值必须在 0 到 1 之间");
+        if (options.autoExpandPrompt() != null && options.autoExpandPrompt().length() > 1000) throw IqcException.invalidArgument("自动补充说明不能超过 1000 字符");
+        task.setLabelScopeSnapshotJson(writeSnapshot(resolved)); task.setRunCount(runCount);
+        task.setConfidenceThreshold(options.confidenceThreshold()); task.setAutoExpandEnabled(Boolean.TRUE.equals(options.autoExpandEnabled()));
+        task.setAutoExpandPrompt(Boolean.TRUE.equals(options.autoExpandEnabled()) ? options.autoExpandPrompt() : null);
+        task.setQueuePriority(0L); task.setPauseRequested(false); task.setCancelRequested(false); taskMapper.updateById(task); return task;
+    }
 
     @Transactional
     public InspectionTask create(String name, String conversationId, String agentId, String ruleSetId, List<String> requestedRuleIds) {
@@ -153,7 +198,8 @@ public class InspectionTaskService {
     public List<InspectionTask> materializeDue(LocalDateTime now) {
         List<InspectionTask> due = taskMapper.selectList(Wrappers.<InspectionTask>lambdaQuery()
                 .eq(InspectionTask::getStatus, "SCHEDULED").le(InspectionTask::getScheduledTime, now)
-                .orderByAsc(InspectionTask::getScheduledTime).last("LIMIT 20"));
+                .orderByDesc(InspectionTask::getQueuePriority)
+                .orderByAsc(InspectionTask::getScheduledTime).orderByAsc(InspectionTask::getCreatedTime).last("LIMIT 20"));
         List<InspectionTask> ready = new ArrayList<>();
         for (InspectionTask candidate : due) {
             int claimed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
@@ -256,8 +302,11 @@ public class InspectionTaskService {
         catch (JsonProcessingException exception) { throw new IllegalStateException("任务配置快照生成失败", exception); }
     }
 
+    public record LabelExecutionOptions(Integer runCount, java.math.BigDecimal confidenceThreshold,
+                                        Boolean autoExpandEnabled, String autoExpandPrompt) { }
+
     public List<InspectionTask> list() {
-        var query = Wrappers.<InspectionTask>lambdaQuery().orderByDesc(InspectionTask::getCreatedTime);
+        var query = Wrappers.<InspectionTask>lambdaQuery().ne(InspectionTask::getStatus, "DELETED").orderByDesc(InspectionTask::getCreatedTime);
         if (!dataScope.canViewAll()) {
             String groupId = dataScope.groupId();
             query.and(q -> q.eq(InspectionTask::getCreatedBy, dataScope.owner())
@@ -273,7 +322,7 @@ public class InspectionTaskService {
     /** Pages visible tasks and applies the task-list business filters. */
     public IqcPage<InspectionTask> page(long current, long size, String keyword, String status, String taskType) {
         Page<InspectionTask> page = new Page<>(safeCurrent(current), safeSize(size));
-        var query = Wrappers.<InspectionTask>lambdaQuery().orderByDesc(InspectionTask::getCreatedTime);
+        var query = Wrappers.<InspectionTask>lambdaQuery().ne(InspectionTask::getStatus, "DELETED").orderByDesc(InspectionTask::getCreatedTime);
         if (!dataScope.canViewAll()) {
             String groupId = dataScope.groupId();
             query.and(q -> q.eq(InspectionTask::getCreatedBy, dataScope.owner())
@@ -335,14 +384,52 @@ public class InspectionTaskService {
         InspectionTask task = taskMapper.selectById(id);
         if (task == null) throw IqcException.notFound("质检任务不存在: " + id);
         if (!dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权取消该质检任务");
+        boolean running = "RUNNING".equals(task.getStatus()) || "PAUSE_REQUESTED".equals(task.getStatus());
+        String targetStatus = running ? "CANCEL_REQUESTED" : "CANCELLED";
         int cancelled = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
-                .set(InspectionTask::getStatus, "CANCELLED")
+                .set(InspectionTask::getStatus, targetStatus)
+                .set(InspectionTask::getCancelRequested, true)
                 .eq(InspectionTask::getId, id)
-                .in(InspectionTask::getStatus, "SCHEDULED", "MATERIALIZING", "CREATED", "QUEUED", "RUNNING"));
-        if (cancelled == 1 && task.getCurrentExecutionId() != null) {
+                .in(InspectionTask::getStatus, "SCHEDULED", "MATERIALIZING", "CREATED", "QUEUED", "RUNNING", "PAUSE_REQUESTED", "PAUSED"));
+        if (cancelled == 1 && !running && task.getCurrentExecutionId() != null) {
             TaskExecution execution = executionMapper.selectById(task.getCurrentExecutionId());
             if (execution != null) { execution.setStatus("CANCELLED"); executionMapper.updateById(execution); }
         }
         return taskMapper.selectById(id);
+    }
+
+    @Transactional
+    public InspectionTask requestPause(String id) {
+        InspectionTask task = get(id);
+        int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
+                .set(InspectionTask::getStatus, "PAUSE_REQUESTED")
+                .set(InspectionTask::getPauseRequested, true)
+                .eq(InspectionTask::getId, id)
+                .eq(InspectionTask::getStatus, "RUNNING"));
+        if (changed != 1) throw IqcException.invalidState("只有执行中的任务可以暂停");
+        return taskMapper.selectById(id);
+    }
+
+    @Transactional
+    public InspectionTask changePriority(String id, long priority) {
+        get(id);
+        int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
+                .set(InspectionTask::getQueuePriority, priority)
+                .eq(InspectionTask::getId, id)
+                .in(InspectionTask::getStatus, "CREATED", "SCHEDULED", "QUEUED", "PAUSED"));
+        if (changed != 1) throw IqcException.invalidState("当前任务状态不允许调整优先级");
+        return taskMapper.selectById(id);
+    }
+
+    @Transactional
+    public void deleteTerminal(String id) {
+        InspectionTask task = get(id);
+        if (!List.of("SUCCEEDED", "PARTIAL_FAILED", "FAILED", "NO_DATA", "CANCELLED").contains(task.getStatus())) {
+            throw IqcException.invalidState("只有终态任务可以删除");
+        }
+        int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
+                .set(InspectionTask::getStatus, "DELETED")
+                .eq(InspectionTask::getId, id).eq(InspectionTask::getStatus, task.getStatus()));
+        if (changed != 1) throw IqcException.invalidState("任务状态已变化，请刷新后重试");
     }
 }

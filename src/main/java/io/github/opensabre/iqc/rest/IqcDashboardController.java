@@ -9,6 +9,7 @@ import io.github.opensabre.iqc.result.model.InspectionResult;
 import io.github.opensabre.iqc.task.dao.InspectionTaskMapper;
 import io.github.opensabre.iqc.task.model.InspectionTask;
 import io.github.opensabre.iqc.shared.IqcDataScope;
+import io.github.opensabre.iqc.label.LabelResultQueryService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -37,9 +38,10 @@ public class IqcDashboardController {
     private final InspectionTaskMapper taskMapper;
     private final InspectionResultMapper resultMapper;
     private final IqcDataScope dataScope;
+    private final LabelResultQueryService labelResults;
 
-    public IqcDashboardController(ConversationMapper conversationMapper, InspectionTaskMapper taskMapper, InspectionResultMapper resultMapper, IqcDataScope dataScope) {
-        this.conversationMapper = conversationMapper; this.taskMapper = taskMapper; this.resultMapper = resultMapper; this.dataScope = dataScope;
+    public IqcDashboardController(ConversationMapper conversationMapper, InspectionTaskMapper taskMapper, InspectionResultMapper resultMapper, IqcDataScope dataScope, LabelResultQueryService labelResults) {
+        this.conversationMapper = conversationMapper; this.taskMapper = taskMapper; this.resultMapper = resultMapper; this.dataScope = dataScope; this.labelResults = labelResults;
     }
 
     @GetMapping
@@ -105,6 +107,9 @@ public class IqcDashboardController {
         response.put("trend", trend);
         response.put("topAgents", topAgents);
         response.put("topOwners", topOwners);
+        java.util.Date labelFrom = from == null ? null : java.util.Date.from(from.atZone(ZoneId.systemDefault()).toInstant());
+        java.util.Date labelTo = to == null ? null : java.util.Date.from(to.plusSeconds(1).atZone(ZoneId.systemDefault()).toInstant());
+        response.put("labelInsights", labelResults.summaryByTasks(visibleTaskIds, labelFrom, labelTo));
         return response;
     }
 

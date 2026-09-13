@@ -12,6 +12,7 @@ import io.github.opensabre.iqc.result.model.InspectionEvidence;
 import io.github.opensabre.iqc.result.model.InspectionResult;
 import io.github.opensabre.iqc.result.model.RuleInspectionResult;
 import io.github.opensabre.iqc.task.model.InspectionTask;
+import io.github.opensabre.iqc.label.LabelResultService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +31,7 @@ public class HierarchicalResultService {
     private final RuleInspectionResultMapper ruleMapper;
     private final InspectionEvidenceMapper evidenceMapper;
     private final ObjectMapper objectMapper;
+    private final LabelResultService labelResultService;
 
     /** Builds one conversation decision from legacy message evaluations without charging a rule more than once. */
     @Transactional
@@ -54,6 +56,7 @@ public class HierarchicalResultService {
         List<RuleInspectionResult> ruleResults = new ArrayList<>();
         for (JsonNode rule : rules) ruleResults.add(materializeRule(conversation, rule, messageResults));
         boolean anyHit = ruleResults.stream().anyMatch(item -> "HIT".equals(item.getResultStatus()));
+        boolean anyReview = ruleResults.stream().anyMatch(item -> "REVIEW_REQUIRED".equals(item.getResultStatus()));
         boolean allHit = !ruleResults.isEmpty() && ruleResults.stream().allMatch(item -> "HIT".equals(item.getResultStatus()));
         boolean hit = "ALL".equals(aggregationMode) ? allHit : anyHit;
         boolean anyError = ruleResults.stream().anyMatch(item -> item.getResultStatus().endsWith("ERROR"));
@@ -61,13 +64,14 @@ public class HierarchicalResultService {
                 .mapToInt(item -> item.getDeduction() == null ? 0 : item.getDeduction()).sum();
         boolean veto = rules.stream().anyMatch(rule -> rule.path("veto").asBoolean(false)
                 && ruleResults.stream().anyMatch(item -> rule.path("id").asText().equals(item.getRuleId()) && "HIT".equals(item.getResultStatus())));
-        conversation.setResultStatus(anyError ? (hit ? "PARTIAL_ERROR" : "ERROR") : hit ? "HIT" : "NOT_HIT");
+        conversation.setResultStatus(anyReview ? "REVIEW_REQUIRED" : anyError ? (hit ? "PARTIAL_ERROR" : "ERROR") : hit ? "HIT" : "NOT_HIT");
         conversation.setDeduction(hit ? Math.min(100, deduction) : 0);
         conversation.setScore(anyError ? 0 : hit ? (veto ? 0 : Math.max(0, 100 - conversation.getDeduction())) : 100);
         conversation.setRiskLevel(ruleResults.stream().filter(item -> "HIT".equals(item.getResultStatus()))
                 .map(RuleInspectionResult::getRiskLevel).max(Comparator.comparingInt(this::riskOrder)).orElse("LOW"));
         conversation.setReason(hit ? "会话命中 " + ruleResults.stream().filter(item -> "HIT".equals(item.getResultStatus())).count() + " 条规则" : "会话未命中规则");
         conversationMapper.updateById(conversation);
+        labelResultService.materialize(conversation, task.getLabelScopeSnapshotJson(), ruleResults);
         return conversation;
     }
 
@@ -76,20 +80,44 @@ public class HierarchicalResultService {
         String ruleId = rule.path("id").asText();
         List<ResultSlice> slices = slices(ruleId, messageResults);
         boolean hit = slices.stream().anyMatch(slice -> "HIT".equals(slice.status()));
+        boolean review = slices.stream().anyMatch(slice -> "REVIEW_REQUIRED".equals(slice.status()));
         boolean error = slices.stream().anyMatch(slice -> slice.status().endsWith("ERROR"));
         RuleInspectionResult result = new RuleInspectionResult();
         result.setConversationResultId(conversation.getId()); result.setRuleId(ruleId);
         result.setRuleVersionNo(rule.path("versionNo").isNumber() ? rule.path("versionNo").asInt() : null);
         String type = rule.path("ruleType").asText("UNKNOWN"); result.setRuleType(type);
         result.setEvaluationScope("DLS".equalsIgnoreCase(type) ? "CONVERSATION" : "MESSAGE");
-        result.setResultStatus(hit ? "HIT" : error ? "ERROR" : "NOT_HIT");
+        result.setResultStatus(review ? "REVIEW_REQUIRED" : hit ? "HIT" : error ? "ERROR" : "NOT_HIT");
         int deduction = hit ? Math.max(0, Math.min(100, rule.path("deduction").asInt(10))) : 0;
-        result.setDeduction(deduction); result.setScore(error && !hit ? 0 : hit ? (rule.path("veto").asBoolean(false) ? 0 : 100 - deduction) : 100);
-        result.setRiskLevel(hit ? rule.path("riskLevel").asText("MEDIUM") : error ? "HIGH" : "LOW");
-        result.setReason(hit ? "规则在当前会话命中" : error ? "规则执行异常" : "规则在当前会话未命中");
+        result.setDeduction(deduction); result.setScore(error && !hit ? 0 : hit ? (rule.path("veto").asBoolean(false) ? 0 : 100 - deduction) : review ? 0 : 100);
+        result.setRiskLevel(hit ? rule.path("riskLevel").asText("MEDIUM") : error || review ? "HIGH" : "LOW");
+        result.setReason(review ? "多轮判断平票，需要人工复核" : hit ? "规则在当前会话命中" : error ? "规则执行异常" : "规则在当前会话未命中");
+        result.setConfidence(confidence(slices));
+        result.setFindingJson(findingJson(slices));
         ruleMapper.insert(result);
         slices.stream().filter(slice -> "HIT".equals(slice.status())).forEach(slice -> insertEvidence(result, slice));
         return result;
+    }
+
+    private java.math.BigDecimal confidence(List<ResultSlice> slices) {
+        return slices.stream().map(ResultSlice::result).map(InspectionResult::getFindingJson)
+                .filter(java.util.Objects::nonNull).map(value -> {
+                    try { return findConfidence(objectMapper.readTree(value)); }
+                    catch (Exception ignored) { return null; }
+                }).filter(java.util.Objects::nonNull).min(java.math.BigDecimal::compareTo).orElse(null);
+    }
+
+    private java.math.BigDecimal findConfidence(JsonNode node) {
+        if (node == null) return null;
+        if (node.isObject() && node.has("confidence") && node.path("confidence").isNumber()) return node.path("confidence").decimalValue();
+        if (node.isContainerNode()) for (JsonNode child : node) { var value = findConfidence(child); if (value != null) return value; }
+        return null;
+    }
+
+    private String findingJson(List<ResultSlice> slices) {
+        return slices.stream().filter(slice -> "HIT".equals(slice.status()))
+                .map(ResultSlice::result).map(InspectionResult::getFindingJson)
+                .filter(value -> value != null && !value.isBlank()).findFirst().orElse(null);
     }
 
     private List<ResultSlice> slices(String ruleId, List<InspectionResult> results) {

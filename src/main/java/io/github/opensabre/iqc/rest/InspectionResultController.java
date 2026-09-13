@@ -13,6 +13,8 @@ import io.github.opensabre.iqc.result.BatchResultQueryService.BatchResultSummary
 import io.github.opensabre.iqc.result.BatchResultQueryService.ConversationResultDetail;
 import io.github.opensabre.iqc.result.HierarchicalResultService;
 import io.github.opensabre.iqc.result.model.InspectionResult;
+import io.github.opensabre.iqc.label.LabelResultQueryService;
+import io.github.opensabre.iqc.label.LabelInsightExportService;
 import io.github.opensabre.iqc.task.model.InspectionTask;
 import io.github.opensabre.iqc.shared.IqcPage;
 import org.springframework.web.bind.annotation.*;
@@ -31,12 +33,18 @@ public class InspectionResultController {
     private final UsageCounterRecorder usageCounterRecorder;
     private final BatchResultQueryService batchResultQueryService;
     private final HierarchicalResultService hierarchicalResultService;
+    private final LabelResultQueryService labelResultQueryService;
+    private final LabelInsightExportService labelInsightExportService;
 
     public InspectionResultController(InspectionExecutionService executionService, UsageCounterRecorder usageCounterRecorder,
                                       BatchResultQueryService batchResultQueryService,
-                                      HierarchicalResultService hierarchicalResultService) {
+                                      HierarchicalResultService hierarchicalResultService,
+                                      LabelResultQueryService labelResultQueryService,
+                                      LabelInsightExportService labelInsightExportService) {
         this.executionService = executionService; this.usageCounterRecorder = usageCounterRecorder;
         this.batchResultQueryService = batchResultQueryService; this.hierarchicalResultService = hierarchicalResultService;
+        this.labelResultQueryService = labelResultQueryService;
+        this.labelInsightExportService = labelInsightExportService;
     }
 
     @PostMapping("/tasks/{id}/run")
@@ -47,6 +55,15 @@ public class InspectionResultController {
         InspectionTask task = executionService.queue(id);
         executionService.executeAsync(id, task.getCurrentExecutionId());
         usageCounterRecorder.record(new UsageRecord("inspection-task:run:" + id, null, "iqc-platform", "INSPECTION_TASK", id, "RUN", UsageOutcome.SUCCESS));
+        return task;
+    }
+
+    @PostMapping("/tasks/{id}/resume")
+    @ResourcePermission(code = "iqc:task:execute", name = "恢复质检任务", type = "iqc", description = "恢复已暂停的质检任务")
+    @Audit(operationType = OperationType.UPDATE, description = "恢复 IQC 质检任务", module = "IQC_TASK")
+    public InspectionTask resume(@PathVariable String id) {
+        InspectionTask task = executionService.resume(id);
+        executionService.executeAsync(id, task.getCurrentExecutionId());
         return task;
     }
 
@@ -74,6 +91,27 @@ public class InspectionResultController {
     @GetMapping("/tasks/{id}/result-summary")
     @ResourcePermission(code = "iqc:result:view", name = "查看批次质检结果", type = "iqc", description = "查看质检批次及会话汇总结果")
     public BatchResultSummary batchSummary(@PathVariable String id) { return batchResultQueryService.summary(id); }
+
+    @GetMapping("/tasks/{id}/label-results")
+    @ResourcePermission(code = "iqc:result:view", name = "查看标签洞察结果", type = "iqc", description = "查看任务生成的业务标签命中结果")
+    public List<LabelResultQueryService.LabelResultView> labelResults(@PathVariable String id) {
+        return labelResultQueryService.listByTask(id);
+    }
+
+    @GetMapping("/tasks/{id}/label-insights")
+    @ResourcePermission(code = "iqc:result:view", name = "查看标签洞察统计", type = "iqc", description = "查看标签及标签组分布和检出率")
+    public LabelResultQueryService.LabelInsightSummary labelInsights(@PathVariable String id) {
+        return labelResultQueryService.summary(id);
+    }
+
+    @GetMapping(value = "/tasks/{id}/label-results/export", produces = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    @ResourcePermission(code = "iqc:result:export", name = "导出标签洞察结果", type = "iqc", description = "导出任务标签结果 XLSX")
+    @Audit(operationType = OperationType.EXPORT, description = "导出 IQC 标签洞察结果", module = "IQC_RESULT")
+    public ResponseEntity<byte[]> exportLabelResults(@PathVariable String id) {
+        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=iqc-label-results.xlsx")
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(labelInsightExportService.exportTask(id));
+    }
 
     @GetMapping("/tasks/{id}/conversations/{conversationId}/result-detail")
     @ResourcePermission(code = "iqc:result:view", name = "查看会话质检明细", type = "iqc", description = "查看批次内会话记录和质检标注")

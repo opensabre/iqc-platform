@@ -23,6 +23,12 @@ class AgentConfigurationModeTest {
                 .isInstanceOf(IqcException.class).hasMessageContaining("提示词");
     }
 
+    @Test
+    void llmThenRuleIsAValidModelBackedMode() {
+        assertThatCode(() -> config("LLM_THEN_RULE", "先提取候选再按规则复核", "model-1").validated())
+                .doesNotThrowAnyException();
+    }
+
     private AgentConfiguration config(String mode, String prompt, String modelId) {
         return new AgentConfiguration("2.0", mode, prompt, null, null, null, null,
                 modelId, List.of(), List.of(), List.of(), null,

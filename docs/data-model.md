@@ -1,6 +1,12 @@
 # 数据模型与 ER 图
 
-本文档对应当前完整建库脚本 [`iqc-platform-ddl.sql`](../src/main/resources/db/iqc-platform-ddl.sql)。当前采用应用层逻辑外键，DDL 未声明物理外键。
+本文档对应当前完整建库脚本 [`iqc-platform-ddl.sql`](../src/main/resources/db/iqc-platform-ddl.sql)。业务聚合之间主要采用应用层逻辑外键；规范化质检结果内部使用物理外键保证会话结果、规则结果和证据的一致性。
+
+## 标签洞察领域
+
+标签采用固定三级结构：`iqc_label_category`（分类）→ `iqc_label_group`（标签组）→ `iqc_label`（业务标签）。标签本身不保存检测表达式，而是通过 `iqc_label_rule_binding` 绑定既有已发布规则；结构化值由 `iqc_label_value_definition` 定义。`iqc_label_collection` 与成员表用于复用业务选择范围，任务创建时会展开并固化为标签、值、规则及版本快照。
+
+检测仍以 `iqc_inspection_conversation_result`、`iqc_inspection_rule_result` 和 `iqc_inspection_evidence` 为规范结果。`iqc_inspection_label_result` 只是从规范规则结果投影出的业务洞察，保留标签版本、来源规则结果、置信度和值。AI 自动扩展写入隔离的 `iqc_label_candidate`；人工批准只创建标签草稿，不能直接进入发布树。
 
 ```mermaid
 erDiagram
