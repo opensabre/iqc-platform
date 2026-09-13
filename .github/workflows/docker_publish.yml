@@ -46,6 +46,7 @@ jobs:
         uses: actions/checkout@v7.0.1
         with:
           repository: opensabre/opensabre-framework
+          ref: v1.1.4
           path: opensabre-framework
       - name: Set up JDK
         uses: actions/setup-java@v5.6.0
@@ -53,7 +54,7 @@ jobs:
           java-version: "25"
           distribution: temurin
           cache: maven
-      - name: Install OpenSabre Framework Snapshot
+      - name: Install OpenSabre Framework 1.1.4
         run: mvn --batch-mode --no-transfer-progress -f opensabre-framework/pom.xml -DskipTests install
       - name: Run tests
         run: mvn --batch-mode --no-transfer-progress verify
@@ -82,6 +83,7 @@ jobs:
         uses: actions/checkout@v7.0.1
         with:
           repository: opensabre/opensabre-framework
+          ref: v1.1.4
           path: opensabre-framework
       - name: Set up JDK
         uses: actions/setup-java@v5.6.0
@@ -89,7 +91,7 @@ jobs:
           java-version: "25"
           distribution: temurin
           cache: maven
-      - name: Install OpenSabre Framework Snapshot
+      - name: Install OpenSabre Framework 1.1.4
         run: mvn --batch-mode --no-transfer-progress -f opensabre-framework/pom.xml -DskipTests install
       - name: Resolve image tags
         id: image
