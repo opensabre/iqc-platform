@@ -35,7 +35,7 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
     /** Validates cross-field references and bounds before a configuration enters version history. */
     public AgentConfiguration validated() {
         if (!("1.0".equals(schemaVersion) || CURRENT_SCHEMA.equals(schemaVersion))) throw IqcException.invalidArgument("不支持的 Agent 配置版本: " + schemaVersion);
-        if (mode != null && !Set.of("RULE_ONLY", "RULE_THEN_LLM", "AGENT_LLM").contains(mode.trim().toUpperCase()))
+        if (mode != null && !Set.of("RULE_ONLY", "RULE_THEN_LLM", "LLM_THEN_RULE", "AGENT_LLM").contains(mode.trim().toUpperCase()))
             throw IqcException.invalidArgument("不支持的质检模式: " + mode);
         boolean ruleOnly = "RULE_ONLY".equalsIgnoreCase(mode);
         if (!ruleOnly && (systemPrompt == null || systemPrompt.isBlank())) throw IqcException.invalidArgument("默认提示词不能为空");

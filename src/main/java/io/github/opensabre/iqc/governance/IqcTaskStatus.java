@@ -10,11 +10,15 @@ public enum IqcTaskStatus implements DictionaryEnum {
     MATERIALIZING("MATERIALIZING", "正在选取会话", "processing"),
     QUEUED("QUEUED", "排队中", "processing"),
     RUNNING("RUNNING", "执行中", "processing"),
+    PAUSE_REQUESTED("PAUSE_REQUESTED", "暂停中", "warning"),
+    PAUSED("PAUSED", "已暂停", "warning"),
+    CANCEL_REQUESTED("CANCEL_REQUESTED", "取消中", "warning"),
     SUCCEEDED("SUCCEEDED", "已完成", "success"),
     NO_DATA("NO_DATA", "无匹配数据", "default"),
     PARTIAL_FAILED("PARTIAL_FAILED", "部分失败", "warning"),
     FAILED("FAILED", "失败", "error"),
-    CANCELLED("CANCELLED", "已取消", "default");
+    CANCELLED("CANCELLED", "已取消", "default"),
+    DELETED("DELETED", "已删除", "default");
 
     private final String value;
     private final String label;

@@ -4,6 +4,8 @@ import io.github.opensabre.governance.usage.UsageCounterRecorder;
 import io.github.opensabre.iqc.result.BatchResultQueryService;
 import io.github.opensabre.iqc.result.HierarchicalResultService;
 import io.github.opensabre.iqc.result.InspectionExecutionService;
+import io.github.opensabre.iqc.label.LabelResultQueryService;
+import io.github.opensabre.iqc.label.LabelInsightExportService;
 import io.github.opensabre.webmvc.rest.RestResponseBodyAdvice;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
@@ -23,7 +25,8 @@ class InspectionResultControllerTest {
     void returnsJsonNullWhenHierarchyHasNotBeenGenerated() throws Exception {
         InspectionResultController controller = new InspectionResultController(
                 mock(InspectionExecutionService.class), mock(UsageCounterRecorder.class),
-                mock(BatchResultQueryService.class), mock(HierarchicalResultService.class));
+                mock(BatchResultQueryService.class), mock(HierarchicalResultService.class),
+                mock(LabelResultQueryService.class), mock(LabelInsightExportService.class));
         MockMvc mvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new RestResponseBodyAdvice())
                 .build();

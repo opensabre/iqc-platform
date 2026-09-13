@@ -20,4 +20,7 @@ public class RuleInspectionResult extends BasePo {
     private String riskLevel;
     private Integer deduction;
     private String reason;
+    private java.math.BigDecimal confidence;
+    /** Structured detector output retained for typed label-value projection. */
+    private String findingJson;
 }

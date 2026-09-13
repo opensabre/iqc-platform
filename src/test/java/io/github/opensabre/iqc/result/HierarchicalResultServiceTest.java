@@ -12,6 +12,7 @@ import io.github.opensabre.iqc.result.model.InspectionEvidence;
 import io.github.opensabre.iqc.result.model.InspectionResult;
 import io.github.opensabre.iqc.result.model.RuleInspectionResult;
 import io.github.opensabre.iqc.task.model.InspectionTask;
+import io.github.opensabre.iqc.label.LabelResultService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,7 +31,8 @@ class HierarchicalResultServiceTest {
     private final RuleInspectionResultMapper rules = mock(RuleInspectionResultMapper.class);
     private final InspectionEvidenceMapper evidence = mock(InspectionEvidenceMapper.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HierarchicalResultService service = new HierarchicalResultService(conversations, rules, evidence, objectMapper);
+    private final LabelResultService labelResults = mock(LabelResultService.class);
+    private final HierarchicalResultService service = new HierarchicalResultService(conversations, rules, evidence, objectMapper, labelResults);
 
     @BeforeEach
     void initializeMybatisMetadata() {

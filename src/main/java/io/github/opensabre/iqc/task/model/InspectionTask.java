@@ -21,6 +21,14 @@ public class InspectionTask extends BasePo {
     private String ruleIdsJson;
     private String agentSnapshotJson;
     private String ruleSnapshotJson;
+    private String labelScopeSnapshotJson;
+    private Integer runCount;
+    private java.math.BigDecimal confidenceThreshold;
+    private Boolean autoExpandEnabled;
+    private String autoExpandPrompt;
+    private Long queuePriority;
+    private Boolean pauseRequested;
+    private Boolean cancelRequested;
     private String status;
     private Integer totalMessages;
     private Integer processedMessages;
