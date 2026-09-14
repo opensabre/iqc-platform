@@ -1,10 +1,13 @@
 package io.github.opensabre.iqc.security;
 
+import io.github.opensabre.security.actuator.ActuatorMonitoringAccess;
+import io.github.opensabre.security.webmvc.InternalTokenAuthenticationFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 
 import java.util.stream.Stream;
@@ -21,14 +24,19 @@ public class IqcResourceServerConfiguration {
     @Bean
     SecurityFilterChain iqcResourceServerFilterChain(
             HttpSecurity http,
-            JwtAuthenticationConverter jwtAuthenticationConverter) throws Exception {
+            JwtAuthenticationConverter jwtAuthenticationConverter,
+            InternalTokenAuthenticationFilter internalTokenAuthenticationFilter) throws Exception {
         http.csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/v3/api-docs", "/v3/api-docs/**")
                         .permitAll()
+                        .requestMatchers(ActuatorMonitoringAccess.metricPathArray())
+                        .hasAuthority(ActuatorMonitoringAccess.AUTHORITY)
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(resourceServer -> resourceServer
-                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)));
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)))
+                .addFilterBefore(internalTokenAuthenticationFilter,
+                        BearerTokenAuthenticationFilter.class);
         return http.build();
     }
 

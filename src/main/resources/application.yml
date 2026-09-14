@@ -12,6 +12,10 @@ spring:
       discovery:
         server-addr: ${REGISTER_HOST:localhost}:${REGISTER_PORT:8848}
         ip: ${NACOS_DISCOVERY_IP:}
+        metadata:
+          management.host: ${MANAGEMENT_SERVER_HOST:${spring.application.name}}
+          management.port: ${MANAGEMENT_SERVER_PORT:18080}
+          management.scheme: ${MANAGEMENT_SERVER_SCHEME:http}
       config:
         server-addr: ${REGISTER_HOST:localhost}:${REGISTER_PORT:8848}
         file-extension: yml
@@ -93,7 +97,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus,opensabreGovernanceRegistration
+        include: health,info,metrics,prometheus,internalTokenKeyStatus,opensabreGovernanceRegistration
   endpoint:
     health:
       probes:
