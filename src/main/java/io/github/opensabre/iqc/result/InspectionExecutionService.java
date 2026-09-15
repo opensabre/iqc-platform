@@ -23,6 +23,7 @@ import io.github.opensabre.iqc.shared.IqcPage;
 import io.github.opensabre.iqc.governance.IqcException;
 import io.github.opensabre.iqc.result.llm.LlmQualityProvider;
 import io.github.opensabre.iqc.result.llm.LlmTextSanitizer;
+import io.github.opensabre.iqc.label.LabelCandidateService;
 import io.github.opensabre.iqc.rule.RuleMatcher;
 import io.github.opensabre.iqc.rule.dls.DlsEngine;
 import io.github.opensabre.governance.usage.UsageCounterRecorder;
@@ -44,6 +45,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.Collections;
+import java.math.BigDecimal;
 
 @Service
 @RequiredArgsConstructor
@@ -60,6 +62,7 @@ public class InspectionExecutionService {
     private final LlmQualityProvider llmQualityProvider;
     private final UsageCounterRecorder usageCounterRecorder;
     private final HierarchicalResultService hierarchicalResultService;
+    private final LabelCandidateService labelCandidateService;
     private final Map<String, DlsEngine.Compiled> dlsCompileCache = Collections.synchronizedMap(
             new LinkedHashMap<>(32, 0.75f, true) {
                 @Override protected boolean removeEldestEntry(Map.Entry<String, DlsEngine.Compiled> eldest) {
@@ -168,13 +171,23 @@ public class InspectionExecutionService {
 
         TaskExecution execution = executionMapper.selectById(executionId);
         if (execution == null) throw IqcException.notFound("执行实例不存在: " + executionId);
-        if ("CANCELLED".equals(task.getStatus())) { execution.setStatus("CANCELLED"); executionMapper.updateById(execution); return task; }
-        task.setStatus("RUNNING"); taskMapper.updateById(task);
+        if (List.of("CANCELLED", "CANCEL_REQUESTED").contains(task.getStatus())) { execution.setStatus("CANCELLED"); executionMapper.updateById(execution); return task; }
+        int claimed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
+                .set(InspectionTask::getStatus, "RUNNING")
+                .eq(InspectionTask::getId, taskId)
+                .eq(InspectionTask::getCurrentExecutionId, executionId)
+                .eq(InspectionTask::getStatus, "QUEUED"));
+        if (claimed != 1) {
+            InspectionTask current = taskMapper.selectById(taskId);
+            if (current != null && List.of("RUNNING", "SUCCEEDED").contains(current.getStatus())) return current;
+            throw IqcException.invalidState("任务执行实例未能取得运行租约");
+        }
+        task.setStatus("RUNNING");
         execution.setStatus("RUNNING"); executionMapper.updateById(execution);
         JsonNode ruleSnapshot = readSnapshot(task.getRuleSnapshotJson());
         List<TaskItem> items = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
                 .eq(TaskItem::getExecutionId, executionId).orderByAsc(TaskItem::getSequenceNo));
-        int previouslyProcessed = task.getProcessedMessages() == null ? 0 : task.getProcessedMessages();
+        int previouslyProcessed = Math.max(0, (task.getTotalMessages() == null ? items.size() : task.getTotalMessages()) - items.size());
         Map<String, List<TaskItem>> byConversation = items.stream().collect(java.util.stream.Collectors.groupingBy(
                 item -> item.getConversationId() == null ? "legacy" : item.getConversationId(), LinkedHashMap::new, java.util.stream.Collectors.toList()));
         int concurrency = Math.min(Math.max(1, task.getConcurrencyLimit() == null ? 1 : task.getConcurrencyLimit()), Math.max(1, byConversation.size()));
@@ -192,15 +205,52 @@ public class InspectionExecutionService {
             }
         }
         task = taskMapper.selectById(taskId);
-        if (task == null || "CANCELLED".equals(task.getStatus())) {
+        if (task == null || List.of("CANCELLED", "CANCEL_REQUESTED").contains(task.getStatus())) {
+            if (task != null && "CANCEL_REQUESTED".equals(task.getStatus())) {
+                task.setStatus("CANCELLED");
+                taskMapper.updateById(task);
+            }
             execution.setStatus("CANCELLED"); executionMapper.updateById(execution); return task;
         }
         int processed = previouslyProcessed + (int) items.stream().filter(item -> List.of("SUCCEEDED", "FAILED", "CANCELLED").contains(item.getStatus())).count();
         int failed = (int) items.stream().filter(item -> "FAILED".equals(item.getStatus())).count();
         task.setProcessedMessages(processed); task.setFailedMessages(failed);
+        if ("PAUSE_REQUESTED".equals(task.getStatus())) {
+            task.setStatus("PAUSED"); taskMapper.updateById(task);
+            execution.setProcessedMessages(processed); execution.setFailedMessages(failed); execution.setStatus("PAUSED"); executionMapper.updateById(execution);
+            return task;
+        }
         task.setStatus(failed > 0 ? "PARTIAL_FAILED" : "SUCCEEDED"); taskMapper.updateById(task);
         execution.setProcessedMessages(processed); execution.setFailedMessages(failed); execution.setStatus(failed > 0 ? "PARTIAL_FAILED" : "SUCCEEDED"); executionMapper.updateById(execution);
         return task;
+    }
+
+    @Transactional
+    public InspectionTask resume(String taskId) {
+        InspectionTask task = taskMapper.selectById(taskId);
+        if (task == null) throw IqcException.notFound("质检任务不存在: " + taskId);
+        if (!dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权恢复该质检任务");
+        if (task.getCurrentExecutionId() == null) throw IqcException.invalidState("任务没有可恢复的执行实例");
+        List<TaskItem> previousItems = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery().eq(TaskItem::getExecutionId, task.getCurrentExecutionId()));
+        List<TaskItem> unfinished = previousItems.stream().filter(item -> !List.of("SUCCEEDED", "CANCELLED").contains(item.getStatus())).toList();
+        int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
+                .set(InspectionTask::getStatus, "QUEUED")
+                .set(InspectionTask::getPauseRequested, false)
+                .eq(InspectionTask::getId, taskId)
+                .eq(InspectionTask::getStatus, "PAUSED"));
+        if (changed != 1) throw IqcException.invalidState("只有已暂停任务可以恢复");
+        int attempt = task.getAttemptCount() == null ? 1 : task.getAttemptCount() + 1;
+        TaskExecution execution = new TaskExecution(); execution.setTaskId(taskId); execution.setAttemptNo(attempt); execution.setStatus("QUEUED");
+        execution.setProcessedMessages(Math.max(0, (task.getTotalMessages() == null ? previousItems.size() : task.getTotalMessages()) - unfinished.size())); execution.setFailedMessages(0);
+        executionMapper.insert(execution);
+        int sequence = 0;
+        for (TaskItem previous : unfinished) {
+            TaskItem item = new TaskItem(); item.setTaskId(taskId); item.setExecutionId(execution.getId()); item.setMessageId(previous.getMessageId());
+            item.setConversationId(previous.getConversationId()); item.setSequenceNo(++sequence); item.setStatus("PENDING"); item.setAttemptCount(previous.getAttemptCount() == null ? 0 : previous.getAttemptCount());
+            taskItemMapper.insert(item);
+        }
+        task = taskMapper.selectById(taskId); task.setCurrentExecutionId(execution.getId()); task.setAttemptCount(attempt);
+        task.setProcessedMessages(execution.getProcessedMessages()); task.setFailedMessages(0); taskMapper.updateById(task); return task;
     }
 
     private void processConversation(InspectionTask task, String executionId, JsonNode ruleSnapshot, List<TaskItem> items) {
@@ -213,9 +263,10 @@ public class InspectionExecutionService {
         List<InspectionResult> conversationResults = new ArrayList<>();
         for (TaskItem item : items) {
             InspectionTask current = taskMapper.selectById(task.getId());
-            if (current == null || "CANCELLED".equals(current.getStatus())) {
+            if (current == null || List.of("CANCELLED", "CANCEL_REQUESTED").contains(current.getStatus())) {
                 item.setStatus("CANCELLED"); taskItemMapper.updateById(item); continue;
             }
+            if (List.of("PAUSE_REQUESTED", "PAUSED").contains(current.getStatus())) break;
             if ("SUCCEEDED".equals(item.getStatus()) || "CANCELLED".equals(item.getStatus())) continue;
             item.setStatus("RUNNING"); item.setAttemptCount((item.getAttemptCount() == null ? 0 : item.getAttemptCount()) + 1); taskItemMapper.updateById(item);
             String usageRecordId = "inspection-message:" + task.getId() + ":" + item.getMessageId();
@@ -223,8 +274,9 @@ public class InspectionExecutionService {
             try {
                 ConversationMessage message = conversationMessagesById.get(item.getMessageId());
                 if (message == null) throw IqcException.notFound("会话消息不存在: " + item.getMessageId());
-                InspectionResult result = evaluate(task, message, ruleSnapshot, conversationMessages);
+                InspectionResult result = evaluateWithRuns(task, message, ruleSnapshot, conversationMessages);
                 result.setExecutionId(executionId); resultMapper.insert(result); item.setResultId(result.getId());
+                maybeProposeCandidate(task, message, result);
                 conversationResults.add(result);
                 if (result.getResultStatus() != null && result.getResultStatus().endsWith("ERROR")) {
                     item.setStatus("FAILED"); item.setErrorMessage(result.getReason());
@@ -239,8 +291,18 @@ public class InspectionExecutionService {
             }
             taskItemMapper.updateById(item);
         }
-        if (!conversationMessages.isEmpty() && !conversationResults.isEmpty())
-            hierarchicalResultService.materialize(task, executionId, ruleSnapshot, conversationMessages, conversationResults);
+        if (!conversationMessages.isEmpty() && !conversationResults.isEmpty()) {
+            String conversationId = conversationMessages.get(0).getConversationId();
+            List<ConversationMessage> fullMessages = messageMapper.selectList(Wrappers.<ConversationMessage>lambdaQuery()
+                    .eq(ConversationMessage::getConversationId, conversationId).orderByAsc(ConversationMessage::getSequenceNo));
+            if (fullMessages == null || fullMessages.isEmpty()) fullMessages = conversationMessages;
+            List<InspectionResult> previousResults = resultMapper.selectList(Wrappers.<InspectionResult>lambdaQuery()
+                    .eq(InspectionResult::getTaskId, task.getId()).eq(InspectionResult::getConversationId, conversationId).orderByAsc(InspectionResult::getCreatedTime));
+            Map<String, InspectionResult> latestByMessage = new LinkedHashMap<>();
+            if (previousResults != null) previousResults.forEach(value -> latestByMessage.put(value.getMessageId(), value));
+            conversationResults.forEach(value -> latestByMessage.put(value.getMessageId(), value));
+            hierarchicalResultService.materialize(task, executionId, ruleSnapshot, fullMessages, new ArrayList<>(latestByMessage.values()));
+        }
     }
 
     public List<InspectionResult> list(String taskId) {
@@ -377,6 +439,115 @@ public class InspectionExecutionService {
         return evaluate(task, message, ruleSnapshot, List.of(message));
     }
 
+    private InspectionResult evaluateWithRuns(InspectionTask task, ConversationMessage message, JsonNode ruleSnapshot,
+                                              List<ConversationMessage> conversationMessages) {
+        int runs = Math.min(5, Math.max(1, task.getRunCount() == null ? 1 : task.getRunCount()));
+        List<InspectionResult> decisions = new ArrayList<>(runs);
+        for (int index = 0; index < runs; index++) decisions.add(evaluate(task, message, ruleSnapshot, conversationMessages));
+        long hitCount = decisions.stream().filter(value -> "HIT".equals(value.getResultStatus())).count();
+        double confidence = Math.max(hitCount, runs - hitCount) / (double) runs;
+        boolean hit = hitCount * 2 >= runs;
+        InspectionResult selected = decisions.stream().filter(value -> hit == "HIT".equals(value.getResultStatus()))
+                .findFirst().orElse(decisions.get(0));
+        ObjectNode finding;
+        try {
+            JsonNode existing = objectMapper.readTree(selected.getFindingJson() == null ? "{}" : selected.getFindingJson());
+            finding = existing != null && existing.isObject() ? (ObjectNode) existing.deepCopy() : objectMapper.createObjectNode();
+            if (existing != null && existing.isArray()) finding.set("findings", existing);
+        } catch (Exception ignored) { finding = objectMapper.createObjectNode(); }
+        ArrayNode runDetails = objectMapper.createArrayNode();
+        for (int index = 0; index < decisions.size(); index++) {
+            InspectionResult decision = decisions.get(index);
+            ObjectNode detail = objectMapper.createObjectNode().put("runIndex", index + 1)
+                    .put("status", decision.getResultStatus()).put("reason", decision.getReason());
+            if (decision.getFindingJson() != null && !decision.getFindingJson().isBlank()) {
+                try { detail.set("finding", objectMapper.readTree(decision.getFindingJson())); }
+                catch (Exception exception) { detail.put("findingRaw", decision.getFindingJson()); }
+            }
+            runDetails.add(detail);
+        }
+        finding.set("runs", runDetails);
+        finding.put("runCount", runs); finding.put("hitCount", hitCount); finding.put("confidence", confidence);
+        selected.setFindingJson(finding.toString());
+        if (runs % 2 == 0 && hitCount * 2 == runs) {
+            selected.setResultStatus("REVIEW_REQUIRED"); selected.setReason("多轮判断出现平票，需要人工复核");
+            updateBreakdownStatus(selected, "REVIEW_REQUIRED");
+        } else if (task.getConfidenceThreshold() != null && confidence < task.getConfidenceThreshold().doubleValue()) {
+            selected.setResultStatus("NOT_HIT"); selected.setReason("多轮判断置信度低于任务阈值");
+            updateBreakdownStatus(selected, "NOT_HIT");
+        }
+        return selected;
+    }
+
+    private void updateBreakdownStatus(InspectionResult result, String status) {
+        try {
+            JsonNode breakdown = objectMapper.readTree(result.getRuleBreakdownJson());
+            if (breakdown.isArray()) breakdown.forEach(item -> { if (item.isObject()) ((ObjectNode) item).put("status", status); });
+            result.setRuleBreakdownJson(breakdown.toString());
+        } catch (Exception ignored) { /* The aggregate status remains authoritative for legacy malformed detail. */ }
+    }
+
+    private void maybeProposeCandidate(InspectionTask task, ConversationMessage message, InspectionResult result) {
+        if (!Boolean.TRUE.equals(task.getAutoExpandEnabled()) || !"LLM_THEN_RULE".equals(qualityMode(readSnapshot(task.getAgentSnapshotJson())))
+                || !"NOT_HIT".equals(result.getResultStatus())) return;
+        try {
+            JsonNode snapshot = readSnapshot(task.getLabelScopeSnapshotJson());
+            String reason = result.getReason() == null || result.getReason().isBlank() ? "模型发现的新业务语义" : result.getReason();
+            JsonNode finding = readSnapshot(result.getFindingJson());
+            JsonNode proposal = firstCandidate(finding);
+            JsonNode targetLabel = autoExpandTarget(snapshot, proposal);
+            if (targetLabel == null) { recordCandidateDiagnostic(result, "没有唯一且允许自动扩展的目标标签群组"); return; }
+            String proposedName = proposal == null ? null : proposal.path("name").asText(null);
+            String name = proposedName == null || proposedName.isBlank() ? (reason.length() > 50 ? reason.substring(0, 50) : reason) : proposedName.substring(0, Math.min(50, proposedName.length()));
+            String proposedCode = proposal == null ? null : proposal.path("code").asText(null);
+            String code = proposedCode == null || proposedCode.isBlank() ? "ai_" + Integer.toUnsignedString((message.getConversationId() + ":" + name).hashCode(), 36) : proposedCode;
+            BigDecimal confidence = BigDecimal.ZERO;
+            if (finding != null && finding.has("confidence")) confidence = finding.path("confidence").decimalValue();
+            if (proposal != null && proposal.path("confidence").isNumber()) confidence = proposal.path("confidence").decimalValue();
+            if (task.getConfidenceThreshold() != null && confidence.compareTo(task.getConfidenceThreshold()) >= 0) {
+                recordCandidateDiagnostic(result, "候选置信度已达到正式判定阈值，不进入低置信候选池"); return;
+            }
+            labelCandidateService.propose(new LabelCandidateService.Proposal(task.getId(), message.getConversationId(), null,
+                    targetLabel.path("groupId").asText(null), name, code,
+                    proposal == null ? task.getAutoExpandPrompt() : proposal.path("description").asText(task.getAutoExpandPrompt()),
+                    proposal == null || proposal.path("value").isMissingNode() ? null : proposal.path("value").toString(),
+                    result.getEvidenceJson(), confidence, task.getAgentSnapshotJson()));
+        } catch (RuntimeException exception) {
+            recordCandidateDiagnostic(result, "候选生成失败: " + exception.getClass().getSimpleName());
+            log.warn("event=iqc_label_candidate taskId={} conversationId={} status=SKIPPED errorType={}",
+                    task.getId(), message.getConversationId(), exception.getClass().getSimpleName());
+        }
+    }
+
+    private JsonNode autoExpandTarget(JsonNode snapshot, JsonNode proposal) {
+        if (snapshot == null) return null;
+        String groupId = proposal == null ? "" : proposal.path("groupId").asText();
+        String groupCode = proposal == null ? "" : proposal.path("groupCode").asText();
+        Map<String, JsonNode> allowedGroups = new LinkedHashMap<>();
+        for (JsonNode label : snapshot.path("labels")) if (label.path("groupAllowAutoExpand").asBoolean(false))
+            allowedGroups.putIfAbsent(label.path("groupId").asText(), label);
+        if (!groupId.isBlank()) return allowedGroups.get(groupId);
+        if (!groupCode.isBlank()) return allowedGroups.values().stream().filter(label -> groupCode.equals(label.path("groupCode").asText())).findFirst().orElse(null);
+        return allowedGroups.size() == 1 ? allowedGroups.values().iterator().next() : null;
+    }
+
+    private void recordCandidateDiagnostic(InspectionResult result, String message) {
+        try {
+            JsonNode parsed = readSnapshot(result.getFindingJson());
+            ObjectNode finding = parsed != null && parsed.isObject() ? (ObjectNode) parsed.deepCopy() : objectMapper.createObjectNode();
+            finding.put("candidateDiagnostic", message); result.setFindingJson(finding.toString()); resultMapper.updateById(result);
+        } catch (RuntimeException exception) {
+            log.warn("event=iqc_label_candidate_diagnostic resultId={} errorType={}", result.getId(), exception.getClass().getSimpleName());
+        }
+    }
+
+    private JsonNode firstCandidate(JsonNode node) {
+        if (node == null) return null;
+        if (node.isObject() && node.path("candidates").isArray() && !node.path("candidates").isEmpty()) return node.path("candidates").path(0);
+        if (node.isContainerNode()) for (JsonNode child : node) { JsonNode found = firstCandidate(child); if (found != null) return found; }
+        return null;
+    }
+
     private InspectionResult evaluate(InspectionTask task, ConversationMessage message, JsonNode ruleSnapshot,
                                       List<ConversationMessage> conversationMessages) {
         List<JsonNode> rules = new ArrayList<>();
@@ -425,6 +596,20 @@ public class InspectionExecutionService {
                     llmRules.forEach(rule -> evaluated.add(evaluateSingle(task, message, rule, preRuleFindings, conversationMessages)));
                 }
             }
+        } else if ("LLM_THEN_RULE".equals(mode)) {
+            ObjectNode extractionRule = agentReviewRule(task, "先提取可能命中的业务标签、标签值、证据和置信度");
+            InspectionResult candidate = evaluateSingle(task, message, extractionRule, null, conversationMessages);
+            if ("HIT".equals(candidate.getResultStatus())) {
+                markCandidate(candidate);
+                evaluated.add(candidate);
+                Set<String> candidateRuleIds = candidateRuleIds(task, candidate);
+                localRules.forEach(rule -> evaluated.add(candidateRuleIds.contains(rule.path("id").asText())
+                        ? evaluateSingle(task, message, rule, null, conversationMessages)
+                        : notEvaluated(task, message, rule, "规则未关联到 LLM 提取的候选标签")));
+            } else {
+                evaluated.add(candidate);
+                localRules.forEach(rule -> evaluated.add(notEvaluated(task, message, rule, "LLM 未提取到候选，跳过确定性规则复核")));
+            }
         } else if ("AGENT_LLM".equals(mode)) {
             // Agent mode delegates semantic checks to LLM rules; deterministic rules are not part of this mode.
             if (llmRules.isEmpty()) {
@@ -448,7 +633,7 @@ public class InspectionExecutionService {
         int deduction = evaluated.stream().mapToInt(item -> item.getDeduction() == null ? 0 : item.getDeduction()).sum();
         boolean veto = rules.stream().anyMatch(rule -> rule.path("veto").asBoolean(false)
                 && evaluated.stream().anyMatch(item -> rule.path("id").asText().equals(item.getRuleId()) && "HIT".equals(item.getResultStatus())));
-        List<String> ruleIds = rules.stream().map(rule -> rule.path("id").asText(null)).filter(id -> id != null && !id.isBlank()).toList();
+        List<String> ruleIds = evaluated.stream().map(InspectionResult::getRuleId).filter(id -> id != null && !id.isBlank()).distinct().toList();
         ArrayNode findings = objectMapper.createArrayNode();
         ArrayNode evidences = objectMapper.createArrayNode();
         ArrayNode suggestions = objectMapper.createArrayNode();
@@ -456,7 +641,9 @@ public class InspectionExecutionService {
         evaluated.forEach(item -> { mergeJsonArray(findings, item.getFindingJson()); mergeJsonArray(evidences, item.getEvidenceJson()); mergeJsonArray(suggestions, item.getSuggestionJson()); });
         for (int index = 0; index < evaluated.size(); index++) {
             InspectionResult item = evaluated.get(index);
-            breakdown.add(objectMapper.valueToTree(breakdownDetail(item, rules.get(index), item.getResultStatus(),
+            JsonNode evaluatedRule = rules.stream().filter(rule -> java.util.Objects.equals(rule.path("id").asText(), item.getRuleId()))
+                    .findFirst().orElseGet(() -> syntheticRule(item));
+            breakdown.add(objectMapper.valueToTree(breakdownDetail(item, evaluatedRule, item.getResultStatus(),
                     item.getDeduction() == null ? 0 : item.getDeduction(), item.getReason())));
         }
         aggregate.setRuleId(String.join(",", ruleIds));
@@ -471,6 +658,15 @@ public class InspectionExecutionService {
         return aggregate;
     }
 
+    private ObjectNode syntheticRule(InspectionResult result) {
+        ObjectNode rule = objectMapper.createObjectNode();
+        rule.put("id", result.getRuleId()); rule.put("name", "Agent 候选提取");
+        rule.put("ruleType", "LLM"); rule.put("targetRole", result.getSpeakerRole() == null ? "all" : result.getSpeakerRole());
+        rule.put("deduction", result.getDeduction() == null ? 0 : result.getDeduction());
+        rule.put("riskLevel", result.getRiskLevel());
+        return rule;
+    }
+
     private ObjectNode agentReviewRule(InspectionTask task, String expression) {
         ObjectNode rule = objectMapper.createObjectNode();
         rule.put("id", "agent:" + task.getAgentId());
@@ -478,6 +674,30 @@ public class InspectionExecutionService {
         rule.put("expression", expression);
         rule.put("targetRole", "all"); rule.put("deduction", 0); rule.put("riskLevel", "MEDIUM");
         return rule;
+    }
+
+    private Set<String> candidateRuleIds(InspectionTask task, InspectionResult candidate) {
+        JsonNode snapshot = readSnapshot(task.getLabelScopeSnapshotJson());
+        JsonNode finding = readSnapshot(candidate.getFindingJson());
+        if (snapshot == null || finding == null) return Set.of();
+        Set<String> labelIds = new java.util.HashSet<>();
+        Set<String> labelCodes = new java.util.HashSet<>();
+        collectCandidateLabels(finding, labelIds, labelCodes);
+        Set<String> ruleIds = new java.util.HashSet<>();
+        for (JsonNode label : snapshot.path("labels")) {
+            if (!labelIds.contains(label.path("id").asText()) && !labelCodes.contains(label.path("code").asText())) continue;
+            label.path("bindings").forEach(binding -> ruleIds.add(binding.path("ruleId").asText()));
+        }
+        return ruleIds;
+    }
+
+    private void collectCandidateLabels(JsonNode node, Set<String> ids, Set<String> codes) {
+        if (node == null) return;
+        if (node.isObject() && node.path("candidates").isArray()) node.path("candidates").forEach(candidate -> {
+            String id = candidate.path("labelId").asText(); if (!id.isBlank()) ids.add(id);
+            String code = candidate.path("labelCode").asText(); if (!code.isBlank()) codes.add(code);
+        });
+        if (node.isContainerNode()) node.forEach(child -> collectCandidateLabels(child, ids, codes));
     }
 
     private int compareRisk(String left, String right) {
@@ -561,7 +781,7 @@ public class InspectionExecutionService {
                 result.setResultStatus(match.hit() ? "HIT" : "NOT_HIT"); result.setScore(match.hit() ? (veto ? 0 : 100 - deduction) : 100);
                 result.setRiskLevel(match.hit() ? rule.path("riskLevel").asText("MEDIUM") : "LOW"); result.setDeduction(deduction);
                 result.setReason(evaluation.reason()); result.setEvidence(match.hit() ? message.getContent() : null);
-                result.setFindingJson(writeJson(List.of(finding(match, rule)))); result.setEvidenceJson("[]");
+                result.setFindingJson(evaluation.structuredJson() == null ? writeJson(List.of(finding(match, rule))) : evaluation.structuredJson()); result.setEvidenceJson("[]");
                 result.setSuggestionJson(writeJson(match.hit() ? List.of(suggestion(rule)) : List.of()));
                 return result;
             }
@@ -623,7 +843,7 @@ public class InspectionExecutionService {
             catch (Exception ignored) { return "LEGACY"; }
         }
         String mode = config.path("mode").asText("LEGACY").trim().toUpperCase();
-        return Set.of("RULE_ONLY", "RULE_THEN_LLM", "AGENT_LLM").contains(mode) ? mode : "LEGACY";
+        return Set.of("RULE_ONLY", "RULE_THEN_LLM", "LLM_THEN_RULE", "AGENT_LLM").contains(mode) ? mode : "LEGACY";
     }
 
     private List<String> conversationIds(InspectionTask task) {

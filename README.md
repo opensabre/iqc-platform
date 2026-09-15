@@ -16,7 +16,7 @@ mvn -DskipTests package
 mvn -DskipTests -Djib.to.image=iqc-platform:local jib:dockerBuild
 ```
 
-业务表结构见 `src/main/resources/db/iqc-platform-ddl.sql`，部署到 MySQL 前先创建 `iqc_platform` schema 并执行该脚本；已有环境按顺序执行 `db/migration/` 中尚未应用的脚本（当前至 `V1.1.20__add_iqc_skill_versions.sql`）。平台审计、限次、计次、字典、错误码和资源注册由 OpenSabre Framework/base-sysadmin 提供，IQC 只声明业务使用场景。TXT 会话上传默认限制 20 MiB，并由后端强制校验 `.txt` 扩展名和大小。
+业务表结构见 `src/main/resources/db/iqc-platform-ddl.sql`，部署到 MySQL 前先创建 `iqc_platform` schema 并执行该脚本；已有环境由 Flyway 按顺序执行尚未应用的正式迁移（当前至 `V1.1.24__ddl_add_label_domain.sql`）。平台审计、限次、计次、字典、错误码和资源注册由 OpenSabre Framework/base-sysadmin 提供，IQC 只声明业务使用场景。TXT 会话上传默认限制 20 MiB，并由后端强制校验 `.txt` 扩展名和大小。
 
 独立前端的 OAuth2 registration 使用 `iqc-platform-local`，授权服务需执行 `base-authorization/src/main/resources/db/migration/mysql/V20260822_01__add_iqc_platform_local_oauth2_client.sql`；网关使用同名 registration 并将 `/api/iqc/**` 转发到 `lb://iqc-platform`。
 

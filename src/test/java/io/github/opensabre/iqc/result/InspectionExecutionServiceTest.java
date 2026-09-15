@@ -24,6 +24,7 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import io.github.opensabre.iqc.task.model.TaskExecution;
 import io.github.opensabre.iqc.task.model.TaskItem;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,17 +32,23 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
 
 class InspectionExecutionServiceTest {
     @BeforeEach
     void initializeMybatisLambdaMetadata() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "iqc-execution-test"), TaskItem.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "iqc-task-test"), InspectionTask.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "iqc-message-test"), ConversationMessage.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "iqc-result-test"), InspectionResult.class);
     }
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final LlmQualityProvider llmProvider = mock(LlmQualityProvider.class);
     private final InspectionExecutionService service = new InspectionExecutionService(
             mock(InspectionTaskMapper.class), mock(ConversationMapper.class), mock(ConversationMessageMapper.class), mock(InspectionResultMapper.class),
-            objectMapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class), mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class));
+            objectMapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class), mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class));
 
     @Test
     void keywordRuleOnlyAppliesToItsTargetSpeaker() {
@@ -67,6 +74,61 @@ class InspectionExecutionServiceTest {
         assertThat(result.getRiskLevel()).isEqualTo("HIGH");
         assertThat(result.getReason()).contains("未配置可用适配器");
         assertThat(result.getRuleBreakdownJson()).contains("ERROR");
+    }
+
+    @Test
+    void multiRunStoresConsensusConfidence() throws Exception {
+        InspectionTask task = task(); task.setRunCount(3); task.setConfidenceThreshold(new java.math.BigDecimal("0.80"));
+        com.fasterxml.jackson.databind.node.ArrayNode snapshot = objectMapper.createArrayNode();
+        snapshot.add(rule("r-1", "KEYWORD", "优惠", "agent"));
+        InspectionResult result = ReflectionTestUtils.invokeMethod(service, "evaluateWithRuns", task,
+                message("agent", "今天有优惠"), snapshot, List.of(message("agent", "今天有优惠")));
+        assertThat(result.getResultStatus()).isEqualTo("HIT");
+        assertThat(objectMapper.readTree(result.getFindingJson()).path("runCount").asInt()).isEqualTo(3);
+        assertThat(objectMapper.readTree(result.getFindingJson()).path("runs")).hasSize(3);
+        assertThat(objectMapper.readTree(result.getFindingJson()).path("confidence").asDouble()).isEqualTo(1.0);
+    }
+
+    @Test
+    void evenRunTieRequiresHumanReview() {
+        InspectionTask task = task(); task.setRunCount(2);
+        JsonNode rule = rule("r-llm", "LLM", "判断意图", "all");
+        when(llmProvider.evaluate(any(), org.mockito.ArgumentMatchers.eq(rule), org.mockito.ArgumentMatchers.nullable(JsonNode.class), any()))
+                .thenReturn(new LlmQualityProvider.LlmEvaluation(true, true, "命中"), new LlmQualityProvider.LlmEvaluation(true, false, "未命中"));
+
+        InspectionResult result = ReflectionTestUtils.invokeMethod(service, "evaluateWithRuns", task,
+                message("agent", "测试话术"), objectMapper.createArrayNode().add(rule), List.of(message("agent", "测试话术")));
+
+        assertThat(result.getResultStatus()).isEqualTo("REVIEW_REQUIRED");
+        assertThat(result.getRuleBreakdownJson()).contains("REVIEW_REQUIRED");
+    }
+
+    @Test
+    void llmCandidateOnlySelectsRulesBoundToThatLabel() {
+        InspectionTask task = task();
+        task.setLabelScopeSnapshotJson("{\"labels\":[{\"id\":\"label-a\",\"code\":\"A\",\"bindings\":[{\"ruleId\":\"rule-a\"}]},{\"id\":\"label-b\",\"code\":\"B\",\"bindings\":[{\"ruleId\":\"rule-b\"}]}]}");
+        InspectionResult candidate = new InspectionResult();
+        candidate.setFindingJson("{\"candidates\":[{\"labelCode\":\"A\"}]}");
+
+        Set<String> ruleIds = ReflectionTestUtils.invokeMethod(service, "candidateRuleIds", task, candidate);
+
+        assertThat(ruleIds).containsExactly("rule-a");
+    }
+
+    @Test
+    void llmThenRuleKeepsExtractionAndLocalRuleBreakdownAligned() throws Exception {
+        InspectionTask task = task();
+        task.setAgentSnapshotJson("{\"configJson\":{\"mode\":\"LLM_THEN_RULE\"}}");
+        task.setLabelScopeSnapshotJson("{\"labels\":[{\"id\":\"label-a\",\"code\":\"A\",\"bindings\":[{\"ruleId\":\"rule-a\"}]}]}");
+        JsonNode localRule = rule("rule-a", "KEYWORD", "优惠", "agent");
+        when(llmProvider.evaluate(any(), any(), org.mockito.ArgumentMatchers.nullable(JsonNode.class), any()))
+                .thenReturn(new LlmQualityProvider.LlmEvaluation(true, true, "提取到候选", "{\"candidates\":[{\"labelCode\":\"A\"}]}"));
+
+        InspectionResult result = ReflectionTestUtils.invokeMethod(service, "evaluate", task,
+                message("agent", "今天有优惠"), objectMapper.createArrayNode().add(localRule), List.of(message("agent", "今天有优惠")));
+
+        assertThat(result.getResultStatus()).isEqualTo("HIT");
+        assertThat(objectMapper.readTree(result.getRuleBreakdownJson())).hasSize(2);
     }
 
     @Test
@@ -208,6 +270,7 @@ class InspectionExecutionServiceTest {
         TaskItem first = taskItem("item-1", "message-1", "conversation-1", 1);
         TaskItem second = taskItem("item-2", "message-2", "conversation-2", 2);
         when(tasks.selectById("task-1")).thenReturn(task);
+        when(tasks.update(isNull(), any())).thenReturn(1);
         when(executions.selectById("execution-1")).thenReturn(execution);
         when(items.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(first, second));
         AtomicInteger active = new AtomicInteger(); AtomicInteger maximum = new AtomicInteger();
@@ -220,13 +283,81 @@ class InspectionExecutionServiceTest {
             return message;
         });
         InspectionExecutionService concurrentService = new InspectionExecutionService(tasks, mock(ConversationMapper.class), messages, results, objectMapper,
-                executions, items, mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class));
+                executions, items, mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class));
 
         InspectionTask completed = concurrentService.run("task-1", "execution-1");
 
         assertThat(maximum.get()).isEqualTo(2);
         assertThat(completed.getProcessedMessages()).isEqualTo(2);
         assertThat(completed.getStatus()).isEqualTo("SUCCEEDED");
+    }
+
+    @Test
+    void resumedExecutionDoesNotCountAlreadySucceededItemsTwice() {
+        InspectionTaskMapper tasks = mock(InspectionTaskMapper.class);
+        ConversationMessageMapper messages = mock(ConversationMessageMapper.class);
+        InspectionResultMapper results = mock(InspectionResultMapper.class);
+        TaskExecutionMapper executions = mock(TaskExecutionMapper.class);
+        TaskItemMapper items = mock(TaskItemMapper.class);
+        InspectionTask task = task(); task.setStatus("QUEUED"); task.setConcurrencyLimit(1); task.setTotalMessages(2);
+        task.setProcessedMessages(1); task.setRuleSnapshotJson("[]");
+        TaskExecution execution = new TaskExecution(); execution.setId("execution-1");
+        TaskItem completed = taskItem("item-1", "message-1", "conversation-1", 1); completed.setStatus("SUCCEEDED");
+        TaskItem pending = taskItem("item-2", "message-2", "conversation-1", 2); pending.setStatus("PENDING");
+        when(tasks.selectById("task-1")).thenReturn(task);
+        when(tasks.update(isNull(), any())).thenReturn(1);
+        when(executions.selectById("execution-1")).thenReturn(execution);
+        when(items.selectList(any())).thenReturn(List.of(completed, pending));
+        ConversationMessage first = message("agent", "已完成"); first.setId("message-1");
+        ConversationMessage second = message("agent", "待恢复"); second.setId("message-2");
+        when(messages.selectById("message-1")).thenReturn(first); when(messages.selectById("message-2")).thenReturn(second);
+        InspectionExecutionService resumed = new InspectionExecutionService(tasks, mock(ConversationMapper.class), messages, results, objectMapper,
+                executions, items, mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class));
+
+        InspectionTask result = resumed.run("task-1", "execution-1");
+
+        assertThat(result.getProcessedMessages()).isEqualTo(2);
+        verify(results, times(1)).insert(any(InspectionResult.class));
+    }
+
+    @Test
+    void secondNodeDoesNotProcessAnExecutionAlreadyClaimedByAnotherNode() {
+        InspectionTaskMapper tasks = mock(InspectionTaskMapper.class);
+        TaskExecutionMapper executions = mock(TaskExecutionMapper.class);
+        TaskItemMapper items = mock(TaskItemMapper.class);
+        InspectionTask queued = task(); queued.setStatus("QUEUED"); queued.setCurrentExecutionId("execution-1");
+        InspectionTask running = task(); running.setStatus("RUNNING"); running.setCurrentExecutionId("execution-1");
+        TaskExecution execution = new TaskExecution(); execution.setId("execution-1"); execution.setStatus("QUEUED");
+        when(tasks.selectById("task-1")).thenReturn(queued, running);
+        when(executions.selectById("execution-1")).thenReturn(execution);
+        when(tasks.update(isNull(), any())).thenReturn(0);
+        InspectionExecutionService contender = new InspectionExecutionService(tasks, mock(ConversationMapper.class), mock(ConversationMessageMapper.class),
+                mock(InspectionResultMapper.class), objectMapper, executions, items, mock(IqcDataScope.class), llmProvider,
+                mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class));
+
+        assertThat(contender.run("task-1", "execution-1")).isSameAs(running);
+        verifyNoInteractions(items);
+    }
+
+    @Test
+    void resumeCreatesANewExecutionContainingOnlyUnfinishedItems() {
+        InspectionTaskMapper tasks = mock(InspectionTaskMapper.class); TaskExecutionMapper executions = mock(TaskExecutionMapper.class); TaskItemMapper items = mock(TaskItemMapper.class); IqcDataScope scope = mock(IqcDataScope.class);
+        InspectionTask paused = task(); paused.setStatus("PAUSED"); paused.setCurrentExecutionId("execution-old"); paused.setAttemptCount(1); paused.setTotalMessages(2);
+        TaskItem succeeded = taskItem("done", "message-1", "conversation-1", 1); succeeded.setStatus("SUCCEEDED");
+        TaskItem pending = taskItem("pending", "message-2", "conversation-1", 2); pending.setStatus("PENDING");
+        when(tasks.selectById("task-1")).thenReturn(paused); when(scope.canView(any(), any())).thenReturn(true);
+        when(items.selectList(any())).thenReturn(List.of(succeeded, pending)); when(tasks.update(isNull(), any())).thenReturn(1);
+        org.mockito.Mockito.doAnswer(invocation -> { TaskExecution value = invocation.getArgument(0); value.setId("execution-new"); return 1; }).when(executions).insert(any(TaskExecution.class));
+        InspectionExecutionService resumed = new InspectionExecutionService(tasks, mock(ConversationMapper.class), mock(ConversationMessageMapper.class), mock(InspectionResultMapper.class), objectMapper,
+                executions, items, scope, llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class));
+
+        InspectionTask result = resumed.resume("task-1");
+
+        assertThat(result.getCurrentExecutionId()).isEqualTo("execution-new");
+        assertThat(result.getProcessedMessages()).isEqualTo(1);
+        org.mockito.ArgumentCaptor<TaskItem> copied = org.mockito.ArgumentCaptor.forClass(TaskItem.class);
+        verify(items).insert(copied.capture());
+        assertThat(copied.getValue().getMessageId()).isEqualTo("message-2");
     }
 
     private InspectionResult evaluate(JsonNode rule, ConversationMessage message) {

@@ -16,6 +16,7 @@ import io.github.opensabre.iqc.rule.dao.QualityRuleMapper;
 import io.github.opensabre.iqc.rule.QualityRuleSetService;
 import io.github.opensabre.iqc.shared.IqcDataScope;
 import io.github.opensabre.iqc.governance.IqcException;
+import io.github.opensabre.iqc.label.LabelResolutionService;
 import io.github.opensabre.iqc.task.dao.InspectionTaskMapper;
 import io.github.opensabre.iqc.task.dao.TaskExecutionMapper;
 import io.github.opensabre.iqc.task.dao.TaskItemMapper;
@@ -32,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -56,9 +58,9 @@ class InspectionTaskServiceTest {
     private final TaskItemMapper taskItemMapper = mock(TaskItemMapper.class);
     private final IqcDataScope dataScope = mock(IqcDataScope.class);
     private final InspectionExecutionService executionService = new InspectionExecutionService(taskMapper, conversationMapper, messageMapper, resultMapper,
-            new ObjectMapper(), executionMapper, taskItemMapper, dataScope, mock(io.github.opensabre.iqc.result.llm.LlmQualityProvider.class), mock(UsageCounterRecorder.class), mock(io.github.opensabre.iqc.result.HierarchicalResultService.class));
+            new ObjectMapper(), executionMapper, taskItemMapper, dataScope, mock(io.github.opensabre.iqc.result.llm.LlmQualityProvider.class), mock(UsageCounterRecorder.class), mock(io.github.opensabre.iqc.result.HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class));
     private final InspectionTaskService taskService = new InspectionTaskService(taskMapper, conversationMapper, agentMapper, ruleMapper, ruleSetService,
-            new ObjectMapper(), executionMapper, dataScope);
+            new ObjectMapper(), executionMapper, dataScope, mock(LabelResolutionService.class));
 
     @Test
     void retryOnlyQueuesFailedMessagesAndPreservesSuccessfulProgress() {
@@ -109,7 +111,7 @@ class InspectionTaskServiceTest {
     }
 
     @Test
-    void runningTaskCancellationAlsoCancelsCurrentExecution() {
+    void runningTaskCancellationWaitsForSafeExecutionBoundary() {
         InspectionTask task = task("RUNNING");
         task.setCurrentExecutionId("execution-1");
         TaskExecution execution = new TaskExecution();
@@ -121,8 +123,8 @@ class InspectionTaskServiceTest {
 
         taskService.cancel("task-1");
 
-        assertThat(execution.getStatus()).isEqualTo("CANCELLED");
-        verify(executionMapper).updateById(execution);
+        assertThat(execution.getStatus()).isEqualTo("RUNNING");
+        verify(executionMapper, never()).updateById(execution);
     }
 
     @Test
@@ -220,6 +222,19 @@ class InspectionTaskServiceTest {
         assertThat(scheduled.getConversationId()).isEqualTo("conversation-new");
         assertThat(scheduled.getSelectionFilterJson()).contains("scopeOwner", "alice", "service");
         verify(taskMapper).insert(scheduled);
+    }
+
+    @Test
+    void deletingTerminalTaskKeepsTheTaskRecord() {
+        InspectionTask task = task("SUCCEEDED");
+        when(taskMapper.selectById("task-1")).thenReturn(task);
+        when(dataScope.canView(null, null)).thenReturn(true);
+        when(taskMapper.update(any(), any())).thenReturn(1);
+
+        taskService.deleteTerminal("task-1");
+
+        verify(taskMapper, never()).deleteById("task-1");
+        verify(taskMapper).update(any(), any());
     }
 
     private void stubVisibleConversation() {

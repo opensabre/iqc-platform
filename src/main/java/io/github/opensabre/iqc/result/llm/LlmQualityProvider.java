@@ -21,6 +21,9 @@ public interface LlmQualityProvider {
 
     LlmEvaluation evaluate(String content, JsonNode rule, String recordId);
 
-    record LlmEvaluation(boolean supported, boolean hit, String reason) {
+    record LlmEvaluation(boolean supported, boolean hit, String reason, String structuredJson) {
+        public LlmEvaluation(boolean supported, boolean hit, String reason) {
+            this(supported, hit, reason, null);
+        }
     }
 }

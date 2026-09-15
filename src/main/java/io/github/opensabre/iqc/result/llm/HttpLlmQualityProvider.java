@@ -95,7 +95,7 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
                         .body(Map.of("model", properties.getModel(), "temperature", 0,
                                 "response_format", Map.of("type", "json_object"),
                                 "messages", List.of(
-                                        Map.of("role", "system", "content", "你是质检规则执行器。只返回 JSON，不要 Markdown。格式必须是 {\\\"hit\\\":true或false,\\\"reason\\\":\\\"简短理由\\\"}。"),
+                                        Map.of("role", "system", "content", "你是质检规则执行器。只返回 JSON，不要 Markdown。必须包含 hit 布尔值和 reason 字符串；规则要求的标签值放入 labelValues 数组，可扩展的新标签放入 candidates 数组，不得臆造。"),
                                 Map.of("role", "user", "content", prompt(content, rule, preRuleFindings)))))
                         .retrieve().body(JsonNode.class);
                 return parseEvaluation(response);
@@ -125,7 +125,7 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
         if (!json.has("hit") || !json.get("hit").isBoolean()) throw new IllegalArgumentException("LLM 响应缺少布尔 hit 字段");
         String reason = json.path("reason").asText("").trim();
         if (reason.isBlank()) throw new IllegalArgumentException("LLM 响应缺少 reason 字段");
-        return new LlmEvaluation(true, json.get("hit").asBoolean(), reason);
+        return new LlmEvaluation(true, json.get("hit").asBoolean(), reason, json.toString());
     }
 
     private String prompt(String content, JsonNode rule, JsonNode preRuleFindings) {

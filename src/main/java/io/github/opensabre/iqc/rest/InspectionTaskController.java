@@ -15,6 +15,7 @@ import java.util.Map;
 import io.github.opensabre.iqc.shared.IqcPage;
 import java.util.List;
 import java.time.LocalDateTime;
+import io.github.opensabre.iqc.label.LabelResolutionService;
 
 @RestController
 @RequestMapping("/api/iqc/tasks")
@@ -50,21 +51,24 @@ public class InspectionTaskController {
     @RateLimit(sceneCode = "iqc-task-create", maxCount = 20, period = 60)
     public InspectionTask create(@RequestBody CreateTaskRequest request) {
         if ("SAMPLE".equalsIgnoreCase(request.taskType())) {
-            InspectionTask task = taskService.createSampled(request.name(), request.selectionFilter(),
-                    request.sampleSize() == null ? 100 : request.sampleSize(), request.sampleSeed(), request.agentId(),
-                    request.ruleSetId(), request.ruleIds(), request.concurrencyLimit());
+            InspectionTask task = request.labelSelection() == null
+                    ? taskService.createSampled(request.name(), request.selectionFilter(), request.sampleSize() == null ? 100 : request.sampleSize(), request.sampleSeed(), request.agentId(), request.ruleSetId(), request.ruleIds(), request.concurrencyLimit())
+                    : taskService.createSampledWithLabels(request.name(), request.selectionFilter(), request.sampleSize() == null ? 100 : request.sampleSize(), request.sampleSeed(), request.agentId(), request.labelSelection(), request.concurrencyLimit(), request.labelOptions());
             usageCounterRecorder.record(new UsageRecord("inspection-task:create:" + task.getId(), null, "iqc-platform", "INSPECTION_TASK", task.getId(), "CREATE", UsageOutcome.SUCCESS));
             return task;
         }
         if ("SCHEDULED".equalsIgnoreCase(request.taskType())) {
-            InspectionTask task = taskService.createScheduled(request.name(), request.selectionFilter(),
-                    parseScheduledTime(request.scheduledTime()), request.agentId(), request.ruleSetId(), request.ruleIds(), request.concurrencyLimit());
+            InspectionTask task = request.labelSelection() == null
+                    ? taskService.createScheduled(request.name(), request.selectionFilter(), parseScheduledTime(request.scheduledTime()), request.agentId(), request.ruleSetId(), request.ruleIds(), request.concurrencyLimit())
+                    : taskService.createScheduledWithLabels(request.name(), request.selectionFilter(), parseScheduledTime(request.scheduledTime()), request.agentId(), request.labelSelection(), request.concurrencyLimit(), request.labelOptions());
             usageCounterRecorder.record(new UsageRecord("inspection-task:create:" + task.getId(), null, "iqc-platform", "INSPECTION_TASK", task.getId(), "CREATE", UsageOutcome.SUCCESS));
             return task;
         }
         List<String> conversationIds = request.conversationIds() == null || request.conversationIds().isEmpty()
                 ? (request.conversationId() == null ? List.of() : List.of(request.conversationId())) : request.conversationIds();
-        InspectionTask task = taskService.createBatch(request.name(), conversationIds, request.agentId(), request.ruleSetId(), request.ruleIds(), request.concurrencyLimit());
+        InspectionTask task = request.labelSelection() == null
+                ? taskService.createBatch(request.name(), conversationIds, request.agentId(), request.ruleSetId(), request.ruleIds(), request.concurrencyLimit())
+                : taskService.createBatchWithLabels(request.name(), conversationIds, request.agentId(), request.labelSelection(), request.concurrencyLimit(), request.labelOptions());
         usageCounterRecorder.record(new UsageRecord(
                 "inspection-task:create:" + task.getId(), null, "iqc-platform", "INSPECTION_TASK",
                 task.getId(), "CREATE", UsageOutcome.SUCCESS));
@@ -84,8 +88,31 @@ public class InspectionTaskController {
         return taskService.cancel(id);
     }
 
+    @PostMapping("/{id}/pause")
+    @ResourcePermission(code = "iqc:task:execute", name = "暂停质检任务", type = "iqc", description = "在安全边界暂停执行中的质检任务")
+    @Audit(operationType = OperationType.UPDATE, description = "暂停 IQC 质检任务", module = "IQC_TASK")
+    public InspectionTask pause(@PathVariable String id) {
+        return taskService.requestPause(id);
+    }
+
+    @PutMapping("/{id}/priority")
+    @ResourcePermission(code = "iqc:task:execute", name = "调整任务优先级", type = "iqc", description = "调整未完成任务的队列优先级")
+    @Audit(operationType = OperationType.UPDATE, description = "调整 IQC 任务优先级", module = "IQC_TASK")
+    public InspectionTask priority(@PathVariable String id, @RequestBody Map<String, Long> request) {
+        return taskService.changePriority(id, request.getOrDefault("priority", 0L));
+    }
+
+    @DeleteMapping("/{id}")
+    @ResourcePermission(code = "iqc:task:delete", name = "删除质检任务", type = "iqc", description = "逻辑删除终态质检任务")
+    @Audit(operationType = OperationType.DELETE, description = "删除 IQC 质检任务", module = "IQC_TASK")
+    public void delete(@PathVariable String id) {
+        taskService.deleteTerminal(id);
+    }
+
     public record CreateTaskRequest(String name, String taskType, String conversationId, List<String> conversationIds,
                                     InspectionTaskService.ScheduledFilter selectionFilter, String scheduledTime, String agentId,
                                     String ruleSetId, List<String> ruleIds, Integer concurrencyLimit,
-                                    Integer sampleSize, String sampleSeed) { }
+                                    Integer sampleSize, String sampleSeed,
+                                    LabelResolutionService.LabelSelection labelSelection,
+                                    InspectionTaskService.LabelExecutionOptions labelOptions) { }
 }
