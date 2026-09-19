@@ -92,7 +92,7 @@ Maven Verify，并上传测试报告；`main` 或版本标签通过测试后，�
 - 真实认证用户验证数据范围、审计、限次拒绝、计次、错误码和异步任务执行。
 - OAuth2 回调与独立站点域名/端口完全一致。
 
-本地或部署后可使用 `scripts/iqc-runtime-smoke.sh` 执行只读运行探针。脚本默认要求所有核心查询接口返回 HTTP 200 和 OpenSabre 统一响应结构；通过 `IQC_COOKIE_JAR` 或 `IQC_ACCESS_TOKEN` 提供已认证会话。脚本不会创建会话、任务或结果。
+本地或部署后可使用 `scripts/iqc-runtime-smoke.sh` 执行只读运行探针。脚本默认要求所有核心查询接口返回 HTTP 200 和 OpenSabre 统一响应结构；通过 `IQC_COOKIE_JAR` 或 `IQC_ACCESS_TOKEN` 提供已认证会话。治理注册 Actuator 检查另需 `IQC_ACTUATOR_CLIENT_ID`、`IQC_ACTUATOR_CLIENT_SECRET`（具有 `actuator.read` scope 的 OAuth2 client-credentials 客户端），必要时设置 `IQC_ACTUATOR_TOKEN_URL`。不要复用浏览器 Token 或把客户端密钥提交到仓库。脚本不会创建会话、任务或结果。
 
 只读探针同时执行单接口响应时间门禁，默认基线为 2000ms，可通过 `IQC_MAX_RESPONSE_TIME_MS` 调整。任务执行日志包含稳定的 `event`、`taskId`、`executionId`、`status`、处理/失败数量、`errorType` 和 `elapsedMs` 字段；Actuator 暴露 health、metrics 和 prometheus 端点供部署环境采集。
 
