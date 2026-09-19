@@ -28,10 +28,14 @@ public class IqcResourceServerConfiguration {
             InternalTokenAuthenticationFilter internalTokenAuthenticationFilter) throws Exception {
         http.csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers("/actuator/health", "/actuator/health/**", "/v3/api-docs", "/v3/api-docs/**")
+                        .requestMatchers("/v3/api-docs", "/v3/api-docs/**")
                         .permitAll()
+                        .requestMatchers("/actuator/internalTokenKeyStatus")
+                        .hasAuthority(ActuatorMonitoringAccess.AUTHORITY)
                         .requestMatchers(ActuatorMonitoringAccess.metricPathArray())
                         .hasAuthority(ActuatorMonitoringAccess.AUTHORITY)
+                        .requestMatchers("/actuator/**")
+                        .hasAuthority("SCOPE_actuator.read")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)))

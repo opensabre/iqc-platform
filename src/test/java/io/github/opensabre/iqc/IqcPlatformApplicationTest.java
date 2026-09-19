@@ -23,6 +23,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -98,6 +99,19 @@ class IqcPlatformApplicationTest {
                         .GET().build(),
                 HttpResponse.BodyHandlers.discarding());
         assertThat(authorized.statusCode()).isEqualTo(200);
+    }
+
+    @Test
+    void rejectsAnonymousManagementEndpoints() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+        for (String path : List.of("/actuator/health", "/actuator/prometheus",
+                "/actuator/opensabreGovernanceRegistration")) {
+            HttpResponse<Void> response = client.send(
+                    HttpRequest.newBuilder(URI.create("http://localhost:" + managementPort + path))
+                            .GET().build(),
+                    HttpResponse.BodyHandlers.discarding());
+            assertThat(response.statusCode()).as(path).isEqualTo(401);
+        }
     }
 
     @TestConfiguration(proxyBeanMethods = false)
