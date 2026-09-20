@@ -21,7 +21,7 @@
 
 ## 2. 数据库初始化
 
-新环境执行 `src/main/resources/db/iqc-platform-ddl.sql`。已有环境按顺序执行 `db/migration/V1.1.2__...` 至 `V1.1.10__...`，其中 V1.1.10 为分页、数据范围和结果筛选索引。初始化后必须确认核心表、版本表和索引均存在；迁移脚本只允许执行一次。
+新环境由 `base-k8s` 创建 `iqc_platform` schema 和迁移账号，然后在启动应用前运行独立 Flyway 迁移；Flyway 从 `src/main/resources/db/migration/mysql/baseline/` 建立初始状态并执行后续版本迁移。已有环境按发布矩阵确认基线后执行尚未应用的迁移。执行后确认核心表、版本表和索引存在，并用 `flyway validate` 核对历史；重复执行 `migrate` 应为零变更。详见 `base-k8s/docs/database-migrations.md`。
 
 ## 3. 服务环境变量
 
