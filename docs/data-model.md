@@ -1,6 +1,6 @@
 # 数据模型与 ER 图
 
-本文档对应当前完整建库脚本 [`iqc-platform-ddl.sql`](../src/main/resources/db/iqc-platform-ddl.sql)。业务聚合之间主要采用应用层逻辑外键；规范化质检结果内部使用物理外键保证会话结果、规则结果和证据的一致性。
+本文档对应 [`db/migration/mysql/`](../src/main/resources/db/migration/mysql/) 中的 Flyway 基线与后续迁移。业务聚合之间主要采用应用层逻辑外键；规范化质检结果内部使用物理外键保证会话结果、规则结果和证据的一致性。
 
 ## 标签洞察领域
 
