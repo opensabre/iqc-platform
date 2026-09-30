@@ -33,7 +33,7 @@ public class IqcResourceServerConfiguration {
                         .requestMatchers("/actuator/internalTokenKeyStatus")
                         .hasAuthority(ActuatorMonitoringAccess.AUTHORITY)
                         .requestMatchers(ActuatorMonitoringAccess.metricPathArray())
-                        .hasAuthority(ActuatorMonitoringAccess.AUTHORITY)
+                        .hasAnyAuthority("SCOPE_actuator.read", ActuatorMonitoringAccess.AUTHORITY)
                         .requestMatchers("/actuator/**")
                         .hasAuthority("SCOPE_actuator.read")
                         .anyRequest().authenticated())
