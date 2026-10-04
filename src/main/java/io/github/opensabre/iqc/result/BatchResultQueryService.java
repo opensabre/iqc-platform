@@ -66,6 +66,7 @@ public class BatchResultQueryService {
         if (taskId == null || taskId.isBlank()) throw IqcException.invalidArgument("业务导出必须选择一个质检任务");
         InspectionTask task = requireTask(taskId);
         JsonNode snapshot = exportJson(task.getRuleSnapshotJson());
+        if (snapshot.has("pipelineSnapshot")) return exportPipelineCsv(task, snapshot);
         var definition = SchemeResultEvaluator.definition(snapshot, objectMapper);
         if (definition == null) throw IqcException.invalidArgument("该任务不是业务方案任务，请使用消息观察导出");
         // This export has one row per check. A label-only scheme would otherwise return a misleading header-only file.
@@ -139,6 +140,80 @@ public class BatchResultQueryService {
             }
         }
         return csv.toString();
+    }
+
+    /** Existing business export transport also serves Pipeline policies; machine facts are validated before serialization. */
+    private String exportPipelineCsv(InspectionTask task, JsonNode snapshot) {
+        try {
+            var marker = snapshot.path("pipelineSnapshot");
+            var release = objectMapper.treeToValue(marker.path("release"), io.github.opensabre.iqc.pipelineasset.PipelineRelease.class);
+            if (release == null || snapshot.has("schemeSnapshot") || !marker.path("contentHash").asText().equals(
+                    io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(objectMapper.writeValueAsString(release))))
+                throw IqcException.invalidState("流水线导出快照摘要不一致");
+            if (release.items().isEmpty()) throw IqcException.invalidArgument("该流水线没有可导出的业务质检项");
+            var ids = exportConversationIds(task, objectMapper);
+            if ((long) ids.size() * release.items().size() > 50_000)
+                throw IqcException.invalidArgument("业务导出最多50000行，请缩小任务范围");
+            var csv = new StringBuilder("\uFEFF任务ID,流水线ID,发布版本,草稿修订,快照哈希,任务类型,会话ID,原始结果ID,执行实例,评分状态,会话最终分（勿按行求和）,评分政策版本,评分方式,质检项编码,质检项名称,判定,项目绑定规则ID,项目绑定规则版本,规则字段含义,计分贡献,一票否决,事实编码,事实状态,确定事实值JSON,选中事实ID,选中检测节点,项目证据消息ID,融合保留证据JSON（含未选中候选）\n");
+            long bytes = csv.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+            for (String id : ids) {
+                var canonical = latestCanonical(task, id);
+                var items = new java.util.HashMap<String, SchemeResultEvaluator.ItemResult>();
+                var lines = new java.util.HashMap<String, InspectionScoring.Line>();
+                var facts = new java.util.HashMap<String, io.github.opensabre.iqc.fusion.FindingFusion.Result>();
+                InspectionScoring.Result score = null;
+                if (canonical != null) {
+                    var original = objectMapper.readValue(canonical.getBusinessItemResultsJson(),
+                            new com.fasterxml.jackson.core.type.TypeReference<List<SchemeResultEvaluator.ItemResult>>() { });
+                    var trace = objectMapper.readValue(canonical.getExecutionTraceJson(), io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation.class);
+                    var allowed = messageMapper.selectList(Wrappers.<ConversationMessage>lambdaQuery()
+                            .select(ConversationMessage::getId).eq(ConversationMessage::getConversationId, id)).stream()
+                            .map(ConversationMessage::getId).collect(Collectors.toSet());
+                    var checked = io.github.opensabre.iqc.quality.BusinessItemReviewEvaluator.evaluatePipeline(
+                            canonical.getId(), release, trace, original, List.of(), allowed);
+                    score = checked.original().scoring();
+                    var saved = objectMapper.readValue(canonical.getScoringResultJson(), InspectionScoring.Result.class);
+                    if (!objectMapper.valueToTree(score).equals(objectMapper.valueToTree(saved))
+                            || !score.scoreStatus().name().equals(canonical.getScoreStatus())
+                            || (score.finalScore() == null ? canonical.getFinalScore() != null
+                            : canonical.getFinalScore() == null || score.finalScore().compareTo(canonical.getFinalScore()) != 0))
+                        throw IqcException.invalidState("流水线机器评分与导出结果不一致");
+                    checked.original().items().forEach(item -> items.put(item.itemCode(), item));
+                    score.lines().forEach(line -> lines.put(line.itemCode(), line));
+                    for (var fact : trace.fusion()) {
+                        if (fact.evidence().stream().anyMatch(evidence -> evidence.type() == io.github.opensabre.iqc.finding.Finding.EvidenceType.CONVERSATION
+                                && !allowed.contains(evidence.reference()))) throw IqcException.invalidState("融合证据不属于当前会话");
+                        facts.put(fact.code(), fact);
+                    }
+                }
+                for (var mapping : release.items()) {
+                    var item = items.get(mapping.itemCode()); var line = lines.get(mapping.itemCode());
+                    var fact = facts.get(mapping.findingCode());
+                    var selectedNodes = fact == null ? List.<String>of() : fact.rawFindings().stream()
+                            .filter(value -> fact.selectedIds().contains(value.id())).map(value -> value.source().nodeId()).distinct().toList();
+                    var cells = new Object[]{task.getId(), marker.path("pipelineId").asText(), marker.path("versionNo").asText(""),
+                            marker.path("draftRevision").asText(""), marker.path("contentHash").asText(), task.getTaskType(), id,
+                            canonical == null ? "" : canonical.getId(), canonical == null ? "" : canonical.getExecutionId(),
+                            score == null ? "PENDING" : score.scoreStatus(), score == null ? null : score.finalScore(),
+                            release.scoring().version(), release.scoring().mode(), mapping.itemCode(), item == null ? mapping.itemCode() : item.name(),
+                            item == null ? "NOT_EVALUATED" : item.status(), item == null ? "" : item.ruleId(), item == null ? "" : item.ruleVersionNo(),
+                            "冻结项目绑定；真实来源见选中检测节点及执行轨迹", line == null ? null : line.contribution(), line == null ? null : line.vetoTriggered(),
+                            mapping.findingCode(), fact == null ? "NOT_EVALUATED" : fact.state(),
+                            fact == null || fact.state() != io.github.opensabre.iqc.finding.Finding.State.KNOWN ? "" : objectMapper.writeValueAsString(fact.value()),
+                            fact == null ? "" : String.join(";", fact.selectedIds()), String.join(";", selectedNodes),
+                            item == null ? "" : objectMapper.writeValueAsString(item.matchedMessageIds()),
+                            fact == null ? "" : objectMapper.writeValueAsString(fact.evidence())};
+                    String row = java.util.Arrays.stream(cells).map(value -> InspectionExecutionService.row(value == null ? "" : value.toString()))
+                            .collect(Collectors.joining(",")) + "\n";
+                    bytes += row.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+                    if (bytes > 50L * 1024 * 1024) throw IqcException.invalidArgument("业务导出超过50MiB，请缩小任务范围");
+                    csv.append(row);
+                }
+            }
+            return csv.toString();
+        } catch (com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException ex) {
+            throw IqcException.invalidState("流水线导出事实或政策快照损坏");
+        }
     }
 
     /** Strict, shared task scope for machine and review exports; corrupt JSON never falls back to another scope. */
