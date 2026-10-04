@@ -28,13 +28,15 @@ final class RouteExecutionTrace {
                 .put("inputHash", inputHash(inputs)).put("planSchemaVersion", plan.schemaVersion())
                 .put("ruleSnapshotHash", hash(snapshot.toString()))
                 .put("agentSnapshotHash", task.getAgentSnapshotJson() == null ? null : hash(task.getAgentSnapshotJson()));
+        root.put("findingSchemaVersion", io.github.opensabre.iqc.finding.Finding.SCHEMA);
         var nodes = root.putArray("nodes");
         for (var round : run.rounds()) for (var stage : round.stages()) {
             var context = plan.contexts().stream().filter(value -> value.contextKey().equals(stage.contextKey()))
                     .findFirst().orElseThrow(() -> new IllegalStateException("执行轨迹缺少冻结节点上下文"));
             String engine = "UNKNOWN";
+            JsonNode frozenRule = null;
             for (var rule : snapshot.path("rules")) if (context.ruleId().equals(rule.path("id").asText())) {
-                engine = rule.path("ruleType").asText("UNKNOWN"); break;
+                engine = rule.path("ruleType").asText("UNKNOWN"); frozenRule = rule; break;
             }
             var result = stage.result();
             var node = nodes.addObject().put("nodeId", context.contextKey()).put("runIndex", round.runIndex())
@@ -48,6 +50,16 @@ final class RouteExecutionTrace {
                     .put("startedAt", stage.startedAt() == null ? null : stage.startedAt().toString());
             attach(node, "rawFinding", result.getFindingJson(), mapper);
             attach(node, "evidence", result.getEvidenceJson(), mapper);
+            if (frozenRule == null) throw new IllegalStateException("执行轨迹缺少冻结规则版本");
+            var source = new io.github.opensabre.iqc.finding.Finding.Source(context.contextKey(), engine,
+                    "rule:" + context.ruleId() + ":" + context.versionNo(), round.runIndex(), stage.inputHash());
+            JsonNode citations = null;
+            try { citations = result.getEvidenceJson() == null ? null : mapper.readTree(result.getEvidenceJson()); }
+            catch (com.fasterxml.jackson.core.JsonProcessingException exception) { citations = mapper.createObjectNode(); }
+            String identity = executionId + ":" + conversationId + ":" + context.contextKey() + ":" + round.runIndex();
+            var fact = io.github.opensabre.iqc.finding.LegacyFindingAdapter.adapt(hash(identity), frozenRule,
+                    result.getResultStatus(), stage.executed(), result.getReason(), citations, inputs, source);
+            node.set("findings", mapper.valueToTree(List.of(fact)));
         }
         return root;
     }

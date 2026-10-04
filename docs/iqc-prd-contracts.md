@@ -55,3 +55,25 @@
 复用现有 result-hierarchy API 与结果页面：新增安全解析 executionTraceJson 的纯函数和独立轨迹组件；按 runIndex 分组，展示节点/版本/状态/耗时/原始事实与证据。未经确认不要编辑后端拥有的文件。
 
 使用文本渲染 JSON、reason、引用，不使用 v-html；解析未知 schema 或无效 JSON 时显示不可用。原始/融合/人工结果明确区分，不能将此轨迹描述为通用流水线已上线。
+
+## 统一事实协议与语义目录（I1-B）
+
+轨迹新增 findingSchemaVersion=iqc-finding-v1；每个 node.findings 为 Finding 数组。字段 id/code/category/valueType/value/state/confidence/severity/reason/evidence/source。KNOWN 才有 typed value，UNKNOWN/CONFLICT/ERROR/NOT_EVALUATED 均无 canonical value。source 记录 node/engine/version/run/inputHash，证据引用具体会话消息并校验其原始引文。不会把跳过节点映射为 false。
+
+旧规则暂用 LEGACY_RULE:<ruleId>，value 为旧检测命中布尔值；不冒充跨引擎语义编码，也不改变既有评分标签。代码公开的新 FindingDefinition 用于显式绑定跨引擎语义，后续新 Pipeline 发布会冻结该定义。
+
+语义目录 API：
+
+| 方法 | 路径（前缀 /api/iqc/findings/catalog） | 请求 / 返回 | 独立资源编码 |
+|---|---|---|---|
+| GET | 集合 | current/size → IqcPage | iqc:finding:view |
+| GET | /{id} | FindingCatalog | iqc:finding:detail:view |
+| POST | 集合 | FindingDefinition → FindingCatalog | iqc:finding:manage |
+| PUT | /{id} | {expectedRevision,definition} → FindingCatalog | iqc:finding:update |
+| POST | /{id}/publish | {expectedRevision} → FindingCatalogVersion | iqc:finding:publish |
+| POST | /{id}/availability | {enabled} → FindingCatalog | iqc:finding:availability |
+| GET | /{id}/versions | 最近100个不可变版本 | iqc:finding:versions:view |
+
+FindingDefinition schemaVersion=iqc-finding-definition-v1，包含code/name/category/description/valueType/allowedValues/defaultSeverity/evidenceRequired/evidenceTypes。valueType 支持 BOOLEAN/STRING/NUMBER/ENUM/OBJECT；仅 ENUM 设置非空 allowedValues。HIGH/CRITICAL 要求证据；发布过的 code 不允许更改字段类型。草稿编辑使用 expectedRevision，事务行锁避免覆盖并行修改；发布同一修订幂等。
+
+后端 DDL V1.1.34，组织权限迁移另仓库 V20261004_01；API尚未部署，目录页面后续接入。当前 runtime 的融合和通用节点编排为已实现模块，尚未接入生产任务和方案发布，不代表通用 Pipeline 可从页面执行。
