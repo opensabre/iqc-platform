@@ -45,3 +45,9 @@ POST `/api/iqc/conversation-results/{id}/decision-revisions`：targetPipelineId�
 GET 同一路径返回该源结果最新100条重算记录。源任务数据范围和目标资产范围分别校验；原始融合与评分须可由原冻结政策再现，拒绝不一致快照。requestId 对当前主体幂等，不同内容拒绝；结果为 append-only iqc_decision_revision（V1.1.36），targetPolicyJson 冻结目标版本，projectionJson 包含原始/重算评分、融合理由及源摘要。原始检测结果及人工复核不覆盖，不自动替换报表当前结论。
 
 当前仅支持 Pipeline BOOLEAN 业务评分；旧 Scheme、标签、独立风险政策重算及结构化评分对比仍待扩展。前端已接入发布版本选择、重算请求及最近100条记录查看。权限 iqc:decision:recalculate / iqc:decision:history:view。
+
+## 配置页面
+
+前端 /pipelines 已编码：复用现有资产查询选择发布版本，支持节点顺序、条件、错误政策/备用节点、输入映射及输出校验、融合及Boolean评分映射；草稿未保存时禁止试跑/发布。复用现有会话选择、任务运行与任务选择组件；真实试跑发布仍由服务端校验。发布历史、启停、正式版本任务创建与幂等重试已接入，菜单需V20261004_06。vue-tsc/Vite构建通过，尚未浏览器和角色联调。
+
+下一复核改造已核对 BusinessItemReviewEvaluator/Service：其参数和验证目前绑定SchemeDefinition，Pipeline不能生成一个合成Scheme掩盖来源。应提取评分政策及冻结项目/来源验证边界，继续复用现有ResultReview轮次、权限、摘要和历史；Pipeline机器状态先依据冻结Finding/Fusion再现，人工覆盖单独计分。当前这项改造尚未实施。
