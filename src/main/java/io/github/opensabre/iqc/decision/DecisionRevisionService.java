@@ -1,0 +1,133 @@
+package io.github.opensabre.iqc.decision;
+
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.opensabre.iqc.decision.dao.DecisionRevisionMapper;
+import io.github.opensabre.iqc.decision.model.DecisionRevision;
+import io.github.opensabre.iqc.finding.Finding;
+import io.github.opensabre.iqc.fusion.FindingFusion;
+import io.github.opensabre.iqc.governance.IqcException;
+import io.github.opensabre.iqc.pipelineasset.*;
+import io.github.opensabre.iqc.pipelinebridge.*;
+import io.github.opensabre.iqc.result.dao.ConversationInspectionResultMapper;
+import io.github.opensabre.iqc.scoring.InspectionScoring;
+import io.github.opensabre.iqc.shared.IqcDataScope;
+import io.github.opensabre.iqc.task.dao.InspectionTaskMapper;
+import io.github.opensabre.iqc.task.model.InspectionTask;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
+import java.util.*;
+
+@Service
+@RequiredArgsConstructor
+public class DecisionRevisionService {
+    public record Projection(String schemaVersion, String sourceResultId, String sourceHash,
+            InspectionScoring.Result original, List<FindingFusion.Result> fusion,
+            List<InspectionScoring.Decision> decisions, InspectionScoring.Result recalculated) { }
+    private final DecisionRevisionMapper revisions;
+    private final ConversationInspectionResultMapper results;
+    private final InspectionTaskMapper tasks;
+    private final PipelineAssetService assets;
+    private final IqcDataScope scope;
+    private final ObjectMapper json;
+
+    @Transactional(isolation=Isolation.READ_COMMITTED)
+    public DecisionRevision create(String resultId, String targetPipelineId, int targetVersion,
+                                   String requestId, String reason) {
+        if (targetPipelineId == null || targetPipelineId.isBlank() || targetPipelineId.length() > 64 || targetVersion < 1
+                || requestId == null || !requestId.matches("[A-Za-z0-9_-]{16,64}")
+                || reason == null || reason.isBlank() || reason.trim().length() > 1000)
+            throw IqcException.invalidArgument("重算需要稳定请求标识和不超过1000字的原因");
+        String actor = scope.owner();
+        if (actor == null || actor.isBlank()) throw IqcException.accessDenied("重算必须登录");
+        var initial = results.selectById(resultId);
+        if (initial == null) throw IqcException.notFound("原始结果不存在");
+        authorize(tasks.selectById(initial.getTaskId()));
+        var task = tasks.selectOne(Wrappers.<InspectionTask>lambdaQuery()
+                .eq(InspectionTask::getId, initial.getTaskId()).last("FOR UPDATE"));
+        authorize(task);
+        String id = "dr-" + hash(List.of(actor, requestId)).substring(0,60);
+        String fingerprint = hash(List.of(resultId, targetPipelineId, targetVersion, reason.trim()));
+        var existing = revisions.selectById(id);
+        if (existing != null) {
+            if (!fingerprint.equals(existing.getRequestFingerprint()))
+                throw IqcException.invalidArgument("同一重算请求标识不能用于不同内容");
+            return existing;
+        }
+        if (!Set.of("SUCCEEDED","PARTIAL_FAILED","FAILED","CANCELLED").contains(task.getStatus()))
+            throw IqcException.invalidState("任务结束后才能重算政策");
+        var result = results.selectById(resultId);
+        if (result == null || !task.getId().equals(result.getTaskId()))
+            throw IqcException.invalidState("源结果已变化");
+        try {
+            var snapshot = json.readTree(task.getRuleSnapshotJson());
+            if (snapshot == null || !snapshot.isObject() || !snapshot.path("pipelineSnapshot").isObject())
+                throw IqcException.invalidArgument("当前重算仅支持流水线事实结果");
+            var marker = snapshot.path("pipelineSnapshot");
+            var release = json.treeToValue(marker.path("release"), PipelineRelease.class);
+            if (!hash(release).equals(marker.path("contentHash").asText()))
+                throw IqcException.invalidState("源流水线快照摘要不一致");
+            var trace = json.readValue(result.getExecutionTraceJson(), PipelineConversationEvaluator.Evaluation.class);
+            if (trace == null || trace.fusion() == null || trace.scoring() == null)
+                throw IqcException.invalidState("源执行轨迹不完整");
+            if (!"iqc-pipeline-execution-v1".equals(trace.schemaVersion()))
+                throw IqcException.invalidArgument("当前重算仅支持流水线事实结果");
+            var raw = new ArrayList<Finding>();
+            trace.fusion().forEach(value -> raw.addAll(value.rawFindings()));
+            var originalFusion = FindingFusion.fuse(raw,release.fusion());
+            var originalScore = PipelineDecisionEvaluator.evaluate(release.scoring(),release.items(),originalFusion);
+            if (!json.valueToTree(originalFusion).equals(json.valueToTree(trace.fusion()))
+                    || !json.valueToTree(originalScore).equals(json.valueToTree(trace.scoring()))
+                    || !json.valueToTree(originalScore).equals(json.readTree(result.getScoringResultJson()))
+                    || !originalScore.scoreStatus().name().equals(result.getScoreStatus())
+                    || (originalScore.finalScore() == null ? result.getFinalScore() != null
+                    : result.getFinalScore() == null || originalScore.finalScore().compareTo(result.getFinalScore()) != 0))
+                throw IqcException.invalidState("源事实或评分快照不一致");
+            var target = assets.publishedRelease(targetPipelineId,targetVersion);
+            var fusion = FindingFusion.fuse(raw,target.release().fusion());
+            var decisions = PipelineDecisionEvaluator.decisions(target.release().items(),fusion);
+            var score = InspectionScoring.evaluate(target.release().scoring(),decisions);
+            String sourceHash = hash(Arrays.asList(task.getRuleSnapshotJson(),result.getId(),
+                    result.getExecutionTraceJson(),result.getBusinessItemResultsJson(),result.getScoringResultJson()));
+            var projection = new Projection("iqc-decision-revision-v1",resultId,sourceHash,originalScore,fusion,decisions,score);
+            var saved = new DecisionRevision();
+            saved.setId(id); saved.setSourceResultId(resultId); saved.setTaskId(task.getId());
+            saved.setSourceHash(sourceHash); saved.setRequestFingerprint(fingerprint);
+            saved.setTargetPolicyJson(json.writeValueAsString(target));
+            saved.setProjectionJson(json.writeValueAsString(projection)); saved.setReason(reason.trim());
+            saved.setCreatedBy(actor); saved.setOwnerGroupId(task.getOwnerGroupId());
+            try { revisions.insert(saved); }
+            catch (org.springframework.dao.DuplicateKeyException concurrent) {
+                var winner = revisions.selectOne(Wrappers.<DecisionRevision>lambdaQuery()
+                        .eq(DecisionRevision::getId,id).last("FOR UPDATE"));
+                if (winner == null || !fingerprint.equals(winner.getRequestFingerprint()))
+                    throw IqcException.invalidArgument("同一重算请求标识不能用于不同内容");
+                return winner;
+            }
+            return saved;
+        } catch (com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException ex) {
+            throw IqcException.invalidState("重算事实或政策快照无效");
+        }
+    }
+
+    @Transactional(readOnly=true)
+    public List<DecisionRevision> history(String resultId) {
+        var result = results.selectById(resultId);
+        if (result == null) throw IqcException.notFound("原始结果不存在");
+        authorize(tasks.selectById(result.getTaskId()));
+        return revisions.selectList(Wrappers.<DecisionRevision>lambdaQuery()
+                .eq(DecisionRevision::getSourceResultId,resultId).orderByDesc(DecisionRevision::getCreatedTime)
+                .orderByDesc(DecisionRevision::getId).last("LIMIT 100"));
+    }
+
+    private void authorize(InspectionTask task) {
+        if (task == null || !scope.canView(task.getCreatedBy(),task.getOwnerGroupId()))
+            throw IqcException.accessDenied("无权访问重算源结果");
+    }
+    private String hash(Object value) {
+        try { return PipelineAssetService.hash(json.writeValueAsString(value)); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException ex) { throw IqcException.invalidState("重算快照无法序列化"); }
+    }
+}

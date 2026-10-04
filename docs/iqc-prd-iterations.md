@@ -39,3 +39,7 @@
 下一实施批次：提取 InspectionExecutionService.evaluateItemRouteStage 的检测适配边界供旧路线和 EngineAdapter 共用，保留主体与逐字证据验证；在 InspectionTaskService.createBatchWithSnapshot 上增加 Pipeline 快照任务创建入口，同步 queue/run/resume 三个验证点，processConversation 分支复用完整会话与TaskItem。新流水线资产与发布冻结需引用 FindingCatalogVersion、RuleVersion、AgentVersion；无需创建重复 Task/Execution 主表。此处是待办，不代表当前代码已完成生产接入。
 
 2026-10-04 I2 生产接入：新增独立 Pipeline 草稿/不可变版本与 V1.1.35，冻结已有规则、Agent 与 Finding 版本；真实草稿试跑成功且结果确认后可发布。复用现有任务/执行/会话结果与消息检查点，接入 queue/run/resume 快照和可用性校验、执行租约防护、节点间心跳、逐字引文验证与业务评分映射。已发布任务支持 requestId 幂等。`mvn -o -q -DskipTests test-compile` 成功，仅编译现有测试源码，没有执行测试。未运行迁移、真实模型或部署；试跑门禁不等同金标评测门禁。策略重算、Pipeline 前端和 I3–I7 尚未完成。
+
+2026-10-04 I2 决策重算：提取生产共用 PipelineDecisionEvaluator；新增基于保存的原始事实、已发布融合/映射/评分政策的不可覆盖重算记录及API（V1.1.36）。源结果与人工复核保留，新增政策需要的缺失事实保持待定。不调用检测或动作。旧方案、标签与独立风险政策重算、前端对比和运行验收仍待完成。
+
+本批验证：`mvn -o -q -DskipTests test-compile` 与最终 `mvn -o -q -DskipTests compile` 成功；仅编译，没有执行测试或数据库迁移，尚未部署。

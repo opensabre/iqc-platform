@@ -37,3 +37,11 @@ release.schemaVersion 为 `iqc-pipeline-release-v1`，包含 pipeline、fusion�
 ## 数据与验证
 
 新增 V1.1.35 仅承担 Pipeline 资产版本；复用现有任务、执行、结果表。组织资源另需 V20261004_01 和 V20261004_02 迁移。后端及现有测试源码编译通过；未执行自动化测试、迁移或端到端运行，未部署。
+
+## 基于事实的政策重算
+
+POST `/api/iqc/conversation-results/{id}/decision-revisions`：targetPipelineId、targetVersion、requestId（16–64位字母数字下划线短横线）、reason。使用指定已发布版本的 fusion/items/scoring，将原结果保存的全部原始 Finding 重新融合和评分；不执行目标版本的检测节点，不调用模型，不发业务动作。目标新增事实但源数据不存在时保留 NOT_EVALUATED/PENDING，不能假定通过。
+
+GET 同一路径返回该源结果最新100条重算记录。源任务数据范围和目标资产范围分别校验；原始融合与评分须可由原冻结政策再现，拒绝不一致快照。requestId 对当前主体幂等，不同内容拒绝；结果为 append-only iqc_decision_revision（V1.1.36），targetPolicyJson 冻结目标版本，projectionJson 包含原始/重算评分、融合理由及源摘要。原始检测结果及人工复核不覆盖，不自动替换报表当前结论。
+
+当前仅支持 Pipeline BOOLEAN 业务评分；旧 Scheme、标签、独立风险政策重算和前端对比仍待扩展。权限 iqc:decision:recalculate / iqc:decision:history:view。
