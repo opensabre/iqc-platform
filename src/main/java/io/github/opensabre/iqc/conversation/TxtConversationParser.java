@@ -88,7 +88,7 @@ public class TxtConversationParser {
                 continue;
             }
 
-            messages.add(new ConversationMessageDraft(sequence, speakerRole, relativeTime, message, rawLine, lineNumber));
+            messages.add(new ConversationMessageDraft(sequence, ConversationSpeakerRole.canonical(speakerRole), relativeTime, message, rawLine, lineNumber));
             previousSequence = sequence;
         }
         return new ConversationParseResult(List.copyOf(messages), List.copyOf(errors), ignoredBlankLines);

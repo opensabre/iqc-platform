@@ -13,7 +13,13 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
                                  String primaryModelProfileId, List<String> fallbackModelProfileIds,
                                  List<String> mcpServerIds, List<String> skillIds, AssetSnapshots assetSnapshots,
                                  String ruleSetId) {
-    public static final String CURRENT_SCHEMA = "2.0";
+    public static final String CURRENT_SCHEMA = "3.0";
+    public static final String CAPABILITY_SCHEMA = CURRENT_SCHEMA;
+
+    /** Both managed-asset schemas pin models and tools; schema 3 deliberately excludes task policy. */
+    public static boolean usesManagedAssets(String schema) {
+        return "2.0".equals(schema) || CAPABILITY_SCHEMA.equals(schema);
+    }
 
     /** Backward-compatible constructor for legacy callers that predate explicit execution modes. */
     public AgentConfiguration(String schemaVersion, String systemPrompt, String primaryModel,
@@ -24,7 +30,7 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
                 primaryModelProfileId, fallbackModelProfileIds, mcpServerIds, skillIds, assetSnapshots, null);
     }
 
-    /** Returns a usable baseline for new Agents without exposing provider credentials. */
+    /** Preserves defaults for legacy callers omitting configuration; new clients explicitly send schema 3. */
     public static AgentConfiguration defaults() {
         return new AgentConfiguration("1.0", "RULE_ONLY",
                 "你是专业的客服质检 Agent。严格依据已发布规则判断，输出可追溯的理由和证据。",
@@ -34,13 +40,15 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
 
     /** Validates cross-field references and bounds before a configuration enters version history. */
     public AgentConfiguration validated() {
-        if (!("1.0".equals(schemaVersion) || CURRENT_SCHEMA.equals(schemaVersion))) throw IqcException.invalidArgument("不支持的 Agent 配置版本: " + schemaVersion);
+        if (!("1.0".equals(schemaVersion) || usesManagedAssets(schemaVersion))) throw IqcException.invalidArgument("不支持的 Agent 配置版本: " + schemaVersion);
+        if (CAPABILITY_SCHEMA.equals(schemaVersion) && (mode != null || ruleSetId != null))
+            throw IqcException.invalidArgument("新版 Agent 只配置 LLM 能力，质检模式和规则集应配置在任务或业务方案中");
         if (mode != null && !Set.of("RULE_ONLY", "RULE_THEN_LLM", "LLM_THEN_RULE", "AGENT_LLM").contains(mode.trim().toUpperCase()))
             throw IqcException.invalidArgument("不支持的质检模式: " + mode);
         boolean ruleOnly = "RULE_ONLY".equalsIgnoreCase(mode);
         if (!ruleOnly && (systemPrompt == null || systemPrompt.isBlank())) throw IqcException.invalidArgument("默认提示词不能为空");
         if (systemPrompt != null && systemPrompt.length() > 8000) throw IqcException.invalidArgument("默认提示词不能超过 8000 字符");
-        if (CURRENT_SCHEMA.equals(schemaVersion)) {
+        if (usesManagedAssets(schemaVersion)) {
             if (ruleOnly && blank(ruleSetId)) throw IqcException.invalidArgument("普通规则 Agent 必须选择规则集");
             if (!ruleOnly && blank(primaryModelProfileId)) throw IqcException.invalidArgument("当前质检模式必须选择主模型配置");
             ensureUnique(fallbackModelProfileIds, "备用模型"); ensureUnique(mcpServerIds, "MCP"); ensureUnique(skillIds, "Skill");

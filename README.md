@@ -5,8 +5,7 @@ IQC 质检业务服务，基于 `opensabre-framework` Starter 组合开发。
 ## 数据模型
 
 - [表结构与 ER 图](docs/data-model.md)
-- [完整建库脚本](src/main/resources/db/iqc-platform-ddl.sql)
-- 数据库增量变更位于 `src/main/resources/db/migration/mysql/`
+- 数据库基线与增量迁移位于 `src/main/resources/db/migration/mysql/`
 
 ## 本地验证
 
@@ -16,9 +15,9 @@ mvn -DskipTests package
 mvn -DskipTests -Djib.to.image=iqc-platform:local jib:dockerBuild
 ```
 
-业务表结构见 `src/main/resources/db/iqc-platform-ddl.sql`，部署到 MySQL 前先创建 `iqc_platform` schema 并执行该脚本；已有环境由 Flyway 按顺序执行尚未应用的正式迁移（当前至 `V1.1.24__ddl_add_label_domain.sql`）。平台审计、限次、计次、字典、错误码和资源注册由 OpenSabre Framework/base-sysadmin 提供，IQC 只声明业务使用场景。TXT 会话上传默认限制 20 MiB，并由后端强制校验 `.txt` 扩展名和大小。
+业务表结构以 `src/main/resources/db/migration/mysql/` 中的 Flyway 脚本为准；新库由 `base-k8s` 创建 `iqc_platform` schema 和迁移账号，再运行独立 Flyway 迁移，已有环境由 Flyway 执行尚未应用的版本迁移。平台审计、限次、计次、字典、错误码和资源注册由 OpenSabre Framework/base-sysadmin 提供，IQC 只声明业务使用场景。TXT 会话上传默认限制 20 MiB，并由后端强制校验 `.txt` 扩展名和大小。
 
-独立前端的 OAuth2 registration 使用 `iqc-platform-local`，授权服务需执行 `base-authorization/src/main/resources/db/migration/mysql/V20260822_01__add_iqc_platform_local_oauth2_client.sql`；网关使用同名 registration 并将 `/api/iqc/**` 转发到 `lb://iqc-platform`。
+独立前端的 OAuth2 registration 使用 `iqc-platform-local`，授权服务需执行 `base-authorization/src/main/resources/db/migration/mysql/history/V20260822_01__add_iqc_platform_local_oauth2_client.sql`；网关使用同名 registration 并将 `/api/iqc/**` 转发到 `lb://iqc-platform`。
 
 ## 运行配置
 
@@ -28,7 +27,7 @@ mvn -DskipTests -Djib.to.image=iqc-platform:local jib:dockerBuild
 - `GOVERNANCE_USAGE_TRANSPORT`：使用量计次传输方式
 - `opensabre.governance.registration-token`：Nacos 公共配置中的字典/错误码/资源注册令牌，支持 `ENC(...)`
 
-TXT 导入接口会保存会话与消息，并以文件 SHA-256 指纹保证重复提交幂等；质检任务执行时保存 Agent/规则快照，结果按 TaskItem 和执行 attempt 追踪。数据范围通过 `opensabre-starter-rpc` 调用 `base-organization` 获取当前用户 `groupId`，IQC 只保存业务归属快照。
+TXT 导入接口会保存会话与消息，并以文件 SHA-256 指纹保证重复提交幂等。说话人角色支持 `agent`、`user` 和原有 `customer`；“客服/坐席”归一为 `agent`，“客户/用户”归一为 `user`，未知角色保留原值。TXT 原始行和文件指纹不改；旧会话只在任务执行内存中归一，不回填数据库。质检任务执行时保存 Agent/规则快照，结果按 TaskItem 和执行 attempt 追踪。数据范围通过 `opensabre-starter-rpc` 调用 `base-organization` 获取当前用户 `groupId`，IQC 只保存业务归属快照。
 
 Agent 支持 `RULE_ONLY`、`RULE_THEN_LLM` 和 `AGENT_LLM` 三种质检模式。规则+LLM 模式先运行本地规则，仅对命中候选调用模型，并把本地候选结果传给 LLM 复核；未配置模式的历史 Agent 保持兼容执行。
 

@@ -19,6 +19,21 @@ class SnapshotMcpToolProviderTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void capabilityAgentUsesAllowlistedToolsWithoutGlobalMode() throws Exception {
+        McpSyncClient client = mock(McpSyncClient.class);
+        when(client.listTools()).thenReturn(new McpSchema.ListToolsResult(List.of(), null));
+        SnapshotMcpToolProvider provider = new SnapshotMcpToolProvider(objectMapper, reference -> "token") {
+            @Override protected McpSyncClient createClient(JsonNode server) { return client; }
+        };
+        var snapshot = snapshot("RULE_THEN_LLM");
+        var config = (com.fasterxml.jackson.databind.node.ObjectNode) snapshot.path("configJson");
+        config.put("schemaVersion", "3.0"); config.remove("mode");
+        try (var session = provider.open(snapshot)) { assertEquals(0, session.callbacks().length); }
+        verify(client).initialize();
+        verify(client).close();
+    }
+
+    @Test
     void exposesOnlyAllowedToolsAndForwardsCalls() throws Exception {
         McpSyncClient client = mock(McpSyncClient.class);
         McpSchema.JsonSchema schema = new McpSchema.JsonSchema("object",

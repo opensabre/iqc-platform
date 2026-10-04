@@ -70,7 +70,7 @@ public class ConversationImportService {
             ConversationMessage message = new ConversationMessage();
             message.setConversationId(conversation.getId());
             message.setSequenceNo(draft.sequence());
-            message.setSpeakerRole(draft.speakerRole());
+            message.setSpeakerRole(ConversationSpeakerRole.canonical(draft.speakerRole()));
             message.setRelativeTime(draft.relativeTime());
             message.setContent(draft.content());
             message.setRawLine(draft.rawLine());

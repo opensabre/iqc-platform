@@ -177,7 +177,7 @@ public class QualityAgentService {
     private String snapshotConfiguration(String value) {
         try {
             AgentConfiguration configuration = objectMapper.readValue(value, AgentConfiguration.class).validated();
-            if (!AgentConfiguration.CURRENT_SCHEMA.equals(configuration.schemaVersion())) return value;
+            if (!AgentConfiguration.usesManagedAssets(configuration.schemaVersion())) return value;
             return objectMapper.writeValueAsString(configuration.withSnapshots(assetReferenceValidator.snapshot(configuration)));
         } catch (IqcException exception) { throw exception; }
         catch (Exception exception) { throw IqcException.invalidArgument("Agent 资产快照生成失败"); }

@@ -67,6 +67,7 @@ public class QualityOperationsService {
     @Transactional
     public ResultReview requestReview(String resultId, String comment) {
         ResultContext context = requireResult(resultId);
+        if (context.result().getScore() == null) throw IqcException.invalidState("业务方案检测结果不支持按消息改分，请使用业务质检项复核");
         ResultReview existing = reviewMapper.selectOne(Wrappers.<ResultReview>lambdaQuery().eq(ResultReview::getResultId, resultId));
         if (existing != null) return existing;
         InspectionResult result = context.result();
@@ -82,6 +83,7 @@ public class QualityOperationsService {
                                      String finalRiskLevel, String comment) {
         ResultReview review = reviewMapper.selectById(reviewId);
         if (review == null) throw IqcException.notFound("复核记录不存在: " + reviewId);
+        if (!"MESSAGE".equals(review.getTargetType())) throw IqcException.invalidArgument("业务复核不能通过消息改分接口处理");
         requireResult(review.getResultId());
         String normalized = upper(decision);
         if (!REVIEW_DECISIONS.contains(normalized)) throw IqcException.invalidArgument("复核决定无效");
@@ -98,7 +100,8 @@ public class QualityOperationsService {
     }
 
     public List<ResultReview> reviews(String status) {
-        var query = Wrappers.<ResultReview>lambdaQuery().eq(status != null && !status.isBlank(), ResultReview::getStatus, upper(status))
+        var query = Wrappers.<ResultReview>lambdaQuery().eq(ResultReview::getTargetType, "MESSAGE")
+                .eq(status != null && !status.isBlank(), ResultReview::getStatus, upper(status))
                 .orderByDesc(ResultReview::getCreatedTime);
         if (!dataScope.canViewAll()) query.and(q -> q.eq(ResultReview::getCreatedBy, dataScope.owner())
                 .or(dataScope.groupId() != null, nested -> nested.eq(ResultReview::getOwnerGroupId, dataScope.groupId())));

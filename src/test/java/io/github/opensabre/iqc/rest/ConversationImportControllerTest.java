@@ -102,6 +102,24 @@ class ConversationImportControllerTest {
         assertThat((List<?>) result.get("items")).hasSize(2);
     }
 
+    @Test
+    void apiIngestCanonicalizesKnownRolesBeforePersistence() {
+        ConversationImportService importService = mock(ConversationImportService.class);
+        UsageCounterRecorder recorder = mock(UsageCounterRecorder.class);
+        Conversation conversation = new Conversation(); conversation.setId("c1"); conversation.setStatus("IMPORTED");
+        when(importService.persist(any(String.class), any(String.class), any(ConversationParseResult.class),
+                isNull(), eq("API"), isNull(), any(io.github.opensabre.iqc.conversation.ConversationMetadata.class))).thenReturn(conversation);
+        ConversationImportController controller = new ConversationImportController(new TxtConversationParser(), importService, recorder, uploadProperties());
+
+        controller.ingest(new ConversationImportController.ConversationIngestRequest(null, null, null,
+                List.of(new ConversationImportController.IngestMessage("客户", "00:00:01", "我没有房子"))));
+
+        var captor = org.mockito.ArgumentCaptor.forClass(ConversationParseResult.class);
+        verify(importService).persist(any(String.class), any(String.class), captor.capture(), isNull(), eq("API"), isNull(),
+                any(io.github.opensabre.iqc.conversation.ConversationMetadata.class));
+        assertThat(captor.getValue().messages().getFirst().speakerRole()).isEqualTo("user");
+    }
+
     private ConversationUploadProperties uploadProperties() {
         return new ConversationUploadProperties();
     }

@@ -9,6 +9,7 @@ import io.github.opensabre.governance.usage.UsageRecord;
 import io.github.opensabre.boot.annotations.ResourcePermission;
 import io.github.opensabre.iqc.conversation.ConversationParseResult;
 import io.github.opensabre.iqc.conversation.ConversationImportService;
+import io.github.opensabre.iqc.conversation.ConversationSpeakerRole;
 import io.github.opensabre.iqc.conversation.ConversationUploadProperties;
 import io.github.opensabre.iqc.conversation.TxtConversationParser;
 import io.github.opensabre.iqc.governance.IqcException;
@@ -197,7 +198,7 @@ public class ConversationImportController {
             try { time = item.time() == null || item.time().isBlank() ? LocalTime.MIDNIGHT.plusSeconds(index) : LocalTime.parse(item.time()); }
             catch (RuntimeException exception) { throw IqcException.invalidArgument("第 " + (index + 1) + " 条消息 time 格式应为 HH:mm:ss"); }
             canonical.append('|').append(item.role()).append('|').append(time).append('|').append(item.content());
-            messages.add(new ConversationMessageDraft(index + 1, item.role().trim(), time, item.content().trim(), item.content(), index + 1));
+            messages.add(new ConversationMessageDraft(index + 1, ConversationSpeakerRole.canonical(item.role()), time, item.content().trim(), item.content(), index + 1));
         }
         ConversationMetadata metadata = request.metadata();
         if (metadata != null) canonical.append('|').append(metadata.fingerprintPart());

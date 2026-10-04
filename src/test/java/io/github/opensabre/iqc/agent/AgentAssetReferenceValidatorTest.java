@@ -13,6 +13,23 @@ import static org.mockito.Mockito.*;
 
 class AgentAssetReferenceValidatorTest {
     @Test
+    void capabilitySchemaPinsSkillsWithoutAgentMode() {
+        IqcModelProfileMapper models = mock(IqcModelProfileMapper.class);
+        IqcSkillMapper skills = mock(IqcSkillMapper.class);
+        IqcModelProfile model = new IqcModelProfile(); model.setId("m1"); model.setStatus("ENABLED"); model.setVersionNo(4);
+        var skill = new io.github.opensabre.iqc.skill.model.IqcSkill();
+        skill.setId("s1"); skill.setStatus("ENABLED"); skill.setVersionNo(7); skill.setInstructions("fact extraction");
+        when(models.selectById("m1")).thenReturn(model);
+        when(skills.selectById("s1")).thenReturn(skill);
+        var config = new AgentConfiguration("3.0", null, "prompt", null, null, null, null,
+                "m1", List.of(), List.of(), List.of("s1"), null, null);
+        var snapshot = new AgentAssetReferenceValidator(models, mock(IqcMcpServerMapper.class), skills).snapshot(config);
+        assertThat(snapshot.primaryModel().versionNo()).isEqualTo(4);
+        assertThat(snapshot.skills()).hasSize(1);
+        assertThat(snapshot.skills().getFirst().versionNo()).isEqualTo(7);
+    }
+
+    @Test
     void rejectsDisabledPrimaryModel() {
         IqcModelProfileMapper models=mock(IqcModelProfileMapper.class);
         IqcModelProfile profile=new IqcModelProfile(); profile.setStatus("DISABLED");

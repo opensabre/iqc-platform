@@ -21,6 +21,19 @@ import static org.mockito.Mockito.when;
 class SpringAiLlmQualityProviderTest {
 
     @Test
+    void capabilitySchemaReadsOnlyPublishedSkillInstructions() throws Exception {
+        var provider = new SpringAiLlmQualityProvider(mock(ChatModel.class), null, new ObjectMapper(),
+                mock(GovernanceRateLimiter.class), mock(UsageCounterRecorder.class), new LlmQualityProperties());
+        var agent = new ObjectMapper().readTree("""
+                {"configJson":{"schemaVersion":"3.0","systemPrompt":"判断事实",
+                  "skills":[{"name":"旧指令","instructions":"不可使用的旧值","enabled":true}],
+                  "assetSnapshots":{"skills":[{"name":"画像识别","instructions":"证据不足标记未知","versionNo":4}]}}}
+                """);
+        String prompt = org.springframework.test.util.ReflectionTestUtils.invokeMethod(provider, "agentSystemPrompt", agent);
+        assertThat(prompt).contains("画像识别", "证据不足标记未知").doesNotContain("不可使用的旧值");
+    }
+
+    @Test
     void evaluatesStructuredResponseAndSanitizesSensitiveInput() throws Exception {
         ChatModel chatModel = mock(ChatModel.class);
         GovernanceRateLimiter rateLimiter = mock(GovernanceRateLimiter.class);

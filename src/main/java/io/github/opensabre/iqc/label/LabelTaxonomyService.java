@@ -145,6 +145,16 @@ public class LabelTaxonomyService {
         try {
             var config = objectMapper.readTree(configJson);
             if (!config.isObject()) throw new IllegalArgumentException();
+            var hitValues = config.get("onRuleHit");
+            if (hitValues != null) {
+                if (!hitValues.isObject() || hitValues.isEmpty() || hitValues.size() > 100) throw new IllegalArgumentException();
+                var entries = hitValues.fields();
+                while (entries.hasNext()) {
+                    var entry = entries.next();
+                    if (entry.getKey().isBlank() || !LabelFactEvaluator.validValue(type, entry.getValue()))
+                        throw new IllegalArgumentException();
+                }
+            }
             var value = config.get("defaultValue");
             if (value == null || value.isNull()) return;
             switch (type) {

@@ -18,6 +18,14 @@ class LabelResultServiceTest {
     private final LabelResultService service = new LabelResultService(mapper, new ObjectMapper());
 
     @Test
+    void coverageProtocolCannotFallThroughToLegacyHitOnlyProjection() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.materialize(new ConversationInspectionResult(),
+                "{\"schemaVersion\":\"2.0\",\"labels\":[]}", List.of()))
+                .hasRootCauseMessage("标签联合输出尚未接入结果链路");
+        verifyNoInteractions(mapper);
+    }
+
+    @Test
     void projectsHitRuleOnceAndKeepsCanonicalRuleResultReference() {
         ConversationInspectionResult conversation = new ConversationInspectionResult(); conversation.setId("conversation-result-1");
         RuleInspectionResult hit = rule("rule-1", "rule-result-1", "HIT");

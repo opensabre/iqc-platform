@@ -45,30 +45,24 @@ public class InspectionTaskController {
         return taskService.get(id);
     }
 
+    @GetMapping("/{id}/executions")
+    @ResourcePermission(code = "iqc:task:view", name = "查看任务执行记录", type = "iqc", description = "按任务可见范围查看执行轮次")
+    @RateLimit(sceneCode = "iqc-task-execution-query", maxCount = 60, period = 60)
+    public List<InspectionTaskService.TaskRunSummary> executions(@PathVariable String id) {
+        return taskService.executions(id);
+    }
+
     @PostMapping
     @ResourcePermission(code = "iqc:task:create", name = "创建质检任务", type = "iqc", description = "创建质检任务")
     @Audit(operationType = OperationType.CREATE, description = "创建 IQC 质检任务", module = "IQC_TASK")
     @RateLimit(sceneCode = "iqc-task-create", maxCount = 20, period = 60)
     public InspectionTask create(@RequestBody CreateTaskRequest request) {
-        if ("SAMPLE".equalsIgnoreCase(request.taskType())) {
-            InspectionTask task = request.labelSelection() == null
-                    ? taskService.createSampled(request.name(), request.selectionFilter(), request.sampleSize() == null ? 100 : request.sampleSize(), request.sampleSeed(), request.agentId(), request.ruleSetId(), request.ruleIds(), request.concurrencyLimit())
-                    : taskService.createSampledWithLabels(request.name(), request.selectionFilter(), request.sampleSize() == null ? 100 : request.sampleSize(), request.sampleSeed(), request.agentId(), request.labelSelection(), request.concurrencyLimit(), request.labelOptions());
-            usageCounterRecorder.record(new UsageRecord("inspection-task:create:" + task.getId(), null, "iqc-platform", "INSPECTION_TASK", task.getId(), "CREATE", UsageOutcome.SUCCESS));
-            return task;
-        }
-        if ("SCHEDULED".equalsIgnoreCase(request.taskType())) {
-            InspectionTask task = request.labelSelection() == null
-                    ? taskService.createScheduled(request.name(), request.selectionFilter(), parseScheduledTime(request.scheduledTime()), request.agentId(), request.ruleSetId(), request.ruleIds(), request.concurrencyLimit())
-                    : taskService.createScheduledWithLabels(request.name(), request.selectionFilter(), parseScheduledTime(request.scheduledTime()), request.agentId(), request.labelSelection(), request.concurrencyLimit(), request.labelOptions());
-            usageCounterRecorder.record(new UsageRecord("inspection-task:create:" + task.getId(), null, "iqc-platform", "INSPECTION_TASK", task.getId(), "CREATE", UsageOutcome.SUCCESS));
-            return task;
-        }
         List<String> conversationIds = request.conversationIds() == null || request.conversationIds().isEmpty()
                 ? (request.conversationId() == null ? List.of() : List.of(request.conversationId())) : request.conversationIds();
-        InspectionTask task = request.labelSelection() == null
-                ? taskService.createBatch(request.name(), conversationIds, request.agentId(), request.ruleSetId(), request.ruleIds(), request.concurrencyLimit())
-                : taskService.createBatchWithLabels(request.name(), conversationIds, request.agentId(), request.labelSelection(), request.concurrencyLimit(), request.labelOptions());
+        InspectionTask task = taskService.createConfigured(request.name(), request.taskType(), conversationIds,
+                request.selectionFilter(), "SCHEDULED".equalsIgnoreCase(request.taskType()) ? parseScheduledTime(request.scheduledTime()) : null,
+                request.sampleSize(), request.sampleSeed(), request.agentId(), request.ruleSetId(), request.ruleIds(),
+                request.concurrencyLimit(), request.labelSelection(), request.labelOptions(), request.executionMode());
         usageCounterRecorder.record(new UsageRecord(
                 "inspection-task:create:" + task.getId(), null, "iqc-platform", "INSPECTION_TASK",
                 task.getId(), "CREATE", UsageOutcome.SUCCESS));
@@ -114,5 +108,7 @@ public class InspectionTaskController {
                                     String ruleSetId, List<String> ruleIds, Integer concurrencyLimit,
                                     Integer sampleSize, String sampleSeed,
                                     LabelResolutionService.LabelSelection labelSelection,
-                                    InspectionTaskService.LabelExecutionOptions labelOptions) { }
+                                    InspectionTaskService.LabelExecutionOptions labelOptions,
+                                    @io.swagger.v3.oas.annotations.media.Schema(description = "任务执行策略；省略保留旧 Agent 模式。RULE_ONLY 无需 Agent。", allowableValues = {"RULE_ONLY", "RULE_THEN_LLM", "LLM_THEN_RULE", "AGENT_LLM", "INDEPENDENT"})
+                                    String executionMode) { }
 }

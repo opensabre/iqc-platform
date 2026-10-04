@@ -19,6 +19,30 @@ public class LabelResolutionService {
     private final LabelCollectionMemberMapper memberMapper;
     private final IqcDataScope dataScope;
 
+    /** Freezes exact currently published label versions; old versions must come from an existing release snapshot. */
+    public ResolvedSelection resolveVersions(List<LabelReference> references) {
+        if (references == null || references.isEmpty() || references.size() > 200)
+            throw IqcException.invalidArgument("方案标签引用必须为 1 到 200 项");
+        var expected = new LinkedHashMap<String, Integer>();
+        for (var reference : references) {
+            if (reference == null || reference.id() == null || reference.id().isBlank() || reference.versionNo() < 1
+                    || expected.putIfAbsent(reference.id(), reference.versionNo()) != null)
+                throw IqcException.invalidArgument("方案标签引用无效或重复");
+        }
+        var resolved = resolve(new LabelSelection(null, null, List.copyOf(expected.keySet()), null));
+        for (var label : resolved.labels()) {
+            if (!Objects.equals(expected.get(label.id()), label.versionNo()))
+                throw IqcException.invalidState("标签版本已变化，请重新选择并试跑: " + label.id());
+            for (var binding : label.bindings()) {
+                if (binding.getRuleId() == null || binding.getRuleId().isBlank()
+                        || binding.getRuleVersionNo() == null || binding.getRuleVersionNo() < 1)
+                    throw IqcException.invalidState("标签绑定缺少明确规则版本: " + label.id());
+            }
+        }
+        // A distinct protocol prevents coverage-aware outputs from being interpreted as legacy hit-only labels.
+        return new ResolvedSelection("2.0", resolved.labels(), resolved.ruleIds());
+    }
+
     public ResolvedSelection resolve(LabelSelection selection) {
         if (selection == null) throw IqcException.invalidArgument("标签选择不能为空");
         LinkedHashSet<String> categoryIds = clean(selection.categoryIds());
@@ -59,6 +83,7 @@ public class LabelResolutionService {
     }
     private LinkedHashSet<String> clean(List<String> values) { LinkedHashSet<String> result = new LinkedHashSet<>(); if (values != null) values.stream().filter(v -> v != null && !v.isBlank()).map(String::trim).forEach(result::add); return result; }
     public record LabelSelection(List<String> categoryIds, List<String> groupIds, List<String> labelIds, List<String> collectionIds) { }
+    public record LabelReference(String id, int versionNo) { }
     public record ResolvedSelection(String schemaVersion, List<LabelSnapshot> labels, List<String> ruleIds) { }
     public record LabelSnapshot(String id, Integer versionNo, String name, String code, String groupId, String groupName,
                                 String groupCode, String categoryId, String categoryName, boolean groupAllowAutoExpand, String targetRole,

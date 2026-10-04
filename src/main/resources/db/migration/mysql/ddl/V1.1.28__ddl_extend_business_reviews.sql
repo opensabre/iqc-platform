@@ -1,0 +1,10 @@
+ALTER TABLE iqc_result_review MODIFY COLUMN result_id varchar(64) NULL;
+ALTER TABLE iqc_result_review ADD COLUMN target_type varchar(32) NOT NULL DEFAULT 'MESSAGE';
+ALTER TABLE iqc_result_review ADD COLUMN business_result_id varchar(64) NULL;
+ALTER TABLE iqc_result_review ADD COLUMN review_revision int NULL;
+ALTER TABLE iqc_result_review ADD COLUMN source_hash varchar(64) NULL;
+ALTER TABLE iqc_result_review ADD COLUMN request_fingerprint varchar(64) NULL;
+ALTER TABLE iqc_result_review ADD COLUMN request_comment varchar(1000) NULL;
+ALTER TABLE iqc_result_review ADD COLUMN decision_fingerprint varchar(64) NULL;
+ALTER TABLE iqc_result_review ADD COLUMN reviewed_result_json longtext NULL;
+CREATE UNIQUE INDEX uk_iqc_review_business_revision ON iqc_result_review (business_result_id, review_revision);

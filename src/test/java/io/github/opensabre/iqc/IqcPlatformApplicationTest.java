@@ -50,7 +50,7 @@ import static org.mockito.Mockito.when;
         "jetcache.remote.shortTime.type=mock"
 })
 @Import(IqcPlatformApplicationTest.InternalTokenNacosTestConfiguration.class)
-class IqcPlatformApplicationTest {
+public class IqcPlatformApplicationTest {
     @Autowired
     private ApplicationContext applicationContext;
 
@@ -101,7 +101,7 @@ class IqcPlatformApplicationTest {
     }
 
     @TestConfiguration(proxyBeanMethods = false)
-    static class InternalTokenNacosTestConfiguration {
+    public static class InternalTokenNacosTestConfiguration {
 
         @Bean
         NacosConfigManager nacosConfigManager() {
