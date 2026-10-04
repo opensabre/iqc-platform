@@ -168,6 +168,8 @@ public class HierarchicalResultService {
                     .map(rule -> rule.path("riskLevel").asText("MEDIUM")).max(Comparator.comparingInt(this::riskOrder)).orElse("LOW"));
             conversation.setReason(incomplete ? "部分业务质检项尚未形成确定结论" : "已按方案版本中的独立评分政策计算");
         }
+        if (routed != null) conversation.setExecutionTraceJson(write(RouteExecutionTrace.build(
+                task, executionId, conversationId, snapshot, messages, routed.plan(), routed.run(), objectMapper)));
         conversationMapper.updateById(conversation);
         labelResultService.materialize(conversation, task.getLabelScopeSnapshotJson(), ruleResults, messages);
         return conversation;
