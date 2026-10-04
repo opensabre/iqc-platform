@@ -33,3 +33,7 @@
 2026-10-04 I1-A：实现现有路线原始多轮节点轨迹，记录状态、版本、输入 hash、单调耗时，事务内写入现有会话结果。通过现有 result-hierarchy 接口附加 executionTraceJson，新增 V1.1.33。`mvn -q -DskipTests compile` 成功（JDK 25 编译目标 21）。尚未执行自动化测试、MySQL 迁移或真实模型验收，尚未部署；I1 其余交付仍待实施。前端契约已落盘，另一位开发者未确认领取。
 
 2026-10-04 I1-B / I2 基础：统一 Finding/Evidence/Source 契约及现有节点兼容输出接入轨迹；新增语义目录草稿/不可变发布版本/数据范围API和V1.1.34（ADR已记录新增表职责）。协作实现有限PipelineRuntime和四种基础Fusion，仅模块落地，尚未接入正式任务、发布流程及决策重算。后端 `mvn -o -q -DskipTests compile` 成功。前端轨迹组件与安全解析接入结果详情；组织权限另工作树新增独立端点资源迁移。自动化测试、迁移运行和端到端验收尚未进行，I1/I2不标记完成。
+
+2026-10-04 联合交付记录：后端 `ad9158f`（统一事实/目录/流水线与融合基础），前端 `017654f`（结果详情原始轨迹，vue-tsc+Vite通过），组织权限 `d20f32e`（资源/按钮迁移，仅静态核对未在MySQL执行）。三个仓库均独立工作树，未覆盖原有未提交修改。整个PRD仍未完成，未推送/部署。
+
+下一实施批次：提取 InspectionExecutionService.evaluateItemRouteStage 的检测适配边界供旧路线和 EngineAdapter 共用，保留主体与逐字证据验证；在 InspectionTaskService.createBatchWithSnapshot 上增加 Pipeline 快照任务创建入口，同步 queue/run/resume 三个验证点，processConversation 分支复用完整会话与TaskItem。新流水线资产与发布冻结需引用 FindingCatalogVersion、RuleVersion、AgentVersion；无需创建重复 Task/Execution 主表。此处是待办，不代表当前代码已完成生产接入。
