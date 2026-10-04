@@ -18,4 +18,8 @@ public class QualitySample extends BasePo {
     private String tagsJson;
     private String status;
     private String ownerGroupId;
+    private String goldDraftJson;
+    private Integer goldDraftRevision = 0;
+    private String goldStatus = "UNLABELLED";
+    private Integer goldReviewVersion = 0;
 }

@@ -81,3 +81,6 @@ FindingDefinition schemaVersion=iqc-finding-definition-v1，包含code/name/cate
 ## Pipeline 资产与生产任务
 
 接口、冻结版本、试跑发布门禁与 `iqc-pipeline-execution-v1` 轨迹契约见 [iqc-pipeline-assets.md](iqc-pipeline-assets.md)。旧路线 schema 保持兼容；前端需分别识别两种轨迹。
+# I3 金标/数据集协议入口
+
+精确 API、资源码、版本与状态协议见 [金标与冻结数据集](iqc-evaluation-datasets.md)。候选创建 API 与现有旧样本语义保持兼容；ENABLED/CANDIDATE 均不表示审核通过。Dataset 保存精确已批准版本的完整输入与金标。实际评测执行、报表、对照和发布门禁仍待接入。

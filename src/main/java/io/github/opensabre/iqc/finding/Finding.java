@@ -35,7 +35,7 @@ public record Finding(String id, String code, String category, ValueType valueTy
         Objects.requireNonNull(severity, "severity"); Objects.requireNonNull(source, "source");
         if (confidence != null && (confidence.compareTo(BigDecimal.ZERO) < 0 || confidence.compareTo(BigDecimal.ONE) > 0))
             throw new IllegalArgumentException("confidence must be between 0 and 1");
-        if (state == State.KNOWN && !valid(valueType, value))
+        if (state == State.KNOWN && !validValue(valueType, value))
             throw new IllegalArgumentException("known finding requires a value matching its type");
         if (state != State.KNOWN && value != null && !value.isNull())
             throw new IllegalArgumentException("incomplete finding cannot carry a canonical value");
@@ -45,7 +45,8 @@ public record Finding(String id, String code, String category, ValueType valueTy
         value = value == null || value.isNull() ? null : value.deepCopy();
     }
     @Override public JsonNode value() { return value == null ? null : value.deepCopy(); }
-    private static boolean valid(ValueType type, JsonNode value) {
+    public static boolean validValue(ValueType type, JsonNode value) {
+        if (type == null) return false;
         if (value == null || value.isNull()) return false;
         return switch (type) {
             case BOOLEAN -> value.isBoolean();
