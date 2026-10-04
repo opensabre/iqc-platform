@@ -119,12 +119,11 @@ public class BusinessItemReviewService {
                 effective.put(decision.itemCode(), decision);
             }
             try {
-                var definition = SchemeResultEvaluator.definition(mapper.readTree(context.task().getRuleSnapshotJson()), mapper);
                 var original = mapper.readValue(context.result().getBusinessItemResultsJson(), new TypeReference<List<SchemeResultEvaluator.ItemResult>>() { });
                 Set<String> allowed = messages.selectList(Wrappers.<ConversationMessage>lambdaQuery()
                         .eq(ConversationMessage::getConversationId, context.result().getConversationId())).stream()
                         .map(ConversationMessage::getId).collect(Collectors.toSet());
-                var projection = BusinessItemReviewEvaluator.evaluate(context.result().getId(), definition, original,
+                var projection = projection(context.task(), context.result(), original,
                         List.copyOf(effective.values()), allowed);
                 review.setReviewedResultJson(mapper.writeValueAsString(projection));
             } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
@@ -155,12 +154,16 @@ public class BusinessItemReviewService {
         authorize(task);
         if (!Set.of("SUCCEEDED", "PARTIAL_FAILED", "FAILED", "CANCELLED").contains(task.getStatus()))
             throw IqcException.invalidState("任务结束后才能批量导出复核结果");
-        final io.github.opensabre.iqc.scheme.SchemeDefinition definition;
-        try { definition = SchemeResultEvaluator.definition(mapper.readTree(task.getRuleSnapshotJson()), mapper); }
-        catch (com.fasterxml.jackson.core.JsonProcessingException exception) { throw IqcException.invalidState("任务快照损坏"); }
-        if (definition == null) throw IqcException.invalidArgument("批量复核导出仅支持业务方案任务");
+        final int configuredItems;
+        try {
+            var snapshot = mapper.readTree(task.getRuleSnapshotJson());
+            var definition = SchemeResultEvaluator.definition(snapshot, mapper);
+            if (snapshot.has("pipelineSnapshot")) configuredItems = pipelineRelease(snapshot).items().size();
+            else if (definition != null) configuredItems = definition.items().size();
+            else throw IqcException.invalidArgument("批量复核导出仅支持业务会话任务");
+        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) { throw IqcException.invalidState("任务快照损坏"); }
         var ids = io.github.opensabre.iqc.result.BatchResultQueryService.exportConversationIds(task, mapper);
-        if (ids.size() > 500 || (long) ids.size() * definition.items().size() > 50_000)
+        if (ids.size() > 500 || (long) ids.size() * configuredItems > 50_000)
             throw IqcException.invalidArgument("批量复核导出最多 500 个会话、50000 个项目，请缩小任务范围");
         StringBuilder manifest = new StringBuilder("\uFEFF任务ID,会话ID,当前结果ID,执行实例,覆盖状态,采用复核ID,采用轮次,最新复核状态,最新轮次,存在更新待处理轮次,明细文件\n");
         StringBuilder detail = new StringBuilder();
@@ -238,7 +241,6 @@ public class BusinessItemReviewService {
             throw IqcException.invalidState("复核基准或裁决信息已变化，无法导出");
         try {
             var snapshot = mapper.readTree(task.getRuleSnapshotJson());
-            var definition = SchemeResultEvaluator.definition(snapshot, mapper);
             var original = mapper.readValue(result.getBusinessItemResultsJson(), new TypeReference<List<SchemeResultEvaluator.ItemResult>>() { });
             var stored = read(review.getReviewedResultJson(), BusinessItemReviewEvaluator.Projection.class);
             if (stored == null || !result.getId().equals(stored.sourceResultId())) throw IqcException.invalidState("复核结果来源不一致");
@@ -248,7 +250,7 @@ public class BusinessItemReviewService {
                     .eq(ConversationMessage::getConversationId, result.getConversationId())).stream()
                     .map(ConversationMessage::getId).collect(Collectors.toSet());
             // Revalidate the saved overlay against the frozen policy; reject corruption instead of repairing it on export.
-            var checked = BusinessItemReviewEvaluator.evaluate(result.getId(), definition, original, stored.decisions(), allowed);
+            var checked = projection(task, result, original, stored.decisions(), allowed);
             if (!mapper.valueToTree(checked).equals(mapper.valueToTree(stored)))
                 throw IqcException.invalidState("复核项目或评分快照不一致，无法导出");
             return checked;
@@ -265,12 +267,11 @@ public class BusinessItemReviewService {
     /** Returns the same validated items and score together; reports must not parse unchecked item JSON separately. */
     SchemeResultEvaluator.Evaluation validatedMachineEvaluation(ConversationInspectionResult result, InspectionTask task) {
         try {
-            var definition = SchemeResultEvaluator.definition(mapper.readTree(task.getRuleSnapshotJson()), mapper);
             var original = mapper.readValue(result.getBusinessItemResultsJson(), new TypeReference<List<SchemeResultEvaluator.ItemResult>>() { });
             var allowed = messages.selectList(Wrappers.<ConversationMessage>lambdaQuery()
                     .select(ConversationMessage::getId).eq(ConversationMessage::getConversationId, result.getConversationId()))
                     .stream().map(ConversationMessage::getId).collect(Collectors.toSet());
-            var evaluation = BusinessItemReviewEvaluator.evaluate(result.getId(), definition, original, List.of(), allowed).original();
+            var evaluation = projection(task, result, original, List.of(), allowed).original();
             var score = evaluation.scoring();
             var stored = read(result.getScoringResultJson(), io.github.opensabre.iqc.scoring.InspectionScoring.Result.class);
             if (!mapper.valueToTree(score).equals(mapper.valueToTree(stored)) || !score.scoreStatus().name().equals(result.getScoreStatus())
@@ -287,8 +288,9 @@ public class BusinessItemReviewService {
             var snapshot = mapper.readTree(task.getRuleSnapshotJson());
             StringBuilder csv = new StringBuilder("\uFEFF任务ID,任务名称,会话ID,原始结果ID,执行实例,复核ID,复核轮次,复核状态,基准摘要,复核人,复核时间,申请原因,本轮裁决原因,评分政策,评分模式,机器评分状态,机器会话分数（勿按行求和）,人工评分状态,人工会话分数（勿按行求和）,质检项编码,质检项名称,规则ID,规则版本,机器结论,本轮有效结论,结论来源,有效裁决原因（可能沿用前轮）,机器证据消息ID,有效证据消息ID\n");
             csv.setLength(csv.length() - 1);
-            csv.append(",方案ID,发布版本,试跑修订,方案内容摘要,方案类型,机器计分贡献,人工计分贡献,机器一票否决,人工一票否决\n");
+            csv.append(",方案ID,发布版本,试跑修订,方案内容摘要,方案类型,机器计分贡献,人工计分贡献,机器一票否决,人工一票否决,流水线ID,流水线发布版本,流水线试跑修订,流水线内容摘要,规则字段含义\n");
             var marker = snapshot.path("schemeSnapshot");
+            var pipelineMarker = snapshot.path("pipelineSnapshot");
             var decisions = checked.decisions().stream().collect(Collectors.toMap(BusinessItemReviewEvaluator.Decision::itemCode, item -> item));
             var machineScore = checked.original().scoring();
             var reviewedScore = checked.reviewed().scoring();
@@ -310,7 +312,10 @@ public class BusinessItemReviewService {
                         marker.path("schemeId").asText(""), marker.path("versionNo").asText(""), marker.path("draftRevision").asText(""),
                         marker.path("contentHash").asText(""), marker.path("kind").asText(""),
                         machineLine == null ? null : machineLine.contribution(), reviewedLine == null ? null : reviewedLine.contribution(),
-                        machineLine == null ? null : machineLine.vetoTriggered(), reviewedLine == null ? null : reviewedLine.vetoTriggered());
+                        machineLine == null ? null : machineLine.vetoTriggered(), reviewedLine == null ? null : reviewedLine.vetoTriggered(),
+                        pipelineMarker.path("pipelineId").asText(""), pipelineMarker.path("versionNo").asText(""),
+                        pipelineMarker.path("draftRevision").asText(""), pipelineMarker.path("contentHash").asText(""),
+                        "冻结项目绑定；检测来源见执行轨迹");
             }
             return csv.toString();
         } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
@@ -350,7 +355,12 @@ public class BusinessItemReviewService {
         var latest = results.selectLatestForTaskConversation(context.task().getId(), context.result().getConversationId());
         if (latest == null || !context.result().getId().equals(latest.getId())) throw IqcException.invalidState("该会话已有更新的质检结果");
         try {
-            if (SchemeResultEvaluator.definition(mapper.readTree(context.task().getRuleSnapshotJson()), mapper) == null)
+            var snapshot = mapper.readTree(context.task().getRuleSnapshotJson());
+            if (snapshot.has("pipelineSnapshot")) {
+                if (pipelineRelease(snapshot).items().isEmpty()) throw IqcException.invalidArgument("该流水线没有可复核的业务质检项");
+                validatedMachineEvaluation(context.result(), context.task());
+            }
+            else if (SchemeResultEvaluator.definition(snapshot, mapper) == null)
                 throw IqcException.invalidArgument("旧消息任务请使用原复核流程");
         } catch (com.fasterxml.jackson.core.JsonProcessingException exception) { throw IqcException.invalidState("任务快照损坏"); }
     }
@@ -361,7 +371,34 @@ public class BusinessItemReviewService {
                 .orderByDesc(ResultReview::getReviewRevision).last("LIMIT 1"));
     }
 
+    private io.github.opensabre.iqc.pipelineasset.PipelineRelease pipelineRelease(com.fasterxml.jackson.databind.JsonNode snapshot)
+            throws com.fasterxml.jackson.core.JsonProcessingException {
+        var marker = snapshot.path("pipelineSnapshot");
+        var release = mapper.treeToValue(marker.path("release"), io.github.opensabre.iqc.pipelineasset.PipelineRelease.class);
+        if (release == null || snapshot.has("schemeSnapshot") || !marker.path("contentHash").asText().equals(
+                io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(mapper.writeValueAsString(release))))
+            throw IqcException.invalidState("流水线复核政策快照摘要不一致");
+        return release;
+    }
+
+    private BusinessItemReviewEvaluator.Projection projection(InspectionTask task, ConversationInspectionResult result,
+            List<SchemeResultEvaluator.ItemResult> original, List<BusinessItemReviewEvaluator.Decision> decisions,
+            Set<String> allowed) throws com.fasterxml.jackson.core.JsonProcessingException {
+        var snapshot = mapper.readTree(task.getRuleSnapshotJson());
+        if (snapshot.has("pipelineSnapshot")) {
+            var release = pipelineRelease(snapshot);
+            var trace = mapper.readValue(result.getExecutionTraceJson(), io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation.class);
+            return BusinessItemReviewEvaluator.evaluatePipeline(result.getId(), release, trace, original, decisions, allowed);
+        }
+        return BusinessItemReviewEvaluator.evaluate(result.getId(), SchemeResultEvaluator.definition(snapshot, mapper), original, decisions, allowed);
+    }
+
     private String sourceHash(Context context) {
+        try {
+            if (mapper.readTree(context.task().getRuleSnapshotJson()).has("pipelineSnapshot"))
+                return hash(java.util.Arrays.asList(context.task().getRuleSnapshotJson(), context.result().getId(),
+                        context.result().getBusinessItemResultsJson(), context.result().getScoringResultJson(), context.result().getExecutionTraceJson()));
+        } catch (com.fasterxml.jackson.core.JsonProcessingException ex) { throw IqcException.invalidState("复核政策快照损坏"); }
         return hash(java.util.Arrays.asList(context.task().getRuleSnapshotJson(), context.result().getId(),
                 context.result().getBusinessItemResultsJson(), context.result().getScoringResultJson()));
     }

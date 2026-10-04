@@ -107,10 +107,15 @@ public final class SchemeResultEvaluator {
 
     /** Shared scoring projection for automatic decisions and separately retained human-reviewed decisions. */
     public static Evaluation scoreItems(SchemeDefinition definition, List<ItemResult> items) {
-        Set<String> scored = definition.scoring().items().stream().map(InspectionScoring.Item::itemCode).collect(Collectors.toSet());
+        return scoreItems(definition.scoring(), items);
+    }
+
+    /** Shared policy boundary for scheme and Pipeline projections; no synthetic scheme is required. */
+    public static Evaluation scoreItems(InspectionScoring.Policy policy, List<ItemResult> items) {
+        Set<String> scored = policy.items().stream().map(InspectionScoring.Item::itemCode).collect(Collectors.toSet());
         var decisions = items.stream().filter(item -> scored.contains(item.itemCode()))
                 .map(item -> new InspectionScoring.Decision(item.itemCode(), item.status())).toList();
-        return new Evaluation(List.copyOf(items), InspectionScoring.evaluate(definition.scoring(), decisions));
+        return new Evaluation(List.copyOf(items), InspectionScoring.evaluate(policy, decisions));
     }
 
     /** Null means a fully evaluated positive gate; only a complete negative gate permits NOT_APPLICABLE. */
