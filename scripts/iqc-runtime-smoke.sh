@@ -5,6 +5,9 @@ set -euo pipefail
 base_url="${IQC_BASE_URL:-http://localhost:8040}"
 cookie_jar="${IQC_COOKIE_JAR:-}"
 access_token="${IQC_ACCESS_TOKEN:-}"
+actuator_client_id="${IQC_ACTUATOR_CLIENT_ID:-}"
+actuator_client_secret="${IQC_ACTUATOR_CLIENT_SECRET:-}"
+actuator_token_url="${IQC_ACTUATOR_TOKEN_URL:-http://localhost:8000/oauth2/token}"
 max_response_time_ms="${IQC_MAX_RESPONSE_TIME_MS:-2000}"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/iqc-smoke.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -50,10 +53,27 @@ for path in \
   "/api/iqc/config/rules" \
   "/api/iqc/templates" \
   "/api/iqc/settings" \
-  "/api/iqc/dictionaries?codes=iqc_rule_type,iqc_rule_category,iqc_risk_level,iqc_target_role,iqc_result_status,iqc_task_status" \
-  "/actuator/opensabreGovernanceRegistration"; do
+  "/api/iqc/dictionaries?codes=iqc_rule_type,iqc_rule_category,iqc_risk_level,iqc_target_role,iqc_result_status,iqc_task_status"; do
   request "$path"
 done
+
+if [[ -z "$actuator_client_id" || -z "$actuator_client_secret" ]]; then
+  echo "FAIL: IQC_ACTUATOR_CLIENT_ID and IQC_ACTUATOR_CLIENT_SECRET are required for the authenticated Actuator check" >&2
+  exit 1
+fi
+if [[ ! "$actuator_client_id" =~ ^[A-Za-z0-9._-]+$ || ! "$actuator_client_secret" =~ ^[A-Za-z0-9_-]+$ ]]; then
+  echo "FAIL: Actuator client credentials contain unsupported characters" >&2
+  exit 1
+fi
+printf 'user = "%s:%s"\n' "$actuator_client_id" "$actuator_client_secret" > "$tmp_dir/actuator-oauth.curl"
+chmod 600 "$tmp_dir/actuator-oauth.curl"
+actuator_token="$(curl --fail-with-body --silent --show-error \
+  --config "$tmp_dir/actuator-oauth.curl" \
+  --data-urlencode 'grant_type=client_credentials' \
+  --data-urlencode 'scope=actuator.read' \
+  "$actuator_token_url" | jq -er '.access_token')"
+access_token="$actuator_token"
+request "/actuator/opensabreGovernanceRegistration"
 
 # 发布环境中三类启动注册必须全部成功；FAILED/重试中都不能通过门禁。
 jq -e '
