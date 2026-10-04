@@ -51,7 +51,7 @@ import java.util.Collections;
 import java.math.BigDecimal;
 
 @Service
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
 @Slf4j
 public class InspectionExecutionService {
     private final InspectionTaskMapper taskMapper;
@@ -67,6 +67,20 @@ public class InspectionExecutionService {
     private final HierarchicalResultService hierarchicalResultService;
     private final LabelCandidateService labelCandidateService;
     private final io.github.opensabre.iqc.scheme.SchemeDependencyResolver schemeDependencies;
+    private final io.github.opensabre.iqc.pipelineasset.PipelineAssetService pipelineAssets;
+    private final io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator pipelineEvaluator;
+    /** Keeps the existing embedding constructor compatible; Pipeline tasks require the fully wired constructor. */
+    public InspectionExecutionService(InspectionTaskMapper tasks, ConversationMapper conversations, ConversationMessageMapper messages,
+            InspectionResultMapper results, ObjectMapper mapper, TaskExecutionMapper executions, TaskItemMapper items,
+            IqcDataScope scope, LlmQualityProvider llm, UsageCounterRecorder usage, HierarchicalResultService hierarchy,
+            LabelCandidateService candidates, io.github.opensabre.iqc.scheme.SchemeDependencyResolver schemes) {
+        this(tasks, conversations, messages, results, mapper, executions, items, scope, llm, usage, hierarchy, candidates, schemes, null, null);
+    }
+    private void validatePipelineDependencies(JsonNode snapshot) {
+        if (!io.github.opensabre.iqc.pipelineasset.PipelineAssetService.isPipeline(snapshot)) return;
+        if (pipelineAssets == null || pipelineEvaluator == null) throw IqcException.invalidState("当前执行器未启用流水线能力");
+        pipelineAssets.validateTask(snapshot);
+    }
     private final Map<String, DlsEngine.Compiled> dlsCompileCache = Collections.synchronizedMap(
             new LinkedHashMap<>(32, 0.75f, true) {
                 @Override protected boolean removeEldestEntry(Map.Entry<String, DlsEngine.Compiled> eldest) {
@@ -97,6 +111,7 @@ public class InspectionExecutionService {
             io.github.opensabre.iqc.scheme.SchemeDependencyResolver.validateJointTaskProjection(snapshot,
                     task.getLabelScopeSnapshotJson(), objectMapper);
             schemeDependencies.validateTaskDependencies(snapshot);
+            validatePipelineDependencies(snapshot);
             String previousStatus = task.getStatus();
             String previousExecutionId = task.getCurrentExecutionId();
             Set<String> retryMessageIds = null;
@@ -198,6 +213,7 @@ public class InspectionExecutionService {
         if (List.of("CANCELLED", "CANCEL_REQUESTED").contains(task.getStatus())) { execution.setStatus("CANCELLED"); executionMapper.updateById(execution); return task; }
         int claimed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
                 .set(InspectionTask::getStatus, "RUNNING")
+                .set(InspectionTask::getUpdatedTime, new java.util.Date())
                 .eq(InspectionTask::getId, taskId)
                 .eq(InspectionTask::getCurrentExecutionId, executionId)
                 .eq(InspectionTask::getStatus, "QUEUED"));
@@ -215,6 +231,7 @@ public class InspectionExecutionService {
         io.github.opensabre.iqc.scheme.SchemeDependencyResolver.validateJointTaskProjection(ruleSnapshot,
                 task.getLabelScopeSnapshotJson(), objectMapper);
         schemeDependencies.validateTaskDependencies(ruleSnapshot);
+        validatePipelineDependencies(ruleSnapshot);
         List<TaskItem> items = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
                 .eq(TaskItem::getExecutionId, executionId).orderByAsc(TaskItem::getSequenceNo));
         int previouslyProcessed = Math.max(0, (task.getTotalMessages() == null ? items.size() : task.getTotalMessages()) - items.size());
@@ -241,6 +258,9 @@ public class InspectionExecutionService {
                 taskMapper.updateById(task);
             }
             execution.setStatus("CANCELLED"); executionMapper.updateById(execution); return task;
+        }
+        if (!executionId.equals(task.getCurrentExecutionId()) || !List.of("RUNNING", "PAUSE_REQUESTED").contains(task.getStatus())) {
+            return task; // A recovered/replaced lease cannot be marked successful by the old worker.
         }
         // Batch commits update locked database rows, not the worker's original objects.
         // Aggregate committed progress so both legacy and item-route execution use the same source of truth.
@@ -272,6 +292,7 @@ public class InspectionExecutionService {
         io.github.opensabre.iqc.scheme.SchemeDependencyResolver.validateJointTaskProjection(snapshot,
                 task.getLabelScopeSnapshotJson(), objectMapper);
         schemeDependencies.validateTaskDependencies(snapshot);
+        validatePipelineDependencies(snapshot);
         List<TaskItem> previousItems = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery().eq(TaskItem::getExecutionId, task.getCurrentExecutionId()));
         List<TaskItem> unfinished = previousItems.stream().filter(item -> !List.of("SUCCEEDED", "CANCELLED").contains(item.getStatus())).toList();
         int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
@@ -303,8 +324,9 @@ public class InspectionExecutionService {
         List<ConversationMessage> conversationMessages = new ArrayList<>(conversationMessagesById.values());
         ConversationSpeakerRole.canonicalize(conversationMessages);
         boolean schemeTask = ruleSnapshot != null && ruleSnapshot.has("schemeSnapshot");
-        if (schemeTask && !conversationMessages.isEmpty()) {
-            io.github.opensabre.iqc.scheme.SchemeResultEvaluator.definition(ruleSnapshot, objectMapper);
+        boolean pipelineTask=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.isPipeline(ruleSnapshot);
+        if ((schemeTask || pipelineTask) && !conversationMessages.isEmpty()) {
+            if (schemeTask) io.github.opensabre.iqc.scheme.SchemeResultEvaluator.definition(ruleSnapshot, objectMapper);
             // Retries must evaluate conversation-scoped detectors with the complete conversation, not only failed messages.
             List<ConversationMessage> fullContext = messageMapper.selectList(Wrappers.<ConversationMessage>lambdaQuery()
                     .eq(ConversationMessage::getConversationId, conversationMessages.get(0).getConversationId())
@@ -313,6 +335,17 @@ public class InspectionExecutionService {
                 ConversationSpeakerRole.canonicalize(fullContext);
                 conversationMessages = fullContext;
             }
+        }
+        if (pipelineTask) {
+            var current=taskMapper.selectById(task.getId());
+            if(current==null || !"RUNNING".equals(current.getStatus()) || !executionId.equals(current.getCurrentExecutionId())) return;
+            var pending=items.stream().filter(item->!List.of("SUCCEEDED","CANCELLED").contains(item.getStatus())).toList();
+            if(!pending.isEmpty() && !conversationMessages.isEmpty()) {
+                var release=pipelineAssets.taskRelease(ruleSnapshot);
+                var evaluated=pipelineEvaluator.evaluate(task,release,conversationMessages);
+                hierarchicalResultService.materializePipeline(task,executionId,ruleSnapshot,conversationMessages,evaluated,pending);
+            }
+            return;
         }
         if (schemeTask && SchemeDefinition.ROUTED_TASK_SCHEMA.equals(ruleSnapshot.at("/schemeSnapshot/release/definition/schemaVersion").asText())) {
             var current = taskMapper.selectById(task.getId());
@@ -997,6 +1030,22 @@ public class InspectionExecutionService {
             return aggregate;
     }
 
+    /** Trusted Pipeline bridge reuses the same frozen-rule stage evaluator as the V2 routes. */
+    public InspectionResult evaluateFrozenPipelineNode(InspectionTask task, JsonNode rule, JsonNode agent,
+            List<ConversationMessage> inputs, InspectionResult upstream, String phase, String inputScope, String nodeId, int attempt) {
+        var stageTask = new InspectionTask(); org.springframework.beans.BeanUtils.copyProperties(task, stageTask);
+        stageTask.setAgentSnapshotJson(agent == null || agent.isNull() ? null : agent.toString());
+        stageTask.setId(task.getId()+":execution:"+task.getCurrentExecutionId());
+        var snapshot = (ObjectNode) readSnapshot(task.getRuleSnapshotJson()).deepCopy();
+        snapshot.set("executionStrategy", objectMapper.valueToTree(new io.github.opensabre.iqc.task.TaskExecutionStrategy(
+                "1.0", io.github.opensabre.iqc.task.TaskExecutionStrategy.Mode.INDEPENDENT)));
+        stageTask.setRuleSnapshotJson(snapshot.toString()); // transient adapter context, never persisted
+        var context = new io.github.opensabre.iqc.scheme.SchemeDependencyResolver.DetectionContext(nodeId,
+                rule.path("id").asText(), rule.path("versionNo").asInt(), inputScope, phase, null);
+        return evaluateItemRouteStage(stageTask, Map.of(context.ruleId(), rule), new LinkedHashMap<>(),
+                context, inputs, upstream, Math.max(0,attempt - 1));
+    }
+
     /** Projects only item terminal contexts into the existing independent business scoring engine. */
     io.github.opensabre.iqc.scheme.SchemeResultEvaluator.Evaluation scoreItemRoutes(
             SchemeDefinition definition, io.github.opensabre.iqc.scheme.SchemeDependencyResolver.RoutePlan plan,
@@ -1102,6 +1151,18 @@ public class InspectionExecutionService {
             if (values != null && values.isArray()) values.forEach(evidence::add);
         });
         aggregate.setEvidenceJson(evidence.toString());
+        if (!labelFacts) {
+            var payload = objectMapper.createObjectNode().put("schemaVersion", "iqc-stage-observations-v1");
+            var observations = payload.putArray("observations");
+            for (var observed : results) {
+                var value = observations.addObject().put("messageId", observed.getMessageId())
+                        .put("ruleId", observed.getRuleId()).put("status", observed.getResultStatus())
+                        .put("reason", observed.getReason());
+                value.set("finding", readSnapshot(observed.getFindingJson()));
+                value.set("evidence", readSnapshot(observed.getEvidenceJson()));
+            }
+            aggregate.setFindingJson(payload.toString());
+        }
         if (labelFacts) {
             var payload = objectMapper.createObjectNode().put("schemaVersion", "iqc-rule-observations-v2");
             var observations = payload.putArray("observations");
@@ -1180,7 +1241,7 @@ public class InspectionExecutionService {
                 DlsEngine.Evaluation evaluation = DlsEngine.evaluate(compiledDls(expression), conversationMessages);
                 DlsEngine.Hit anchor = evaluation.evidence().isEmpty() ? null : evaluation.evidence().get(0);
                 JsonNode taskSnapshot = readSnapshot(task.getRuleSnapshotJson());
-                boolean schemeTask = taskSnapshot != null && taskSnapshot.has("schemeSnapshot");
+                boolean schemeTask = taskSnapshot != null && (taskSnapshot.has("schemeSnapshot") || taskSnapshot.has("pipelineSnapshot"));
                 // A V2 conversation match may be an absence condition with no positive message anchor.
                 boolean hit = evaluation.hit() && (schemeTask || anchor != null && java.util.Objects.equals(anchor.messageId(), message.getId()));
                 Match match = hit && anchor != null ? new Match(true, anchor.text(), anchor.start(), anchor.end()) : new Match(hit, null, -1, -1);

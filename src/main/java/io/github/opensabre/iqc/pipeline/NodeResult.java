@@ -13,6 +13,8 @@ public record NodeResult(Status status, List<Finding> findings, Map<String,JsonN
         findings = List.copyOf(findings == null ? List.of() : findings);
         variables = NodeContext.snapshot(variables == null ? Map.of() : variables);
         metrics = NodeContext.snapshot(metrics == null ? Map.of() : metrics);
+        if (variables.keySet().stream().anyMatch(key -> key.startsWith("__")))
+            throw new IllegalArgumentException("Node outputs cannot overwrite trusted execution metadata");
         if (status != Status.SUCCESS && (!findings.isEmpty() || !variables.isEmpty()))
             throw new IllegalArgumentException("Unsuccessful node cannot publish findings or variables");
     }

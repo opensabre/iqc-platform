@@ -40,8 +40,11 @@ public final class FindingFusion {
         String explanation;
         switch (policy.method()) {
             case PRIORITY -> {
-                int highest = raw.stream().mapToInt(f -> policy.nodePriority().getOrDefault(f.source().nodeId(), 0)).max().orElse(0);
-                selected = raw.stream().filter(f -> policy.nodePriority().getOrDefault(f.source().nodeId(), 0) == highest).toList();
+                var eligible = raw.stream().filter(f -> f.state() != Finding.State.NOT_EVALUATED).toList();
+                if (eligible.isEmpty()) return result(code, raw, List.of(), Finding.State.NOT_EVALUATED, null, policy,
+                        "No source executed; skipped observations are not negative values");
+                int highest = eligible.stream().mapToInt(f -> policy.nodePriority().getOrDefault(f.source().nodeId(), 0)).max().orElse(0);
+                selected = eligible.stream().filter(f -> policy.nodePriority().getOrDefault(f.source().nodeId(), 0) == highest).toList();
                 explanation = "Highest source priority " + highest + "; incomplete winners remain incomplete";
             }
             case CONFIDENCE -> {

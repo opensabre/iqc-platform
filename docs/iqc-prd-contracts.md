@@ -77,3 +77,7 @@
 FindingDefinition schemaVersion=iqc-finding-definition-v1，包含code/name/category/description/valueType/allowedValues/defaultSeverity/evidenceRequired/evidenceTypes。valueType 支持 BOOLEAN/STRING/NUMBER/ENUM/OBJECT；仅 ENUM 设置非空 allowedValues。HIGH/CRITICAL 要求证据；发布过的 code 不允许更改字段类型。草稿编辑使用 expectedRevision，事务行锁避免覆盖并行修改；发布同一修订幂等。
 
 后端 DDL V1.1.34，组织权限迁移另仓库 V20261004_01；API尚未部署，目录页面后续接入。当前 runtime 的融合和通用节点编排为已实现模块，尚未接入生产任务和方案发布，不代表通用 Pipeline 可从页面执行。
+
+## Pipeline 资产与生产任务
+
+接口、冻结版本、试跑发布门禁与 `iqc-pipeline-execution-v1` 轨迹契约见 [iqc-pipeline-assets.md](iqc-pipeline-assets.md)。旧路线 schema 保持兼容；前端需分别识别两种轨迹。

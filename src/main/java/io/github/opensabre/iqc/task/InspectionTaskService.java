@@ -372,6 +372,59 @@ public class InspectionTaskService {
                                     String agentId, String agentSnapshotJson, String labelSnapshotJson,
                                     int concurrency, int maxConversations) { }
 
+    /** Reuses authorized batch materialization; published assets and trial drafts are frozen before this boundary. */
+    @Transactional
+    public InspectionTask createUsingPipelineSnapshot(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name, List<String> conversationIds, Integer concurrency, String requestId) {
+        if (prepared == null || !io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(writeSnapshot(prepared.release())).equals(prepared.contentHash()))
+            throw IqcException.invalidState("流水线冻结摘要无效");
+        boolean trial = prepared.versionNo() == null;
+        if (trial && (conversationIds == null || conversationIds.size() > 10)) throw IqcException.invalidArgument("草稿试跑最多10个会话");
+        if (requestId != null && !requestId.matches("[A-Za-z0-9:_-]{1,128}")) throw IqcException.invalidArgument("无效幂等请求标识");
+        var marker = objectMapper.valueToTree(prepared);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) marker).put("trial", trial);
+        var root = objectMapper.createObjectNode(); root.set("pipelineSnapshot", marker);
+        root.set("executionStrategy", objectMapper.createObjectNode().put("schemaVersion", "iqc-pipeline-task-v1").put("mode", "PIPELINE"));
+        var frozenRules = root.putArray("rules"); var ruleIds = new java.util.LinkedHashSet<String>();
+        for (var node : prepared.release().pipeline().nodes()) {
+            frozenRules.add(node.config().path("ruleSnapshot")); ruleIds.add(node.config().path("ruleSnapshot").path("id").asText());
+        }
+        var fingerprint = objectMapper.createObjectNode().put("contentHash", prepared.contentHash()).put("name", name)
+                .put("concurrency", concurrency == null ? 1 : concurrency).put("trial", trial);
+        fingerprint.set("conversationIds", objectMapper.valueToTree(conversationIds == null ? List.of() : conversationIds.stream().filter(id -> id != null && !id.isBlank()).distinct().sorted().toList()));
+        String requestFingerprint = io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(fingerprint.toString());
+        ((com.fasterxml.jackson.databind.node.ObjectNode) marker).put("requestFingerprint", requestFingerprint);
+        String taskId = requestId == null ? null : "p" + io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(
+                objectMapper.createArrayNode().add(dataScope.owner()).add(prepared.pipelineId()).add(requestId).toString()).substring(0, 63);
+        if (taskId != null) {
+            var existing = taskMapper.selectById(taskId);
+            if (existing != null) {
+                if (!dataScope.canView(existing.getCreatedBy(), existing.getOwnerGroupId()) || !requestFingerprint.equals(
+                        readPipelineFingerprint(existing.getRuleSnapshotJson()))) throw IqcException.invalidState("幂等请求内容不同");
+                return existing;
+            }
+        }
+        final String identity = taskId;
+        try {
+            return createBatchWithSnapshot(name, conversationIds, concurrency, task -> {
+                if (identity != null) task.setId(identity);
+                task.setTaskType(trial ? "PIPELINE_TRIAL" : "PIPELINE");
+                task.setRuleSnapshotJson(root.toString()); task.setRuleIdsJson(writeSnapshot(ruleIds)); task.setRunCount(1);
+            });
+        } catch (org.springframework.dao.DuplicateKeyException duplicate) {
+            if (identity == null) throw duplicate;
+            var winner = taskMapper.selectOne(com.baomidou.mybatisplus.core.toolkit.Wrappers.<InspectionTask>lambdaQuery()
+                    .eq(InspectionTask::getId, identity).last("FOR UPDATE"));
+            if (winner == null || !requestFingerprint.equals(readPipelineFingerprint(winner.getRuleSnapshotJson())))
+                throw IqcException.invalidState("并发幂等请求内容不同");
+            return winner;
+        }
+    }
+    private String readPipelineFingerprint(String value) {
+        try { return objectMapper.readTree(value).path("pipelineSnapshot").path("requestFingerprint").asText(); }
+        catch (Exception ex) { throw IqcException.invalidState("既有流水线任务快照无效"); }
+    }
+
     private InspectionTask createBatchWithSnapshot(String name, List<String> requestedConversationIds, Integer concurrencyLimit,
                                                     java.util.function.Consumer<InspectionTask> snapshot) {
         List<String> conversationIds = requestedConversationIds == null ? List.of() : requestedConversationIds.stream()

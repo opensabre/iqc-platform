@@ -97,6 +97,14 @@ public class FindingCatalogService {
         if (!hash(version.getSnapshotJson()).equals(version.getContentHash())) throw IqcException.invalidState("事实版本摘要不一致");
         return read(version.getSnapshotJson());
     }
+    /** Trusted worker boundary: only kill switches/version integrity, never a replacement for API authorization. */
+    public FindingDefinition publishedDefinitionForExecution(String id, int versionNo) {
+        var catalog = catalogs.selectById(id);
+        if (catalog == null || !"ACTIVE".equals(catalog.getStatus())) throw IqcException.invalidState("事实定义不存在或已停用");
+        var version = version(catalog, versionNo);
+        if (!hash(version.getSnapshotJson()).equals(version.getContentHash())) throw IqcException.invalidState("事实版本摘要不一致");
+        return read(version.getSnapshotJson());
+    }
     private FindingCatalogVersion version(FindingCatalog catalog, int number) {
         var version = versions.selectOne(Wrappers.<FindingCatalogVersion>lambdaQuery()
                 .eq(FindingCatalogVersion::getCatalogId, catalog.getId()).eq(FindingCatalogVersion::getVersionNo, number));

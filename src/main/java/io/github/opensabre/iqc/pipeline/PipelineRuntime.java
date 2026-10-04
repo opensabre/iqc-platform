@@ -15,7 +15,9 @@ public final class PipelineRuntime implements AutoCloseable {
     public record Trace(String nodeId, int attempt, Instant startedAt, long durationMs, NodeResult result) { }
     public record Run(Status status, List<Trace> trace, List<Finding> findings,
                       Map<String,JsonNode> variables, boolean reviewRequired) {
-        public Run { trace=List.copyOf(trace); findings=List.copyOf(findings); variables=NodeContext.snapshot(variables); }
+        public Run { trace=List.copyOf(trace); findings=List.copyOf(findings); var visible=new LinkedHashMap<String,JsonNode>();
+            variables.forEach((key,value)->{if(!key.startsWith("__")) visible.put(key,value);});
+            variables=NodeContext.snapshot(visible); }
         @Override public Map<String,JsonNode> variables() { return NodeContext.snapshot(variables); }
     }
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -61,6 +63,11 @@ public final class PipelineRuntime implements AutoCloseable {
         }
     }
     public Run execute(PipelineDefinition definition, JsonNode input, Map<String,JsonNode> initialVariables, Mode mode) {
+        return execute(definition,input,initialVariables,mode,trace -> { });
+    }
+    public Run execute(PipelineDefinition definition, JsonNode input, Map<String,JsonNode> initialVariables, Mode mode,
+                       java.util.function.Consumer<Trace> progress) {
+        Objects.requireNonNull(progress);
         validate(definition); Objects.requireNonNull(input); Objects.requireNonNull(mode);
         var vars=new LinkedHashMap<>(NodeContext.snapshot(initialVariables==null?Map.of():initialVariables));
         var upstream=new LinkedHashMap<String,NodeResult>(); var trace=new ArrayList<Trace>(); var findings=new ArrayList<Finding>();
@@ -72,16 +79,16 @@ public final class PipelineRuntime implements AutoCloseable {
             var context=context(input,vars,upstream);
             if(node.dependsOn().stream().anyMatch(id->!upstream.containsKey(id) || upstream.get(id).status()!=NodeResult.Status.SUCCESS)) {
                 upstream.put(node.nodeId(),NodeResult.failure(NodeResult.Status.SKIPPED,"Dependency unavailable"));
-                trace.add(new Trace(node.nodeId(),0,Instant.now(),0,upstream.get(node.nodeId()))); partial=true; review=true; continue;
+                record(trace,new Trace(node.nodeId(),0,Instant.now(),0,upstream.get(node.nodeId())),progress); partial=true; review=true; continue;
             }
             if(!matches(node.condition(),context)) {
                 upstream.put(node.nodeId(),NodeResult.failure(NodeResult.Status.SKIPPED,"Condition not met"));
-                trace.add(new Trace(node.nodeId(),0,Instant.now(),0,upstream.get(node.nodeId()))); continue;
+                record(trace,new Trace(node.nodeId(),0,Instant.now(),0,upstream.get(node.nodeId())),progress); continue;
             }
-            var result=invoke(node,input,vars,upstream,mode,trace);
+            var result=invoke(node,input,vars,upstream,mode,trace,progress);
             if(result.status()==NodeResult.Status.CANCELLED) return new Run(Status.CANCELLED,trace,findings,vars,review);
             if(result.status()!=NodeResult.Status.SUCCESS) {
-                if(node.onError()==PipelineDefinition.OnError.FALLBACK) result=invoke(nodes.get(node.fallbackNodeId()),input,vars,upstream,mode,trace);
+                if(node.onError()==PipelineDefinition.OnError.FALLBACK) result=invoke(nodes.get(node.fallbackNodeId()),input,vars,upstream,mode,trace,progress);
                 if(result.status()==NodeResult.Status.CANCELLED) return new Run(Status.CANCELLED,trace,findings,vars,review);
                 if(result.status()!=NodeResult.Status.SUCCESS) {
                     partial=true; review|=node.onError()==PipelineDefinition.OnError.MARK_REVIEW || node.onError()==PipelineDefinition.OnError.FALLBACK;
@@ -95,7 +102,7 @@ public final class PipelineRuntime implements AutoCloseable {
         return new Run(partial?Status.PARTIAL_SUCCESS:Status.SUCCESS,trace,findings,vars,review);
     }
     private NodeResult invoke(PipelineDefinition.Node node,JsonNode input,Map<String,JsonNode> vars,
-                              Map<String,NodeResult> upstream,Mode mode,List<Trace> trace) {
+                              Map<String,NodeResult> upstream,Mode mode,List<Trace> trace,java.util.function.Consumer<Trace> progress) {
         var adapter=adapters.get(node.type());
         for(int attempt=1;attempt<=node.retries()+1;attempt++) {
             Instant start=Instant.now(); long tick=System.nanoTime(); NodeResult result; Future<NodeResult> future=null;
@@ -126,12 +133,15 @@ public final class PipelineRuntime implements AutoCloseable {
                 if(future!=null) future.cancel(true);
                 result=NodeResult.failure(NodeResult.Status.ERROR,ex instanceof RejectedExecutionException?"Executor capacity exhausted":"Node execution or output validation failed");
             }
-            trace.add(new Trace(node.nodeId(),attempt,start,TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-tick),result));
+            record(trace,new Trace(node.nodeId(),attempt,start,TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-tick),result),progress);
             if(result.status()==NodeResult.Status.SUCCESS || result.status()==NodeResult.Status.CANCELLED) return result;
             // Avoid concurrent retries against an adapter which ignores cancellation.
             if(result.status()==NodeResult.Status.TIMEOUT) return result;
         }
         return trace.getLast().result();
+    }
+    private static void record(List<Trace> trace,Trace value,java.util.function.Consumer<Trace> progress) {
+        trace.add(value); progress.accept(value);
     }
     private static ObjectNode context(JsonNode input,Map<String,JsonNode> vars,Map<String,NodeResult> upstream) {
         var object=JSON.createObjectNode(); object.set("input",input.deepCopy()); object.set("variables",JSON.valueToTree(vars));
