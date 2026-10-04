@@ -73,28 +73,32 @@ public class IqcDashboardController {
         var results = visibleTaskIds.isEmpty() ? java.util.List.<InspectionResult>of() : resultMapper.selectList(resultQuery);
         long hitCount = results.stream().filter(item -> "HIT".equals(item.getResultStatus())).count();
         long highRiskCount = results.stream().filter(item -> "HIGH".equalsIgnoreCase(item.getRiskLevel())).count();
-        long unqualifiedCount = results.stream().filter(item -> (item.getScore() != null && item.getScore() < 60) || "ERROR".equals(item.getResultStatus()) || "PARTIAL_ERROR".equals(item.getResultStatus())).count();
-        BigDecimal unqualifiedRate = results.isEmpty() ? BigDecimal.ZERO : BigDecimal.valueOf(unqualifiedCount * 100.0 / results.size()).setScale(1, RoundingMode.HALF_UP);
-        BigDecimal averageScore = results.isEmpty() ? BigDecimal.ZERO : BigDecimal.valueOf(results.stream().mapToInt(item -> item.getScore() == null ? 0 : item.getScore()).average().orElse(0)).setScale(1, RoundingMode.HALF_UP);
+        long scoredCount = results.stream().filter(item -> item.getScore() != null).count();
+        long unqualifiedCount = results.stream().filter(item -> item.getScore() != null && (item.getScore() < 60 || "ERROR".equals(item.getResultStatus()) || "PARTIAL_ERROR".equals(item.getResultStatus()))).count();
+        BigDecimal unqualifiedRate = scoredCount == 0 ? null : BigDecimal.valueOf(unqualifiedCount * 100.0 / scoredCount).setScale(1, RoundingMode.HALF_UP);
+        BigDecimal averageScore = legacyAverageScore(results);
         var grouped = new TreeMap<LocalDate, ArrayList<InspectionResult>>();
         results.forEach(item -> { if (item.getCreatedTime() != null) grouped.computeIfAbsent(item.getCreatedTime().toInstant().atZone(ZoneId.systemDefault()).toLocalDate(), ignored -> new ArrayList<>()).add(item); });
         var trend = grouped.entrySet().stream().map(entry -> {
             var dayResults = entry.getValue();
             long dayHitCount = dayResults.stream().filter(item -> "HIT".equals(item.getResultStatus())).count();
             long dayHighRiskCount = dayResults.stream().filter(item -> "HIGH".equalsIgnoreCase(item.getRiskLevel())).count();
-            long dayUnqualifiedCount = dayResults.stream().filter(item -> (item.getScore() != null && item.getScore() < 60) || "ERROR".equals(item.getResultStatus()) || "PARTIAL_ERROR".equals(item.getResultStatus())).count();
+            long dayUnqualifiedCount = dayResults.stream().filter(item -> item.getScore() != null && (item.getScore() < 60 || "ERROR".equals(item.getResultStatus()) || "PARTIAL_ERROR".equals(item.getResultStatus()))).count();
             Map<String, Object> day = new LinkedHashMap<>();
             day.put("date", entry.getKey().toString());
             day.put("resultCount", dayResults.size());
             day.put("hitCount", dayHitCount);
             day.put("highRiskCount", dayHighRiskCount);
             day.put("unqualifiedCount", dayUnqualifiedCount);
-            day.put("averageScore", BigDecimal.valueOf(dayResults.stream().mapToInt(item -> item.getScore() == null ? 0 : item.getScore()).average().orElse(0)).setScale(1, RoundingMode.HALF_UP));
+            day.put("averageScore", legacyAverageScore(dayResults));
             return day;
         }).toList();
         var topAgents = ranking(results, taskById, InspectionTask::getAgentId);
         var topOwners = ranking(results, taskById, InspectionTask::getCreatedBy);
         Map<String, Object> response = new LinkedHashMap<>();
+        response.put("scoreScope", "LEGACY_MESSAGE");
+        response.put("scoredResultCount", scoredCount);
+        response.put("unscoredResultCount", results.size() - scoredCount);
         response.put("conversationCount", conversationCount);
         response.put("taskCount", taskCount);
         response.put("runningTaskCount", runningTaskCount);
@@ -111,6 +115,13 @@ public class IqcDashboardController {
         java.util.Date labelTo = to == null ? null : java.util.Date.from(to.plusSeconds(1).atZone(ZoneId.systemDefault()).toInstant());
         response.put("labelInsights", labelResults.summaryByTasks(visibleTaskIds, labelFrom, labelTo));
         return response;
+    }
+
+    /** This legacy dashboard must not average unscored V2 detector observations as zero. */
+    static BigDecimal legacyAverageScore(List<InspectionResult> results) {
+        var scores = results.stream().map(InspectionResult::getScore).filter(java.util.Objects::nonNull).toList();
+        return scores.isEmpty() ? null : BigDecimal.valueOf(scores.stream().mapToInt(Integer::intValue).average().orElseThrow())
+                .setScale(1, RoundingMode.HALF_UP);
     }
 
     private List<Map<String, Object>> ranking(List<InspectionResult> results, Map<String, InspectionTask> taskById,

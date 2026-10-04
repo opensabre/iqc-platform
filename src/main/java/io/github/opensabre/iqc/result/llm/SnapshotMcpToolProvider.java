@@ -32,11 +32,12 @@ public class SnapshotMcpToolProvider {
         this.secrets = secrets;
     }
 
-    /** Opens snapshotted MCP clients only for AGENT_LLM and closes all clients after the model call. */
+    /** Schema 3 uses snapshotted capabilities; schema 2 keeps its original AGENT_LLM-only tool contract. */
     public Session open(JsonNode agentSnapshot) {
         JsonNode config = config(agentSnapshot);
-        if (!"2.0".equals(config.path("schemaVersion").asText())
-                || !"AGENT_LLM".equals(config.path("mode").asText())) return Session.empty();
+        boolean capabilitySchema = "3.0".equals(config.path("schemaVersion").asText());
+        if (!capabilitySchema && (!"2.0".equals(config.path("schemaVersion").asText())
+                || !"AGENT_LLM".equals(config.path("mode").asText()))) return Session.empty();
         List<McpSyncClient> clients = new ArrayList<>();
         List<ToolCallback> callbacks = new ArrayList<>();
         try {

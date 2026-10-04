@@ -44,6 +44,34 @@ public class InspectionTaskService {
     private final IqcDataScope dataScope;
     private final LabelResolutionService labelResolutionService;
 
+    /** Creates tasks with an explicit execution strategy while preserving legacy label scoring semantics. */
+    @Transactional
+    public InspectionTask createConfigured(String name, String taskType, List<String> conversationIds,
+                                           ScheduledFilter filter, LocalDateTime scheduledTime, Integer sampleSize, String seed,
+                                           String agentId, String ruleSetId, List<String> ruleIds, Integer concurrency,
+                                           LabelResolutionService.LabelSelection labels, LabelExecutionOptions options,
+                                           String executionMode) {
+        LabelResolutionService.ResolvedSelection resolved = labels == null ? null : labelResolutionService.resolve(labels);
+        List<String> effectiveRules = ruleIds;
+        String effectiveSet = ruleSetId;
+        if (resolved != null) {
+            boolean hasChecks = (ruleIds != null && !ruleIds.isEmpty()) || (ruleSetId != null && !ruleSetId.isBlank());
+            // Combining dependency lists before scheme-level scoring exists would charge label-only rules.
+            if (hasChecks) throw IqcException.invalidArgument("检查与标签联合执行需使用业务方案逐项评分，当前兼容入口不支持同时指定规则和标签");
+            effectiveRules = resolved.ruleIds();
+            effectiveSet = null;
+        }
+        InspectionTask task;
+        if ("SCHEDULED".equalsIgnoreCase(taskType))
+            task = createScheduled(name, filter, scheduledTime, agentId, effectiveSet, effectiveRules, concurrency, executionMode);
+        else if ("SAMPLE".equalsIgnoreCase(taskType))
+            task = createSampled(name, filter, sampleSize == null ? 100 : sampleSize, seed, agentId, effectiveSet, effectiveRules, concurrency, executionMode);
+        else if (taskType == null || "BATCH".equalsIgnoreCase(taskType))
+            task = createBatch(name, conversationIds, agentId, effectiveSet, effectiveRules, concurrency, executionMode);
+        else throw IqcException.invalidArgument("不支持的任务类型: " + taskType);
+        return resolved == null ? task : applyLabelConfiguration(task, resolved, options);
+    }
+
     /** Creates a batch whose business label selection is resolved server-side into the existing rule snapshot. */
     @Transactional
     public InspectionTask createBatchWithLabels(String name, List<String> conversationIds, String agentId,
@@ -96,6 +124,256 @@ public class InspectionTaskService {
     @Transactional
     public InspectionTask createBatch(String name, List<String> requestedConversationIds, String agentId,
                                       String ruleSetId, List<String> requestedRuleIds, Integer concurrencyLimit) {
+        return createBatch(name, requestedConversationIds, agentId, ruleSetId, requestedRuleIds, concurrencyLimit, null);
+    }
+
+    /** Freezes a task-owned strategy; a null mode retains the legacy Agent configuration contract. */
+    @Transactional
+    public InspectionTask createBatch(String name, List<String> requestedConversationIds, String agentId,
+                                      String ruleSetId, List<String> requestedRuleIds, Integer concurrencyLimit, String executionMode) {
+        return createBatchWithSnapshot(name, requestedConversationIds, concurrencyLimit,
+                task -> snapshotAgentAndRules(task, agentId, ruleSetId, requestedRuleIds, executionMode));
+    }
+
+    /** Internal entry point: callers must load this immutable version through the scheme data-scope service. */
+    @Transactional
+    public InspectionTask createFromScheme(String name, List<String> conversationIds, Integer concurrencyLimit,
+                                           io.github.opensabre.iqc.scheme.model.InspectionSchemeVersion version) {
+        return createFromScheme(name, conversationIds, concurrencyLimit, version, null, null);
+    }
+
+    /** Accepts a server-derived request identity so a duplicate insert can safely converge on the existing task. */
+    @Transactional
+    public InspectionTask createFromScheme(String name, List<String> conversationIds, Integer concurrencyLimit,
+                                           io.github.opensabre.iqc.scheme.model.InspectionSchemeVersion version,
+                                           String requestTaskId, String requestFingerprint) {
+        return createFromScheme(name, conversationIds, concurrencyLimit, version, requestTaskId, requestFingerprint, null);
+    }
+
+    /** Selects only a frozen allowed variant before any task insert. */
+    @Transactional
+    public InspectionTask createFromScheme(String name, List<String> conversationIds, Integer concurrencyLimit,
+                                           io.github.opensabre.iqc.scheme.model.InspectionSchemeVersion version,
+                                           String requestTaskId, String requestFingerprint, String variantCode) {
+        var published = readPublishedSchemeSnapshot(version, requestFingerprint, variantCode);
+        return createUsingSchemeSnapshot(name, conversationIds, concurrencyLimit, published.release(), published.scheme(), requestTaskId, 1, null);
+    }
+
+    /** Freezes the published template now while resolving matching conversation data only when due. */
+    @Transactional
+    public InspectionTask createScheduledFromScheme(String name, ScheduledFilter requestedFilter, LocalDateTime scheduledTime,
+                                                     Integer concurrencyLimit,
+                                                     io.github.opensabre.iqc.scheme.model.InspectionSchemeVersion version,
+                                                     String requestTaskId, String requestFingerprint) {
+        return createScheduledFromScheme(name, requestedFilter, scheduledTime, concurrencyLimit, version, requestTaskId, requestFingerprint, null);
+    }
+
+    /** Freezes the allowed variant at schedule creation, not when mutable data is selected at execution time. */
+    @Transactional
+    public InspectionTask createScheduledFromScheme(String name, ScheduledFilter requestedFilter, LocalDateTime scheduledTime,
+                                                     Integer concurrencyLimit,
+                                                     io.github.opensabre.iqc.scheme.model.InspectionSchemeVersion version,
+                                                     String requestTaskId, String requestFingerprint, String variantCode) {
+        if (scheduledTime == null || !scheduledTime.isAfter(LocalDateTime.now()))
+            throw IqcException.invalidArgument("计划执行时间必须晚于当前时间");
+        ScheduledFilter filter = (requestedFilter == null
+                ? new ScheduledFilter(null, null, null, "IMPORTED", null, 1000) : requestedFilter).normalized();
+        if (!"IMPORTED".equalsIgnoreCase(filter.status()))
+            throw IqcException.invalidArgument("业务模板定时任务仅支持筛选已导入会话");
+        if (filter.ownerGroupId() != null || filter.employeeId() != null || filter.customerExternalId() != null
+                || filter.channel() != null || filter.businessNo() != null)
+            throw IqcException.invalidArgument("业务模板定时任务不接受组织或会话身份覆盖条件");
+        if (filter.fileName() != null && filter.fileName().length() > 255)
+            throw IqcException.invalidArgument("导入文件名筛选不能超过 255 个字符");
+        LocalDateTime createdFrom = parseTime(filter.createdFrom(), "开始时间");
+        LocalDateTime createdTo = parseTime(filter.createdTo(), "结束时间");
+        if (createdFrom != null && createdTo != null && createdFrom.isAfter(createdTo))
+            throw IqcException.invalidArgument("数据创建开始时间不能晚于结束时间");
+        var published = readPublishedSchemeSnapshot(version, requestFingerprint, variantCode);
+        var frozen = freezeSchemeTask(published.release(), published.scheme(), concurrencyLimit);
+        int frozenLimit = Math.min(filter.limit(), frozen.maxConversations());
+        filter = new ScheduledFilter(filter.createdFrom(), filter.createdTo(), filter.fileName(), "IMPORTED",
+                null, frozenLimit, null, null, null, null);
+        Map<String, Object> selection = new java.util.LinkedHashMap<>();
+        selection.put("filter", filter);
+        selection.put("scopeAll", dataScope.canViewAll());
+        selection.put("scopeOwner", dataScope.owner());
+        selection.put("scopeGroupId", dataScope.groupId());
+
+        InspectionTask task = new InspectionTask();
+        if (requestTaskId != null) task.setId(requestTaskId);
+        task.setName(name == null || name.isBlank() ? "定时质检-" + scheduledTime : name.trim());
+        task.setTaskType("SCHEDULED");
+        task.setSelectionFilterJson(writeSnapshot(selection));
+        task.setScheduledTime(scheduledTime);
+        task.setConcurrencyLimit(frozen.concurrency());
+        task.setRunCount(1);
+        applyFrozenSchemeTask(task, frozen, null, null);
+        task.setOwnerGroupId(dataScope.groupId());
+        task.setStatus("SCHEDULED");
+        task.setConversationIdsJson(writeSnapshot(List.of()));
+        task.setTotalMessages(0);
+        task.setProcessedMessages(0);
+        task.setFailedMessages(0);
+        task.setAttemptCount(0);
+        taskMapper.insert(task);
+        return task;
+    }
+
+    /** Internal expert trial: same task engine, an explicit draft identity, and a small data bound. */
+    @Transactional
+    public InspectionTask createSchemeTrial(String schemeId, int draftRevision, String name, List<String> conversationIds,
+                                            io.github.opensabre.iqc.scheme.InspectionSchemeService.ReleaseSnapshot release) {
+        return createSchemeTrial(schemeId, draftRevision, name, conversationIds, release, null, null);
+    }
+
+    /** Accepts a stable task identity for safe trial creation retries without changing the frozen release. */
+    @Transactional
+    public InspectionTask createSchemeTrial(String schemeId, int draftRevision, String name, List<String> conversationIds,
+                                            io.github.opensabre.iqc.scheme.InspectionSchemeService.ReleaseSnapshot release,
+                                            String requestTaskId, String requestFingerprint) {
+        String selected = release == null ? null : release.selectedVariantCode();
+        return createSchemeTrial(schemeId, draftRevision, name, conversationIds, release, requestTaskId, requestFingerprint, selected);
+    }
+
+    /** Freeze the selected approved code alongside its expanded routes, before any task insertion. */
+    @Transactional
+    public InspectionTask createSchemeTrial(String schemeId, int draftRevision, String name, List<String> conversationIds,
+                                            io.github.opensabre.iqc.scheme.InspectionSchemeService.ReleaseSnapshot release,
+                                            String requestTaskId, String requestFingerprint, String selectedVariantCode) {
+        return createSchemeTrial(schemeId, draftRevision, name, conversationIds, release, requestTaskId,
+                requestFingerprint, selectedVariantCode, 1, null);
+    }
+
+    /** Freeze expert-selected adjudication parameters with the immutable trial task. */
+    @Transactional
+    public InspectionTask createSchemeTrial(String schemeId, int draftRevision, String name, List<String> conversationIds,
+                                            io.github.opensabre.iqc.scheme.InspectionSchemeService.ReleaseSnapshot release,
+                                            String requestTaskId, String requestFingerprint, String selectedVariantCode,
+                                            Integer requestedRunCount, java.math.BigDecimal confidenceThreshold) {
+        if (conversationIds == null || conversationIds.isEmpty() || conversationIds.size() > 20)
+            throw IqcException.invalidArgument("草稿试跑请选择 1 到 20 个会话");
+        int runCount = requestedRunCount == null ? 1 : requestedRunCount;
+        if (runCount < 1 || runCount > 5) throw IqcException.invalidArgument("裁决轮数必须在 1 到 5 之间");
+        if (confidenceThreshold != null && (confidenceThreshold.compareTo(java.math.BigDecimal.ZERO) < 0
+                || confidenceThreshold.compareTo(java.math.BigDecimal.ONE) > 0))
+            throw IqcException.invalidArgument("一致率门槛必须在 0 到 1 之间");
+        if (release != null && release.definition() != null) {
+            release = release.forTaskSnapshot();
+        }
+        var scheme = objectMapper.createObjectNode();
+        scheme.put("kind", "DRAFT_TRIAL"); scheme.put("schemeId", schemeId); scheme.put("draftRevision", draftRevision);
+        if (selectedVariantCode != null) scheme.put("selectedVariantCode", selectedVariantCode);
+        try {
+            // Freeze and hash the same read-back JSON form used by execution and publication validation.
+            scheme.set("release", objectMapper.readTree(writeSnapshot(release)));
+        } catch (com.fasterxml.jackson.core.JsonProcessingException invalidRelease) {
+            throw IqcException.invalidState("方案快照无法冻结");
+        }
+        scheme.put("contentHash", io.github.opensabre.iqc.scheme.InspectionSchemeService.contentHash(scheme.path("release").toString()));
+        if (requestFingerprint != null) scheme.put("requestFingerprint", requestFingerprint);
+        return createUsingSchemeSnapshot("[方案试跑] " + name, conversationIds, 1, release, scheme, requestTaskId,
+                runCount, confidenceThreshold);
+    }
+
+    private InspectionTask createUsingSchemeSnapshot(String name, List<String> conversationIds, Integer concurrencyLimit,
+                                                      io.github.opensabre.iqc.scheme.InspectionSchemeService.ReleaseSnapshot release,
+                                                      com.fasterxml.jackson.databind.node.ObjectNode scheme, String requestTaskId,
+                                                      int runCount, java.math.BigDecimal confidenceThreshold) {
+        var frozen = freezeSchemeTask(release, scheme, concurrencyLimit);
+        long conversationCount = conversationIds == null ? 0 : conversationIds.stream()
+                .filter(id -> id != null && !id.isBlank()).distinct().count();
+        if (conversationCount > frozen.maxConversations())
+            throw IqcException.invalidArgument("超过模板会话上限: " + frozen.maxConversations());
+        return createBatchWithSnapshot(name, conversationIds, frozen.concurrency(), task -> {
+            if (requestTaskId != null) task.setId(requestTaskId);
+            applyFrozenSchemeTask(task, frozen, runCount, confidenceThreshold);
+        });
+    }
+
+    private FrozenSchemeTask freezeSchemeTask(io.github.opensabre.iqc.scheme.InspectionSchemeService.ReleaseSnapshot release,
+                                               com.fasterxml.jackson.databind.node.ObjectNode scheme, Integer concurrencyLimit) {
+        var dependencies = release == null ? null : release.dependencies();
+        if (release == null || release.definition() == null || dependencies == null || dependencies.rules() == null || dependencies.rules().isEmpty())
+            throw IqcException.invalidState("方案快照缺少检测依赖");
+        if ("DRAFT_TRIAL".equals(scheme.path("kind").asText())) release.definition().requireTrialExecutable();
+        else {
+            release.definition().requireExecutable();
+        }
+        var limits = release.definition().effectiveRunLimits();
+        int selectedConcurrency = concurrencyLimit == null ? limits.defaultConcurrency() : concurrencyLimit;
+        if (selectedConcurrency < 1 || selectedConcurrency > limits.maxConcurrency())
+            throw IqcException.invalidArgument("并发数必须在 1 到模板上限 " + limits.maxConcurrency() + " 之间");
+        var mode = TaskExecutionStrategy.parseRequested(dependencies.executionMode());
+        if (mode != TaskExecutionStrategy.Mode.RULE_ONLY && mode != TaskExecutionStrategy.Mode.INDEPENDENT)
+            throw IqcException.invalidState("方案暂仅支持纯规则或独立执行策略");
+        var root = objectMapper.createObjectNode(); root.set("schemeSnapshot", scheme);
+        root.set("rules", objectMapper.valueToTree(dependencies.rules()));
+        root.set("executionStrategy", objectMapper.valueToTree(new TaskExecutionStrategy("1.0", mode)));
+        if (io.github.opensabre.iqc.scheme.SchemeDefinition.ROUTED_TASK_SCHEMA.equals(release.definition().schemaVersion()))
+            io.github.opensabre.iqc.scheme.SchemeDependencyResolver.validateRouteTaskProjection(root,
+                    dependencies.agent() == null ? null : dependencies.agent().toString(), objectMapper);
+        else io.github.opensabre.iqc.scheme.SchemeResultEvaluator.evaluate(release.definition(), root, List.of(), List.of(), objectMapper);
+        io.github.opensabre.iqc.scheme.SchemeDependencyResolver.validateJointTaskProjection(root,
+                dependencies.labels() == null ? null : writeSnapshot(dependencies.labels()), objectMapper);
+        return new FrozenSchemeTask(root, writeSnapshot(dependencies.rules().stream().map(rule -> rule.path("id").asText()).toList()),
+                dependencies.agent() == null || dependencies.agent().isNull() ? null : dependencies.agent().path("id").asText(),
+                dependencies.agent() == null || dependencies.agent().isNull() ? null : dependencies.agent().toString(),
+                dependencies.labels() == null ? null : writeSnapshot(dependencies.labels()),
+                selectedConcurrency, limits.maxConversations());
+    }
+
+    private void applyFrozenSchemeTask(InspectionTask task, FrozenSchemeTask frozen, Integer runCount,
+                                      java.math.BigDecimal confidenceThreshold) {
+        task.setRuleSnapshotJson(frozen.ruleSnapshot().toString());
+        task.setRuleIdsJson(frozen.ruleIdsJson());
+        task.setAgentId(frozen.agentId());
+        task.setAgentSnapshotJson(frozen.agentSnapshotJson());
+        task.setLabelScopeSnapshotJson(frozen.labelSnapshotJson());
+        if (runCount != null) task.setRunCount(runCount);
+        if (confidenceThreshold != null) task.setConfidenceThreshold(confidenceThreshold);
+    }
+
+    private PublishedSchemeSnapshot readPublishedSchemeSnapshot(
+            io.github.opensabre.iqc.scheme.model.InspectionSchemeVersion version, String requestFingerprint, String variantCode) {
+        if (version == null || version.getSchemeId() == null || version.getVersionNo() == null || version.getVersionNo() < 1)
+            throw IqcException.invalidArgument("必须选择明确的方案发布版本");
+        try {
+            String hash = java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(version.getSnapshotJson().getBytes(StandardCharsets.UTF_8)));
+            if (!hash.equals(version.getContentHash())) throw IqcException.invalidState("方案发布快照校验失败");
+            var release = objectMapper.readValue(version.getSnapshotJson(), io.github.opensabre.iqc.scheme.InspectionSchemeService.ReleaseSnapshot.class);
+            release = release.selectVariant(variantCode);
+            var scheme = objectMapper.createObjectNode();
+            scheme.put("kind", "PUBLISHED");
+            scheme.put("schemeId", version.getSchemeId()); scheme.put("versionNo", version.getVersionNo());
+            scheme.put("contentHash", hash); scheme.set("release", objectMapper.readTree(version.getSnapshotJson()));
+            var taskDefinition = release.definition().forTaskSnapshot();
+            if (!taskDefinition.equals(release.definition())) {
+                release = new io.github.opensabre.iqc.scheme.InspectionSchemeService.ReleaseSnapshot(
+                        release.name(), release.code(), release.description(), release.businessScene(), taskDefinition,
+                        release.dependencies(), release.selectedVariantCode(), release.variantDependencies());
+                var selectedJson = objectMapper.readTree(writeSnapshot(release));
+                scheme.put("publishedContentHash", hash);
+                if (release.selectedVariantCode() != null) scheme.put("selectedVariantCode", release.selectedVariantCode());
+                scheme.set("release", selectedJson);
+                scheme.put("contentHash", io.github.opensabre.iqc.scheme.InspectionSchemeService.contentHash(selectedJson.toString()));
+            }
+            if (requestFingerprint != null) scheme.put("requestFingerprint", requestFingerprint);
+            return new PublishedSchemeSnapshot(release, scheme);
+        } catch (JsonProcessingException | java.security.NoSuchAlgorithmException exception) {
+            throw IqcException.invalidState("方案发布快照无效");
+        }
+    }
+
+    private record PublishedSchemeSnapshot(io.github.opensabre.iqc.scheme.InspectionSchemeService.ReleaseSnapshot release,
+                                           com.fasterxml.jackson.databind.node.ObjectNode scheme) { }
+    private record FrozenSchemeTask(com.fasterxml.jackson.databind.node.ObjectNode ruleSnapshot, String ruleIdsJson,
+                                    String agentId, String agentSnapshotJson, String labelSnapshotJson,
+                                    int concurrency, int maxConversations) { }
+
+    private InspectionTask createBatchWithSnapshot(String name, List<String> requestedConversationIds, Integer concurrencyLimit,
+                                                    java.util.function.Consumer<InspectionTask> snapshot) {
         List<String> conversationIds = requestedConversationIds == null ? List.of() : requestedConversationIds.stream()
                 .filter(id -> id != null && !id.isBlank()).distinct().toList();
         if (conversationIds.isEmpty()) throw IqcException.invalidArgument("至少选择一个会话");
@@ -109,7 +387,6 @@ public class InspectionTaskService {
             if (!dataScope.canView(conversation.getCreatedBy(), conversation.getOwnerGroupId())) throw IqcException.accessDenied("无权使用该会话创建任务");
             conversations.add(conversation);
         }
-        if (agentId == null || agentId.isBlank()) throw IqcException.invalidArgument("必须选择已发布 Agent");
 
         InspectionTask task = new InspectionTask();
         task.setName(name == null || name.isBlank() ? "批量质检-" + conversations.size() + "个会话" : name.trim());
@@ -117,8 +394,7 @@ public class InspectionTaskService {
         task.setConversationId(conversationIds.size() == 1 ? conversationIds.get(0) : null);
         task.setConversationIdsJson(writeSnapshot(conversationIds));
         task.setConcurrencyLimit(safeConcurrency);
-        task.setAgentId(agentId);
-        snapshotAgentAndRules(task, agentId, ruleSetId, requestedRuleIds);
+        snapshot.accept(task);
         String ownerGroupId = conversations.get(0).getOwnerGroupId();
         task.setOwnerGroupId(conversations.stream().allMatch(item -> java.util.Objects.equals(ownerGroupId, item.getOwnerGroupId())) ? ownerGroupId : null);
         task.setStatus("CREATED");
@@ -135,6 +411,14 @@ public class InspectionTaskService {
     public InspectionTask createScheduled(String name, ScheduledFilter filter, LocalDateTime scheduledTime,
                                            String agentId, String ruleSetId, List<String> requestedRuleIds,
                                            Integer concurrencyLimit) {
+        return createScheduled(name, filter, scheduledTime, agentId, ruleSetId, requestedRuleIds, concurrencyLimit, null);
+    }
+
+    /** Freezes the execution strategy now while scheduled data selection is materialized when due. */
+    @Transactional
+    public InspectionTask createScheduled(String name, ScheduledFilter filter, LocalDateTime scheduledTime,
+                                           String agentId, String ruleSetId, List<String> requestedRuleIds,
+                                           Integer concurrencyLimit, String executionMode) {
         if (scheduledTime == null || !scheduledTime.isAfter(LocalDateTime.now()))
             throw IqcException.invalidArgument("计划执行时间必须晚于当前时间");
         int safeConcurrency = concurrencyLimit == null ? 1 : concurrencyLimit;
@@ -149,7 +433,7 @@ public class InspectionTaskService {
         task.setName(name == null || name.isBlank() ? "定时质检-" + scheduledTime : name.trim());
         task.setTaskType("SCHEDULED"); task.setSelectionFilterJson(writeSnapshot(snapshot));
         task.setScheduledTime(scheduledTime); task.setConcurrencyLimit(safeConcurrency); task.setAgentId(agentId);
-        snapshotAgentAndRules(task, agentId, ruleSetId, requestedRuleIds);
+        snapshotAgentAndRules(task, agentId, ruleSetId, requestedRuleIds, executionMode);
         task.setStatus("SCHEDULED"); task.setTotalMessages(0); task.setProcessedMessages(0);
         task.setFailedMessages(0); task.setAttemptCount(0); task.setOwnerGroupId((String) snapshot.get("scopeGroupId"));
         taskMapper.insert(task);
@@ -160,6 +444,13 @@ public class InspectionTaskService {
     @Transactional
     public InspectionTask createSampled(String name, ScheduledFilter requestedFilter, int sampleSize, String seed,
                                         String agentId, String ruleSetId, List<String> ruleIds, Integer concurrencyLimit) {
+        return createSampled(name, requestedFilter, sampleSize, seed, agentId, ruleSetId, ruleIds, concurrencyLimit, null);
+    }
+
+    /** Applies the same strategy contract to reproducible sampling as to explicit batches. */
+    @Transactional
+    public InspectionTask createSampled(String name, ScheduledFilter requestedFilter, int sampleSize, String seed,
+                                        String agentId, String ruleSetId, List<String> ruleIds, Integer concurrencyLimit, String executionMode) {
         if (sampleSize < 1 || sampleSize > 1000) throw IqcException.invalidArgument("抽样数量必须在 1 到 1000 之间");
         ScheduledFilter filter = (requestedFilter == null
                 ? new ScheduledFilter(null, null, null, "IMPORTED", null, 1000) : requestedFilter).normalized();
@@ -179,7 +470,7 @@ public class InspectionTaskService {
                 .sorted(java.util.Comparator.comparing(id -> sampleKey(stableSeed, id))).limit(sampleSize).toList();
         if (selected.isEmpty()) throw IqcException.invalidArgument("当前筛选条件没有可抽样会话");
         InspectionTask task = createBatch(name == null || name.isBlank() ? "抽样质检-" + selected.size() + "个会话" : name,
-                selected, agentId, ruleSetId, ruleIds, concurrencyLimit);
+                selected, agentId, ruleSetId, ruleIds, concurrencyLimit, executionMode);
         task.setTaskType("SAMPLE");
         task.setSelectionFilterJson(writeSnapshot(Map.of("filter", filter, "sampleSize", sampleSize,
                 "seed", stableSeed, "selectedConversationIds", selected)));
@@ -232,30 +523,60 @@ public class InspectionTaskService {
         return ready;
     }
 
-    private void snapshotAgentAndRules(InspectionTask task, String agentId, String ruleSetId, List<String> requestedRuleIds) {
-        if (agentId == null || agentId.isBlank()) throw IqcException.invalidArgument("必须选择已发布 Agent");
-        QualityAgent agent = agentMapper.selectById(agentId);
-        if (agent == null || !"PUBLISHED".equals(agent.getStatus())) throw IqcException.invalidArgument("只能选择已发布 Agent");
+    private void snapshotAgentAndRules(InspectionTask task, String agentId, String ruleSetId, List<String> requestedRuleIds, String executionMode) {
+        TaskExecutionStrategy.Mode mode = TaskExecutionStrategy.parseRequested(executionMode);
+        QualityAgent agent = agentId == null || agentId.isBlank() ? null : agentMapper.selectById(agentId);
+        if (agent == null && mode != TaskExecutionStrategy.Mode.RULE_ONLY)
+            throw IqcException.invalidArgument("LLM 或旧版任务必须选择已发布 Agent，纯规则任务请显式选择 RULE_ONLY 策略");
+        if (agentId != null && !agentId.isBlank() && (agent == null || !"PUBLISHED".equals(agent.getStatus())))
+            throw IqcException.invalidArgument("只能选择已发布 Agent");
+        if (agent != null && mode == null && "3.0".equals(agentConfiguration(agent).path("schemaVersion").asText()))
+            throw IqcException.invalidArgument("新版 Agent 不持有质检模式，请在任务中选择执行策略");
+        if (agent != null && mode != null && mode != TaskExecutionStrategy.Mode.RULE_ONLY
+                && "RULE_ONLY".equalsIgnoreCase(agentConfiguration(agent).path("mode").asText()))
+            throw IqcException.invalidArgument("普通规则旧版 Agent 不具备 LLM 能力，请选择模型型 Agent");
         String effectiveRuleSetId = ruleSetId;
         if ((effectiveRuleSetId == null || effectiveRuleSetId.isBlank()) && (requestedRuleIds == null || requestedRuleIds.isEmpty())) {
-            effectiveRuleSetId = configuredRuleSetId(agent);
+            effectiveRuleSetId = agent == null ? null : configuredRuleSetId(agent);
         }
         List<String> ruleIds = requestedRuleIds == null ? new ArrayList<>() : requestedRuleIds.stream().filter(id -> id != null && !id.isBlank()).distinct().toList();
         QualityRuleSetService.PublishedRuleSet publishedSet = null;
         if (ruleIds.isEmpty() && effectiveRuleSetId != null && !effectiveRuleSetId.isBlank()) { publishedSet = ruleSetService.published(effectiveRuleSetId); ruleIds = publishedSet.ruleIds(); }
         if (ruleIds.isEmpty()) throw IqcException.invalidArgument("至少选择一条已发布规则");
         task.setRuleSetId(effectiveRuleSetId); task.setRuleIdsJson(writeSnapshot(ruleIds));
-        task.setAgentSnapshotJson(writeSnapshot(agent));
+        task.setAgentId(mode == TaskExecutionStrategy.Mode.RULE_ONLY ? null : agentId);
+        task.setAgentSnapshotJson(mode == TaskExecutionStrategy.Mode.RULE_ONLY ? null : writeSnapshot(agent));
         List<QualityRule> rules = new ArrayList<>();
         for (String ruleId : ruleIds) {
             QualityRule rule = ruleMapper.selectById(ruleId);
             if (rule == null || !"PUBLISHED".equals(rule.getStatus())) throw IqcException.invalidArgument("只能选择已发布规则");
             rules.add(rule);
         }
+        if (mode == TaskExecutionStrategy.Mode.RULE_ONLY && rules.stream().anyMatch(rule -> "LLM".equalsIgnoreCase(rule.getRuleType())))
+            throw IqcException.invalidArgument("纯规则策略不能包含 LLM 检测，请调整规则或执行策略");
+        if (mode == TaskExecutionStrategy.Mode.AGENT_LLM && rules.stream().anyMatch(rule -> !"LLM".equalsIgnoreCase(rule.getRuleType())))
+            throw IqcException.invalidArgument("纯 LLM 策略不能静默跳过普通规则，请选择逐项独立执行或调整规则");
         if (publishedSet == null) task.setRuleSnapshotJson(writeSnapshot(rules));
         else task.setRuleSnapshotJson(writeSnapshot(Map.of("ruleSetId", publishedSet.id(), "ruleSetName", publishedSet.name(),
                 "ruleSetCode", publishedSet.code(), "ruleSetVersion", publishedSet.versionNo(),
                 "aggregationMode", publishedSet.aggregationMode(), "rules", rules)));
+        if (mode != null) {
+            JsonNode current;
+            try { current = objectMapper.readTree(task.getRuleSnapshotJson()); }
+            catch (JsonProcessingException exception) { throw new IllegalStateException(exception); }
+            com.fasterxml.jackson.databind.node.ObjectNode snapshot = current.isObject()
+                    ? (com.fasterxml.jackson.databind.node.ObjectNode) current : objectMapper.createObjectNode().set("rules", current);
+            snapshot.set("executionStrategy", objectMapper.valueToTree(new TaskExecutionStrategy("1.0", mode)));
+            task.setRuleSnapshotJson(writeSnapshot(snapshot));
+        }
+    }
+
+    private JsonNode agentConfiguration(QualityAgent agent) {
+        try {
+            JsonNode config = agent.getConfigJson() == null ? null : objectMapper.readTree(agent.getConfigJson());
+            return config == null ? objectMapper.createObjectNode() : config;
+        }
+        catch (JsonProcessingException exception) { throw IqcException.invalidArgument("Agent 配置不是有效的结构化配置"); }
     }
 
     private String configuredRuleSetId(QualityAgent agent) {
@@ -378,6 +699,20 @@ public class InspectionTaskService {
         if (!dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权查看该质检任务");
         return task;
     }
+
+    /** Lists authorized task attempts for explicit run-level report selection. */
+    public List<TaskRunSummary> executions(String taskId) {
+        InspectionTask task = get(taskId);
+        return executionMapper.selectList(Wrappers.<TaskExecution>lambdaQuery()
+                        .eq(TaskExecution::getTaskId, taskId).orderByAsc(TaskExecution::getAttemptNo))
+                .stream().map(execution -> new TaskRunSummary(execution.getId(), execution.getAttemptNo(),
+                        execution.getStatus(), execution.getProcessedMessages(), execution.getFailedMessages(),
+                        execution.getCreatedTime(), execution.getId().equals(task.getCurrentExecutionId())))
+                .toList();
+    }
+
+    public record TaskRunSummary(String id, Integer attemptNo, String status, Integer processedMessages,
+                                 Integer failedMessages, java.util.Date createdTime, boolean current) { }
 
     @Transactional
     public InspectionTask cancel(String id) {

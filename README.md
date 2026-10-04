@@ -27,7 +27,7 @@ mvn -DskipTests -Djib.to.image=iqc-platform:local jib:dockerBuild
 - `GOVERNANCE_USAGE_TRANSPORT`：使用量计次传输方式
 - `opensabre.governance.registration-token`：Nacos 公共配置中的字典/错误码/资源注册令牌，支持 `ENC(...)`
 
-TXT 导入接口会保存会话与消息，并以文件 SHA-256 指纹保证重复提交幂等；质检任务执行时保存 Agent/规则快照，结果按 TaskItem 和执行 attempt 追踪。数据范围通过 `opensabre-starter-rpc` 调用 `base-organization` 获取当前用户 `groupId`，IQC 只保存业务归属快照。
+TXT 导入接口会保存会话与消息，并以文件 SHA-256 指纹保证重复提交幂等。说话人角色支持 `agent`、`user` 和原有 `customer`；“客服/坐席”归一为 `agent`，“客户/用户”归一为 `user`，未知角色保留原值。TXT 原始行和文件指纹不改；旧会话只在任务执行内存中归一，不回填数据库。质检任务执行时保存 Agent/规则快照，结果按 TaskItem 和执行 attempt 追踪。数据范围通过 `opensabre-starter-rpc` 调用 `base-organization` 获取当前用户 `groupId`，IQC 只保存业务归属快照。
 
 Agent 支持 `RULE_ONLY`、`RULE_THEN_LLM` 和 `AGENT_LLM` 三种质检模式。规则+LLM 模式先运行本地规则，仅对命中候选调用模型，并把本地候选结果传给 LLM 复核；未配置模式的历史 Agent 保持兼容执行。
 

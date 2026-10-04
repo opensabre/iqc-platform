@@ -46,6 +46,18 @@ class LabelTaxonomyServiceTest {
     }
 
     @Test
+    void explicitRuleHitValuesMustMatchTheDeclaredType() {
+        when(labels.selectById("label-1")).thenReturn(new InsightLabel());
+        assertThatThrownBy(() -> service.replaceValues("label-1", List.of(
+                new LabelTaxonomyService.ValueRequest("owns", "BOOLEAN", null, "{\"onRuleHit\":{\"rule-1\":\"false\"}}"))))
+                .isInstanceOf(IqcException.class).hasMessageContaining("BOOLEAN");
+        service.replaceValues("label-1", List.of(
+                new LabelTaxonomyService.ValueRequest("owns", "BOOLEAN", null, "{\"onRuleHit\":{\"rule-1\":false}}")));
+        verify(values).insert(argThat((io.github.opensabre.iqc.label.model.LabelValueDefinition value) ->
+                "{\"onRuleHit\":{\"rule-1\":false}}".equals(value.getConfigJson())));
+    }
+
+    @Test
     void labelWithoutPublishedRuleBindingCannotPublish() {
         InsightLabel label = new InsightLabel(); label.setId("label-1");
         when(labels.selectById("label-1")).thenReturn(label);

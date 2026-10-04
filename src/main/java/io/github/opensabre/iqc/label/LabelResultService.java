@@ -21,10 +21,71 @@ import java.util.stream.Collectors;
 public class LabelResultService {
     private final InspectionLabelResultMapper mapper; private final ObjectMapper objectMapper;
 
+    /** Uses the caller's canonical conversation/messages; invoked inside conversation materialization's transaction. */
+    public void materialize(ConversationInspectionResult conversation, String labelSnapshotJson, List<RuleInspectionResult> ruleResults,
+                            List<io.github.opensabre.iqc.conversation.model.ConversationMessage> messages) {
+        if (labelSnapshotJson == null || labelSnapshotJson.isBlank()) return;
+        final JsonNode snapshot;
+        try { snapshot = objectMapper.readTree(labelSnapshotJson); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException exception) { throw new IllegalStateException("标签快照无效", exception); }
+        if (!"2.0".equals(snapshot.path("schemaVersion").asText())) {
+            materialize(conversation, labelSnapshotJson, ruleResults); return;
+        }
+        if (conversation.getId() == null || conversation.getConversationId() == null || !snapshot.path("labels").isArray()
+                || snapshot.path("labels").isEmpty()) throw new IllegalStateException("新版标签快照或会话身份无效");
+        var byMessage = new java.util.LinkedHashMap<String, io.github.opensabre.iqc.conversation.model.ConversationMessage>();
+        for (var message : messages) {
+            if (message.getId() == null || !conversation.getConversationId().equals(message.getConversationId())
+                    || byMessage.putIfAbsent(message.getId(), message) != null) throw new IllegalStateException("标签证据会话范围无效");
+        }
+        var byRule = new java.util.LinkedHashMap<String, RuleInspectionResult>();
+        for (var source : ruleResults) {
+            if (source.getId() == null || !conversation.getId().equals(source.getConversationResultId())
+                    || byRule.putIfAbsent(source.getRuleId(), source) != null) throw new IllegalStateException("标签规则结果归属无效");
+        }
+        var pending = new java.util.ArrayList<InspectionLabelResult>();
+        var labelIds = new java.util.HashSet<String>();
+        for (var label : snapshot.path("labels")) {
+            String id = label.path("id").asText();
+            if (!label.path("id").isTextual() || id.isBlank() || !labelIds.add(id)
+                    || !label.path("versionNo").isIntegralNumber() || label.path("versionNo").asInt() < 1
+                    || !List.of("user", "customer", "agent").contains(label.path("targetRole").asText())
+                    || !label.path("bindings").isArray() || label.path("bindings").isEmpty()
+                    || !label.path("values").isArray() || label.path("values").isEmpty()) throw new IllegalStateException("新版标签定义不完整");
+            var sources = new java.util.ArrayList<RuleInspectionResult>();
+            for (var binding : label.path("bindings")) {
+                var source = byRule.get(binding.path("ruleId").asText());
+                if (source == null || source.getRuleVersionNo() == null || !binding.path("ruleVersionNo").isIntegralNumber()
+                        || source.getRuleVersionNo() != binding.path("ruleVersionNo").asInt()) throw new IllegalStateException("标签规则版本不一致");
+                if (!sources.contains(source)) sources.add(source);
+            }
+            var valueCodes = new java.util.HashSet<String>();
+            for (var definition : label.path("values")) {
+                String code = definition.path("valueCode").asText();
+                if (!definition.path("valueCode").isTextual() || code.isBlank() || !valueCodes.add(code)
+                        || !List.of("FIXED", "BOOLEAN", "PERCENTAGE", "DURATION_MONTHS", "MONTH", "DATE")
+                        .contains(definition.path("valueType").asText()))
+                    throw new IllegalStateException("标签值编码或类型无效、重复");
+                var payload = LabelFactEvaluator.evaluate(label, definition, sources, byMessage, objectMapper);
+                var result = new InspectionLabelResult(); result.setConversationResultId(conversation.getId());
+                result.setLabelId(id); result.setLabelVersionNo(label.path("versionNo").asInt()); result.setValueCode(code);
+                result.setValueJson(payload.toString()); result.setGenerationSource("RULE");
+                // Required legacy anchor, not a claim that only this rule supplied the fact. All candidates carry provenance.
+                result.setSourceRuleResultId(sources.getFirst().getId()); pending.add(result);
+            }
+        }
+        // Validate the entire projection before writing; database failures still propagate to the outer transaction.
+        pending.forEach(mapper::insert);
+    }
+
     public void materialize(ConversationInspectionResult conversation, String labelSnapshotJson, List<RuleInspectionResult> ruleResults) {
         if (labelSnapshotJson == null || labelSnapshotJson.isBlank()) return;
         try {
-            JsonNode labels = objectMapper.readTree(labelSnapshotJson).path("labels");
+            JsonNode snapshot = objectMapper.readTree(labelSnapshotJson);
+            // Coverage-aware snapshots must never fall through to the legacy hit-only projection.
+            if ("2.0".equals(snapshot.path("schemaVersion").asText()))
+                throw new IllegalStateException("标签联合输出尚未接入结果链路");
+            JsonNode labels = snapshot.path("labels");
             if (!labels.isArray()) return;
             Map<String, RuleInspectionResult> byRule = ruleResults.stream().collect(Collectors.toMap(RuleInspectionResult::getRuleId, Function.identity(), (a, b) -> a));
             for (JsonNode label : labels) {

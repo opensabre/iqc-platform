@@ -72,7 +72,7 @@ jobs:
   build-and-push:
     name: Build and Push Image
     if: github.event_name == 'push'
-    needs: test
+    needs: [test, database-migrations]
     runs-on: ubuntu-latest
     env:
       REGISTRY_URL: "ccr.ccs.tencentyun.com/opensabre"

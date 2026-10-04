@@ -2,11 +2,19 @@
 
 本文档对应 [`db/migration/mysql/`](../src/main/resources/db/migration/mysql/) 中的 Flyway 基线与后续迁移。业务聚合之间主要采用应用层逻辑外键；规范化质检结果内部使用物理外键保证会话结果、规则结果和证据的一致性。
 
+## 业务方案及派生来源
+
+`iqc_inspection_scheme` 是可编辑草稿与当前发布指针；`iqc_inspection_scheme_version` 追加保存不可变发布快照。`V1.1.31` 在方案主记录保存可空的直接来源方案 ID、冻结名称/编码、来源版本号和内容摘要。创建派生草稿时，服务端按来源 ID 与版本读取并校验已发布快照，再复制冻结业务定义；不会从浏览器接受来源配置，也不会跟随来源方案后续编辑。来源字段只在创建时写入，目标草稿后续修订不改变来源链。来源关系没有物理外键，需与任务快照一样按应用层授权和版本摘要校验。
+
+`V1.1.32` 在发布版本行新增 `archived` 标记，默认 `FALSE`。只允许改变低于方案当前发布指针的版本；归档不改写快照、不改变当前指针。专家仍可读取归档快照并恢复；普通模板历史不返回归档版本，新建任务和派生草稿拒绝使用它。已经创建的任务以自身冻结快照继续处理，不重新读取发布版本的归档状态。
+
 ## 标签洞察领域
 
 标签采用固定三级结构：`iqc_label_category`（分类）→ `iqc_label_group`（标签组）→ `iqc_label`（业务标签）。标签本身不保存检测表达式，而是通过 `iqc_label_rule_binding` 绑定既有已发布规则；结构化值由 `iqc_label_value_definition` 定义。`iqc_label_collection` 与成员表用于复用业务选择范围，任务创建时会展开并固化为标签、值、规则及版本快照。
 
 检测仍以 `iqc_inspection_conversation_result`、`iqc_inspection_rule_result` 和 `iqc_inspection_evidence` 为规范结果。`iqc_inspection_label_result` 只是从规范规则结果投影出的业务洞察，保留标签版本、来源规则结果、置信度和值。AI 自动扩展写入隔离的 `iqc_label_candidate`；人工批准只创建标签草稿，不能直接进入发布树。
+
+联合标签会将逐消息事实、候选来源和原文引文写入现有结果列。`V1.1.29` 将 `iqc_inspection_result.finding_json`、`evidence_json` 和 `iqc_inspection_label_result.value_json` 从 `TEXT` 扩为 `MEDIUMTEXT`；不新增结果表或改变旧行语义。迁移必须在运行新版联合试跑代码前完成，仍需隔离 MySQL 验证新库、升级与重复迁移路径；`MEDIUMTEXT` 不是无限容量，超长模型输出仍需运行链路上限验收。
 
 ```mermaid
 erDiagram

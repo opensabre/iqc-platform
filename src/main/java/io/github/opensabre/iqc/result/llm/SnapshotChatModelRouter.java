@@ -32,7 +32,10 @@ public class SnapshotChatModelRouter {
         Prompt executablePrompt = callbacks.length == 0 ? prompt : new Prompt(prompt.getInstructions(),
                 ToolCallingChatOptions.builder().toolCallbacks(callbacks).build());
         JsonNode config=config(agentSnapshot);
-        if(!"2.0".equals(config.path("schemaVersion").asText())||config.path("assetSnapshots").isMissingNode()) {
+        boolean managed = io.github.opensabre.iqc.agent.AgentConfiguration.usesManagedAssets(config.path("schemaVersion").asText());
+        if ("3.0".equals(config.path("schemaVersion").asText()) && (!config.path("assetSnapshots").isObject() || !config.path("assetSnapshots").path("primaryModel").isObject()))
+            throw new IllegalStateException("Agent 缺少已发布的模型资产快照");
+        if(!managed || config.path("assetSnapshots").isMissingNode()) {
             if(defaultModel==null) throw new IllegalStateException("系统默认模型未启用");
             return defaultModel.call(executablePrompt);
         }

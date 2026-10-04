@@ -39,7 +39,8 @@ public class AgentEffectService {
         long highRisk = results.stream().filter(result -> "HIGH".equalsIgnoreCase(result.getRiskLevel())).count();
         long errors = results.stream().filter(result -> "ERROR".equals(result.getResultStatus()) || "PARTIAL_ERROR".equals(result.getResultStatus())).count();
         double averageScore = results.stream().map(InspectionResult::getScore).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).average().orElse(0);
-        return new AgentEffectReport(agentId, versionNo, taskIds.size(), results.size(), decimal(averageScore), rate(hits, results.size()),
+        return new AgentEffectReport(agentId, versionNo, taskIds.size(), results.size(),
+                !results.isEmpty() && results.stream().noneMatch(result -> result.getScore() != null) ? null : decimal(averageScore), rate(hits, results.size()),
                 rate(highRisk, results.size()), rate(errors, results.size()));
     }
 

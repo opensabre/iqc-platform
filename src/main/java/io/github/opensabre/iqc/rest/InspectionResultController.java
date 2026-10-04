@@ -35,16 +35,19 @@ public class InspectionResultController {
     private final HierarchicalResultService hierarchicalResultService;
     private final LabelResultQueryService labelResultQueryService;
     private final LabelInsightExportService labelInsightExportService;
+    private final io.github.opensabre.iqc.quality.BusinessItemReviewService businessReviews;
 
     public InspectionResultController(InspectionExecutionService executionService, UsageCounterRecorder usageCounterRecorder,
                                       BatchResultQueryService batchResultQueryService,
                                       HierarchicalResultService hierarchicalResultService,
                                       LabelResultQueryService labelResultQueryService,
-                                      LabelInsightExportService labelInsightExportService) {
+                                      LabelInsightExportService labelInsightExportService,
+                                      io.github.opensabre.iqc.quality.BusinessItemReviewService businessReviews) {
         this.executionService = executionService; this.usageCounterRecorder = usageCounterRecorder;
         this.batchResultQueryService = batchResultQueryService; this.hierarchicalResultService = hierarchicalResultService;
         this.labelResultQueryService = labelResultQueryService;
         this.labelInsightExportService = labelInsightExportService;
+        this.businessReviews = businessReviews;
     }
 
     @PostMapping("/tasks/{id}/run")
@@ -87,6 +90,18 @@ public class InspectionResultController {
     @GetMapping("/results/{id}")
     @ResourcePermission(code = "iqc:result:view", name = "查看质检结果详情", type = "iqc", description = "查看质检结果详情")
     public Map<String, Object> resultDetail(@PathVariable String id) { return executionService.detail(id); }
+
+    /** Current business conversation results; message filters and legacy scores have a separate endpoint. */
+    @GetMapping("/results/business")
+    @ResourcePermission(code = "iqc:result:business:view", name = "查看业务会话结果", type = "iqc", description = "按当前会话业务结果分页查询")
+    @RateLimit(sceneCode = "iqc-result-query", maxCount = 60, period = 60)
+    public IqcPage<BatchResultQueryService.BusinessConversationRow> businessResults(
+            @RequestParam(defaultValue = "1") long current, @RequestParam(defaultValue = "20") long size,
+            @RequestParam(required = false) String taskId, @RequestParam(required = false) String scoreStatus,
+            @RequestParam(required = false) String riskLevel, @RequestParam(required = false) java.math.BigDecimal minScore,
+            @RequestParam(required = false) java.math.BigDecimal maxScore) {
+        return batchResultQueryService.businessPage(current, size, taskId, scoreStatus, riskLevel, minScore, maxScore);
+    }
 
     @GetMapping("/tasks/{id}/result-summary")
     @ResourcePermission(code = "iqc:result:view", name = "查看批次质检结果", type = "iqc", description = "查看质检批次及会话汇总结果")
@@ -132,7 +147,7 @@ public class InspectionResultController {
         return batchResultQueryService.conversationDetail(conversationId);
     }
 
-    @GetMapping(value = "/results/export", produces = "text/csv")
+    @GetMapping(value = "/results/export", produces = {"text/csv", "application/zip"})
     @ResourcePermission(code = "iqc:result:export", name = "导出质检结果", type = "iqc", description = "导出质检结果")
     @Audit(operationType = OperationType.EXPORT, description = "导出 IQC 质检结果", module = "IQC_RESULT")
     @RateLimit(sceneCode = "iqc-result-export", maxCount = 10, period = 60)
@@ -144,9 +159,35 @@ public class InspectionResultController {
                                          @RequestParam(required = false) Integer minScore,
                                          @RequestParam(required = false) Integer maxScore,
                                          @RequestParam(required = false) String speakerRole,
-                                         @RequestParam(required = false) String riskLevel) {
-        byte[] body = executionService.exportCsv(taskId, agentId, ownerId, groupId, status, minScore, maxScore, speakerRole, riskLevel).getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=iqc-results.csv")
+                                         @RequestParam(required = false) String riskLevel,
+                                         @RequestParam(defaultValue = "MESSAGE") String view,
+                                         @RequestParam(required = false) String reviewId) {
+        if ("BUSINESS_REVIEW_TASK".equals(view)) {
+            if (reviewId != null || agentId != null || ownerId != null || groupId != null || status != null
+                    || minScore != null || maxScore != null || speakerRole != null || riskLevel != null)
+                throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("批量复核导出只能指定任务，不支持轮次或消息筛选");
+            return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=iqc-task-reviews.zip")
+                    .contentType(MediaType.parseMediaType("application/zip")).body(businessReviews.exportTaskZip(taskId));
+        }
+        if ("BUSINESS_REVIEW".equals(view)) {
+            if (taskId != null || agentId != null || ownerId != null || groupId != null || status != null
+                    || minScore != null || maxScore != null || speakerRole != null || riskLevel != null)
+                throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("复核导出只能指定复核轮次，不支持任务或消息筛选");
+            return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=iqc-business-review.csv")
+                    .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
+                    .body(businessReviews.exportCsv(reviewId).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        if (reviewId != null) throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("非复核导出不得指定复核轮次");
+        if (!"MESSAGE".equals(view) && !"SCHEME".equals(view))
+            throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("不支持的结果导出视图");
+        if ("SCHEME".equals(view) && (agentId != null || ownerId != null || groupId != null || status != null
+                || minScore != null || maxScore != null || speakerRole != null || riskLevel != null))
+            throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("业务导出按完整任务导出，不支持消息筛选条件");
+        String csv = "SCHEME".equals(view) ? batchResultQueryService.exportSchemeCsv(taskId)
+                : executionService.exportCsv(taskId, agentId, ownerId, groupId, status, minScore, maxScore, speakerRole, riskLevel);
+        byte[] body = csv.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String filename = "SCHEME".equals(view) ? "iqc-business-results.csv" : "iqc-results.csv";
+        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + filename)
                 .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8")).body(body);
     }
 }

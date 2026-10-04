@@ -62,7 +62,24 @@ class TxtConversationParserTest {
         assertTrue(result.successful());
         assertEquals(3, result.messages().size());
         assertEquals(0, result.messages().getFirst().sequence());
-        assertEquals("客户", result.messages().get(1).speakerRole());
+        assertEquals("agent", result.messages().getFirst().speakerRole());
+        assertEquals("user", result.messages().get(1).speakerRole());
+        assertEquals("agent", result.messages().getLast().speakerRole());
+        assertEquals("客户：[10:02:03] 我想查询账单", result.messages().get(1).rawLine());
         assertEquals("10:02:08", result.messages().getLast().relativeTime().toString());
+    }
+
+    @Test
+    void canonicalizesKnownEnglishAliasesButDoesNotAssignUnknownSpeakers() {
+        ConversationParseResult result = parser.parse("""
+                0(Customer):[00:00:01]我要办理
+                1(AGENT):[00:00:02]好的
+                2(系统):[00:00:03]会话结束
+                """);
+
+        assertTrue(result.successful());
+        assertEquals("customer", result.messages().get(0).speakerRole());
+        assertEquals("agent", result.messages().get(1).speakerRole());
+        assertEquals("系统", result.messages().get(2).speakerRole());
     }
 }

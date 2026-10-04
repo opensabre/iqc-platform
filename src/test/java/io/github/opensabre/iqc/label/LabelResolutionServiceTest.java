@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -44,6 +45,33 @@ class LabelResolutionServiceTest {
         InsightLabel value = new InsightLabel();
         value.setId(id); value.setCode(code); value.setName(code); value.setStatus("PUBLISHED"); value.setVersionNo(1);
         return value;
+    }
+
+    @Test
+    void versionedResolutionChecksPublishedIdentityAndBindingVersion() {
+        var current = label("label-1", "a");
+        var binding = binding("rule");
+        when(labels.selectBatchIds(any())).thenReturn(List.of(current));
+        when(scope.canView(any(), any())).thenReturn(true);
+        when(bindings.selectList(any())).thenReturn(List.of(binding));
+        var refs = List.of(new LabelResolutionService.LabelReference("label-1", 1));
+        var resolved = service.resolveVersions(refs);
+        assertThat(resolved.schemaVersion()).isEqualTo("2.0");
+        assertThat(resolved.labels().getFirst().versionNo()).isEqualTo(1);
+        current.setVersionNo(2);
+        assertThatThrownBy(() -> service.resolveVersions(refs)).hasMessageContaining("版本已变化");
+        current.setVersionNo(1); binding.setRuleVersionNo(null);
+        assertThatThrownBy(() -> service.resolveVersions(refs)).hasMessageContaining("明确规则版本");
+    }
+
+    @Test
+    void versionedResolutionRetainsScopeAndRejectsDuplicatesBeforeReading() {
+        var ref = new LabelResolutionService.LabelReference("label-1", 1);
+        assertThatThrownBy(() -> service.resolveVersions(List.of(ref, ref))).hasMessageContaining("重复");
+        verifyNoInteractions(labels);
+        when(labels.selectBatchIds(any())).thenReturn(List.of(label("label-1", "a")));
+        assertThatThrownBy(() -> service.resolveVersions(List.of(ref))).hasMessageContaining("数据权限");
+        verifyNoInteractions(bindings);
     }
 
     private LabelRuleBinding binding(String ruleId) {

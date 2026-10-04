@@ -20,6 +20,24 @@ import static org.mockito.Mockito.when;
 
 class ConversationImportServiceTest {
     @Test
+    void persistsCanonicalRolesWhileKeepingOriginalTranscriptLine() {
+        ConversationMapper conversationMapper = mock(ConversationMapper.class);
+        ConversationMessageMapper messageMapper = mock(ConversationMessageMapper.class);
+        IqcDataScope dataScope = mock(IqcDataScope.class);
+        ConversationImportService service = new ConversationImportService(conversationMapper, messageMapper, dataScope,
+                new com.fasterxml.jackson.databind.ObjectMapper());
+        var draft = new ConversationMessageDraft(1, "客户", java.time.LocalTime.parse("00:00:01"),
+                "我没有房子", "客户：我没有房子", 1);
+
+        service.persist("conversation.txt", "fingerprint", new ConversationParseResult(List.of(draft), List.of(), 0));
+
+        var captor = org.mockito.ArgumentCaptor.forClass(ConversationMessage.class);
+        verify(messageMapper).insert(captor.capture());
+        assertThat(captor.getValue().getSpeakerRole()).isEqualTo("user");
+        assertThat(captor.getValue().getRawLine()).isEqualTo("客户：我没有房子");
+    }
+
+    @Test
     void persistsParticipantAndBusinessMetadataSnapshots() {
         ConversationMapper conversationMapper = mock(ConversationMapper.class);
         ConversationMessageMapper messageMapper = mock(ConversationMessageMapper.class);
