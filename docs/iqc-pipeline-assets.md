@@ -32,7 +32,7 @@ release.schemaVersion 为 `iqc-pipeline-release-v1`，包含 pipeline、fusion�
 
 失败、未知、冲突、未执行分别保存，不转换为未命中。VERIFY 仅接受上游在原消息中可验证的逐字引文。结果与任务消息检查点在现有事务保存，执行ID或租约失效时拒绝写入。节点之间更新心跳；跨实例周期心跳与完整持久化调度仍属于 I4。
 
-当前风险级别是评分映射事实的基础投影，评分不完整时为 UNKNOWN；独立 RiskPolicy、动作和复核适配仍待 I5。前端当前仅支持旧路线轨迹，需要接入新 schema。
+当前风险级别是评分映射事实的基础投影，评分不完整时为 UNKNOWN；独立 RiskPolicy、动作和复核适配仍待 I5。前端已编码两种轨迹展示，包含节点尝试、融合候选与原因及计分明细，尚未完成浏览器联调。
 
 ## 数据与验证
 
@@ -44,4 +44,4 @@ POST `/api/iqc/conversation-results/{id}/decision-revisions`：targetPipelineId�
 
 GET 同一路径返回该源结果最新100条重算记录。源任务数据范围和目标资产范围分别校验；原始融合与评分须可由原冻结政策再现，拒绝不一致快照。requestId 对当前主体幂等，不同内容拒绝；结果为 append-only iqc_decision_revision（V1.1.36），targetPolicyJson 冻结目标版本，projectionJson 包含原始/重算评分、融合理由及源摘要。原始检测结果及人工复核不覆盖，不自动替换报表当前结论。
 
-当前仅支持 Pipeline BOOLEAN 业务评分；旧 Scheme、标签、独立风险政策重算和前端对比仍待扩展。权限 iqc:decision:recalculate / iqc:decision:history:view。
+当前仅支持 Pipeline BOOLEAN 业务评分；旧 Scheme、标签、独立风险政策重算及结构化评分对比仍待扩展。前端已接入发布版本选择、重算请求及最近100条记录查看。权限 iqc:decision:recalculate / iqc:decision:history:view。

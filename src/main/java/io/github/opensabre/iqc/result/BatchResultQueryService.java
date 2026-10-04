@@ -179,7 +179,7 @@ public class BatchResultQueryService {
                                                        String riskLevel, BigDecimal minScore, BigDecimal maxScore) {
         long pageNo = Math.max(1, current), pageSize = Math.min(Math.max(1, size), 100);
         if (scoreStatus != null && !List.of("FINAL", "PENDING", "NOT_APPLICABLE").contains(scoreStatus)
-                || riskLevel != null && !List.of("HIGH", "MEDIUM", "LOW").contains(riskLevel)
+                || riskLevel != null && !List.of("NONE", "LOW", "MEDIUM", "HIGH", "CRITICAL", "UNKNOWN").contains(riskLevel)
                 || minScore != null && minScore.signum() < 0 || maxScore != null && maxScore.signum() < 0
                 || minScore != null && maxScore != null && minScore.compareTo(maxScore) > 0)
             throw IqcException.invalidArgument("业务结果筛选条件无效");
@@ -232,7 +232,7 @@ public class BatchResultQueryService {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public BatchResultSummary summary(String taskId) {
         InspectionTask task = requireTask(taskId);
-        boolean scheme = isScheme(task);
+        boolean scheme = isConversationPolicy(task);
         Map<String, Integer> attempts = scheme ? executionAttempts(taskId) : Map.of();
         List<InspectionResult> results = resultMapper.selectList(Wrappers.<InspectionResult>lambdaQuery()
                 .eq(InspectionResult::getTaskId, taskId).orderByAsc(InspectionResult::getCreatedTime));
@@ -264,8 +264,8 @@ public class BatchResultQueryService {
         List<InspectionResult> results = resultMapper.selectList(Wrappers.<InspectionResult>lambdaQuery()
                 .eq(InspectionResult::getTaskId, taskId).eq(InspectionResult::getConversationId, conversationId)
                 .orderByAsc(InspectionResult::getCreatedTime));
-        Map<String, Integer> attempts = isScheme(task) ? executionAttempts(taskId) : Map.of();
-        List<InspectionResult> visibleResults = isScheme(task)
+        Map<String, Integer> attempts = isConversationPolicy(task) ? executionAttempts(taskId) : Map.of();
+        List<InspectionResult> visibleResults = isConversationPolicy(task)
                 ? observationsFor(latestCanonical(task, conversationId), results, attempts) : results;
         return new ConversationResultDetail(conversation, task, conversationSummary(task, conversationId, conversation, visibleResults, attempts), messages, visibleResults);
     }
@@ -285,8 +285,8 @@ public class BatchResultQueryService {
         List<ConversationMessage> messages = messageMapper.selectList(Wrappers.<ConversationMessage>lambdaQuery()
                 .eq(ConversationMessage::getConversationId, conversationId).orderByAsc(ConversationMessage::getSequenceNo));
         return new ConversationResultDetail(conversation, task, conversationSummary(task, conversationId, conversation,
-                isScheme(task) ? visibleResults.stream().filter(result -> task.getId().equals(result.getTaskId())).toList() : visibleResults,
-                isScheme(task) ? executionAttempts(task.getId()) : Map.of()), messages, visibleResults);
+                isConversationPolicy(task) ? visibleResults.stream().filter(result -> task.getId().equals(result.getTaskId())).toList() : visibleResults,
+                isConversationPolicy(task) ? executionAttempts(task.getId()) : Map.of()), messages, visibleResults);
     }
 
     private InspectionTask requireTask(String taskId) {
@@ -313,7 +313,7 @@ public class BatchResultQueryService {
 
     private ConversationResultSummary conversationSummary(InspectionTask task, String id, Conversation conversation,
                                                            List<InspectionResult> results, Map<String, Integer> attempts) {
-        if (isScheme(task)) {
+        if (isConversationPolicy(task)) {
             // Completed conversations are not re-run when another conversation is retried; keep their latest canonical decision.
             ConversationInspectionResult canonical = latestCanonical(task, id);
             List<InspectionResult> currentResults = observationsFor(canonical, results, attempts);
@@ -327,7 +327,7 @@ public class BatchResultQueryService {
             return new ConversationResultSummary(id, conversation == null ? null : conversation.getSourceFileName(),
                     conversation == null ? 0 : conversation.getMessageCount(), currentResults.size(),
                     canonical == null || !"FINAL".equals(canonical.getScoreStatus()) ? null : canonical.getFinalScore(), failures,
-                    canonical != null && "HIGH".equals(canonical.getRiskLevel()) ? 1 : 0,
+                    canonical != null && ("HIGH".equals(canonical.getRiskLevel()) || "CRITICAL".equals(canonical.getRiskLevel())) ? 1 : 0,
                     currentResults.stream().filter(item -> item.getResultStatus() != null && item.getResultStatus().endsWith("ERROR")).count(),
                     canonical == null ? "PENDING" : canonical.getScoreStatus());
         }
@@ -364,9 +364,10 @@ public class BatchResultQueryService {
         return List.copyOf(latestByMessage.values());
     }
 
-    private boolean isScheme(InspectionTask task) {
+    private boolean isConversationPolicy(InspectionTask task) {
         if (task.getRuleSnapshotJson() == null) return false;
-        try { return objectMapper.readTree(task.getRuleSnapshotJson()).has("schemeSnapshot"); }
+        try { var snapshot = objectMapper.readTree(task.getRuleSnapshotJson());
+            return snapshot.has("schemeSnapshot") || snapshot.has("pipelineSnapshot"); }
         catch (Exception exception) { throw IqcException.invalidState("任务规则快照损坏"); }
     }
 
