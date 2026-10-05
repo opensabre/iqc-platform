@@ -68,7 +68,12 @@ public class PipelineAssetController {
     @ResourcePermission(code="iqc:pipeline:task:create",name="创建流水线任务",type="iqc",description="使用不可变已发布流水线创建任务")
     @Audit(operationType=OperationType.CREATE,description="创建流水线任务",module="IQC_PIPELINE")
     public InspectionTask task(@PathVariable String id,@RequestBody Run body) {
-        return tasks.createUsingPipelineSnapshot(assets.publishedRelease(id,body.versionNo()),body.name(),body.conversationIds(),body.concurrency(),body.requestId());
+        var release=assets.publishedRelease(id,body.versionNo());
+        if(body.selector()!=null) {
+            if(body.conversationIds()!=null && !body.conversationIds().isEmpty()) throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("Selector与显式会话IDs不能同时提交");
+            return tasks.createUsingPipelineSelector(release,body.name(),body.selector(),body.concurrency(),body.requestId());
+        }
+        return tasks.createUsingPipelineSnapshot(release,body.name(),body.conversationIds(),body.concurrency(),body.requestId());
     }
     public record Create(String code,String name,PipelineRelease release) { }
     public record Update(int expectedRevision,String name,PipelineRelease release) { }
@@ -81,5 +86,10 @@ public class PipelineAssetController {
             this(expectedRevision,trialTaskId,resultsReviewed,null,null,null);
         }
     }
-    public record Run(int versionNo,String name,List<String> conversationIds,Integer concurrency,String requestId) { }
+    public record Run(int versionNo,String name,List<String> conversationIds,Integer concurrency,String requestId,
+            io.github.opensabre.iqc.selector.SelectorDefinition selector) {
+        public Run(int versionNo,String name,List<String> conversationIds,Integer concurrency,String requestId) {
+            this(versionNo,name,conversationIds,concurrency,requestId,null);
+        }
+    }
 }
