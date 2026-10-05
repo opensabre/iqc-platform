@@ -10,8 +10,14 @@ import java.util.HashSet;
 
 /** Pipeline and deterministic policies are frozen together; detector assets are embedded in node config. */
 public record PipelineRelease(String schemaVersion, PipelineDefinition pipeline, FusionPolicy fusion,
-                              InspectionScoring.Policy scoring, List<ItemMapping> items) {
+                              InspectionScoring.Policy scoring, List<ItemMapping> items,
+                              @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                              PublicationGatePolicy publicationGate) {
     public static final String SCHEMA = "iqc-pipeline-release-v1";
+    public PipelineRelease(String schemaVersion,PipelineDefinition pipeline,FusionPolicy fusion,
+                           InspectionScoring.Policy scoring,List<ItemMapping> items) {
+        this(schemaVersion,pipeline,fusion,scoring,items,null);
+    }
     public record ItemMapping(String itemCode, String findingCode, SchemeDefinition.HitMeaning hitMeaning,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
             String appliesWhenFindingCode) {

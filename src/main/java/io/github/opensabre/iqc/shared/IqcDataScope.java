@@ -29,6 +29,12 @@ public class IqcDataScope {
                 || effectiveScopes().contains("iqc:result:all");
     }
 
+    /** Force publication needs trusted administrator roles, never a broad read scope. */
+    public boolean isIqcAdministrator() {
+        return effectiveRoles().stream().map(this::normalizeRole)
+                .anyMatch(role -> role.equals("IQC_ADMIN") || role.equals("SUPER_ADMIN"));
+    }
+
     /** Uses the trusted internal context first, then the verified external JWT context. */
     private Set<String> effectiveRoles() {
         Set<String> roles = userContext.getRoles();

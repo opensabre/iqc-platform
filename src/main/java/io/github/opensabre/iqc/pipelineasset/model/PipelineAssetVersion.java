@@ -12,4 +12,6 @@ public class PipelineAssetVersion extends BasePo {
     private Integer sourceDraftRevision;
     private String snapshotJson;
     private String contentHash;
+    private String publicationDecisionJson;
+    private String publicationDecisionHash;
 }

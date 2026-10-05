@@ -44,8 +44,26 @@ public class PipelineAssetController {
     }
     @PostMapping("/{id}/publish")
     @ResourcePermission(code="iqc:pipeline:publish",name="发布流水线",type="iqc",description="经真实试跑确认发布流水线版本")
-    @Audit(operationType=OperationType.UPDATE,description="发布流水线",module="IQC_PIPELINE")
-    public PipelineAssetVersion publish(@PathVariable String id,@RequestBody Publish body) { return assets.publish(id,body.expectedRevision(),body.trialTaskId(),body.resultsReviewed()); }
+    @Audit(operationType=OperationType.UPDATE,description="发布流水线",module="IQC_PIPELINE",response=true,key="#id")
+    public PipelineAssetVersion publish(@PathVariable String id,@RequestBody Publish body) {
+        if(body.qualityEvidence()==null && body.regressionEvidence()==null && body.forceReason()==null)
+            return assets.publish(id,body.expectedRevision(),body.trialTaskId(),body.resultsReviewed());
+        return assets.publishMeasured(id,body.expectedRevision(),body.trialTaskId(),body.resultsReviewed(),body.qualityEvidence(),body.regressionEvidence(),false,body.forceReason());
+    }
+    @GetMapping("/{id}/publication-gate")
+    @ResourcePermission(code="iqc:pipeline:gate:view",name="查看流水线发布门禁",type="iqc",description="按冻结评测产物计算准入")
+    public PipelinePublicationGateService.Decision gate(@PathVariable String id,@RequestParam int expectedRevision,
+            @RequestParam String qualityTaskId,@RequestParam String qualityExecutionId,
+            @RequestParam String regressionTaskId,@RequestParam String regressionExecutionId) {
+        return assets.publicationPreview(id,expectedRevision,new PipelinePublicationGateService.ExecutionEvidence(qualityTaskId,qualityExecutionId),
+                new PipelinePublicationGateService.ExecutionEvidence(regressionTaskId,regressionExecutionId));
+    }
+    @PostMapping("/{id}/force-publish")
+    @ResourcePermission(code="iqc:pipeline:force:publish",name="管理员例外发布流水线",type="iqc",description="保留未通过门禁及管理员原因")
+    @Audit(operationType=OperationType.UPDATE,description="管理员例外发布流水线",module="IQC_PIPELINE",response=true,key="#id")
+    public PipelineAssetVersion forcePublish(@PathVariable String id,@RequestBody Publish body) {
+        return assets.publishMeasured(id,body.expectedRevision(),body.trialTaskId(),body.resultsReviewed(),body.qualityEvidence(),body.regressionEvidence(),true,body.forceReason());
+    }
     @PostMapping("/{id}/tasks")
     @ResourcePermission(code="iqc:pipeline:task:create",name="创建流水线任务",type="iqc",description="使用不可变已发布流水线创建任务")
     @Audit(operationType=OperationType.CREATE,description="创建流水线任务",module="IQC_PIPELINE")
@@ -56,6 +74,12 @@ public class PipelineAssetController {
     public record Update(int expectedRevision,String name,PipelineRelease release) { }
     public record Availability(boolean enabled) { }
     public record Trial(int expectedRevision,String name,List<String> conversationIds,String requestId) { }
-    public record Publish(int expectedRevision,String trialTaskId,boolean resultsReviewed) { }
+    public record Publish(int expectedRevision,String trialTaskId,boolean resultsReviewed,
+            PipelinePublicationGateService.ExecutionEvidence qualityEvidence,
+            PipelinePublicationGateService.ExecutionEvidence regressionEvidence,String forceReason) {
+        public Publish(int expectedRevision,String trialTaskId,boolean resultsReviewed) {
+            this(expectedRevision,trialTaskId,resultsReviewed,null,null,null);
+        }
+    }
     public record Run(int versionNo,String name,List<String> conversationIds,Integer concurrency,String requestId) { }
 }

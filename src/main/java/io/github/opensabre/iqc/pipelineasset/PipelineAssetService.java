@@ -49,6 +49,7 @@ public class PipelineAssetService {
     private final PipelineRuntime runtime;
     private final InspectionTaskMapper tasks;
     private final ConversationInspectionResultMapper results;
+    private final org.springframework.beans.factory.ObjectProvider<PipelinePublicationGateService> publicationGates;
 
     public IqcPage<PipelineAsset> page(long current, long size) {
         if (current < 1 || size < 1 || size > 100) throw IqcException.invalidArgument("无效流水线分页");
@@ -75,8 +76,9 @@ public class PipelineAssetService {
         var asset=require(id,true); asset.setStatus(enabled?"ACTIVE":"DISABLED"); assets.updateById(asset); return asset;
     }
     public List<PipelineAssetVersion> history(String id) {
-        require(id,false); return versions.selectList(Wrappers.<PipelineAssetVersion>lambdaQuery()
+        require(id,false); var history=versions.selectList(Wrappers.<PipelineAssetVersion>lambdaQuery()
                 .eq(PipelineAssetVersion::getPipelineId,id).orderByDesc(PipelineAssetVersion::getVersionNo).last("LIMIT 100"));
+        history.forEach(this::validatePublicationEvidence); return history;
     }
     public Prepared frozenDraft(String id,int revision) {
         var asset=require(id,false); checkRevision(asset,revision); requireActive(asset);
@@ -89,14 +91,30 @@ public class PipelineAssetService {
                 .eq(PipelineAssetVersion::getVersionNo,versionNo));
         if(version==null) throw IqcException.notFound("流水线发布版本不存在");
         if(!hash(version.getSnapshotJson()).equals(version.getContentHash())) throw IqcException.invalidState("流水线版本摘要不一致");
+        validatePublicationEvidence(version);
         var release=read(version.getSnapshotJson()); validateFrozen(release);
         return new Prepared(id,versionNo,null,release,version.getContentHash());
     }
     @Transactional public PipelineAssetVersion publish(String id,int revision,String trialTaskId,boolean reviewed) {
+        return publishMeasured(id,revision,trialTaskId,reviewed,null,null,false,null);
+    }
+    public PipelinePublicationGateService.Decision publicationPreview(String id,int revision,
+            PipelinePublicationGateService.ExecutionEvidence quality,PipelinePublicationGateService.ExecutionEvidence regression) {
+        var prepared=frozenDraft(id,revision);
+        return publicationGates.getObject().evaluate(id,revision,prepared.contentHash(),prepared.release(),quality,regression);
+    }
+    @Transactional public PipelineAssetVersion publishMeasured(String id,int revision,String trialTaskId,boolean reviewed,
+            PipelinePublicationGateService.ExecutionEvidence quality,PipelinePublicationGateService.ExecutionEvidence regression,
+            boolean force,String forceReason) {
+        if("system".equals(scope.owner())) throw IqcException.accessDenied("发布需要已认证操作者");
+        if(force && !scope.isIqcAdministrator()) throw IqcException.accessDenied("强制发布仅限可信管理员角色");
+        if(force && (forceReason==null || forceReason.trim().isEmpty() || forceReason.length()>1000))
+            throw IqcException.invalidArgument("管理员强制发布必须填写1–1000字原因");
+        if(!force && forceReason!=null && !forceReason.isBlank()) throw IqcException.invalidArgument("普通发布不能提交强制发布原因");
         var asset=require(id,true); checkRevision(asset,revision); requireActive(asset);
         var prior=versions.selectOne(Wrappers.<PipelineAssetVersion>lambdaQuery().eq(PipelineAssetVersion::getPipelineId,id)
                 .eq(PipelineAssetVersion::getSourceDraftRevision,revision));
-        if(prior!=null) return prior;
+        if(prior!=null) { validatePublicationEvidence(prior); return prior; }
         var release=freeze(read(asset.getDraftConfigJson())); String body=write(release), digest=hash(body);
         var trial=trialTaskId==null?null:tasks.selectById(trialTaskId);
         if(!reviewed || trial==null || !scope.canView(trial.getCreatedBy(),trial.getOwnerGroupId()) || !"SUCCEEDED".equals(trial.getStatus()))
@@ -115,10 +133,32 @@ public class PipelineAssetService {
                 !List.of("FINAL","NOT_APPLICABLE").contains(value.getScoreStatus())
                         || value.getExecutionTraceJson()==null || !"SUCCESS".equals(parse(value.getExecutionTraceJson()).path("run").path("status").asText())))
             throw IqcException.invalidState("试跑会话未全部形成完整业务结果");
+        var gate=publicationGates.getObject().evaluate(id,revision,digest,release,quality,regression);
+        if(!gate.passed() && !force) throw IqcException.invalidState("发布门禁未通过，请查看测量准入报告");
+        var publication=json.createObjectNode().put("schemaVersion","iqc-pipeline-publication-v1")
+                .put("operator",scope.owner()).put("recordedAt",java.time.Instant.now().toString()).put("forced",force);
+        if(force) publication.put("forceReason",forceReason.trim());
+        publication.set("gate",json.valueToTree(gate));
+        String admission=publication.toString();
+        if(admission.getBytes(StandardCharsets.UTF_8).length>8*1024*1024) throw IqcException.invalidState("发布证据超过8MiB");
         var version=new PipelineAssetVersion(); version.setPipelineId(id); version.setSourceDraftRevision(revision);
         version.setVersionNo(asset.getActivePublishedVersion()==null?1:asset.getActivePublishedVersion()+1);
-        version.setSnapshotJson(body); version.setContentHash(digest); versions.insert(version);
+        version.setSnapshotJson(body); version.setContentHash(digest);
+        version.setPublicationDecisionJson(admission); version.setPublicationDecisionHash(hash(admission)); versions.insert(version);
         asset.setActivePublishedVersion(version.getVersionNo()); assets.updateById(asset); return version;
+    }
+    private void validatePublicationEvidence(PipelineAssetVersion version) {
+        String body=version.getPublicationDecisionJson(), digest=version.getPublicationDecisionHash();
+        if(body==null && digest==null) return; // Versions published before this migration.
+        if(body==null || digest==null || !hash(body).equals(digest))
+            throw IqcException.invalidState("流水线发布证据摘要不一致");
+        var admission=parse(body); var gate=admission.path("gate");
+        if(!"iqc-pipeline-publication-v1".equals(admission.path("schemaVersion").asText())
+                || !"iqc-publication-gate-decision-v1".equals(gate.path("schemaVersion").asText())
+                || !version.getPipelineId().equals(gate.path("pipelineId").asText())
+                || gate.path("draftRevision").asInt(-1)!=version.getSourceDraftRevision()
+                || !version.getContentHash().equals(gate.path("releaseHash").asText()))
+            throw IqcException.invalidState("流水线发布证据协议或来源不一致");
     }
     public void validateTask(JsonNode snapshot) {
         if(!isPipeline(snapshot)) return;
@@ -184,7 +224,7 @@ public class PipelineAssetService {
         for(var item:release.items()) if(!codes.contains(item.findingCode())
                 || item.appliesWhenFindingCode()!=null && !codes.contains(item.appliesWhenFindingCode()))
             throw IqcException.invalidArgument("业务项目或适用条件引用未声明的事实编码");
-        var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes),release.fusion(),release.scoring(),release.items());
+        var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes),release.fusion(),release.scoring(),release.items(),release.publicationGate());
         runtime.validate(frozen.pipeline()); return frozen;
     }
     private void validateFrozen(PipelineRelease release) {
