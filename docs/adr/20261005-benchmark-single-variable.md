@@ -1,6 +1,6 @@
 # I3 Benchmark 单变量契约准备
 
-状态：只读设计结论，尚未实现Benchmark API、比较器或发布门禁。
+状态：Benchmark API、比较器及配对报告已按下述契约编码；真实运行验收与发布门禁仍待完成。
 
 需求来源：PRD 14.4，同一Dataset比较Model、Prompt、Pipeline、Skill、Fusion，并支持只改变一个变量。
 
@@ -33,3 +33,9 @@ PIPELINE包含内嵌检测资产，不能称为纯拓扑实验；纯编排比较
 当前模型路由可回退但尚无实际选中模型/回退轨迹；MODEL实验暂须禁止备用模型，或先补选中模型身份记录。未补齐时只能描述配置变化，不能声称每次调用都使用声明模型。缺少结构化输出/置信度校准/实际成本指标，缺指标不能视为发布门禁通过。
 
 发布门禁、管理员原因与审计另批接入真实评测报告，不能用complete或试跑SUCCESS替代质量阈值。上述只读结论没有宣称实现、运行或验证成功。
+
+## 实验绑定实现决定（2026-10-05）
+
+同一事务创建两份既有评测Task；benchmarkSnapshot相互绑定peerTaskId，保存actor/request派生实验ID、请求摘要、selection、comparison和双方目标版本。不增加实验主表：Task快照已提供不可变持久化身份与审计，实验生命周期沿用两Task。原始完整Release保留在各Task，重查配对与报告必须再次验证双方marker、dataset身份/成员、并发和语义不变量。创建不自动执行；不同内容的幂等标识冲突拒绝，报告固定双方EID，不以共同成功子集改变金标分母。
+
+新API `/api/iqc/evaluation/benchmarks`：POST创建；GET `/{baselineTaskId}`查询配对；GET `/{baselineTaskId}/report`查询明确双方轮次的配对报告。新增API职责是实验绑定和比较；各方执行/结果仍完全复用已有接口。尚在实施，不构成完成证明。

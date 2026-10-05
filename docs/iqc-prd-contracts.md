@@ -87,3 +87,7 @@ FindingDefinition schemaVersion=iqc-finding-definition-v1，包含code/name/cate
 # I3 实际评测执行契约
 
 执行/产物/完整分母报告见 [固定数据集评测执行](iqc-evaluation-execution.md)。新增任务类型 PIPELINE_EVALUATION 与 evaluationSnapshot，复用现有任务执行API；实际输出仍为 iqc-pipeline-execution-v1、mode=EVALUATION。生产质检结果API拒绝或排除这种任务，评测产物使用专用4个API。门禁与对照尚待实施。
+
+## I3 单变量实验
+
+新 `/api/iqc/evaluation/benchmarks` 原子创建既有评测Task配对；精确契约与单变量边界见 `docs/iqc-benchmark-experiments.md`。查询配对和固定双方EID的报告分别授权，不混用评测结果/创建资源码。完整产物与阈值达标分别处理，发布门禁尚待实现。

@@ -16,8 +16,8 @@ public final class BenchmarkVariableComparator {
     public enum Dimension { PROMPT, MODEL, SKILL, FUSION, PIPELINE }
     public record Selection(Dimension dimension, String nodeId, Integer slot) { }
     public record Comparison(Selection selection, List<String> allowedPaths, String invariantHash,
-            String baselineVariableHash, String candidateVariableHash, String baselineReleaseHash,
-            String candidateReleaseHash, String baselineEffectivePromptHash, String candidateEffectivePromptHash) {
+            String baselineVariableHash, String candidateVariableHash, String baselineReleaseProjectionHash,
+            String candidateReleaseProjectionHash, String baselineEffectivePromptHash, String candidateEffectivePromptHash) {
         public Comparison { allowedPaths = List.copyOf(allowedPaths); }
     }
     private record Projection(ObjectNode invariant, JsonNode variable, String prompt, List<String> paths) { }
@@ -36,11 +36,11 @@ public final class BenchmarkVariableComparator {
         if ((selection.dimension() == Dimension.PROMPT || selection.dimension() == Dimension.SKILL)
                 && leftPrompt.equals(rightPrompt)) throw invalid("Benchmark 变量未改变实际有效提示");
         return new Comparison(selection, left.paths(), hash(left.invariant(), mapper), leftVariable, rightVariable,
-                hash(mapper.valueToTree(baseline), mapper), hash(mapper.valueToTree(candidate), mapper), leftPrompt, rightPrompt);
+                hash(releaseProjection(baseline,mapper), mapper), hash(releaseProjection(candidate,mapper), mapper), leftPrompt, rightPrompt);
     }
 
     private static Projection project(PipelineRelease release, Selection selection, ObjectMapper mapper) {
-        ObjectNode root = mapper.valueToTree(release);
+        ObjectNode root = releaseProjection(release,mapper);
         ArrayNode nodes = (ArrayNode) root.path("pipeline").path("nodes");
         // All configurations remain schema 3 and tool-free, including a composite PIPELINE variable.
         for (JsonNode node : nodes) if ("LLM".equals(node.path("type").asText())) configuration(node, mapper);
@@ -49,6 +49,11 @@ public final class BenchmarkVariableComparator {
             if (selection.nodeId() != null || selection.slot() != null) throw invalid("该变量维度不能指定节点或槽位");
             String field = dimension == Dimension.FUSION ? "fusion" : "pipeline";
             JsonNode variable = root.get(field).deepCopy(); root.put(field, "__BENCHMARK_VARIABLE__");
+            if(dimension==Dimension.FUSION) ((ObjectNode)variable).remove(List.of("id","version"));
+            if(dimension==Dimension.PIPELINE) {
+                // A node display-name edit alone does not change detection or orchestration.
+                for(JsonNode child:variable.path("nodes")) ((ObjectNode)child).remove("name");
+            }
             return new Projection(root, variable, null, List.of("/" + field));
         }
         if (selection.nodeId() == null || selection.nodeId().isBlank()) throw invalid("必须指定单个 LLM 节点");
@@ -130,6 +135,17 @@ public final class BenchmarkVariableComparator {
     private static String hash(JsonNode value, ObjectMapper mapper) {
         try { return PipelineAssetService.hash(mapper.writeValueAsString(value)); }
         catch (Exception ex) { throw invalid("Benchmark 配置摘要失败"); }
+    }
+    private static ObjectNode releaseProjection(PipelineRelease release,ObjectMapper mapper) {
+        ObjectNode root=mapper.valueToTree(release);
+        // This domain field is a Set; other arrays retain their meaningful order.
+        JsonNode calibrated=root.path("fusion").path("calibratedNodeIds");
+        if(calibrated.isArray()) {
+            var ids=new ArrayList<String>(); calibrated.forEach(id->ids.add(id.asText())); ids.sort(String::compareTo);
+            var sorted=mapper.createArrayNode(); ids.forEach(sorted::add);
+            ((ObjectNode)root.get("fusion")).set("calibratedNodeIds",sorted);
+        }
+        return root;
     }
     private static RuntimeException invalid(String message) { return IqcException.invalidArgument(message); }
 }

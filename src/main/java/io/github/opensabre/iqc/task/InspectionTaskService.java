@@ -484,8 +484,7 @@ public class InspectionTaskService {
         fingerprintBody.put("name", name == null ? "" : name.trim()).put("concurrency", concurrency);
         String fingerprint = io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(fingerprintBody.toString());
         ((com.fasterxml.jackson.databind.node.ObjectNode) body.get("evaluationSnapshot")).put("requestFingerprint", fingerprint);
-        String id = "e" + io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(
-                objectMapper.createArrayNode().add(dataScope.owner()).add(requestId).toString()).substring(0, 63);
+        String id = evaluationRequestTaskId(requestId);
         var existing = taskMapper.selectById(id);
         if (existing != null) return requireEvaluationRetry(existing, fingerprint);
         int messages = golds.stream().mapToInt(gold -> gold.messages().size()).sum();
@@ -510,6 +509,14 @@ public class InspectionTaskService {
                 throw IqcException.invalidState("同一评测请求标识不能用于不同内容");
         } catch (JsonProcessingException exception) { throw IqcException.invalidState("既有评测快照无效"); }
         return task;
+    }
+
+    /** Shared actor-scoped identity for single evaluations and atomic benchmark pairs. */
+    public String evaluationRequestTaskId(String requestId) {
+        if (requestId == null || !requestId.matches("[A-Za-z0-9_-]{16,64}"))
+            throw IqcException.invalidArgument("评测请求标识必须为16–64字符");
+        return "e" + io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(
+                objectMapper.createArrayNode().add(dataScope.owner()).add(requestId).toString()).substring(0, 63);
     }
 
     /** Saves selection criteria now; matching conversations are resolved only when the schedule becomes due. */

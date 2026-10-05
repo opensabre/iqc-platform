@@ -68,6 +68,13 @@ public class PipelineEvaluationService {
     @Transactional
     public InspectionTask create(String datasetId, int datasetVersion, String pipelineId, Integer pipelineVersion,
             Integer draftRevision, String name, Integer concurrency, String requestId) {
+        return createBenchmarked(datasetId,datasetVersion,pipelineId,pipelineVersion,draftRevision,name,concurrency,requestId,null);
+    }
+
+    /** Internal server-built experiment marker; no public controller accepts raw frozen snapshots. */
+    @Transactional
+    public InspectionTask createBenchmarked(String datasetId,int datasetVersion,String pipelineId,Integer pipelineVersion,
+            Integer draftRevision,String name,Integer concurrency,String requestId,JsonNode benchmark) {
         if ((pipelineVersion == null) == (draftRevision == null)) throw IqcException.invalidArgument("评测必须选择发布版本或精确草稿修订之一");
         var dataset = datasets.get(datasetId);
         if (!"ACTIVE".equals(dataset.getStatus())) throw IqcException.invalidState("数据集已停用");
@@ -80,6 +87,7 @@ public class PipelineEvaluationService {
         var rules = root.putArray("rules"); pipeline.release().pipeline().nodes().forEach(node -> rules.add(node.config().path("ruleSnapshot")));
         root.set("evaluationSnapshot", json.createObjectNode().put("schemaVersion", TASK_SCHEMA).put("datasetId", datasetId)
                 .put("versionNo", datasetVersion).put("contentHash", version.getContentHash()).put("sampleCount", frozen.members().size()));
+        if (benchmark != null) root.set("benchmarkSnapshot",benchmark.deepCopy());
         validateGold(frozen, pipeline.release());
         return taskService.createEvaluationTask(name, root, frozen.members().stream().map(DatasetSnapshot.Member::gold).toList(),
                 concurrency == null ? 1 : concurrency, requestId);
@@ -313,6 +321,11 @@ public class PipelineEvaluationService {
         if (task == null || !"PIPELINE_EVALUATION".equals(task.getTaskType())) throw IqcException.notFound("评测任务不存在");
         if (!scope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权查看评测任务");
         return task;
+    }
+    public record Context(InspectionTask task,JsonNode snapshot,Prepared prepared) { }
+    public Context context(String id) {
+        var task=requireTask(id); var snapshot=parse(task.getRuleSnapshotJson());
+        return new Context(task,snapshot,prepare(task,snapshot,false));
     }
     private TaskExecution requireExecution(InspectionTask task, String id) {
         String selected = id == null || id.isBlank() ? task.getCurrentExecutionId() : id;
