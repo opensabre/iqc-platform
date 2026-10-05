@@ -35,6 +35,8 @@ V1.1.40 保存每个 Task/EID/sample 的不可变 `iqc_evaluation_sample_result`
 
 FindingMetrics 覆盖全部冻结样本，缺失行传入空实际Finding，仍计覆盖/值准确率/阳性FN分母；complete仅表示终态且每个成员有产物，不等于全部SUCCESS或门禁通过。错误样本保留原输出及错误计数，不删除坏样本提高分数。指标缺分母为null。
 
+RegressionMetrics 只对 REGRESSION 数据集计算，全体冻结样本为分母，保留失败 sampleId。通过要求执行SUCCESS、所有已标注Finding类型/状态/KNOWN值精确一致、选中证据ID与可选金标精确一致，以及已标注Score状态/数值和Risk精确一致。没有标注的额外Finding不视为误判；有标签期望时因当前无标签输出不能通过。其他类型数据集 expectedSamples=0、passRate=null，不能当作100%回归通过。该严格匹配指标没有替代发布准入或证明现有版本已通过回归。
+
 BusinessMetrics：已标注FINAL分数且实际FINAL的比较数与MAE，同时报告完整gold scoreCoverage；高风险HIGH/CRITICAL金标为分母，实际HIGH/CRITICAL为召回，缺失/未知实际不算检出。风险使用当前兼容评分事实投影，独立Risk Policy仍属I5。标签期望数量保留，但当前Pipeline无独立标签输出，comparableLabels=0、labelAccuracy=null，不能作为正确空标签。LatencyMetrics：实测样本墙钟P50/P95/P99、已物化产物的执行失败率；缺失样本单独显示，分位数采用nearest-rank，不宣称批次TPS、Token/GPU或成本指标完成。
 
 单产物/流水线解析最多16MiB，Dataset输入沿用64MiB总量限制。评测任务/报告前端、复核候选B交付、完整业务/模型/系统/离线音频指标、单变量Benchmark对照、回归通过率、发布门禁及强制发布审计仍待实现。此接口不能绕过现有发布流程，也未改变现有试跑发布门禁。

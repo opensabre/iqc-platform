@@ -56,6 +56,18 @@ public final class FindingEvaluationMetrics {
         return new Result(SCHEMA, samples.size(), overall.summary(), byCode, unlabelled);
     }
 
+    /** Exact match of all labelled states, known values and optional selected evidence. */
+    public static boolean matchesGold(Sample sample) {
+        var actual = new LinkedHashMap<String, FindingFusion.Result>();
+        sample.actual().forEach(fact -> actual.put(fact.code(), fact));
+        return sample.gold().findings().stream().allMatch(gold -> {
+            var count = compare(gold, actual.get(gold.code()));
+            return count.stateMatches == 1 && count.typeMismatches == 0
+                    && (gold.state() != Finding.State.KNOWN || count.valueMatches == 1)
+                    && count.evidenceGold == count.evidenceMatches;
+        });
+    }
+
     private static Counter compare(GoldFinding gold, FindingFusion.Result actual) {
         var c = new Counter(); boolean knownGold = gold.state() == Finding.State.KNOWN;
         if (knownGold) c.known = 1; else c.uncertain = 1;

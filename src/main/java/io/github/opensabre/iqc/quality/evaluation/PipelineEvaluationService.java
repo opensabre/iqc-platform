@@ -214,7 +214,9 @@ public class PipelineEvaluationService {
     public record Report(String schemaVersion, String taskId, String executionId, String datasetHash,
                          int expectedSamples, int availableSamples, int successfulSamples, boolean complete,
                          List<String> missingSampleIds, Map<String, String> sourceExecutionIds, FindingEvaluationMetrics.Result findingMetrics,
-                         BusinessMetrics businessMetrics,LatencyMetrics latencyMetrics) { }
+                         BusinessMetrics businessMetrics,LatencyMetrics latencyMetrics,RegressionMetrics regressionMetrics) { }
+    public record RegressionMetrics(String scope,int expectedSamples,int passedSamples,
+                                    java.math.BigDecimal passRate,List<String> failedSampleIds) { }
     public record BusinessMetrics(int scoreGold,int comparableScores,java.math.BigDecimal meanAbsoluteScoreError,
                                   java.math.BigDecimal scoreCoverage,int riskGold,int highRiskGold,int highRiskDetected,
                                   java.math.BigDecimal highRiskRecall,int labelGold,int comparableLabels,java.math.BigDecimal labelAccuracy) { }
@@ -231,6 +233,8 @@ public class PipelineEvaluationService {
             bySample.put(row.getSampleId(), row);
         var metricSamples = new ArrayList<FindingEvaluationMetrics.Sample>(); var missing = new ArrayList<String>();
         var sources = new LinkedHashMap<String, String>(); int successful = 0;
+        boolean regression = prepared.dataset().type() == DatasetDraft.Type.REGRESSION;
+        var regressionFailed = new ArrayList<String>(); int regressionPassed = 0;
         int scoreGold=0,comparableScores=0,riskGold=0,highRiskGold=0,highRiskDetected=0,labelGold=0;
         var absoluteScoreError=java.math.BigDecimal.ZERO; var durations=new ArrayList<Long>();
         for (var member : prepared.dataset().members()) {
@@ -242,7 +246,11 @@ public class PipelineEvaluationService {
                 if(expected.risk()==GoldDecision.Risk.HIGH || expected.risk()==GoldDecision.Risk.CRITICAL) highRiskGold++;
                 labelGold+=expected.labels().size();
             }
-            if (row == null) { missing.add(member.sampleId()); metricSamples.add(new FindingEvaluationMetrics.Sample(member.gold(), List.of())); continue; }
+            if (row == null) {
+                missing.add(member.sampleId()); metricSamples.add(new FindingEvaluationMetrics.Sample(member.gold(), List.of()));
+                if (regression) regressionFailed.add(member.sampleId());
+                continue;
+            }
             var actual = validatedRow(task, prepared, row); sources.put(member.sampleId(), row.getExecutionId());
             if ("SUCCESS".equals(row.getStatus())) successful++;
             durations.add(row.getDurationMs());
@@ -253,7 +261,13 @@ public class PipelineEvaluationService {
                 if((expected.risk()==GoldDecision.Risk.HIGH || expected.risk()==GoldDecision.Risk.CRITICAL)
                         && Set.of("HIGH","CRITICAL").contains(actual.riskLevel())) highRiskDetected++;
             }
-            metricSamples.add(new FindingEvaluationMetrics.Sample(member.gold(), actual.fusion()));
+            var metricSample = new FindingEvaluationMetrics.Sample(member.gold(), actual.fusion());
+            metricSamples.add(metricSample);
+            if (regression) {
+                boolean matched = "SUCCESS".equals(row.getStatus()) && FindingEvaluationMetrics.matchesGold(metricSample)
+                        && matchesBusiness(expected, actual);
+                if (matched) regressionPassed++; else regressionFailed.add(member.sampleId());
+            }
         }
         boolean terminal = Set.of("SUCCEEDED", "PARTIAL_FAILED", "FAILED").contains(execution.getStatus());
         durations.sort(Long::compareTo);
@@ -264,7 +278,17 @@ public class PipelineEvaluationService {
                 percentile(durations,0.95),percentile(durations,0.99),ratio(sources.size()-successful,sources.size()));
         return new Report("iqc-evaluation-report-v1", taskId, execution.getId(), prepared.datasetHash(), prepared.dataset().members().size(),
                 sources.size(), successful, terminal && missing.isEmpty(), List.copyOf(missing), Collections.unmodifiableMap(sources),
-                FindingEvaluationMetrics.evaluate(metricSamples),business,latency);
+                FindingEvaluationMetrics.evaluate(metricSamples),business,latency,
+                new RegressionMetrics("EXACT_LABELLED_FINDING_EVIDENCE_SCORE_RISK",regression?prepared.dataset().members().size():0,
+                        regressionPassed,regression?ratio(regressionPassed,prepared.dataset().members().size()):null,List.copyOf(regressionFailed)));
+    }
+    private boolean matchesBusiness(GoldDecision expected, PipelineConversationEvaluator.Evaluation actual) {
+        if (expected == null) return true;
+        if (!expected.labels().isEmpty()) return false; // No label output exists in this Pipeline contract yet.
+        if (expected.risk() != null && !expected.risk().name().equals(actual.riskLevel())) return false;
+        if (expected.scoreStatus() != null && !expected.scoreStatus().name().equals(actual.scoring().scoreStatus().name())) return false;
+        return expected.score() == null || actual.scoring().finalScore() != null
+                && expected.score().compareTo(actual.scoring().finalScore()) == 0;
     }
     private java.math.BigDecimal ratio(int n,int d){return d==0?null:java.math.BigDecimal.valueOf(n).divide(java.math.BigDecimal.valueOf(d),6,java.math.RoundingMode.HALF_UP);}
     private Long percentile(List<Long> values,double fraction){return values.isEmpty()?null:values.get((int)Math.ceil(values.size()*fraction)-1);}
