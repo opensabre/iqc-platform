@@ -37,6 +37,7 @@ public class ConversationImportService {
     @Transactional
     public Conversation persist(String fileName, String fingerprint, ConversationParseResult parsed,
                                 String batchNo, String sourceType, String externalId, ConversationMetadata metadata) {
+        if (metadata != null) metadata = metadata.normalized();
         Conversation existing = externalId == null || externalId.isBlank()
                 ? conversationMapper.selectOne(Wrappers.<Conversation>lambdaQuery()
                 .eq(Conversation::getSourceFingerprint, fingerprint))
@@ -48,6 +49,16 @@ public class ConversationImportService {
             // 指纹去重是全局唯一约束，但重复命中不能绕过会话的数据范围校验。
             if (!dataScope.canView(existing.getCreatedBy(), existing.getOwnerGroupId())) {
                 throw IqcException.accessDenied("该文件已导入且当前用户无权访问");
+            }
+            if (metadata != null && (metadata.asrStatus() != null || metadata.customerLevel() != null
+                    || metadata.complaint() != null || metadata.businessFields() != null)) {
+                String fieldsJson = metadata.businessFields() == null ? null : serializeFields(metadata.businessFields());
+                if (!java.util.Objects.equals(existing.getAsrStatus(), metadata.asrStatus())
+                        || !java.util.Objects.equals(existing.getCustomerLevel(), metadata.customerLevel())
+                        || !java.util.Objects.equals(existing.getComplaint(), metadata.complaint())
+                        || !java.util.Objects.equals(existing.getBusinessFieldsJson(), fieldsJson)) {
+                    throw IqcException.invalidArgument("重复会话的新选择器元数据与已导入快照不一致");
+                }
             }
             return existing;
         }
@@ -80,6 +91,17 @@ public class ConversationImportService {
         return conversation;
     }
 
+    private String serializeFields(java.util.Map<String, com.fasterxml.jackson.databind.JsonNode> fields) {
+        try {
+            String json = objectMapper.writeValueAsString(fields);
+            if (json.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 65536)
+                throw IqcException.invalidArgument("businessFields 序列化最长 65536 字节");
+            return json;
+        } catch (JsonProcessingException exception) {
+            throw IqcException.invalidArgument("businessFields 无法序列化");
+        }
+    }
+
     private void applyMetadata(Conversation conversation, ConversationMetadata metadata) {
         if (metadata == null) return;
         ConversationMetadata value = metadata.normalized();
@@ -87,6 +109,9 @@ public class ConversationImportService {
         conversation.setEmployeeGroupId(value.employeeGroupId()); conversation.setCustomerExternalId(value.customerExternalId());
         conversation.setCustomerName(value.customerName()); conversation.setCustomerContactMasked(value.customerContactMasked());
         conversation.setChannel(value.channel()); conversation.setStartedTime(value.startedTime()); conversation.setEndedTime(value.endedTime());
+        conversation.setAsrStatus(value.asrStatus()); conversation.setCustomerLevel(value.customerLevel());
+        conversation.setComplaint(value.complaint());
+        conversation.setBusinessFieldsJson(value.businessFields() == null ? null : serializeFields(value.businessFields()));
         conversation.setBusinessType(value.businessType()); conversation.setBusinessNo(value.businessNo());
         try { conversation.setTagsJson(objectMapper.writeValueAsString(value.tags())); }
         catch (JsonProcessingException exception) { throw new IllegalStateException("会话标签序列化失败", exception); }

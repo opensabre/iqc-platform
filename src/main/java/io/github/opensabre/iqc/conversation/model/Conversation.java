@@ -24,6 +24,10 @@ public class Conversation extends BasePo {
     private String businessType;
     private String businessNo;
     private String tagsJson;
+    private String asrStatus;
+    private String customerLevel;
+    private Boolean complaint;
+    private String businessFieldsJson;
     private String sourceFileName;
     private String sourceFingerprint;
     private Integer messageCount;

@@ -279,7 +279,18 @@ public class ConversationImportController {
                                             String customerExternalId, String customerName, String customerContactMasked,
                                             String channel, java.time.LocalDateTime startedTime, java.time.LocalDateTime endedTime,
                                             String businessType, String businessNo, List<String> tags,
-                                            List<IngestMessage> messages) {
+                                            List<IngestMessage> messages,
+                                            String asrStatus, String customerLevel, Boolean complaint,
+                                            Map<String, com.fasterxml.jackson.databind.JsonNode> businessFields) {
+        public ConversationIngestRequest(String externalId, String batchNo, String title,
+                String employeeId, String employeeName, String employeeGroupId,
+                String customerExternalId, String customerName, String customerContactMasked,
+                String channel, java.time.LocalDateTime startedTime, java.time.LocalDateTime endedTime,
+                String businessType, String businessNo, List<String> tags, List<IngestMessage> messages) {
+            this(externalId, batchNo, title, employeeId, employeeName, employeeGroupId, customerExternalId,
+                    customerName, customerContactMasked, channel, startedTime, endedTime, businessType,
+                    businessNo, tags, messages, null, null, null, null);
+        }
         public ConversationIngestRequest(String externalId, String batchNo, String title, List<IngestMessage> messages) {
             this(externalId, batchNo, title, null, null, null, null, null, null, null,
                     null, null, null, null, List.of(), messages);
@@ -287,7 +298,8 @@ public class ConversationImportController {
 
         ConversationMetadata metadata() {
             return new ConversationMetadata(employeeId, employeeName, employeeGroupId, customerExternalId,
-                    customerName, customerContactMasked, channel, startedTime, endedTime, businessType, businessNo, tags);
+                    customerName, customerContactMasked, channel, startedTime, endedTime, businessType, businessNo, tags,
+                    asrStatus, customerLevel, complaint, businessFields);
         }
     }
 
