@@ -19,12 +19,19 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 /** Quality operations APIs for result feedback, human review and sample governance. */
-@RestController @RequestMapping("/api/iqc/quality-operations") @RequiredArgsConstructor
+@RestController @RequestMapping("/api/iqc/quality-operations") @RequiredArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
 public class QualityOperationsController {
     private final QualityOperationsService service;
     private final BusinessItemReviewService businessReviews;
     private final BusinessQualityReportService businessReports;
     private final LabelResultReviewService labelReviews;
+    private final io.github.opensabre.iqc.quality.BusinessReviewSampleService businessSamples;
+
+    /** Preserves embedded callers that only create legacy message samples. */
+    public QualityOperationsController(QualityOperationsService service, BusinessItemReviewService businessReviews,
+            BusinessQualityReportService businessReports, LabelResultReviewService labelReviews) {
+        this(service, businessReviews, businessReports, labelReviews, null);
+    }
 
     /** Label reviews use the same permission family and audit stream without overloading message/business IDs. */
     @PostMapping("/label-results/{labelResultId}/reviews")
@@ -122,6 +129,13 @@ public class QualityOperationsController {
     @ResourcePermission(code="iqc:sample:manage", name="管理质检样本", type="iqc", description="从质检结果沉淀样本")
     @Audit(operationType=OperationType.CREATE, description="创建 IQC 质检样本", module="IQC_SAMPLE")
     public QualitySample createSample(@PathVariable String resultId, @RequestBody SampleRequest request) {
+        if (request == null) throw IqcException.invalidArgument("样本请求不能为空");
+        if (business(request.targetType())) {
+            if (request.expectedJson() != null) throw IqcException.invalidArgument("业务候选的期望结果必须来自已完成复核");
+            if (businessSamples == null) throw IqcException.invalidState("会话候选服务未配置");
+            return businessSamples.create(resultId, request.reviewId(), request.requestId(), request.name(), request.sampleType(), request.tagsJson());
+        }
+        if (request.reviewId() != null || request.requestId() != null) throw IqcException.invalidArgument("消息样本不接受业务复核参数");
         return service.createSample(resultId, request.name(), request.sampleType(), request.expectedJson(), request.tagsJson());
     }
     @GetMapping("/samples")
@@ -159,5 +173,10 @@ public class QualityOperationsController {
         if ("BUSINESS".equals(targetType)) return true;
         throw IqcException.invalidArgument("不支持的复核目标类型");
     }
-    public record SampleRequest(String name, String sampleType, String expectedJson, String tagsJson) { }
+    public record SampleRequest(String name, String sampleType, String expectedJson, String tagsJson,
+                                String targetType, String reviewId, String requestId) {
+        public SampleRequest(String name, String sampleType, String expectedJson, String tagsJson) {
+            this(name, sampleType, expectedJson, tagsJson, null, null, null);
+        }
+    }
 }
