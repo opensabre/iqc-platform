@@ -75,6 +75,7 @@ public class BusinessQualityReportService {
         for (String id : taskIds.stream().distinct().toList()) {
             var task = tasks.selectById(id);
             if (task == null || !scope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权统计所选任务");
+            if("PIPELINE_EVALUATION".equals(task.getTaskType())) throw IqcException.invalidArgument("评测任务不能进入正式业务评分统计");
             String executionId = runSelections.get(id);
             if (executionId != null && !"LATEST".equals(executionId)) {
                 TaskExecution execution = executions.selectById(executionId);

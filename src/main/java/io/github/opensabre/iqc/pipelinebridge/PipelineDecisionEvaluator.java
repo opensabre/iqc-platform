@@ -43,6 +43,18 @@ public final class PipelineDecisionEvaluator {
             List<PipelineRelease.ItemMapping> mappings, List<FindingFusion.Result> facts) {
         return InspectionScoring.evaluate(policy, decisions(mappings, facts));
     }
+    /** Current compatibility projection; independent configurable risk policies remain a separate iteration. */
+    public static String riskLevel(List<PipelineRelease.ItemMapping> mappings,List<FindingFusion.Result> facts,InspectionScoring.Result score) {
+        if(score.scoreStatus()==InspectionScoring.ScoreStatus.PENDING) return "UNKNOWN";
+        var byCode=new HashMap<String,FindingFusion.Result>(); facts.forEach(fact->byCode.put(fact.code(),fact));
+        var statuses=new HashMap<String,InspectionScoring.ItemStatus>(); decisions(mappings,facts).forEach(d->statuses.put(d.itemCode(),d.status()));
+        Finding.Severity highest=Finding.Severity.NONE;
+        for(var mapping:mappings) {
+            var fact=byCode.get(mapping.findingCode());
+            if(statuses.get(mapping.itemCode())==InspectionScoring.ItemStatus.FAIL && fact!=null && fact.severity().compareTo(highest)>0) highest=fact.severity();
+        }
+        return highest.name();
+    }
 
     private static InspectionScoring.ItemStatus status(FindingFusion.Result fact, SchemeDefinition.HitMeaning meaning) {
         if (fact == null) return InspectionScoring.ItemStatus.NOT_EVALUATED;

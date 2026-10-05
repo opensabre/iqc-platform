@@ -69,12 +69,27 @@ public class InspectionExecutionService {
     private final io.github.opensabre.iqc.scheme.SchemeDependencyResolver schemeDependencies;
     private final io.github.opensabre.iqc.pipelineasset.PipelineAssetService pipelineAssets;
     private final io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator pipelineEvaluator;
+    private final io.github.opensabre.iqc.quality.evaluation.PipelineEvaluationService evaluationService;
     /** Keeps the existing embedding constructor compatible; Pipeline tasks require the fully wired constructor. */
     public InspectionExecutionService(InspectionTaskMapper tasks, ConversationMapper conversations, ConversationMessageMapper messages,
             InspectionResultMapper results, ObjectMapper mapper, TaskExecutionMapper executions, TaskItemMapper items,
             IqcDataScope scope, LlmQualityProvider llm, UsageCounterRecorder usage, HierarchicalResultService hierarchy,
             LabelCandidateService candidates, io.github.opensabre.iqc.scheme.SchemeDependencyResolver schemes) {
-        this(tasks, conversations, messages, results, mapper, executions, items, scope, llm, usage, hierarchy, candidates, schemes, null, null);
+        this(tasks, conversations, messages, results, mapper, executions, items, scope, llm, usage, hierarchy, candidates, schemes, null, null, null);
+    }
+    public InspectionExecutionService(InspectionTaskMapper tasks, ConversationMapper conversations, ConversationMessageMapper messages,
+            InspectionResultMapper results, ObjectMapper mapper, TaskExecutionMapper executions, TaskItemMapper items,
+            IqcDataScope scope, LlmQualityProvider llm, UsageCounterRecorder usage, HierarchicalResultService hierarchy,
+            LabelCandidateService candidates, io.github.opensabre.iqc.scheme.SchemeDependencyResolver schemes,
+            io.github.opensabre.iqc.pipelineasset.PipelineAssetService assets,
+            io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator pipeline) {
+        this(tasks, conversations, messages, results, mapper, executions, items, scope, llm, usage, hierarchy, candidates, schemes, assets, pipeline, null);
+    }
+    private io.github.opensabre.iqc.quality.evaluation.PipelineEvaluationService.Prepared prepareEvaluation(InspectionTask task,JsonNode snapshot) {
+        if (!"PIPELINE_EVALUATION".equals(task.getTaskType())
+                && !io.github.opensabre.iqc.quality.evaluation.PipelineEvaluationService.isEvaluation(snapshot)) return null;
+        if (evaluationService==null) throw IqcException.invalidState("当前执行器未启用冻结输入评测");
+        return evaluationService.prepare(task,snapshot,true);
     }
     private void validatePipelineDependencies(JsonNode snapshot) {
         if (!io.github.opensabre.iqc.pipelineasset.PipelineAssetService.isPipeline(snapshot)) return;
@@ -112,6 +127,7 @@ public class InspectionExecutionService {
                     task.getLabelScopeSnapshotJson(), objectMapper);
             schemeDependencies.validateTaskDependencies(snapshot);
             validatePipelineDependencies(snapshot);
+            var evaluationInputs=prepareEvaluation(task,snapshot);
             String previousStatus = task.getStatus();
             String previousExecutionId = task.getCurrentExecutionId();
             Set<String> retryMessageIds = null;
@@ -142,7 +158,8 @@ public class InspectionExecutionService {
             execution.setProcessedMessages(successfulMessages);
             executionMapper.insert(execution);
             List<String> conversationIds = conversationIds(task);
-            List<ConversationMessage> messages = conversationIds.isEmpty() ? List.of() : messageMapper.selectList(Wrappers.<ConversationMessage>lambdaQuery()
+            List<ConversationMessage> messages = evaluationInputs!=null?evaluationInputs.messages().values().stream().flatMap(List::stream).toList()
+                    :conversationIds.isEmpty() ? List.of() : messageMapper.selectList(Wrappers.<ConversationMessage>lambdaQuery()
                     .in(ConversationMessage::getConversationId, conversationIds)
                     .orderByAsc(ConversationMessage::getConversationId).orderByAsc(ConversationMessage::getSequenceNo));
             int batchSequence = 0;
@@ -232,6 +249,7 @@ public class InspectionExecutionService {
                 task.getLabelScopeSnapshotJson(), objectMapper);
         schemeDependencies.validateTaskDependencies(ruleSnapshot);
         validatePipelineDependencies(ruleSnapshot);
+        var evaluationInputs=prepareEvaluation(task,ruleSnapshot);
         List<TaskItem> items = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
                 .eq(TaskItem::getExecutionId, executionId).orderByAsc(TaskItem::getSequenceNo));
         int previouslyProcessed = Math.max(0, (task.getTotalMessages() == null ? items.size() : task.getTotalMessages()) - items.size());
@@ -243,7 +261,7 @@ public class InspectionExecutionService {
         try (ExecutorService workers = Executors.newFixedThreadPool(concurrency, Thread.ofPlatform().name("iqc-conversation-", 0).factory())) {
             List<Future<?>> futures = new ArrayList<>();
             for (List<TaskItem> conversationItems : byConversation.values()) {
-                futures.add(workers.submit(() -> processConversation(executionTask, executionId, ruleSnapshot, conversationItems)));
+                futures.add(workers.submit(() -> processConversation(executionTask, executionId, ruleSnapshot, conversationItems,evaluationInputs)));
             }
             for (Future<?> future : futures) {
                 try { future.get(); }
@@ -293,6 +311,7 @@ public class InspectionExecutionService {
                 task.getLabelScopeSnapshotJson(), objectMapper);
         schemeDependencies.validateTaskDependencies(snapshot);
         validatePipelineDependencies(snapshot);
+        prepareEvaluation(task,snapshot);
         List<TaskItem> previousItems = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery().eq(TaskItem::getExecutionId, task.getCurrentExecutionId()));
         List<TaskItem> unfinished = previousItems.stream().filter(item -> !List.of("SUCCEEDED", "CANCELLED").contains(item.getStatus())).toList();
         int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
@@ -315,7 +334,25 @@ public class InspectionExecutionService {
         task.setProcessedMessages(execution.getProcessedMessages()); task.setFailedMessages(0); taskMapper.updateById(task); return task;
     }
 
-    private void processConversation(InspectionTask task, String executionId, JsonNode ruleSnapshot, List<TaskItem> items) {
+    private void processConversation(InspectionTask task, String executionId, JsonNode ruleSnapshot, List<TaskItem> items,
+            io.github.opensabre.iqc.quality.evaluation.PipelineEvaluationService.Prepared evaluationInputs) {
+        if (evaluationInputs!=null) {
+            if(items.isEmpty()) return;
+            var current=taskMapper.selectById(task.getId());
+            if(current==null || !"RUNNING".equals(current.getStatus()) || !executionId.equals(current.getCurrentExecutionId())) return;
+            var pending=items.stream().filter(item->!List.of("SUCCEEDED","CANCELLED").contains(item.getStatus())).toList();
+            if(pending.isEmpty()) return;
+            String conversationId=items.getFirst().getConversationId();
+            var frozen=evaluationInputs.messages().get(conversationId);
+            if(frozen==null || frozen.isEmpty()) throw IqcException.invalidState("评测检查点不在冻结会话中");
+            var member=evaluationInputs.member(conversationId);
+            long evaluatedAt=System.nanoTime();
+            var evaluated=pipelineEvaluator.evaluate(task,evaluationInputs.release(),frozen,
+                    io.github.opensabre.iqc.pipeline.PipelineRuntime.Mode.EVALUATION,member.gold().businessContext());
+            evaluationService.materialize(task,executionId,ruleSnapshot,evaluationInputs,frozen,evaluated,pending,
+                    java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(Math.max(0,System.nanoTime()-evaluatedAt)));
+            return;
+        }
         Map<String, ConversationMessage> conversationMessagesById = new LinkedHashMap<>();
         for (TaskItem item : items) {
             ConversationMessage loaded = messageMapper.selectById(item.getMessageId());

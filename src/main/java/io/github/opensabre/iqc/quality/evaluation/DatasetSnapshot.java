@@ -28,6 +28,9 @@ public record DatasetSnapshot(String schemaVersion, String datasetId, String nam
                 || members.stream().map(member -> member.gold().conversationId()).distinct().count() != members.size())
             throw new IllegalArgumentException("dataset requires unique samples and conversations");
         var types = new java.util.HashMap<String, io.github.opensabre.iqc.finding.Finding.ValueType>();
+        var messageIds = new java.util.HashSet<String>();
+        for(Member member:members) for(var message:member.gold().messages())
+            if(!messageIds.add(message.id())) throw new IllegalArgumentException("dataset message IDs must be globally unique");
         for (Member member : members) for (GoldFinding finding : member.gold().findings()) {
             var previous = types.putIfAbsent(finding.code(), finding.valueType());
             if (previous != null && previous != finding.valueType())

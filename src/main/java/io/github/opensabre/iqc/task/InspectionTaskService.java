@@ -441,21 +441,74 @@ public class InspectionTaskService {
             conversations.add(conversation);
         }
 
+        String ownerGroupId = conversations.get(0).getOwnerGroupId();
+        return saveSnapshotTask(name, "批量质检-" + conversations.size() + "个会话", conversationIds, safeConcurrency,
+                conversations.stream().allMatch(item -> java.util.Objects.equals(ownerGroupId, item.getOwnerGroupId())) ? ownerGroupId : null,
+                conversations.stream().map(Conversation::getMessageCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum(), snapshot);
+    }
+
+    private InspectionTask saveSnapshotTask(String name, String defaultName, List<String> conversationIds, int concurrency,
+                                            String groupId, int messageCount, java.util.function.Consumer<InspectionTask> snapshot) {
         InspectionTask task = new InspectionTask();
-        task.setName(name == null || name.isBlank() ? "批量质检-" + conversations.size() + "个会话" : name.trim());
+        task.setName(name == null || name.isBlank() ? defaultName : name.trim());
         task.setTaskType("BATCH");
         task.setConversationId(conversationIds.size() == 1 ? conversationIds.get(0) : null);
         task.setConversationIdsJson(writeSnapshot(conversationIds));
-        task.setConcurrencyLimit(safeConcurrency);
+        task.setConcurrencyLimit(concurrency);
         snapshot.accept(task);
-        String ownerGroupId = conversations.get(0).getOwnerGroupId();
-        task.setOwnerGroupId(conversations.stream().allMatch(item -> java.util.Objects.equals(ownerGroupId, item.getOwnerGroupId())) ? ownerGroupId : null);
+        task.setOwnerGroupId(groupId);
         task.setStatus("CREATED");
-        task.setTotalMessages(conversations.stream().map(Conversation::getMessageCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum());
+        task.setTotalMessages(messageCount);
         task.setProcessedMessages(0);
         task.setFailedMessages(0);
         task.setAttemptCount(0);
         taskMapper.insert(task);
+        return task;
+    }
+
+    /** Internal evaluated-input boundary: the caller has scoped and validated exact Dataset/Pipeline versions. */
+    @Transactional
+    public InspectionTask createEvaluationTask(String name, JsonNode snapshot,
+            List<io.github.opensabre.iqc.quality.evaluation.GoldConversation> golds, int concurrency, String requestId) {
+        if (golds == null || golds.isEmpty() || golds.size() > 1000 || concurrency < 1 || concurrency > 32
+                || requestId == null || !requestId.matches("[A-Za-z0-9_-]{16,64}"))
+            throw IqcException.invalidArgument("评测必须包含1–1000个冻结样本、1–32并发及16–64字符请求标识");
+        if (name != null && name.length() > 128) throw IqcException.invalidArgument("评测名称不得超过128字");
+        if (snapshot == null || !snapshot.isObject() || !snapshot.has("pipelineSnapshot")
+                || !"iqc-pipeline-evaluation-task-v1".equals(snapshot.path("evaluationSnapshot").path("schemaVersion").asText()))
+            throw IqcException.invalidArgument("评测任务快照协议无效");
+        List<String> ids = golds.stream().map(io.github.opensabre.iqc.quality.evaluation.GoldConversation::conversationId).toList();
+        if (ids.stream().distinct().count() != ids.size()) throw IqcException.invalidArgument("冻结评测会话重复");
+        var body = (com.fasterxml.jackson.databind.node.ObjectNode) snapshot.deepCopy();
+        var fingerprintBody = objectMapper.createObjectNode(); fingerprintBody.set("snapshot", body.deepCopy());
+        fingerprintBody.put("name", name == null ? "" : name.trim()).put("concurrency", concurrency);
+        String fingerprint = io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(fingerprintBody.toString());
+        ((com.fasterxml.jackson.databind.node.ObjectNode) body.get("evaluationSnapshot")).put("requestFingerprint", fingerprint);
+        String id = "e" + io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(
+                objectMapper.createArrayNode().add(dataScope.owner()).add(requestId).toString()).substring(0, 63);
+        var existing = taskMapper.selectById(id);
+        if (existing != null) return requireEvaluationRetry(existing, fingerprint);
+        int messages = golds.stream().mapToInt(gold -> gold.messages().size()).sum();
+        try {
+            return saveSnapshotTask(name, "离线评测-" + ids.size() + "个会话", ids, concurrency, dataScope.groupId(), messages, task -> {
+                task.setId(id); task.setTaskType("PIPELINE_EVALUATION"); task.setRuleSnapshotJson(body.toString());
+                task.setRuleIdsJson(writeSnapshot(java.util.stream.StreamSupport.stream(body.path("rules").spliterator(),false)
+                        .map(rule->rule.path("id").asText()).distinct().toList()));
+                task.setRunCount(1);
+            });
+        } catch (org.springframework.dao.DuplicateKeyException duplicate) {
+            var winner = taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId, id).last("FOR UPDATE"));
+            if (winner == null) throw duplicate;
+            return requireEvaluationRetry(winner, fingerprint);
+        }
+    }
+    private InspectionTask requireEvaluationRetry(InspectionTask task, String fingerprint) {
+        if (!dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId()) || !"PIPELINE_EVALUATION".equals(task.getTaskType()))
+            throw IqcException.accessDenied("无权复用该评测请求");
+        try {
+            if (!fingerprint.equals(objectMapper.readTree(task.getRuleSnapshotJson()).path("evaluationSnapshot").path("requestFingerprint").asText()))
+                throw IqcException.invalidState("同一评测请求标识不能用于不同内容");
+        } catch (JsonProcessingException exception) { throw IqcException.invalidState("既有评测快照无效"); }
         return task;
     }
 

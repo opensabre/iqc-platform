@@ -258,7 +258,8 @@ public class BatchResultQueryService {
                 || minScore != null && minScore.signum() < 0 || maxScore != null && maxScore.signum() < 0
                 || minScore != null && maxScore != null && minScore.compareTo(maxScore) > 0)
             throw IqcException.invalidArgument("业务结果筛选条件无效");
-        var query = Wrappers.<InspectionTask>lambdaQuery().select(InspectionTask::getId, InspectionTask::getName);
+        var query = Wrappers.<InspectionTask>lambdaQuery().select(InspectionTask::getId, InspectionTask::getName)
+                .ne(InspectionTask::getTaskType,"PIPELINE_EVALUATION");
         if (!dataScope.canViewAll()) {
             String group = dataScope.groupId();
             query.and(value -> value.eq(InspectionTask::getCreatedBy, dataScope.owner())
@@ -368,6 +369,7 @@ public class BatchResultQueryService {
         InspectionTask task = taskMapper.selectById(taskId);
         if (task == null) throw IqcException.notFound("质检任务不存在: " + taskId);
         if (!dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权查看该质检结果");
+        if("PIPELINE_EVALUATION".equals(task.getTaskType())) throw IqcException.invalidArgument("评测任务请使用评测结果与报告接口");
         return task;
     }
 

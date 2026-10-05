@@ -27,7 +27,16 @@ public class PipelineConversationEvaluator {
         return evaluate(task,release,messages,PipelineRuntime.Mode.PRODUCTION);
     }
     public Evaluation evaluate(InspectionTask task,PipelineRelease release,List<ConversationMessage> messages,PipelineRuntime.Mode mode) {
+        return evaluate(task,release,messages,mode,null);
+    }
+    public com.fasterxml.jackson.databind.JsonNode executionInput(List<ConversationMessage> messages,com.fasterxml.jackson.databind.JsonNode businessContext) {
         var input=json.createObjectNode(); input.set("messages",json.valueToTree(messages));
+        if(businessContext!=null) input.set("businessContext",businessContext.deepCopy());
+        return input;
+    }
+    public Evaluation evaluate(InspectionTask task,PipelineRelease release,List<ConversationMessage> messages,PipelineRuntime.Mode mode,
+            com.fasterxml.jackson.databind.JsonNode businessContext) {
+        var input=executionInput(messages,businessContext);
         var run=runtime.execute(release.pipeline(),input,Map.of("__task",json.valueToTree(task),"__messages",json.valueToTree(messages)),
                 mode, trace -> {
                     int renewed=tasks.update(null,com.baomidou.mybatisplus.core.toolkit.Wrappers.<InspectionTask>lambdaUpdate()
@@ -55,19 +64,18 @@ public class PipelineConversationEvaluator {
         var decisions=PipelineDecisionEvaluator.decisions(release.items(),fused);
         var statuses=new HashMap<String,InspectionScoring.ItemStatus>();
         decisions.forEach(value->statuses.put(value.itemCode(),value.status()));
-        Finding.Severity highest=Finding.Severity.NONE;
         for(var mapping:release.items()) {
             var fact=byCode.get(mapping.findingCode());
             var status=statuses.get(mapping.itemCode());
             var matched=fact==null || status==InspectionScoring.ItemStatus.NOT_APPLICABLE?List.<String>of():fact.evidence().stream().filter(value->value.type()==Finding.EvidenceType.CONVERSATION)
                     .map(Finding.Evidence::reference).filter(id->messages.stream().anyMatch(message->id.equals(message.getId()))).distinct().toList();
-            if(status==InspectionScoring.ItemStatus.FAIL && fact!=null && fact.severity().compareTo(highest)>0) highest=fact.severity();
             var producer=release.pipeline().nodes().stream().filter(node->mapping.findingCode().equals(node.config().path("findingDefinition").path("code").asText()))
                     .findFirst().orElseThrow();
             var rule=producer.config().path("ruleSnapshot");
             items.add(new SchemeResultEvaluator.ItemResult(mapping.itemCode(),mapping.itemCode(),rule.path("id").asText(),rule.path("versionNo").asInt(),status,matched));
         }
         var score=InspectionScoring.evaluate(release.scoring(),decisions);
-        return new Evaluation("iqc-pipeline-execution-v1",PipelineAssetService.hash(input.toString()),run,fused,List.copyOf(items),score,score.scoreStatus()==InspectionScoring.ScoreStatus.PENDING?"UNKNOWN":highest.name(),mode);
+        return new Evaluation("iqc-pipeline-execution-v1",PipelineAssetService.hash(input.toString()),run,fused,List.copyOf(items),score,
+                PipelineDecisionEvaluator.riskLevel(release.items(),fused,score),mode);
     }
 }

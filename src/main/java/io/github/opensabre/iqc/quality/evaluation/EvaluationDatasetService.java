@@ -111,6 +111,18 @@ public class EvaluationDatasetService {
         if (version == null) throw IqcException.notFound("数据集冻结版本不存在");
         validateVersion(version); return version;
     }
+    /** Trusted task worker boundary; API authorization must come from the owning task before calling this. */
+    public EvaluationDatasetVersion versionForExecution(String id, int versionNo, String expectedHash, boolean requireActive) {
+        if (requireActive) {
+            var dataset = datasets.selectById(id);
+            if (dataset == null || !"ACTIVE".equals(dataset.getStatus())) throw IqcException.invalidState("评测数据集不存在或已停用");
+        }
+        var version = versions.selectOne(Wrappers.<EvaluationDatasetVersion>lambdaQuery()
+                .eq(EvaluationDatasetVersion::getDatasetId, id).eq(EvaluationDatasetVersion::getVersionNo, versionNo));
+        if (version == null || !java.util.Objects.equals(expectedHash, version.getContentHash()))
+            throw IqcException.invalidState("评测冻结数据集版本不存在或摘要不一致");
+        validateVersion(version); return version;
+    }
     private void validateVersion(EvaluationDatasetVersion version) {
         DatasetSnapshot snapshot = read(version.getSnapshotJson(), DatasetSnapshot.class);
         if (!PipelineAssetService.hash(version.getSnapshotJson()).equals(version.getContentHash()))

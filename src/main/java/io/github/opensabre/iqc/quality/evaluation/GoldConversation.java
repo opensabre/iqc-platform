@@ -16,6 +16,7 @@ public record GoldConversation(String schemaVersion, String sourceSampleId, Stri
     public record Message(String id, String role, String content, int sequence, java.time.LocalTime relativeTime) {
         public Message {
             required(id, "message id"); required(role, "message role");
+            if(id.length()>64 || role.length()>128) throw new IllegalArgumentException("gold message identity too long");
             Objects.requireNonNull(content, "message content");
             if (sequence < 0) throw new IllegalArgumentException("negative message sequence");
         }

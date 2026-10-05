@@ -84,3 +84,6 @@ FindingDefinition schemaVersion=iqc-finding-definition-v1，包含code/name/cate
 # I3 金标/数据集协议入口
 
 精确 API、资源码、版本与状态协议见 [金标与冻结数据集](iqc-evaluation-datasets.md)。候选创建 API 与现有旧样本语义保持兼容；ENABLED/CANDIDATE 均不表示审核通过。Dataset 保存精确已批准版本的完整输入与金标。实际评测执行、报表、对照和发布门禁仍待接入。
+# I3 实际评测执行契约
+
+执行/产物/完整分母报告见 [固定数据集评测执行](iqc-evaluation-execution.md)。新增任务类型 PIPELINE_EVALUATION 与 evaluationSnapshot，复用现有任务执行API；实际输出仍为 iqc-pipeline-execution-v1、mode=EVALUATION。生产质检结果API拒绝或排除这种任务，评测产物使用专用4个API。门禁与对照尚待实施。
