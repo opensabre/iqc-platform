@@ -51,9 +51,10 @@ public class ConversationImportService {
                 throw IqcException.accessDenied("该文件已导入且当前用户无权访问");
             }
             if (metadata != null && (metadata.asrStatus() != null || metadata.customerLevel() != null
-                    || metadata.complaint() != null || metadata.businessFields() != null)) {
+                    || metadata.complaint() != null || metadata.businessFields() != null || metadata.employeeDepartmentId() != null)) {
                 String fieldsJson = metadata.businessFields() == null ? null : serializeFields(metadata.businessFields());
-                if (!java.util.Objects.equals(existing.getAsrStatus(), metadata.asrStatus())
+                if (!java.util.Objects.equals(existing.getEmployeeDepartmentId(), metadata.employeeDepartmentId())
+                        || !java.util.Objects.equals(existing.getAsrStatus(), metadata.asrStatus())
                         || !java.util.Objects.equals(existing.getCustomerLevel(), metadata.customerLevel())
                         || !java.util.Objects.equals(existing.getComplaint(), metadata.complaint())
                         || !java.util.Objects.equals(existing.getBusinessFieldsJson(), fieldsJson)) {
@@ -106,7 +107,7 @@ public class ConversationImportService {
         if (metadata == null) return;
         ConversationMetadata value = metadata.normalized();
         conversation.setEmployeeId(value.employeeId()); conversation.setEmployeeName(value.employeeName());
-        conversation.setEmployeeGroupId(value.employeeGroupId()); conversation.setCustomerExternalId(value.customerExternalId());
+        conversation.setEmployeeGroupId(value.employeeGroupId()); conversation.setEmployeeDepartmentId(value.employeeDepartmentId()); conversation.setCustomerExternalId(value.customerExternalId());
         conversation.setCustomerName(value.customerName()); conversation.setCustomerContactMasked(value.customerContactMasked());
         conversation.setChannel(value.channel()); conversation.setStartedTime(value.startedTime()); conversation.setEndedTime(value.endedTime());
         conversation.setAsrStatus(value.asrStatus()); conversation.setCustomerLevel(value.customerLevel());

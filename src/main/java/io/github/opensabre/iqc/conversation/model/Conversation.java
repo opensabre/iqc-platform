@@ -15,6 +15,7 @@ public class Conversation extends BasePo {
     private String employeeId;
     private String employeeName;
     private String employeeGroupId;
+    private String employeeDepartmentId;
     private String customerExternalId;
     private String customerName;
     private String customerContactMasked;

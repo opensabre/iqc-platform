@@ -32,7 +32,18 @@ public record ConversationMetadata(
         @JsonInclude(JsonInclude.Include.NON_NULL) String asrStatus,
         @JsonInclude(JsonInclude.Include.NON_NULL) String customerLevel,
         @JsonInclude(JsonInclude.Include.NON_NULL) Boolean complaint,
-        @JsonInclude(JsonInclude.Include.NON_NULL) Map<String, JsonNode> businessFields) {
+        @JsonInclude(JsonInclude.Include.NON_NULL) Map<String, JsonNode> businessFields,
+        @JsonInclude(JsonInclude.Include.NON_NULL) String employeeDepartmentId) {
+
+    public ConversationMetadata(String employeeId, String employeeName, String employeeGroupId,
+            String customerExternalId, String customerName, String customerContactMasked, String channel,
+            LocalDateTime startedTime, LocalDateTime endedTime, String businessType, String businessNo,
+            List<String> tags, String asrStatus, String customerLevel, Boolean complaint,
+            Map<String, JsonNode> businessFields) {
+        this(employeeId, employeeName, employeeGroupId, customerExternalId, customerName, customerContactMasked,
+                channel, startedTime, endedTime, businessType, businessNo, tags, asrStatus, customerLevel,
+                complaint, businessFields, null);
+    }
 
     public ConversationMetadata(String employeeId, String employeeName, String employeeGroupId,
             String customerExternalId, String customerName, String customerContactMasked, String channel,
@@ -58,7 +69,7 @@ public record ConversationMetadata(
                 sized("customerName", customerName, 128), maskedContact, sizedUpper("channel", channel, 32),
                 startedTime, endedTime, sizedUpper("businessType", businessType, 64),
                 sized("businessNo", businessNo, 128), normalizedTags, sizedUpper("asrStatus", asrStatus, 32),
-                sized("customerLevel", customerLevel, 64), complaint, normalizedBusinessFields(businessFields));
+                sized("customerLevel", customerLevel, 64), complaint, normalizedBusinessFields(businessFields), sized("employeeDepartmentId", employeeDepartmentId, 64));
     }
 
     /** Stable metadata portion used when content fingerprinting file imports. */
@@ -66,10 +77,11 @@ public record ConversationMetadata(
         ConversationMetadata value = normalized();
         String legacy = String.join("|", safe(value.employeeId), safe(value.employeeGroupId), safe(value.customerExternalId),
                 safe(value.channel), safe(value.startedTime), safe(value.businessType), safe(value.businessNo));
-        if (value.asrStatus == null && value.customerLevel == null && value.complaint == null && value.businessFields == null) return legacy;
+        if (value.asrStatus == null && value.customerLevel == null && value.complaint == null && value.businessFields == null && value.employeeDepartmentId == null) return legacy;
         Map<String, Object> extension = new TreeMap<>();
         extension.put("asrStatus", value.asrStatus); extension.put("customerLevel", value.customerLevel);
         extension.put("complaint", value.complaint); extension.put("businessFields", value.businessFields);
+        if (value.employeeDepartmentId != null) extension.put("employeeDepartmentId", value.employeeDepartmentId);
         return legacy + "|selector-metadata-v1:" + serialize(extension);
     }
 
