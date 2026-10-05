@@ -15,6 +15,8 @@ public class PipelineAssetController {
     private final PipelineAssetService assets;
     private final InspectionTaskService tasks;
     public PipelineAssetController(PipelineAssetService assets,InspectionTaskService tasks) { this.assets=assets; this.tasks=tasks; }
+    @org.springframework.beans.factory.annotation.Autowired
+    private io.github.opensabre.iqc.selector.SelectorAssetService selectorAssets;
     @GetMapping
     @ResourcePermission(code="iqc:pipeline:view",name="查看流水线目录",type="iqc",description="查询可见流水线")
     public IqcPage<PipelineAsset> page(@RequestParam(defaultValue="1") long current,@RequestParam(defaultValue="20") long size) { return assets.page(current,size); }
@@ -69,6 +71,12 @@ public class PipelineAssetController {
     @Audit(operationType=OperationType.CREATE,description="创建流水线任务",module="IQC_PIPELINE")
     public InspectionTask task(@PathVariable String id,@RequestBody Run body) {
         var release=assets.publishedRelease(id,body.versionNo());
+        if(body.selectorAsset()!=null) {
+            if(body.selector()!=null || (body.conversationIds()!=null && !body.conversationIds().isEmpty()))
+                throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("Selector资产、内联Selector与会话IDs不能同时提交");
+            var selector=selectorAssets.published(body.selectorAsset().selectorId(),body.selectorAsset().versionNo());
+            return tasks.createUsingPipelineSelectorAsset(release,body.name(),selector,body.concurrency(),body.requestId());
+        }
         if(body.selector()!=null) {
             if(body.conversationIds()!=null && !body.conversationIds().isEmpty()) throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("Selector与显式会话IDs不能同时提交");
             return tasks.createUsingPipelineSelector(release,body.name(),body.selector(),body.concurrency(),body.requestId());
@@ -87,9 +95,14 @@ public class PipelineAssetController {
         }
     }
     public record Run(int versionNo,String name,List<String> conversationIds,Integer concurrency,String requestId,
-            io.github.opensabre.iqc.selector.SelectorDefinition selector) {
+            io.github.opensabre.iqc.selector.SelectorDefinition selector,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Reference selectorAsset) {
+        public Run(int versionNo,String name,List<String> conversationIds,Integer concurrency,String requestId,
+                io.github.opensabre.iqc.selector.SelectorDefinition selector) {
+            this(versionNo,name,conversationIds,concurrency,requestId,selector,null);
+        }
         public Run(int versionNo,String name,List<String> conversationIds,Integer concurrency,String requestId) {
-            this(versionNo,name,conversationIds,concurrency,requestId,null);
+            this(versionNo,name,conversationIds,concurrency,requestId,null,null);
         }
     }
 }

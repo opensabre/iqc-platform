@@ -1,0 +1,15 @@
+package io.github.opensabre.iqc.selector.model;
+import com.baomidou.mybatisplus.annotation.TableName;
+import io.github.opensabre.persistence.entity.po.BasePo;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+@Data @EqualsAndHashCode(callSuper=true) @TableName("iqc_selector_asset")
+public class SelectorAsset extends BasePo {
+    private String code;
+    private String name;
+    private String draftConfigJson;
+    private Integer draftRevision;
+    private Integer activePublishedVersion;
+    private String status;
+    private String ownerGroupId;
+}
