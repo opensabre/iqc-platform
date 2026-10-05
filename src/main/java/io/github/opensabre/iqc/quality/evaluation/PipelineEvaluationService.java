@@ -222,7 +222,10 @@ public class PipelineEvaluationService {
     public record Report(String schemaVersion, String taskId, String executionId, String datasetHash,
                          int expectedSamples, int availableSamples, int successfulSamples, boolean complete,
                          List<String> missingSampleIds, Map<String, String> sourceExecutionIds, FindingEvaluationMetrics.Result findingMetrics,
-                         BusinessMetrics businessMetrics,LatencyMetrics latencyMetrics,RegressionMetrics regressionMetrics) { }
+                         BusinessMetrics businessMetrics,LatencyMetrics latencyMetrics,RegressionMetrics regressionMetrics,
+                         StructuredMetrics structuredMetrics) { }
+    public record StructuredMetrics(String scope,int declaredLlmNodes,long logicalInvocations,long validOutputs,
+                                    long invalidOrFailedOutputs,long unmeasuredAttempts,java.math.BigDecimal successRate) { }
     public record RegressionMetrics(String scope,int expectedSamples,int passedSamples,
                                     java.math.BigDecimal passRate,List<String> failedSampleIds) { }
     public record BusinessMetrics(int scoreGold,int comparableScores,java.math.BigDecimal meanAbsoluteScoreError,
@@ -245,6 +248,7 @@ public class PipelineEvaluationService {
         var regressionFailed = new ArrayList<String>(); int regressionPassed = 0;
         int scoreGold=0,comparableScores=0,riskGold=0,highRiskGold=0,highRiskDetected=0,labelGold=0;
         var absoluteScoreError=java.math.BigDecimal.ZERO; var durations=new ArrayList<Long>();
+        var structured=new StructuredCounter(prepared.release());
         for (var member : prepared.dataset().members()) {
             var row = bySample.get(member.sampleId());
             var expected=member.gold().decision();
@@ -260,6 +264,7 @@ public class PipelineEvaluationService {
                 continue;
             }
             var actual = validatedRow(task, prepared, row); sources.put(member.sampleId(), row.getExecutionId());
+            structured.add(actual);
             if ("SUCCESS".equals(row.getStatus())) successful++;
             durations.add(row.getDurationMs());
             if(expected!=null) {
@@ -288,7 +293,42 @@ public class PipelineEvaluationService {
                 sources.size(), successful, terminal && missing.isEmpty(), List.copyOf(missing), Collections.unmodifiableMap(sources),
                 FindingEvaluationMetrics.evaluate(metricSamples),business,latency,
                 new RegressionMetrics("EXACT_LABELLED_FINDING_EVIDENCE_SCORE_RISK",regression?prepared.dataset().members().size():0,
-                        regressionPassed,regression?ratio(regressionPassed,prepared.dataset().members().size()):null,List.copyOf(regressionFailed)));
+                        regressionPassed,regression?ratio(regressionPassed,prepared.dataset().members().size()):null,List.copyOf(regressionFailed)),
+                structured.summary());
+    }
+    private static final class StructuredCounter {
+        private final Map<String,String> nodeTypes=new HashMap<>();
+        private final int declared;
+        private long calls,valid,unmeasured;
+        StructuredCounter(PipelineRelease release) {
+            release.pipeline().nodes().forEach(node->nodeTypes.put(node.nodeId(),node.type()));
+            declared=(int)nodeTypes.values().stream().filter("LLM"::equals).count();
+        }
+        void add(PipelineConversationEvaluator.Evaluation actual) {
+            for(var trace:actual.run().trace()) {
+                String type=nodeTypes.get(trace.nodeId());
+                if(type==null || trace.result()==null) throw IqcException.invalidState("结构化指标轨迹不属于冻结节点");
+                if(!"LLM".equals(type)) continue;
+                JsonNode metrics=trace.result().metrics().get("llmStructuredOutput");
+                if(metrics==null) {
+                    if(trace.attempt()>0 && trace.result().status()!=io.github.opensabre.iqc.pipeline.NodeResult.Status.SKIPPED) unmeasured++;
+                    continue;
+                }
+                if(!"iqc-llm-structured-metrics-v1".equals(metrics.path("schemaVersion").asText()))
+                    throw IqcException.invalidState("结构化指标协议无效");
+                for(String key:List.of("logicalInvocations","validOutputs","invalidOrFailedOutputs"))
+                    if(!metrics.path(key).isIntegralNumber() || !metrics.path(key).canConvertToLong())
+                        throw IqcException.invalidState("结构化指标计数类型无效");
+                long attempts=metrics.path("logicalInvocations").asLong(),success=metrics.path("validOutputs").asLong(),failed=metrics.path("invalidOrFailedOutputs").asLong();
+                if(attempts<1 || attempts>10000 || success<0 || success>attempts || failed!=attempts-success)
+                    throw IqcException.invalidState("结构化指标计数无效");
+                calls+=attempts; valid+=success;
+            }
+        }
+        StructuredMetrics summary() {
+            return new StructuredMetrics("LOGICAL_LLM_INVOCATION_OUTPUT",declared,calls,valid,calls-valid,unmeasured,
+                    calls==0 || unmeasured>0?null:java.math.BigDecimal.valueOf(valid).divide(java.math.BigDecimal.valueOf(calls),6,java.math.RoundingMode.HALF_UP));
+        }
     }
     private boolean matchesBusiness(GoldDecision expected, PipelineConversationEvaluator.Evaluation actual) {
         if (expected == null) return true;

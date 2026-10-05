@@ -1182,6 +1182,12 @@ public class InspectionExecutionService {
                 : results.stream().anyMatch(result -> "NOT_EVALUATED".equals(result.getResultStatus())) ? "NOT_EVALUATED"
                 : results.stream().anyMatch(result -> "HIT".equals(result.getResultStatus())) ? "HIT" : "NOT_HIT";
         var aggregate = itemStageOutcome(status, "逐项检测阶段完成");
+        long calls=0,validOutputs=0;
+        for(var result:results) if(result.getDetectorMetricsJson()!=null) {
+            var measured=readSnapshot(result.getDetectorMetricsJson());
+            calls+=measured.path("logicalInvocations").asLong(); validOutputs+=measured.path("validOutputs").asLong();
+        }
+        if(calls>0) aggregate.setDetectorMetricsJson(structuredOutputMetrics(calls,validOutputs));
         var evidence = objectMapper.createArrayNode();
         results.forEach(result -> {
             var values = readSnapshot(result.getEvidenceJson());
@@ -1300,6 +1306,7 @@ public class InspectionExecutionService {
                 return result;
             }
             if ("LLM".equalsIgnoreCase(ruleType)) {
+                result.setDetectorMetricsJson(structuredOutputMetrics(1,0));
                 String recordId = "inspection-message:" + task.getId() + ":" + message.getId() + ":rule:" + rule.path("id").asText("unknown");
                 boolean conversationFacts = rule.path("labelFactTargets").isArray();
                 boolean conversationEvaluation = conversationFacts || "CONVERSATION".equals(rule.path("inspectionScope").asText());
@@ -1323,6 +1330,7 @@ public class InspectionExecutionService {
                 } else evaluation = preRuleFindings == null
                         ? llmQualityProvider.evaluate(message.getContent(), rule, readSnapshot(task.getAgentSnapshotJson()), recordId)
                         : llmQualityProvider.evaluate(message.getContent(), rule, readSnapshot(task.getAgentSnapshotJson()), preRuleFindings, recordId);
+                result.setDetectorMetricsJson(structuredOutputMetrics(1,evaluation.validStructuredOutput(objectMapper,conversationFacts)?1:0));
                 if (!evaluation.supported()) {
                     result.setResultStatus("ERROR"); result.setScore(0); result.setRiskLevel("HIGH"); result.setDeduction(0);
                     result.setReason(evaluation.reason()); result.setFindingJson("[]"); result.setEvidenceJson("[]"); result.setSuggestionJson("[]");
@@ -1376,6 +1384,10 @@ public class InspectionExecutionService {
             }
             return compiled;
         }
+    }
+    private String structuredOutputMetrics(long calls,long valid) {
+        return objectMapper.createObjectNode().put("schemaVersion","iqc-llm-structured-metrics-v1")
+                .put("logicalInvocations",calls).put("validOutputs",valid).put("invalidOrFailedOutputs",calls-valid).toString();
     }
 
     private InspectionResult notEvaluated(InspectionTask task, ConversationMessage message, JsonNode rule, String reason) {

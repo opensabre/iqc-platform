@@ -142,6 +142,7 @@ public class BenchmarkService {
         delta.put("scoreMae",difference(candidate.businessMetrics().meanAbsoluteScoreError(),baseline.businessMetrics().meanAbsoluteScoreError()));
         delta.put("highRiskRecall",difference(candidate.businessMetrics().highRiskRecall(),baseline.businessMetrics().highRiskRecall()));
         delta.put("regressionPassRate",difference(candidate.regressionMetrics().passRate(),baseline.regressionMetrics().passRate()));
+        delta.put("structuredSuccessRate",difference(candidate.structuredMetrics().successRate(),baseline.structuredMetrics().successRate()));
         delta.put("p95Ms",candidate.latencyMetrics().p95Ms()==null || baseline.latencyMetrics().p95Ms()==null?null:
                 BigDecimal.valueOf(candidate.latencyMetrics().p95Ms()).subtract(BigDecimal.valueOf(baseline.latencyMetrics().p95Ms())));
         return new Report("iqc-benchmark-report-v1",pair,baseline,candidate,baseline.complete()&&candidate.complete(),Collections.unmodifiableMap(delta));

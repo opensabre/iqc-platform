@@ -261,10 +261,10 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
         if (text == null || text.isBlank()) throw new IllegalArgumentException("Spring AI 响应为空");
         try {
             String normalized = text.trim().replaceFirst("^```(?:json)?\\s*", "").replaceFirst("\\s*```$", "");
-            JsonNode json = objectMapper.readTree(normalized);
+            JsonNode json = objectMapper.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(normalized);
             if (!json.has("hit") || !json.get("hit").isBoolean()) throw new IllegalArgumentException("LLM 响应缺少布尔 hit 字段");
             String reason = json.path("reason").asText("").trim();
-            if (reason.isBlank()) throw new IllegalArgumentException("LLM 响应缺少 reason 字段");
+            if (!LlmQualityProvider.validJudgment(json)) throw new IllegalArgumentException("LLM 响应缺少非空字符串 reason 字段");
             return new LlmEvaluation(true, json.get("hit").asBoolean(), reason, json.toString());
         } catch (IllegalArgumentException exception) {
             throw exception;

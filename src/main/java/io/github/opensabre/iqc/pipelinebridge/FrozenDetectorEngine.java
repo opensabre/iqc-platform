@@ -73,7 +73,9 @@ public final class FrozenDetectorEngine implements EngineAdapter {
         }
         var outcome=executor.getObject().evaluateFrozenPipelineNode(task,rule,config.get("agentSnapshot"),inputs,upstream,
                 phase,scope,context.node().nodeId(),context.attempt());
-        if("ERROR".equals(outcome.getResultStatus())) return NodeResult.failure(NodeResult.Status.ERROR,"Detector failed");
+        Map<String,JsonNode> metrics="LLM".equals(type) && outcome.getDetectorMetricsJson()!=null
+                ?Map.of("llmStructuredOutput",json.readTree(outcome.getDetectorMetricsJson())):Map.of();
+        if("ERROR".equals(outcome.getResultStatus())) return NodeResult.failure(NodeResult.Status.ERROR,"Detector failed",metrics);
         var citations=json.createArrayNode();
         if(outcome.getEvidenceJson()!=null) {
             var values=json.readTree(outcome.getEvidenceJson()); if(values!=null && values.isArray()) values.forEach(citations::add);
@@ -91,7 +93,7 @@ public final class FrozenDetectorEngine implements EngineAdapter {
         String identity=task.getCurrentExecutionId()+":"+inputs.getFirst().getConversationId()+":"+context.node().nodeId()+":"+context.attempt();
         String id=PipelineAssetService.hash(json.writeValueAsString(identity));
         var observed=LegacyFindingAdapter.adapt(id,rule,outcome.getResultStatus(),true,outcome.getReason(),citations,inputs,source);
-        if(observed.state()==Finding.State.ERROR) return NodeResult.failure(NodeResult.Status.ERROR,"Invalid detector evidence");
+        if(observed.state()==Finding.State.ERROR) return NodeResult.failure(NodeResult.Status.ERROR,"Invalid detector evidence",metrics);
         var definition=json.treeToValue(config.path("findingDefinition"),FindingDefinition.class);
         var evidence=new ArrayList<>(observed.evidence());
         // Deterministic absence/threshold results are supported by the frozen rule and complete supplied input manifest.
@@ -103,10 +105,10 @@ public final class FrozenDetectorEngine implements EngineAdapter {
         var fact=new Finding(observed.id(),definition.code(),definition.category(),definition.valueType(),observed.value(),
                 observed.state(),observed.confidence(),definition.defaultSeverity(),observed.reason(),evidence,source);
         try { definition.validate(fact); }
-        catch(IllegalArgumentException ex) { return NodeResult.failure(NodeResult.Status.ERROR,"Finding violates its frozen semantic/evidence contract"); }
+        catch(IllegalArgumentException ex) { return NodeResult.failure(NodeResult.Status.ERROR,"Finding violates its frozen semantic/evidence contract",metrics); }
         var variables=new LinkedHashMap<String,JsonNode>();
         variables.put(context.node().nodeId()+"_state",json.valueToTree(fact.state()));
         if(fact.state()==Finding.State.KNOWN) variables.put(context.node().nodeId()+"_value",fact.value());
-        return new NodeResult(NodeResult.Status.SUCCESS,List.of(fact),variables,Map.of(),null);
+        return new NodeResult(NodeResult.Status.SUCCESS,List.of(fact),variables,metrics,null);
     }
 }

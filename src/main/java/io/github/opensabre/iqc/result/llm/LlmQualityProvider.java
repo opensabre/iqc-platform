@@ -38,9 +38,24 @@ public interface LlmQualityProvider {
 
     LlmEvaluation evaluate(String content, JsonNode rule, String recordId);
 
+    /** Shared structural contract for provider parsing and measured logical-output diagnostics. */
+    static boolean validJudgment(JsonNode output) {
+        return output != null && output.isObject() && output.path("hit").isBoolean()
+                && output.path("reason").isTextual() && !output.path("reason").asText().trim().isEmpty();
+    }
+
     record LlmEvaluation(boolean supported, boolean hit, String reason, String structuredJson) {
         public LlmEvaluation(boolean supported, boolean hit, String reason) {
             this(supported, hit, reason, null);
+        }
+        public boolean validStructuredOutput(com.fasterxml.jackson.databind.ObjectMapper mapper,boolean labelFacts) {
+            if(!supported || structuredJson==null || structuredJson.isBlank()) return false;
+            try {
+                JsonNode output=mapper.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(structuredJson);
+                return validJudgment(output) && output.path("hit").booleanValue()==hit
+                        && (!labelFacts || "iqc-label-facts-v2".equals(output.path("schemaVersion").asText())
+                        && output.path("facts").isArray());
+            } catch(com.fasterxml.jackson.core.JsonProcessingException invalid) { return false; }
         }
     }
 }

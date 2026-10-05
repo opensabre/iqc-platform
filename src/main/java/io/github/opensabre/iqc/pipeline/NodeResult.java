@@ -23,4 +23,7 @@ public record NodeResult(Status status, List<Finding> findings, Map<String,JsonN
     public static NodeResult failure(Status status,String error) {
         return new NodeResult(status,List.of(),Map.of(),Map.of(),error);
     }
+    public static NodeResult failure(Status status,String error,Map<String,JsonNode> metrics) {
+        return new NodeResult(status,List.of(),Map.of(),metrics,error);
+    }
 }

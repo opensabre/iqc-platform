@@ -1,0 +1,13 @@
+# I3 发布门禁与例外审计
+
+状态：实施中，未完成运行验收。
+
+需求：PRD14.5可配置风险召回、Overall F1、Regression pass、结构化输出成功率与P95阈值；不达标不可直接发布，管理员例外必须填原因并审计。
+
+已检查PipelineAssetService现有真实试跑发布、PipelineAssetVersion不可变记录、PipelineEvaluationService冻结报告及Framework治理Audit注解/切面。复用这些能力：不建第二套发布/审计表，不修改framework；版本追加publicationDecisionJson/hash，保存精确目标摘要、冻结门禁政策、质量/回归评测Task/EID/数据集与报告摘要、各项结果、操作者和例外原因。Controller已有Audit记录请求参数，发布时开启响应并指定目标ID，以保留准入/例外审计。
+
+门禁政策计划作为PipelineRelease可选publicationGate字段，缺失时采用PRD默认阈值；null字段不序列化，以保持既有冻结版本摘要兼容。有政策时进入冻结Release摘要，变更需要新修订。发布仍保留试跑完整结果检查；另需同精确Release摘要的质量和REGRESSION评测，不能以试跑SUCCESS或Report.complete代替阈值达标。缺指标/零分母/不完整或失败不能视为通过；没有LLM节点时结构化输出项明确不适用，不能伪造100%。
+
+现有NodeResult.metrics可保存逻辑LLM调用的实测结构化校验计数，不另加指标结果表。单调用先记录attempted，得到受支持且通过现有输出契约的结构化JSON才记valid；unsupported/异常/null原始JSON不算成功。聚合到节点轨迹后评测报告再计总数。内部provider重试/缓存与实际模型请求计数尚属I7，不能把本指标声明成原始网络请求成功率；未知/旧轨迹/超时未回传指标保留未测量，不以节点SUCCESS推断。
+
+强制发布仅服务端可信管理员身份，必须明确原因并保存未通过项。不允许绕过目标版本/hash、来源与金标完整性校验；缺乏真实评测证据时先补评测，而不是产生空审计。真实数据库/角色/模型验收、完整业务/模型/系统/离线音频指标及I4–I7仍待完成。
