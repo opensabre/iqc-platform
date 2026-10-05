@@ -14,7 +14,7 @@ POST `/api/iqc/selectors/preview`：`{definition,previewSize:10}`，权限`iqc:s
 
 ## 时间与抽样
 
-时间字段CREATED/STARTED；窗口ABSOLUTE（from<to）、LAST_HOURS（1–8760）、PREVIOUS_DAY、PREVIOUS_WEEK（周一开始上一完整周）。服务器记录Instant锚点，以指定zoneId计算日历边界，转为Asia/Shanghai选数墙钟，半开区间[from,to)。createdTime通过Date参数保持数据库驱动时区转换一致；无时区的会话startedTime按Asia/Shanghai业务时间解释。响应同时给请求zoneId与storageZoneId，不能把两者混标。LAST_HOURS保留绝对小时距离，包括夏令时切换。
+时间字段CREATED/STARTED；窗口ABSOLUTE（from<to）、LAST_HOURS（1–8760）、PREVIOUS_DAY、PREVIOUS_WEEK（周一开始上一完整周）。服务器记录Instant锚点，以指定zoneId计算日历边界，转为Asia/Shanghai选数墙钟，半开区间[from,to)。createdTime通过Date参数保持数据库驱动时区转换一致；无时区的会话startedTime按Asia/Shanghai业务时间解释。响应同时给请求zoneId与storageZoneId，不能把两者混标。LAST_HOURS保留绝对小时距离，包括夏令时切换。服务器anchor按Date参数的毫秒精度记录；当前会话基线started/ended/created列为datetime（秒精度），窗口两端向上对齐毫秒仍保留这些存储时间点上的半开区间语义，避免Date参数截断让报告边界与实际选数不一致。没有把基线数据精度伪报为毫秒或纳秒。
 
 抽样种子必填≤128字符：
 

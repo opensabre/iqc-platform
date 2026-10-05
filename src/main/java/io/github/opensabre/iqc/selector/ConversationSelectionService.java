@@ -76,7 +76,7 @@ public class ConversationSelectionService {
     }
     private Selection select(SelectorDefinition definition) {
         validate(definition);
-        Instant anchor=Instant.now();var window=resolve(definition.timeWindow(),anchor);
+        Instant anchor=Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS);var window=resolve(definition.timeWindow(),anchor);
         boolean all=scope.canViewAll();String owner=scope.owner(),group=all?null:scope.groupId();
         var query=Wrappers.<Conversation>lambdaQuery().in(Conversation::getStatus,List.of("IMPORTED","IMPORTED_WITH_ERRORS")).gt(Conversation::getMessageCount,0);
         if(!all) query.and(q->q.eq(Conversation::getCreatedBy,owner).or(group!=null,n->n.eq(Conversation::getOwnerGroupId,group)));
@@ -160,8 +160,13 @@ public class ConversationSelectionService {
         }
         if(!from.toInstant().isBefore(to.toInstant())) throw IqcException.invalidArgument("时区解析后时间窗必须递增");
         var storageZone=ZoneId.of("Asia/Shanghai");
-        return new ResolvedWindow(input.field(),from.withZoneSameInstant(storageZone).toLocalDateTime(),
-                to.withZoneSameInstant(storageZone).toLocalDateTime(),input.zoneId(),storageZone.getId());
+        return new ResolvedWindow(input.field(),ceilMillis(from.toInstant()).atZone(storageZone).toLocalDateTime(),
+                ceilMillis(to.toInstant()).atZone(storageZone).toLocalDateTime(),input.zoneId(),storageZone.getId());
+    }
+    /** Date query parameters have millisecond precision; ceiling preserves [from,to) over stored second-resolution instants. */
+    private Instant ceilMillis(Instant input) {
+        var floor=input.truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        return floor.equals(input)?floor:floor.plusMillis(1);
     }
     private Map<String,JsonNode> values(Conversation c,SelectorSource source) {
         var values=new TreeMap<String,JsonNode>();
