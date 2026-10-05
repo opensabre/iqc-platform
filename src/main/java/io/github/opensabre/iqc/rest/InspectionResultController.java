@@ -26,9 +26,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+@lombok.extern.slf4j.Slf4j
 @RestController
 @RequestMapping("/api/iqc")
 public class InspectionResultController {
+    @org.springframework.beans.factory.annotation.Value("${iqc.task.worker-enabled:true}")
+    private boolean workerEnabled=true;
     private final InspectionExecutionService executionService;
     private final UsageCounterRecorder usageCounterRecorder;
     private final BatchResultQueryService batchResultQueryService;
@@ -56,7 +59,8 @@ public class InspectionResultController {
     @RateLimit(sceneCode = "iqc-task-run", maxCount = 10, period = 60)
     public InspectionTask run(@PathVariable String id) {
         InspectionTask task = executionService.queue(id);
-        executionService.executeAsync(id, task.getCurrentExecutionId());
+        try{executionService.executeAsync(id,task.getCurrentExecutionId());}
+        catch(org.springframework.core.task.TaskRejectedException busy){if(!workerEnabled)throw busy;log.info("event=iqc_api_backpressure taskId={} status=QUEUED",id);}
         usageCounterRecorder.record(new UsageRecord("inspection-task:run:" + id, null, "iqc-platform", "INSPECTION_TASK", id, "RUN", UsageOutcome.SUCCESS));
         return task;
     }
@@ -66,7 +70,8 @@ public class InspectionResultController {
     @Audit(operationType = OperationType.UPDATE, description = "恢复 IQC 质检任务", module = "IQC_TASK")
     public InspectionTask resume(@PathVariable String id) {
         InspectionTask task = executionService.resume(id);
-        executionService.executeAsync(id, task.getCurrentExecutionId());
+        try{executionService.executeAsync(id,task.getCurrentExecutionId());}
+        catch(org.springframework.core.task.TaskRejectedException busy){if(!workerEnabled)throw busy;log.info("event=iqc_api_backpressure taskId={} status=QUEUED",id);}
         return task;
     }
 

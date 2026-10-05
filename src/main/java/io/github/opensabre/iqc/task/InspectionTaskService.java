@@ -861,27 +861,33 @@ public class InspectionTaskService {
                 .eq(InspectionTask::getId, id).in(InspectionTask::getStatus, "CREATED", "MATERIALIZING"));
     }
 
-    /** Converts abandoned queue/running leases into a retryable state after a process crash. */
+    /** Legacy callers retain queued-expiry behavior; durable discovery explicitly excludes waiting rows. */
     @Transactional
-    public int recoverStaleExecutions(java.time.Duration timeout) {
+    public int recoverStaleExecutions(java.time.Duration timeout) {return recoverStaleExecutions(timeout,true);}
+    @Transactional
+    public int recoverStaleExecutions(java.time.Duration timeout,boolean includeQueued) {
         java.util.Date cutoff = java.util.Date.from(java.time.Instant.now().minus(timeout));
         List<InspectionTask> stale = taskMapper.selectList(Wrappers.<InspectionTask>lambdaQuery()
-                .in(InspectionTask::getStatus, "QUEUED", "RUNNING")
+                .in(InspectionTask::getStatus,includeQueued?List.of("QUEUED","RUNNING","PAUSE_REQUESTED","CANCEL_REQUESTED")
+                        :List.of("RUNNING","PAUSE_REQUESTED","CANCEL_REQUESTED"))
                 .lt(InspectionTask::getUpdatedTime, cutoff).last("LIMIT 100"));
         int recovered = 0;
         for (InspectionTask task : stale) {
+            String targetStatus=switch(task.getStatus()){case "PAUSE_REQUESTED"->"PAUSED";case "CANCEL_REQUESTED"->"CANCELLED";default->"FAILED";};
             int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
-                    .set(InspectionTask::getStatus, "FAILED")
+                    .set(InspectionTask::getStatus, targetStatus)
                     .eq(InspectionTask::getId, task.getId())
                     .eq(InspectionTask::getStatus, task.getStatus())
+                    .eq(InspectionTask::getCurrentExecutionId,task.getCurrentExecutionId())
                     .lt(InspectionTask::getUpdatedTime, cutoff));
             if (changed != 1) continue;
             recovered++;
             if (task.getCurrentExecutionId() != null) {
                 executionMapper.update(null, Wrappers.<TaskExecution>lambdaUpdate()
-                        .set(TaskExecution::getStatus, "FAILED")
-                        .set(TaskExecution::getErrorMessage, "执行心跳超时，可安全重试失败消息")
+                        .set(TaskExecution::getStatus, targetStatus)
+                        .set(TaskExecution::getErrorMessage, "执行心跳超时，已按当前运行/暂停/取消状态回收")
                         .eq(TaskExecution::getId, task.getCurrentExecutionId())
+                        .eq(TaskExecution::getTaskId,task.getId())
                         .in(TaskExecution::getStatus, "QUEUED", "RUNNING"));
             }
         }
@@ -911,7 +917,8 @@ public class InspectionTaskService {
 
     @Transactional
     public InspectionTask cancel(String id) {
-        InspectionTask task = taskMapper.selectById(id);
+        InspectionTask task = taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery()
+                .eq(InspectionTask::getId,id).last("FOR UPDATE"));
         if (task == null) throw IqcException.notFound("质检任务不存在: " + id);
         if (!dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权取消该质检任务");
         boolean running = "RUNNING".equals(task.getStatus()) || "PAUSE_REQUESTED".equals(task.getStatus());
@@ -935,6 +942,7 @@ public class InspectionTaskService {
                 .set(InspectionTask::getStatus, "PAUSE_REQUESTED")
                 .set(InspectionTask::getPauseRequested, true)
                 .eq(InspectionTask::getId, id)
+                .eq(InspectionTask::getCurrentExecutionId,task.getCurrentExecutionId())
                 .eq(InspectionTask::getStatus, "RUNNING"));
         if (changed != 1) throw IqcException.invalidState("只有执行中的任务可以暂停");
         return taskMapper.selectById(id);

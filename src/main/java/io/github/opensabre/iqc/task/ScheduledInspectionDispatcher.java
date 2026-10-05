@@ -20,14 +20,19 @@ public class ScheduledInspectionDispatcher {
     @org.springframework.beans.factory.annotation.Value("${iqc.task.execution-timeout-minutes:30}")
     private long executionTimeoutMinutes;
 
+    @org.springframework.beans.factory.annotation.Value("${iqc.task.worker-enabled:true}")
+    private boolean workerEnabled=true;
+
     @Scheduled(fixedDelayString = "${iqc.task.scheduler-delay-ms:5000}")
     public void dispatchDueTasks() {
-        int recovered = taskService.recoverStaleExecutions(java.time.Duration.ofMinutes(Math.max(1, executionTimeoutMinutes)));
+        int recovered = workerEnabled?0:taskService.recoverStaleExecutions(java.time.Duration.ofMinutes(Math.max(1, executionTimeoutMinutes)));
         if (recovered > 0) log.warn("event=iqc_stale_execution_recovery recovered={}", recovered);
         for (var task : taskService.materializeDue(LocalDateTime.now())) {
             try {
                 var queued = executionService.queueSystem(task.getId());
                 executionService.executeAsync(queued.getId(), queued.getCurrentExecutionId());
+            } catch(org.springframework.core.task.TaskRejectedException busy) {
+                log.info("event=iqc_scheduled_backpressure taskId={} status=QUEUED",task.getId());
             } catch (RuntimeException exception) {
                 taskService.markDispatchFailed(task.getId());
                 log.error("event=iqc_scheduled_dispatch taskId={} status=FAILED errorType={}", task.getId(), exception.getClass().getSimpleName(), exception);

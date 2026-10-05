@@ -70,6 +70,12 @@ public class InspectionExecutionService {
     private final io.github.opensabre.iqc.pipelineasset.PipelineAssetService pipelineAssets;
     private final io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator pipelineEvaluator;
     private final io.github.opensabre.iqc.quality.evaluation.PipelineEvaluationService evaluationService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private io.github.opensabre.iqc.task.TaskExecutionStateService executionStates;
+    private io.github.opensabre.iqc.task.TaskExecutionStateService states() {
+        // Direct embedding callers already own their transaction boundary; managed calls use the proxied bean.
+        return executionStates==null?new io.github.opensabre.iqc.task.TaskExecutionStateService(taskMapper,executionMapper):executionStates;
+    }
     /** Keeps the existing embedding constructor compatible; Pipeline tasks require the fully wired constructor. */
     public InspectionExecutionService(InspectionTaskMapper tasks, ConversationMapper conversations, ConversationMessageMapper messages,
             InspectionResultMapper results, ObjectMapper mapper, TaskExecutionMapper executions, TaskItemMapper items,
@@ -181,25 +187,20 @@ public class InspectionExecutionService {
     }
 
     @Async("iqcTaskExecutor")
-    public void executeAsync(String taskId, String executionId) {
-        long startedAt = System.nanoTime();
+    public void executeAsync(String taskId,String executionId) {executePersisted(taskId,executionId);}
+
+    /** Synchronous runner for bounded persistent worker admission on the existing executor. */
+    public void executePersisted(String taskId,String executionId) {
+        long startedAt=System.nanoTime();var claimed=new java.util.concurrent.atomic.AtomicBoolean();
         try {
-            run(taskId, executionId);
-            InspectionTask completed = taskMapper.selectById(taskId);
-            log.info("event=iqc_task_execution taskId={} executionId={} status={} processedMessages={} failedMessages={} elapsedMs={}",
-                    taskId, executionId, completed == null ? "UNKNOWN" : completed.getStatus(),
-                    completed == null ? null : completed.getProcessedMessages(), completed == null ? null : completed.getFailedMessages(), elapsedMillis(startedAt));
-        } catch (RuntimeException exception) {
-            InspectionTask failed = taskMapper.selectById(taskId);
-            if (failed != null) {
-                failed.setStatus("FAILED");
-                failed.setFailedMessages((failed.getTotalMessages() == null ? 0 : failed.getTotalMessages()) - (failed.getProcessedMessages() == null ? 0 : failed.getProcessedMessages()));
-                taskMapper.updateById(failed);
-            }
-            TaskExecution execution = executionMapper.selectById(executionId);
-            if (execution != null) { execution.setStatus("FAILED"); execution.setErrorMessage(persistedErrorMessage(exception.getMessage())); executionMapper.updateById(execution); }
-            log.error("event=iqc_task_execution taskId={} executionId={} status=FAILED errorType={} elapsedMs={}",
-                    taskId, executionId, exception.getClass().getSimpleName(), elapsedMillis(startedAt), exception);
+            run(taskId,executionId,()->claimed.set(true));
+            var completed=taskMapper.selectById(taskId);
+            log.info("event=iqc_task_execution taskId={} executionId={} status={} elapsedMs={}",taskId,executionId,
+                    completed==null?"UNKNOWN":completed.getStatus(),elapsedMillis(startedAt));
+        } catch(RuntimeException exception) {
+            boolean recorded=states().fail(taskId,executionId,claimed.get(),persistedErrorMessage(exception.getMessage()));
+            log.error("event=iqc_task_execution taskId={} executionId={} failureRecorded={} errorType={} elapsedMs={}",
+                    taskId,executionId,recorded,exception.getClass().getSimpleName(),elapsedMillis(startedAt),exception);
         }
     }
 
@@ -219,7 +220,8 @@ public class InspectionExecutionService {
         return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
     }
 
-    public InspectionTask run(String taskId, String executionId) {
+    public InspectionTask run(String taskId,String executionId) {return run(taskId,executionId,()->{});}
+    private InspectionTask run(String taskId,String executionId,Runnable onClaim) {
         InspectionTask task = taskMapper.selectById(taskId);
         if (task == null) throw IqcException.notFound("质检任务不存在: " + taskId);
         if ("RUNNING".equals(task.getStatus()) || "SUCCEEDED".equals(task.getStatus())) return task;
@@ -227,20 +229,11 @@ public class InspectionExecutionService {
 
         TaskExecution execution = executionMapper.selectById(executionId);
         if (execution == null) throw IqcException.notFound("执行实例不存在: " + executionId);
-        if (List.of("CANCELLED", "CANCEL_REQUESTED").contains(task.getStatus())) { execution.setStatus("CANCELLED"); executionMapper.updateById(execution); return task; }
-        int claimed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
-                .set(InspectionTask::getStatus, "RUNNING")
-                .set(InspectionTask::getUpdatedTime, new java.util.Date())
-                .eq(InspectionTask::getId, taskId)
-                .eq(InspectionTask::getCurrentExecutionId, executionId)
-                .eq(InspectionTask::getStatus, "QUEUED"));
-        if (claimed != 1) {
-            InspectionTask current = taskMapper.selectById(taskId);
-            if (current != null && List.of("RUNNING", "SUCCEEDED").contains(current.getStatus())) return current;
-            throw IqcException.invalidState("任务执行实例未能取得运行租约");
-        }
-        task.setStatus("RUNNING");
-        execution.setStatus("RUNNING"); executionMapper.updateById(execution);
+        if(!taskId.equals(execution.getTaskId()) || !executionId.equals(task.getCurrentExecutionId()))return task;
+        boolean claimed=states().claim(taskId,executionId);
+        if(!claimed)return taskMapper.selectById(taskId);
+        onClaim.run();
+        task.setStatus("RUNNING");execution.setStatus("RUNNING");
         JsonNode ruleSnapshot = readSnapshot(task.getRuleSnapshotJson());
         // An asset can be disabled while this task waits in the executor queue. Check before any conversation work.
         io.github.opensabre.iqc.scheme.SchemeDependencyResolver.validateRouteTaskProjection(ruleSnapshot,
@@ -269,32 +262,13 @@ public class InspectionExecutionService {
                 catch (java.util.concurrent.ExecutionException exception) { throw new IllegalStateException("质检批次并发执行失败", exception.getCause()); }
             }
         }
-        task = taskMapper.selectById(taskId);
-        if (task == null || List.of("CANCELLED", "CANCEL_REQUESTED").contains(task.getStatus())) {
-            if (task != null && "CANCEL_REQUESTED".equals(task.getStatus())) {
-                task.setStatus("CANCELLED");
-                taskMapper.updateById(task);
-            }
-            execution.setStatus("CANCELLED"); executionMapper.updateById(execution); return task;
-        }
-        if (!executionId.equals(task.getCurrentExecutionId()) || !List.of("RUNNING", "PAUSE_REQUESTED").contains(task.getStatus())) {
-            return task; // A recovered/replaced lease cannot be marked successful by the old worker.
-        }
         // Batch commits update locked database rows, not the worker's original objects.
         // Aggregate committed progress so both legacy and item-route execution use the same source of truth.
         List<TaskItem> committedItems = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
                 .eq(TaskItem::getExecutionId, executionId).orderByAsc(TaskItem::getSequenceNo));
         int processed = previouslyProcessed + (int) committedItems.stream().filter(item -> List.of("SUCCEEDED", "FAILED", "CANCELLED").contains(item.getStatus())).count();
         int failed = (int) committedItems.stream().filter(item -> "FAILED".equals(item.getStatus())).count();
-        task.setProcessedMessages(processed); task.setFailedMessages(failed);
-        if ("PAUSE_REQUESTED".equals(task.getStatus())) {
-            task.setStatus("PAUSED"); taskMapper.updateById(task);
-            execution.setProcessedMessages(processed); execution.setFailedMessages(failed); execution.setStatus("PAUSED"); executionMapper.updateById(execution);
-            return task;
-        }
-        task.setStatus(failed > 0 ? "PARTIAL_FAILED" : "SUCCEEDED"); taskMapper.updateById(task);
-        execution.setProcessedMessages(processed); execution.setFailedMessages(failed); execution.setStatus(failed > 0 ? "PARTIAL_FAILED" : "SUCCEEDED"); executionMapper.updateById(execution);
-        return task;
+        return states().finish(taskId,executionId,processed,failed);
     }
 
     @Transactional
