@@ -24,7 +24,7 @@ import java.util.*;
 @Service @RequiredArgsConstructor
 public class TaskTriggerService {
     public record Accepted(String schemaVersion,TaskTriggerRequest request,String payloadHash,PipelineAssetService.Prepared pipeline,
-            SelectorAssetService.Prepared selector,ScheduledActorAccessService.CreationBound ownerBound) { }
+            SelectorAssetService.Prepared selector,ScheduledActorAccessService.CreationBound ownerBound,String subscriptionId,String subscriptionRevisionId) { }
     public record Frame(String taskId,Accepted accepted,String requestHash) { }
     private final InspectionTaskMapper rows;
     private final ConversationMapper conversations;
@@ -45,7 +45,8 @@ public class TaskTriggerService {
     private String write(Object value){try{return json.writeValueAsString(value);}catch(Exception failure){throw IqcException.invalidState("触发配置序列化失败");}}
     private <T>T read(String text,Class<T> type){try{return exact().readValue(text,type);}catch(Exception failure){throw IqcException.invalidArgument("触发协议或冻结配置无效");}}
     public static Set<String> grants(TaskTriggerRequest request){var grants=new HashSet<>(Set.of("iqc:pipeline:task:create","iqc:task:execute","iqc:trigger:receive"));
-        if(request.content()!=null)grants.add("iqc:conversation:upload");return Set.copyOf(grants);}
+        if(request.content()!=null)grants.add("iqc:conversation:upload");
+        if("archive-subscription".equals(request.source()))grants.add("iqc:subscription:publish");return Set.copyOf(grants);}
     public InspectionTask receive(String requestJson){
         var transaction=new org.springframework.transaction.support.TransactionTemplate(transactionManager);
         transaction.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
@@ -59,22 +60,45 @@ public class TaskTriggerService {
     }
     private InspectionTask receiveAttempt(String requestJson){
         if(requestJson==null || requestJson.getBytes(StandardCharsets.UTF_8).length>16*1024*1024)throw IqcException.invalidArgument("触发请求超过16MiB");
-        var request=read(requestJson,TaskTriggerRequest.class);String payloadHash=SelectorAssetService.hash(write(request));
-        var bound=actors.capture();String id="t"+SelectorAssetService.hash(write(List.of(bound.userId(),request.source(),request.eventId()))).substring(0,63);
+        var request=read(requestJson,TaskTriggerRequest.class);
+        if("archive-subscription".equals(request.source()))throw IqcException.invalidArgument("内部订阅来源保留，不能由外部接收使用");
+        return accept(request,actors.capture(),null,null,null,null);
+    }
+    /** Runs inside the subscription row lock and transaction; never captures cached user context in background. */
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask receiveSubscription(TaskTriggerRequest request,ScheduledActorAccessService.CreationBound bound,
+            ScheduledActorAccessService.Resolved actor,PipelineAssetService.Prepared expectedPipeline,SelectorAssetService.Prepared expectedSelector,
+            String subscriptionId,String revisionId){
+        if(request==null || request.content()!=null || !"archive-subscription".equals(request.source())
+                || subscriptionId==null || revisionId==null || expectedPipeline==null || bound==null)
+            throw IqcException.invalidState("内部订阅接收来源无效");
+        var evidence=new Accepted("iqc-trigger-accepted-v1",request,"",expectedPipeline,expectedSelector,bound,subscriptionId,revisionId);
+        validateActor(evidence,actor);
+        if(!actor.resourceCodes().contains("iqc:subscription:publish"))throw IqcException.accessDenied("当前负责人无事件订阅发布权限");
+        return accept(request,bound,expectedPipeline,expectedSelector,subscriptionId,revisionId);
+    }
+    private InspectionTask accept(TaskTriggerRequest request,ScheduledActorAccessService.CreationBound bound,
+            PipelineAssetService.Prepared expectedPipeline,SelectorAssetService.Prepared expectedSelector,String subscriptionId,String revisionId){
+        String payloadHash=SelectorAssetService.hash(write(request));String id="t"+SelectorAssetService.hash(write(List.of(bound.userId(),request.source(),request.eventId()))).substring(0,63);
         var existing=rows.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getCreatedBy,bound.owner())
                 .eq(InspectionTask::getTriggerSource,request.source()).eq(InspectionTask::getTriggerEventId,request.eventId()).last("FOR UPDATE"));
         if(existing!=null){
             var original=accepted(existing);if(!bound.userId().equals(original.ownerBound().userId()))throw IqcException.accessDenied("原接收身份不属于当前负责人");
             if(!bound.owner().equals(existing.getCreatedBy()) || !payloadHash.equals(existing.getTriggerPayloadHash()))
-                throw IqcException.invalidState("相同触发身份对应不同载荷");return existing;}
+                throw IqcException.invalidState("相同触发身份对应不同载荷");
+            if(!Objects.equals(subscriptionId,existing.getEventSubscriptionId()) || !Objects.equals(revisionId,existing.getEventSubscriptionRevisionId()))
+                throw IqcException.invalidState("接收身份对应不同订阅来源");return existing;}
         if(request.content()!=null)ingest.validate(request.content());
         if(request.occurredAt().isAfter(Instant.now().plusSeconds(5)) || !request.expiresAt().isAfter(Instant.now()))
             throw IqcException.invalidArgument("新触发事件时刻在未来或已过期");
         var pipeline=pipelines.publishedReleaseForTask(request.pipeline().pipelineId(),request.pipeline().versionNo());
         var selector=request.selector()==null?null:selectors.publishedForTask(request.selector().selectorId(),request.selector().versionNo());
-        var accepted=new Accepted("iqc-trigger-accepted-v1",request,payloadHash,pipeline,selector,bound);
+        if(subscriptionId!=null && (!SelectorAssetService.hash(write(pipeline)).equals(SelectorAssetService.hash(write(expectedPipeline)))
+                || !Objects.equals(selector==null?null:SelectorAssetService.hash(write(selector)),expectedSelector==null?null:SelectorAssetService.hash(write(expectedSelector)))))
+            throw IqcException.invalidState("事件订阅冻结资产发生变化");
+        var accepted=new Accepted("iqc-trigger-accepted-v1",request,payloadHash,pipeline,selector,bound,subscriptionId,revisionId);
         var row=new InspectionTask();row.setId(id);row.setName(request.name().trim());row.setTaskType("PIPELINE");row.setStatus("WAITING_INPUT");
-        row.setTriggerSource(request.source());row.setTriggerEventId(request.eventId());row.setTriggerPayloadHash(payloadHash);row.setTriggerRequestJson(write(accepted));row.setTriggerRequestHash(SelectorAssetService.hash(row.getTriggerRequestJson()));
+        row.setEventSubscriptionId(subscriptionId);row.setEventSubscriptionRevisionId(revisionId);row.setTriggerSource(request.source());row.setTriggerEventId(request.eventId());row.setTriggerPayloadHash(payloadHash);row.setTriggerRequestJson(write(accepted));row.setTriggerRequestHash(SelectorAssetService.hash(row.getTriggerRequestJson()));
         if(row.getTriggerRequestJson().getBytes(StandardCharsets.UTF_8).length>32*1024*1024)throw IqcException.invalidArgument("触发冻结配置超过32MiB");
         row.setConversationIdsJson("[]");row.setConcurrencyLimit(request.concurrency());row.setTotalMessages(0);row.setProcessedMessages(0);row.setFailedMessages(0);row.setAttemptCount(0);
         row.setRuleSnapshotJson(write(Map.of("triggerAccepted",Map.of("payloadHash",payloadHash,"eventType",request.eventType(),"occurredAt",request.occurredAt()))));
@@ -83,7 +107,7 @@ public class TaskTriggerService {
         Conversation target=request.target()==null?null:target(request.target(),false);
         if(target!=null && !scope.canView(target.getCreatedBy(),target.getOwnerGroupId()))throw IqcException.accessDenied("无权使用事件目标会话");
         boolean sourceGroup=target!=null && Objects.equals(group,target.getOwnerGroupId());
-        row.setOwnerGroupId(group!=null && group.equals(pipelineGroup) && (selector==null || group.equals(selector.ownerGroupId())) && sourceGroup?group:null);
+        row.setOwnerGroupId(group!=null && group.equals(bound.groupId()) && group.equals(pipelineGroup) && (selector==null || group.equals(selector.ownerGroupId())) && sourceGroup?group:null);
         if(rows.insert(row)!=1)throw IqcException.invalidState("触发接收记录保存失败");return row;
     }
     private Accepted accepted(InspectionTask row){
@@ -94,6 +118,9 @@ public class TaskTriggerService {
                 || !Objects.equals(row.getTriggerSource(),request.source()) || !Objects.equals(row.getTriggerEventId(),request.eventId())
                 || !Objects.equals(row.getTriggerPayloadHash(),accepted.payloadHash()) || !SelectorAssetService.hash(write(request)).equals(accepted.payloadHash())
                 || !Objects.equals(row.getCreatedBy(),accepted.ownerBound().owner())
+                || !Objects.equals(row.getEventSubscriptionId(),accepted.subscriptionId())
+                || !Objects.equals(row.getEventSubscriptionRevisionId(),accepted.subscriptionRevisionId())
+                || ("archive-subscription".equals(request.source())!=(accepted.subscriptionId()!=null && accepted.subscriptionRevisionId()!=null))
                 || !Objects.equals(request.pipeline().pipelineId(),accepted.pipeline().pipelineId()) || !Objects.equals(request.pipeline().versionNo(),accepted.pipeline().versionNo())
                 || (request.selector()==null)!=(accepted.selector()==null)
                 || (request.selector()!=null && (!request.selector().selectorId().equals(accepted.selector().selectorId()) || request.selector().versionNo()!=accepted.selector().versionNo())))

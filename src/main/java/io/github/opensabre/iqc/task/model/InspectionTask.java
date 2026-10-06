@@ -9,6 +9,8 @@ import lombok.EqualsAndHashCode;
 @TableName("iqc_inspection_task")
 @EqualsAndHashCode(callSuper = true)
 public class InspectionTask extends BasePo {
+    private String eventSubscriptionId;
+    private String eventSubscriptionRevisionId;
     private String triggerSource;
     private String triggerEventId;
     private String triggerPayloadHash;

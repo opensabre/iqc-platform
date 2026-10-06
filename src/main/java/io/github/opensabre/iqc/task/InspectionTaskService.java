@@ -673,6 +673,7 @@ public class InspectionTaskService {
         if(receipt==null)taskMapper.insert(task);
         else {
             task.setId(receipt.getId());task.setCreatedBy(receipt.getCreatedBy());task.setCreatedTime(receipt.getCreatedTime());
+            task.setEventSubscriptionId(receipt.getEventSubscriptionId());task.setEventSubscriptionRevisionId(receipt.getEventSubscriptionRevisionId());
             task.setTriggerSource(receipt.getTriggerSource());task.setTriggerEventId(receipt.getTriggerEventId());
             task.setTriggerPayloadHash(receipt.getTriggerPayloadHash());task.setTriggerRequestHash(receipt.getTriggerRequestHash());task.setTriggerRequestJson(receipt.getTriggerRequestJson());
             var transition=Wrappers.<InspectionTask>lambdaUpdate().eq(InspectionTask::getId,receipt.getId()).eq(InspectionTask::getStatus,"WAITING_INPUT");
