@@ -393,6 +393,30 @@ public class InspectionTaskService {
             String name,List<String> conversationIds,Integer concurrency,String requestId,
             io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,String selectorRequestHash,
             io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset) {
+        return createUsingPipelineSnapshot(prepared,name,conversationIds,concurrency,requestId,selection,selectorRequestHash,selectorAsset,null);
+    }
+    public record PeriodicIdentity(String scheduleId,String revisionId,java.time.Instant plannedAt,com.fasterxml.jackson.databind.JsonNode evidence) { }
+    @Transactional
+    public InspectionTask createPeriodicPipelineTask(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared pipeline,String name,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,PeriodicIdentity identity,int concurrency) {
+        if(identity==null || identity.plannedAt()==null || pipeline==null || pipeline.versionNo()==null || selector==null || selection==null)
+            throw IqcException.invalidArgument("周期物化缺少冻结配置或计划时刻");
+        if(identity.scheduleId()==null || identity.revisionId()==null || concurrency<1 || concurrency>32
+                || !identity.plannedAt().equals(selection.anchor())
+                || !io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(selector.definition())).equals(selector.contentHash())
+                || !selector.definition().equals(selection.definition()))
+            throw IqcException.invalidArgument("周期选数锚点或资产定义不一致");
+        String requestId="cron:"+io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(java.util.List.of(
+                identity.scheduleId(),identity.revisionId(),identity.plannedAt())));
+        String requestHash=io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(java.util.Map.of(
+                "pipeline",pipeline,"selector",selector,"periodic",identity)));
+        return createUsingPipelineSnapshot(pipeline,name,selection.selectedConversationIds(),concurrency,requestId,selection,requestHash,selector,identity);
+    }
+    private InspectionTask createUsingPipelineSnapshot(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,List<String> conversationIds,Integer concurrency,String requestId,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,String selectorRequestHash,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset,PeriodicIdentity periodic) {
         if (prepared == null || !io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(writeSnapshot(prepared.release())).equals(prepared.contentHash()))
             throw IqcException.invalidState("流水线冻结摘要无效");
         boolean trial = prepared.versionNo() == null;
@@ -401,6 +425,7 @@ public class InspectionTaskService {
         var marker = objectMapper.valueToTree(prepared);
         ((com.fasterxml.jackson.databind.node.ObjectNode) marker).put("trial", trial);
         var root = objectMapper.createObjectNode(); root.set("pipelineSnapshot", marker);
+        if(periodic!=null)root.set("periodicSnapshot",objectMapper.valueToTree(periodic));
         root.set("executionStrategy", objectMapper.createObjectNode().put("schemaVersion", "iqc-pipeline-task-v1").put("mode", "PIPELINE"));
         var frozenRules = root.putArray("rules"); var ruleIds = new java.util.LinkedHashSet<String>();
         for (var node : prepared.release().pipeline().nodes()) {
@@ -425,9 +450,11 @@ public class InspectionTaskService {
         }
         final String identity = taskId;
         try {
-            var created=createBatchWithSnapshot(name, conversationIds, concurrency, task -> {
+            java.util.function.Consumer<InspectionTask> freeze=task -> {
                 if (identity != null) task.setId(identity);
                 task.setTaskType(trial ? "PIPELINE_TRIAL" : "PIPELINE");
+                if(periodic!=null){task.setPeriodicScheduleId(periodic.scheduleId());task.setPeriodicRevisionId(periodic.revisionId());
+                    task.setPlannedAtUtc(java.time.LocalDateTime.ofInstant(periodic.plannedAt(),java.time.ZoneOffset.UTC));}
                 if(selection!=null) {
                     var selectionJson=objectMapper.valueToTree(selection);
                     var envelope=objectMapper.createObjectNode().put("schemaVersion","iqc-selector-task-v1")
@@ -444,7 +471,11 @@ public class InspectionTaskService {
                     task.setSelectionFilterJson(body);
                 }
                 task.setRuleSnapshotJson(root.toString()); task.setRuleIdsJson(writeSnapshot(ruleIds)); task.setRunCount(1);
-            });
+            };
+            boolean noData=periodic!=null && (conversationIds==null || conversationIds.isEmpty());
+            var created=noData?saveSnapshotTask(name,"周期无数据",List.of(),concurrency==null?1:concurrency,dataScope.groupId(),0,freeze)
+                    :createBatchWithSnapshot(name,conversationIds,concurrency,freeze);
+            if(noData){created.setStatus("NO_DATA");if(taskMapper.updateById(created)!=1)throw IqcException.invalidState("周期无数据状态保存失败");}
             String selectedGroup=created.getOwnerGroupId();
             if(selectedGroup!=null && ((selection!=null && !selectedGroup.equals(selection.evidenceGroupId()))
                     || (selectorAsset!=null && !selectedGroup.equals(selectorAsset.ownerGroupId())))) {

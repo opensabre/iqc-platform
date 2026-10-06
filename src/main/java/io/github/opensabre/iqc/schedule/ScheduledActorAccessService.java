@@ -43,7 +43,7 @@ public class ScheduledActorAccessService {
                 || !current.accountValid() || !bound.owner().equals(current.username()) || current.roles()==null || current.resourceCodes()==null
                 || current.checkedAt()==null || current.checkedAt().isBefore(now.minusSeconds(30)) || current.checkedAt().isAfter(now.plusSeconds(5)))
             throw IqcException.accessDenied("周期负责人已失效或未取得当前授权证据");
-        if(!current.resourceCodes().containsAll(Set.of("iqc:pipeline:task:create","iqc:task:execute")))
+        if(!current.resourceCodes().containsAll(Set.of("iqc:pipeline:task:create","iqc:task:execute","iqc:schedule:publish")))
             throw IqcException.accessDenied("周期负责人已失去创建或执行权限");
         boolean currentAll=current.roles().stream().map(ScheduledActorAccessService::normalizeRole)
                 .anyMatch(role->Set.of("ADMIN","SUPER_ADMIN").contains(role)) || current.resourceCodes().contains("iqc:result:all");

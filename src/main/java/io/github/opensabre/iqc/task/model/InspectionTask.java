@@ -9,6 +9,9 @@ import lombok.EqualsAndHashCode;
 @TableName("iqc_inspection_task")
 @EqualsAndHashCode(callSuper = true)
 public class InspectionTask extends BasePo {
+    private String periodicScheduleId;
+    private String periodicRevisionId;
+    private java.time.LocalDateTime plannedAtUtc;
     private String conversationId;
     private String name;
     private String taskType;

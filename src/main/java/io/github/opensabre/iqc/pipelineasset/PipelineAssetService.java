@@ -85,8 +85,10 @@ public class PipelineAssetService {
         var release=freeze(read(asset.getDraftConfigJson()));
         return new Prepared(id,null,revision,release,hash(write(release)));
     }
-    public Prepared publishedRelease(String id,int versionNo) {
-        var asset=require(id,false); requireActive(asset);
+    public Prepared publishedRelease(String id,int versionNo) {return publishedRelease(id,versionNo,false);}
+    public Prepared publishedReleaseForTask(String id,int versionNo) {return publishedRelease(id,versionNo,true);}
+    private Prepared publishedRelease(String id,int versionNo,boolean lock) {
+        var asset=require(id,lock); requireActive(asset);
         var version=versions.selectOne(Wrappers.<PipelineAssetVersion>lambdaQuery().eq(PipelineAssetVersion::getPipelineId,id)
                 .eq(PipelineAssetVersion::getVersionNo,versionNo));
         if(version==null) throw IqcException.notFound("流水线发布版本不存在");
