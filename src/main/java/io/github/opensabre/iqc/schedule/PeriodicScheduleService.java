@@ -119,6 +119,7 @@ public class PeriodicScheduleService {
         require(id,false);if(current<1 || size<1 || size>100)throw IqcException.invalidArgument("无效周期实例分页");
         var query=Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getPeriodicScheduleId,id);
         if(!scope.canViewAll()){String group=scope.groupId();query.and(q->{q.eq(InspectionTask::getCreatedBy,scope.owner());if(group!=null)q.or().eq(InspectionTask::getOwnerGroupId,group);});}
+        query.select(InspectionTask.class,field->!"ruleSnapshotJson".equals(field.getProperty()));
         return IqcPage.from(taskRows.selectPage(new Page<>(current,size),query.orderByDesc(InspectionTask::getPlannedAtUtc)));
     }
     public List<Instant> preview(PeriodicDefinition definition,Instant from,int size){if(definition==null)throw IqcException.invalidArgument("缺少周期定义");return definition.preview(from,size);}

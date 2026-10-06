@@ -119,3 +119,9 @@
 新增周期草稿/不可变修订两表，复用原Task/Execution/Selector/Pipeline和持久化worker；UTC三元组唯一物化。显式Cron/时区/有效期，SKIP/FIRE_LATEST/CATCH_UP，计划锚点选数、NO_DATA证据、事务内入队与游标推进、当前负责人授权重验、来源可见范围交集。总开关默认关闭，新发布停用、显式启用；失败保留游标并30秒退避。前端独立调度管理页复用发布目录/Selector库/任务详情，九项接口与权限资源一致。
 
 本批不标记I4完成：文本事件/API触发、重试/速率/成本预算、失败尝试不可变历史待开发；I3完整指标、I5–I7及离线音频继续。未新增/执行测试、SQL或部署；编译/构建与审查证据见交接。协议见iqc-periodic-scheduling.md。
+
+## I4 生产输入冻结及完整执行清单（2026-10-06）
+
+事件/API触发前置：复用原Task JSON、Conversation/Message归档、角色规范和Pipeline执行器，新增productionInputs完整文本/上下文/来源摘要；新生产/试跑/周期Pipeline冻结实际消息数，幂等优先沿用首次快照，NO_DATA空清单。队列/恢复/重试读取冻结输入，各轮TaskItem保留完整消息清单并引用原轮成功产物，缺失检查点不能计作成功；结果提交校验文本/上下文与inputHash。任务级沿用真实跨EID产物，显式EID报告仅包含本轮实际输出。目录排除大型ruleSnapshotJson，详情完整读取；来源scope包含Pipeline/currentGroup交集。
+
+没有新增输入/消息/任务表，没有将生产输入写成金标或进入EVALUATION sink。旧任务/评测继续原协议。事件持久接收/API外部内容接入、可靠事件投递、自动重试/速率/成本预算仍待继续，I4未完成。协议见iqc-production-input-snapshots.md；本批仅编译，未新增/执行测试、SQL或部署。

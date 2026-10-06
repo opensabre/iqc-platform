@@ -47,12 +47,21 @@ public class InspectionTaskService {
     private final IqcDataScope dataScope;
     private final LabelResolutionService labelResolutionService;
     private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.selector.ConversationSelectionService> selections;
+    private final io.github.opensabre.iqc.conversation.ProductionInputSnapshotService productionInputs;
+    private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.pipelineasset.PipelineAssetService> pipelineSources;
 
     /** Existing direct callers retain their original constructor; Spring uses the full dependency constructor. */
     public InspectionTaskService(InspectionTaskMapper taskMapper,ConversationMapper conversationMapper,QualityAgentMapper agentMapper,
             QualityRuleMapper ruleMapper,QualityRuleSetService ruleSetService,ObjectMapper objectMapper,TaskExecutionMapper executionMapper,
             IqcDataScope dataScope,LabelResolutionService labelResolutionService) {
         this(taskMapper,conversationMapper,agentMapper,ruleMapper,ruleSetService,objectMapper,executionMapper,dataScope,labelResolutionService,null);
+    }
+
+    public InspectionTaskService(InspectionTaskMapper taskMapper,ConversationMapper conversationMapper,QualityAgentMapper agentMapper,
+            QualityRuleMapper ruleMapper,QualityRuleSetService ruleSetService,ObjectMapper objectMapper,TaskExecutionMapper executionMapper,
+            IqcDataScope dataScope,LabelResolutionService labelResolutionService,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.selector.ConversationSelectionService> selections) {
+        this(taskMapper,conversationMapper,agentMapper,ruleMapper,ruleSetService,objectMapper,executionMapper,dataScope,labelResolutionService,selections,null,null);
     }
 
     /** Creates tasks with an explicit execution strategy while preserving legacy label scoring semantics. */
@@ -384,7 +393,7 @@ public class InspectionTaskService {
                                     int concurrency, int maxConversations) { }
 
     /** Reuses authorized batch materialization; published assets and trial drafts are frozen before this boundary. */
-    @Transactional
+    @Transactional(isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public InspectionTask createUsingPipelineSnapshot(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
             String name, List<String> conversationIds, Integer concurrency, String requestId) {
         return createUsingPipelineSnapshot(prepared,name,conversationIds,concurrency,requestId,null,null,null);
@@ -448,6 +457,13 @@ public class InspectionTaskService {
                 return existing;
             }
         }
+        if(productionInputs==null)throw IqcException.invalidState("当前物化器未启用生产输入冻结");
+        var frozenInputs=productionInputs.capture(conversationIds==null?List.of():conversationIds.stream()
+                .filter(value->value!=null && !value.isBlank()).distinct().toList());
+        root.set("productionInputs",frozenInputs);
+        if(pipelineSources==null)throw IqcException.invalidState("当前物化器未启用流水线来源范围");
+        String pipelineGroup=pipelineSources.getObject().get(prepared.pipelineId()).getOwnerGroupId();
+        int frozenMessageCount=0;for(var input:frozenInputs.path("conversations"))frozenMessageCount+=input.path("messages").size();
         final String identity = taskId;
         try {
             java.util.function.Consumer<InspectionTask> freeze=task -> {
@@ -475,13 +491,17 @@ public class InspectionTaskService {
             boolean noData=periodic!=null && (conversationIds==null || conversationIds.isEmpty());
             var created=noData?saveSnapshotTask(name,"周期无数据",List.of(),concurrency==null?1:concurrency,dataScope.groupId(),0,freeze)
                     :createBatchWithSnapshot(name,conversationIds,concurrency,freeze);
-            if(noData){created.setStatus("NO_DATA");if(taskMapper.updateById(created)!=1)throw IqcException.invalidState("周期无数据状态保存失败");}
+            created.setTotalMessages(frozenMessageCount);
+            if(noData)created.setStatus("NO_DATA");
+            if(taskMapper.updateById(created)!=1)throw IqcException.invalidState("生产冻结消息数保存失败");
+            productionInputs.prepare(created,root);
             String selectedGroup=created.getOwnerGroupId();
-            if(selectedGroup!=null && ((selection!=null && !selectedGroup.equals(selection.evidenceGroupId()))
+            if(selectedGroup!=null && (!selectedGroup.equals(dataScope.groupId()) || !selectedGroup.equals(pipelineGroup)
+                    || (selection!=null && !selectedGroup.equals(selection.evidenceGroupId()))
                     || (selectorAsset!=null && !selectedGroup.equals(selectorAsset.ownerGroupId())))) {
                 // Counts and distributions also derive from unselected candidates; preserve the whole consulted corpus scope.
-                taskMapper.update(null,Wrappers.<InspectionTask>lambdaUpdate().eq(InspectionTask::getId,created.getId())
-                        .set(InspectionTask::getOwnerGroupId,null));
+                if(taskMapper.update(null,Wrappers.<InspectionTask>lambdaUpdate().eq(InspectionTask::getId,created.getId())
+                        .set(InspectionTask::getOwnerGroupId,null))!=1)throw IqcException.invalidState("流水线来源范围保存失败");
                 created.setOwnerGroupId(null);
             }
             return created;
@@ -923,6 +943,8 @@ public class InspectionTaskService {
         }
         if (status != null && !status.isBlank()) query.eq(InspectionTask::getStatus, status.trim());
         if (taskType != null && !taskType.isBlank()) query.eq(InspectionTask::getTaskType, taskType.trim());
+        // Large frozen transcripts belong to authorized task detail, not every list row.
+        query.select(InspectionTask.class,field->!"ruleSnapshotJson".equals(field.getProperty()));
         return IqcPage.from(taskMapper.selectPage(page, query));
     }
 

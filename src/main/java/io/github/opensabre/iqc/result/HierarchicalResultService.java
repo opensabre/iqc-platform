@@ -30,6 +30,8 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class HierarchicalResultService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private io.github.opensabre.iqc.conversation.ProductionInputSnapshotService productionInputs;
     private final ConversationInspectionResultMapper conversationMapper;
     private final RuleInspectionResultMapper ruleMapper;
     private final InspectionEvidenceMapper evidenceMapper;
@@ -81,9 +83,22 @@ public class HierarchicalResultService {
     public ConversationInspectionResult materializePipeline(InspectionTask task, String executionId, JsonNode snapshot,
             List<ConversationMessage> messages, io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation evaluated,
             List<io.github.opensabre.iqc.task.model.TaskItem> batch) {
+        return materializePipeline(task,executionId,snapshot,messages,evaluated,batch,null);
+    }
+
+    @Transactional
+    public ConversationInspectionResult materializePipeline(InspectionTask task,String executionId,JsonNode snapshot,
+            List<ConversationMessage> messages,io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation evaluated,
+            List<io.github.opensabre.iqc.task.model.TaskItem> batch,
+            io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Prepared verifiedInputs) {
         var current=taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,task.getId()).last("FOR UPDATE"));
         if(current==null || !"RUNNING".equals(current.getStatus()) || !executionId.equals(current.getCurrentExecutionId())) return null;
         if(!java.util.Objects.equals(task.getRuleSnapshotJson(),current.getRuleSnapshotJson())) throw new IllegalStateException("流水线任务快照已变化");
+        if(io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.hasSnapshot(snapshot)) {
+            if(productionInputs==null)throw new IllegalStateException("生产冻结输入校验未启用");
+            if(verifiedInputs==null)productionInputs.validateResult(task,snapshot,messages,evaluated);
+            else productionInputs.validateResult(task,snapshot,messages,evaluated,verifiedInputs);
+        }
         String conversationId=messages.getFirst().getConversationId();
         var conversation=conversationMapper.selectOne(Wrappers.<ConversationInspectionResult>lambdaQuery()
                 .eq(ConversationInspectionResult::getExecutionId,executionId).eq(ConversationInspectionResult::getConversationId,conversationId));

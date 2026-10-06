@@ -72,6 +72,8 @@ public class InspectionExecutionService {
     private final io.github.opensabre.iqc.quality.evaluation.PipelineEvaluationService evaluationService;
     @org.springframework.beans.factory.annotation.Autowired
     private io.github.opensabre.iqc.task.TaskExecutionStateService executionStates;
+    @org.springframework.beans.factory.annotation.Autowired
+    private io.github.opensabre.iqc.conversation.ProductionInputSnapshotService productionInputSnapshots;
     private io.github.opensabre.iqc.task.TaskExecutionStateService states() {
         // Direct embedding callers already own their transaction boundary; managed calls use the proxied bean.
         return executionStates==null?new io.github.opensabre.iqc.task.TaskExecutionStateService(taskMapper,executionMapper):executionStates;
@@ -96,6 +98,37 @@ public class InspectionExecutionService {
                 && !io.github.opensabre.iqc.quality.evaluation.PipelineEvaluationService.isEvaluation(snapshot)) return null;
         if (evaluationService==null) throw IqcException.invalidState("当前执行器未启用冻结输入评测");
         return evaluationService.prepare(task,snapshot,true);
+    }
+    private io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Prepared prepareProduction(InspectionTask task,JsonNode snapshot) {
+        if (!io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.hasSnapshot(snapshot)) return null;
+        if (productionInputSnapshots==null) throw IqcException.invalidState("当前执行器未启用生产冻结输入");
+        return productionInputSnapshots.prepare(task,snapshot);
+    }
+    private void validateProductionCheckpoints(InspectionTask task,String executionId,List<TaskItem> items,
+            io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Prepared inputs) {
+        if(inputs==null)return;
+        Map<String,String> conversationByMessage=new LinkedHashMap<>();
+        inputs.messages().forEach((conversationId,messages)->messages.forEach(message->conversationByMessage.put(message.getId(),conversationId)));
+        Set<String> seen=new HashSet<>();
+        if(items.size()!=conversationByMessage.size())throw IqcException.invalidState("生产检查点未完整覆盖冻结消息");
+        for(var item:items) {
+            if(!task.getId().equals(item.getTaskId()) || !executionId.equals(item.getExecutionId())
+                    || !Set.of("PENDING","RUNNING","SUCCEEDED","FAILED","CANCELLED").contains(item.getStatus())
+                    || ("SUCCEEDED".equals(item.getStatus()) && (item.getResultId()==null || item.getResultId().isBlank()))
+                    || !seen.add(item.getMessageId()) || !java.util.Objects.equals(conversationByMessage.get(item.getMessageId()),item.getConversationId())
+                    || !conversationByMessage.containsKey(item.getMessageId()))
+                throw IqcException.invalidState("生产检查点不在冻结会话中或重复");
+        }
+    }
+    /** Inherited terminal checkpoints retain their original result IDs; no new inference artifact is fabricated. */
+    private TaskItem productionCheckpoint(InspectionTask task,String executionId,ConversationMessage message,int sequence,TaskItem previous) {
+        var item=new TaskItem();item.setTaskId(task.getId());item.setExecutionId(executionId);
+        item.setMessageId(message.getId());item.setConversationId(message.getConversationId());item.setSequenceNo(sequence);
+        boolean terminal=previous!=null && List.of("SUCCEEDED","CANCELLED").contains(previous.getStatus());
+        item.setStatus(terminal?previous.getStatus():"PENDING");
+        item.setAttemptCount(previous==null || previous.getAttemptCount()==null?0:previous.getAttemptCount());
+        if(terminal){item.setResultId(previous.getResultId());item.setErrorMessage(previous.getErrorMessage());}
+        return item;
     }
     private void validatePipelineDependencies(JsonNode snapshot) {
         if (!io.github.opensabre.iqc.pipelineasset.PipelineAssetService.isPipeline(snapshot)) return;
@@ -133,14 +166,24 @@ public class InspectionExecutionService {
                     task.getLabelScopeSnapshotJson(), objectMapper);
             schemeDependencies.validateTaskDependencies(snapshot);
             validatePipelineDependencies(snapshot);
+            var productionInputs=prepareProduction(task,snapshot);
             var evaluationInputs=prepareEvaluation(task,snapshot);
             String previousStatus = task.getStatus();
             String previousExecutionId = task.getCurrentExecutionId();
             Set<String> retryMessageIds = null;
             int successfulMessages = 0;
-            if (previousExecutionId != null && ("FAILED".equals(previousStatus) || "PARTIAL_FAILED".equals(previousStatus))) {
+            Map<String,TaskItem> productionPrevious=new LinkedHashMap<>();
+            if(productionInputs!=null && previousExecutionId!=null){
+                var previousItems=taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery().eq(TaskItem::getExecutionId,previousExecutionId));
+                validateProductionCheckpoints(task,previousExecutionId,previousItems,productionInputs);
+                if(previousItems.isEmpty())throw IqcException.invalidState("生产前轮检查点缺失");
+                previousItems.forEach(item->productionPrevious.put(item.getMessageId(),item));
+                successfulMessages=(int)previousItems.stream().filter(item->List.of("SUCCEEDED","CANCELLED").contains(item.getStatus())).count();
+            }
+            if (productionInputs==null && previousExecutionId != null && ("FAILED".equals(previousStatus) || "PARTIAL_FAILED".equals(previousStatus))) {
                 List<TaskItem> previousItems = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
                         .eq(TaskItem::getExecutionId, previousExecutionId));
+                validateProductionCheckpoints(task,previousExecutionId,previousItems,productionInputs);
                 if (!previousItems.isEmpty()) {
                     retryMessageIds = new HashSet<>();
                     for (TaskItem previousItem : previousItems) {
@@ -164,12 +207,18 @@ public class InspectionExecutionService {
             execution.setProcessedMessages(successfulMessages);
             executionMapper.insert(execution);
             List<String> conversationIds = conversationIds(task);
-            List<ConversationMessage> messages = evaluationInputs!=null?evaluationInputs.messages().values().stream().flatMap(List::stream).toList()
+            List<ConversationMessage> messages = productionInputs!=null?productionInputs.messages().values().stream().flatMap(List::stream).toList()
+                    :evaluationInputs!=null?evaluationInputs.messages().values().stream().flatMap(List::stream).toList()
                     :conversationIds.isEmpty() ? List.of() : messageMapper.selectList(Wrappers.<ConversationMessage>lambdaQuery()
                     .in(ConversationMessage::getConversationId, conversationIds)
                     .orderByAsc(ConversationMessage::getConversationId).orderByAsc(ConversationMessage::getSequenceNo));
             int batchSequence = 0;
             for (ConversationMessage message : messages) {
+                if(productionInputs!=null){
+                    if(taskItemMapper.insert(productionCheckpoint(task,execution.getId(),message,++batchSequence,productionPrevious.get(message.getId())))!=1)
+                        throw IqcException.invalidState("生产冻结检查点保存失败");
+                    continue;
+                }
                 if (retryMessageIds != null && !retryMessageIds.contains(message.getId())) continue;
                 TaskItem item = new TaskItem();
                 item.setTaskId(taskId); item.setExecutionId(execution.getId()); item.setMessageId(message.getId());
@@ -242,10 +291,12 @@ public class InspectionExecutionService {
                 task.getLabelScopeSnapshotJson(), objectMapper);
         schemeDependencies.validateTaskDependencies(ruleSnapshot);
         validatePipelineDependencies(ruleSnapshot);
+        var productionInputs=prepareProduction(task,ruleSnapshot);
         var evaluationInputs=prepareEvaluation(task,ruleSnapshot);
         List<TaskItem> items = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
                 .eq(TaskItem::getExecutionId, executionId).orderByAsc(TaskItem::getSequenceNo));
-        int previouslyProcessed = Math.max(0, (task.getTotalMessages() == null ? items.size() : task.getTotalMessages()) - items.size());
+        validateProductionCheckpoints(task,executionId,items,productionInputs);
+        int previouslyProcessed = productionInputs!=null?0:Math.max(0, (task.getTotalMessages() == null ? items.size() : task.getTotalMessages()) - items.size());
         Map<String, List<TaskItem>> byConversation = items.stream().collect(java.util.stream.Collectors.groupingBy(
                 item -> item.getConversationId() == null ? "legacy" : item.getConversationId(), LinkedHashMap::new, java.util.stream.Collectors.toList()));
         int concurrency = Math.min(Math.max(1, task.getConcurrencyLimit() == null ? 1 : task.getConcurrencyLimit()), Math.max(1, byConversation.size()));
@@ -254,7 +305,8 @@ public class InspectionExecutionService {
         try (ExecutorService workers = Executors.newFixedThreadPool(concurrency, Thread.ofPlatform().name("iqc-conversation-", 0).factory())) {
             List<Future<?>> futures = new ArrayList<>();
             for (List<TaskItem> conversationItems : byConversation.values()) {
-                futures.add(workers.submit(() -> processConversation(executionTask, executionId, ruleSnapshot, conversationItems,evaluationInputs)));
+                if(productionInputs!=null && conversationItems.stream().allMatch(item->List.of("SUCCEEDED","CANCELLED").contains(item.getStatus())))continue;
+                futures.add(workers.submit(() -> processConversation(executionTask, executionId, ruleSnapshot, conversationItems,evaluationInputs,productionInputs)));
             }
             for (Future<?> future : futures) {
                 try { future.get(); }
@@ -266,6 +318,7 @@ public class InspectionExecutionService {
         // Aggregate committed progress so both legacy and item-route execution use the same source of truth.
         List<TaskItem> committedItems = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
                 .eq(TaskItem::getExecutionId, executionId).orderByAsc(TaskItem::getSequenceNo));
+        validateProductionCheckpoints(task,executionId,committedItems,productionInputs);
         int processed = previouslyProcessed + (int) committedItems.stream().filter(item -> List.of("SUCCEEDED", "FAILED", "CANCELLED").contains(item.getStatus())).count();
         int failed = (int) committedItems.stream().filter(item -> "FAILED".equals(item.getStatus())).count();
         return states().finish(taskId,executionId,processed,failed);
@@ -285,8 +338,10 @@ public class InspectionExecutionService {
                 task.getLabelScopeSnapshotJson(), objectMapper);
         schemeDependencies.validateTaskDependencies(snapshot);
         validatePipelineDependencies(snapshot);
+        var productionInputs=prepareProduction(task,snapshot);
         prepareEvaluation(task,snapshot);
         List<TaskItem> previousItems = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery().eq(TaskItem::getExecutionId, task.getCurrentExecutionId()));
+        validateProductionCheckpoints(task,task.getCurrentExecutionId(),previousItems,productionInputs);
         List<TaskItem> unfinished = previousItems.stream().filter(item -> !List.of("SUCCEEDED", "CANCELLED").contains(item.getStatus())).toList();
         int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
                 .set(InspectionTask::getStatus, "QUEUED")
@@ -299,7 +354,13 @@ public class InspectionExecutionService {
         execution.setProcessedMessages(Math.max(0, (task.getTotalMessages() == null ? previousItems.size() : task.getTotalMessages()) - unfinished.size())); execution.setFailedMessages(0);
         executionMapper.insert(execution);
         int sequence = 0;
-        for (TaskItem previous : unfinished) {
+        if(productionInputs!=null){
+            Map<String,TaskItem> previousByMessage=new LinkedHashMap<>();previousItems.forEach(item->previousByMessage.put(item.getMessageId(),item));
+            for(var messages:productionInputs.messages().values())for(var message:messages)
+                if(taskItemMapper.insert(productionCheckpoint(task,execution.getId(),message,++sequence,previousByMessage.get(message.getId())))!=1)
+                    throw IqcException.invalidState("生产恢复检查点保存失败");
+        }
+        for (TaskItem previous : productionInputs!=null?List.<TaskItem>of():unfinished) {
             TaskItem item = new TaskItem(); item.setTaskId(taskId); item.setExecutionId(execution.getId()); item.setMessageId(previous.getMessageId());
             item.setConversationId(previous.getConversationId()); item.setSequenceNo(++sequence); item.setStatus("PENDING"); item.setAttemptCount(previous.getAttemptCount() == null ? 0 : previous.getAttemptCount());
             taskItemMapper.insert(item);
@@ -309,7 +370,8 @@ public class InspectionExecutionService {
     }
 
     private void processConversation(InspectionTask task, String executionId, JsonNode ruleSnapshot, List<TaskItem> items,
-            io.github.opensabre.iqc.quality.evaluation.PipelineEvaluationService.Prepared evaluationInputs) {
+            io.github.opensabre.iqc.quality.evaluation.PipelineEvaluationService.Prepared evaluationInputs,
+            io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Prepared productionInputs) {
         if (evaluationInputs!=null) {
             if(items.isEmpty()) return;
             var current=taskMapper.selectById(task.getId());
@@ -325,6 +387,22 @@ public class InspectionExecutionService {
                     io.github.opensabre.iqc.pipeline.PipelineRuntime.Mode.EVALUATION,member.gold().businessContext());
             evaluationService.materialize(task,executionId,ruleSnapshot,evaluationInputs,frozen,evaluated,pending,
                     java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(Math.max(0,System.nanoTime()-evaluatedAt)));
+            return;
+        }
+        if (productionInputs!=null) {
+            if(items.isEmpty())return;
+            var current=taskMapper.selectById(task.getId());
+            if(current==null || !"RUNNING".equals(current.getStatus()) || !executionId.equals(current.getCurrentExecutionId()))return;
+            var pending=items.stream().filter(item->!List.of("SUCCEEDED","CANCELLED").contains(item.getStatus())).toList();
+            if(pending.isEmpty())return;
+            String conversationId=items.getFirst().getConversationId();
+            // A retry projects only unfinished items but always evaluates the original full frozen conversation.
+            var frozen=productionInputs.messages().get(conversationId);
+            if(frozen==null || frozen.isEmpty())throw IqcException.invalidState("生产检查点不在冻结会话中");
+            var release=pipelineAssets.taskRelease(ruleSnapshot);
+            var evaluated=pipelineEvaluator.evaluate(task,release,frozen,
+                    io.github.opensabre.iqc.pipeline.PipelineRuntime.Mode.PRODUCTION,productionInputs.businessContext(conversationId));
+            hierarchicalResultService.materializePipeline(task,executionId,ruleSnapshot,frozen,evaluated,pending,productionInputs);
             return;
         }
         Map<String, ConversationMessage> conversationMessagesById = new LinkedHashMap<>();
