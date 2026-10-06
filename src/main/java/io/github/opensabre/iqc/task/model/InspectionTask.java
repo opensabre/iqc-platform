@@ -9,6 +9,15 @@ import lombok.EqualsAndHashCode;
 @TableName("iqc_inspection_task")
 @EqualsAndHashCode(callSuper = true)
 public class InspectionTask extends BasePo {
+    private String triggerSource;
+    private String triggerEventId;
+    private String triggerPayloadHash;
+    private String triggerRequestHash;
+    private String triggerRequestJson;
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy=com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
+    private java.time.LocalDateTime triggerRetryNotBeforeUtc;
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy=com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
+    private String triggerError;
     private String periodicScheduleId;
     private String periodicRevisionId;
     private java.time.LocalDateTime plannedAtUtc;

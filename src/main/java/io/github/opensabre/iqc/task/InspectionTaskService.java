@@ -426,6 +426,29 @@ public class InspectionTaskService {
             String name,List<String> conversationIds,Integer concurrency,String requestId,
             io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,String selectorRequestHash,
             io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset,PeriodicIdentity periodic) {
+        return createUsingPipelineSnapshot(prepared,name,conversationIds,concurrency,requestId,selection,selectorRequestHash,selectorAsset,periodic,null,null);
+    }
+    public record TriggerIdentity(String payloadHash,java.time.Instant occurredAt,JsonNode evidence) { }
+    @Transactional
+    public InspectionTask materializeTriggeredPipelineTask(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared pipeline,
+            InspectionTask receipt,List<String> ids,Integer concurrency,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,TriggerIdentity trigger) {
+        if(receipt==null || trigger==null || !"WAITING_INPUT".equals(receipt.getStatus()) || receipt.getId()==null
+                || !dataScope.owner().equals(receipt.getCreatedBy()) || !trigger.payloadHash().equals(receipt.getTriggerPayloadHash())
+                || pipeline==null || pipeline.versionNo()==null || ids==null || concurrency==null || concurrency<1 || concurrency>32)
+            throw IqcException.invalidState("事件接收记录不允许物化");
+        if(selection!=null && (selector==null || !trigger.occurredAt().equals(selection.anchor())
+                || !selector.definition().equals(selection.definition()) || !ids.equals(selection.selectedConversationIds())))
+            throw IqcException.invalidState("事件筛选证据不一致");
+        return createUsingPipelineSnapshot(pipeline,receipt.getName(),ids,concurrency,null,selection,
+                selector==null?null:trigger.payloadHash(),selector,null,trigger,receipt);
+    }
+    private InspectionTask createUsingPipelineSnapshot(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,List<String> conversationIds,Integer concurrency,String requestId,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,String selectorRequestHash,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset,PeriodicIdentity periodic,
+            TriggerIdentity trigger,InspectionTask receipt) {
         if (prepared == null || !io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(writeSnapshot(prepared.release())).equals(prepared.contentHash()))
             throw IqcException.invalidState("流水线冻结摘要无效");
         boolean trial = prepared.versionNo() == null;
@@ -435,6 +458,7 @@ public class InspectionTaskService {
         ((com.fasterxml.jackson.databind.node.ObjectNode) marker).put("trial", trial);
         var root = objectMapper.createObjectNode(); root.set("pipelineSnapshot", marker);
         if(periodic!=null)root.set("periodicSnapshot",objectMapper.valueToTree(periodic));
+        if(trigger!=null)root.set("triggerSnapshot",objectMapper.valueToTree(trigger));
         root.set("executionStrategy", objectMapper.createObjectNode().put("schemaVersion", "iqc-pipeline-task-v1").put("mode", "PIPELINE"));
         var frozenRules = root.putArray("rules"); var ruleIds = new java.util.LinkedHashSet<String>();
         for (var node : prepared.release().pipeline().nodes()) {
@@ -488,9 +512,9 @@ public class InspectionTaskService {
                 }
                 task.setRuleSnapshotJson(root.toString()); task.setRuleIdsJson(writeSnapshot(ruleIds)); task.setRunCount(1);
             };
-            boolean noData=periodic!=null && (conversationIds==null || conversationIds.isEmpty());
-            var created=noData?saveSnapshotTask(name,"周期无数据",List.of(),concurrency==null?1:concurrency,dataScope.groupId(),0,freeze)
-                    :createBatchWithSnapshot(name,conversationIds,concurrency,freeze);
+            boolean noData=(periodic!=null || trigger!=null) && (conversationIds==null || conversationIds.isEmpty());
+            var created=noData?saveSnapshotTask(name,"周期无数据",List.of(),concurrency==null?1:concurrency,dataScope.groupId(),0,freeze,receipt)
+                    :createBatchWithSnapshot(name,conversationIds,concurrency,freeze,receipt);
             created.setTotalMessages(frozenMessageCount);
             if(noData)created.setStatus("NO_DATA");
             if(taskMapper.updateById(created)!=1)throw IqcException.invalidState("生产冻结消息数保存失败");
@@ -498,7 +522,8 @@ public class InspectionTaskService {
             String selectedGroup=created.getOwnerGroupId();
             if(selectedGroup!=null && (!selectedGroup.equals(dataScope.groupId()) || !selectedGroup.equals(pipelineGroup)
                     || (selection!=null && !selectedGroup.equals(selection.evidenceGroupId()))
-                    || (selectorAsset!=null && !selectedGroup.equals(selectorAsset.ownerGroupId())))) {
+                    || (selectorAsset!=null && !selectedGroup.equals(selectorAsset.ownerGroupId()))
+                    || (receipt!=null && !selectedGroup.equals(receipt.getOwnerGroupId())))) {
                 // Counts and distributions also derive from unselected candidates; preserve the whole consulted corpus scope.
                 if(taskMapper.update(null,Wrappers.<InspectionTask>lambdaUpdate().eq(InspectionTask::getId,created.getId())
                         .set(InspectionTask::getOwnerGroupId,null))!=1)throw IqcException.invalidState("流水线来源范围保存失败");
@@ -602,6 +627,10 @@ public class InspectionTaskService {
 
     private InspectionTask createBatchWithSnapshot(String name, List<String> requestedConversationIds, Integer concurrencyLimit,
                                                     java.util.function.Consumer<InspectionTask> snapshot) {
+        return createBatchWithSnapshot(name,requestedConversationIds,concurrencyLimit,snapshot,null);
+    }
+    private InspectionTask createBatchWithSnapshot(String name,List<String> requestedConversationIds,Integer concurrencyLimit,
+            java.util.function.Consumer<InspectionTask> snapshot,InspectionTask receipt) {
         List<String> conversationIds = requestedConversationIds == null ? List.of() : requestedConversationIds.stream()
                 .filter(id -> id != null && !id.isBlank()).distinct().toList();
         if (conversationIds.isEmpty()) throw IqcException.invalidArgument("至少选择一个会话");
@@ -619,11 +648,15 @@ public class InspectionTaskService {
         String ownerGroupId = conversations.get(0).getOwnerGroupId();
         return saveSnapshotTask(name, "批量质检-" + conversations.size() + "个会话", conversationIds, safeConcurrency,
                 conversations.stream().allMatch(item -> java.util.Objects.equals(ownerGroupId, item.getOwnerGroupId())) ? ownerGroupId : null,
-                conversations.stream().map(Conversation::getMessageCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum(), snapshot);
+                conversations.stream().map(Conversation::getMessageCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum(), snapshot,receipt);
     }
 
     private InspectionTask saveSnapshotTask(String name, String defaultName, List<String> conversationIds, int concurrency,
                                             String groupId, int messageCount, java.util.function.Consumer<InspectionTask> snapshot) {
+        return saveSnapshotTask(name,defaultName,conversationIds,concurrency,groupId,messageCount,snapshot,null);
+    }
+    private InspectionTask saveSnapshotTask(String name,String defaultName,List<String> conversationIds,int concurrency,
+            String groupId,int messageCount,java.util.function.Consumer<InspectionTask> snapshot,InspectionTask receipt) {
         InspectionTask task = new InspectionTask();
         task.setName(name == null || name.isBlank() ? defaultName : name.trim());
         task.setTaskType("BATCH");
@@ -637,7 +670,16 @@ public class InspectionTaskService {
         task.setProcessedMessages(0);
         task.setFailedMessages(0);
         task.setAttemptCount(0);
-        taskMapper.insert(task);
+        if(receipt==null)taskMapper.insert(task);
+        else {
+            task.setId(receipt.getId());task.setCreatedBy(receipt.getCreatedBy());task.setCreatedTime(receipt.getCreatedTime());
+            task.setTriggerSource(receipt.getTriggerSource());task.setTriggerEventId(receipt.getTriggerEventId());
+            task.setTriggerPayloadHash(receipt.getTriggerPayloadHash());task.setTriggerRequestHash(receipt.getTriggerRequestHash());task.setTriggerRequestJson(receipt.getTriggerRequestJson());
+            var transition=Wrappers.<InspectionTask>lambdaUpdate().eq(InspectionTask::getId,receipt.getId()).eq(InspectionTask::getStatus,"WAITING_INPUT");
+            if(task.getConversationId()==null)transition.set(InspectionTask::getConversationId,null);
+            if(task.getOwnerGroupId()==null)transition.set(InspectionTask::getOwnerGroupId,null);
+            if(taskMapper.update(task,transition)!=1)throw IqcException.invalidState("事件任务已取消或被其他进程物化");
+        }
         return task;
     }
 
@@ -944,7 +986,7 @@ public class InspectionTaskService {
         if (status != null && !status.isBlank()) query.eq(InspectionTask::getStatus, status.trim());
         if (taskType != null && !taskType.isBlank()) query.eq(InspectionTask::getTaskType, taskType.trim());
         // Large frozen transcripts belong to authorized task detail, not every list row.
-        query.select(InspectionTask.class,field->!"ruleSnapshotJson".equals(field.getProperty()));
+        query.select(InspectionTask.class,field->!java.util.Set.of("ruleSnapshotJson","triggerRequestJson").contains(field.getProperty()));
         return IqcPage.from(taskMapper.selectPage(page, query));
     }
 
@@ -1022,7 +1064,7 @@ public class InspectionTaskService {
                 .set(InspectionTask::getStatus, targetStatus)
                 .set(InspectionTask::getCancelRequested, true)
                 .eq(InspectionTask::getId, id)
-                .in(InspectionTask::getStatus, "SCHEDULED", "MATERIALIZING", "CREATED", "QUEUED", "RUNNING", "PAUSE_REQUESTED", "PAUSED"));
+                .in(InspectionTask::getStatus, "SCHEDULED", "MATERIALIZING", "CREATED", "QUEUED", "RUNNING", "PAUSE_REQUESTED", "PAUSED", "WAITING_INPUT"));
         if (cancelled == 1 && !running && task.getCurrentExecutionId() != null) {
             TaskExecution execution = executionMapper.selectById(task.getCurrentExecutionId());
             if (execution != null) { execution.setStatus("CANCELLED"); executionMapper.updateById(execution); }
@@ -1057,7 +1099,7 @@ public class InspectionTaskService {
     @Transactional
     public void deleteTerminal(String id) {
         InspectionTask task = get(id);
-        if (!List.of("SUCCEEDED", "PARTIAL_FAILED", "FAILED", "NO_DATA", "CANCELLED").contains(task.getStatus())) {
+        if (!List.of("SUCCEEDED", "PARTIAL_FAILED", "FAILED", "NO_DATA", "CANCELLED", "TRIGGER_EXPIRED", "TRIGGER_CONFLICT").contains(task.getStatus())) {
             throw IqcException.invalidState("只有终态任务可以删除");
         }
         int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()

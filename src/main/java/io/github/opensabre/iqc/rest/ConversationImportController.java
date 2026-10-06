@@ -9,7 +9,8 @@ import io.github.opensabre.governance.usage.UsageRecord;
 import io.github.opensabre.boot.annotations.ResourcePermission;
 import io.github.opensabre.iqc.conversation.ConversationParseResult;
 import io.github.opensabre.iqc.conversation.ConversationImportService;
-import io.github.opensabre.iqc.conversation.ConversationSpeakerRole;
+import io.github.opensabre.iqc.conversation.ApiConversationInput;
+import io.github.opensabre.iqc.conversation.ConversationApiIngestService;
 import io.github.opensabre.iqc.conversation.ConversationUploadProperties;
 import io.github.opensabre.iqc.conversation.TxtConversationParser;
 import io.github.opensabre.iqc.governance.IqcException;
@@ -27,8 +28,6 @@ import java.util.Locale;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.time.LocalTime;
-import io.github.opensabre.iqc.conversation.ConversationMessageDraft;
 import io.github.opensabre.iqc.conversation.ConversationMetadata;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -46,6 +45,8 @@ public class ConversationImportController {
     private final ConversationImportService importService;
     private final UsageCounterRecorder usageCounterRecorder;
     private final ConversationUploadProperties uploadProperties;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ConversationApiIngestService apiIngestService;
 
     public ConversationImportController(TxtConversationParser parser, ConversationImportService importService,
                                         UsageCounterRecorder usageCounterRecorder,
@@ -183,40 +184,13 @@ public class ConversationImportController {
     }
 
     private Map<String, Object> ingestOne(ConversationIngestRequest request, String batchNoOverride) {
-        if (request == null || request.messages() == null || request.messages().isEmpty()) {
-            throw IqcException.invalidArgument("messages 不能为空");
-        }
-        if (request.messages().size() > 5000) throw IqcException.invalidArgument("单个会话最多 5000 条消息");
-        List<ConversationMessageDraft> messages = new ArrayList<>();
-        StringBuilder canonical = new StringBuilder(request.externalId() == null ? "" : request.externalId());
-        for (int index = 0; index < request.messages().size(); index++) {
-            IngestMessage item = request.messages().get(index);
-            if (item == null || item.role() == null || item.role().isBlank() || item.content() == null || item.content().isBlank()) {
-                throw IqcException.invalidArgument("第 " + (index + 1) + " 条消息缺少 role 或 content");
-            }
-            LocalTime time;
-            try { time = item.time() == null || item.time().isBlank() ? LocalTime.MIDNIGHT.plusSeconds(index) : LocalTime.parse(item.time()); }
-            catch (RuntimeException exception) { throw IqcException.invalidArgument("第 " + (index + 1) + " 条消息 time 格式应为 HH:mm:ss"); }
-            canonical.append('|').append(item.role()).append('|').append(time).append('|').append(item.content());
-            messages.add(new ConversationMessageDraft(index + 1, ConversationSpeakerRole.canonical(item.role()), time, item.content().trim(), item.content(), index + 1));
-        }
-        ConversationMetadata metadata = request.metadata();
-        if (metadata != null) canonical.append('|').append(metadata.fingerprintPart());
-        String fingerprint = fileFingerprint(canonical.toString().getBytes(StandardCharsets.UTF_8));
-        String usageRecordId = "conversation-ingest:" + fingerprint;
-        usageCounterRecorder.record(new UsageRecord(usageRecordId + ":attempt", null, "iqc-platform", "CONVERSATION_API", fingerprint, "INGEST", UsageOutcome.ATTEMPT));
-        ConversationParseResult parsed = new ConversationParseResult(messages, List.of(), 0);
-        try {
-            var conversation = importService.persist(
-                    request.title() == null || request.title().isBlank() ? "API会话" : request.title().trim(),
-                    fingerprint, parsed, batchNoOverride == null ? request.batchNo() : batchNoOverride, "API", request.externalId(), metadata);
-            usageCounterRecorder.record(new UsageRecord(usageRecordId + ":success", null, "iqc-platform", "CONVERSATION_API", fingerprint, "INGEST", UsageOutcome.SUCCESS));
-            return Map.of("conversationId", conversation.getId(), "batchNo", conversation.getBatchNo() == null ? "" : conversation.getBatchNo(),
-                    "externalId", request.externalId() == null ? "" : request.externalId(), "messageCount", messages.size(), "status", conversation.getStatus());
-        } catch (RuntimeException exception) {
-            usageCounterRecorder.record(new UsageRecord(usageRecordId + ":failure", null, "iqc-platform", "CONVERSATION_API", fingerprint, "INGEST", UsageOutcome.FAILURE));
-            throw exception;
-        }
+        ApiConversationInput input=request==null?null:new ApiConversationInput(request.externalId(),request.batchNo(),request.title(),request.metadata(),
+                request.messages()==null?null:request.messages().stream().map(item->item==null?null:new ApiConversationInput.Message(item.time(),item.role(),item.content())).toList());
+        // Existing direct controller callers retain their constructor; managed calls share the injected service.
+        var service=apiIngestService==null?new ConversationApiIngestService(importService,usageCounterRecorder):apiIngestService;
+        var conversation=service.ingest(input,batchNoOverride);
+        return Map.of("conversationId",conversation.getId(),"batchNo",conversation.getBatchNo()==null?"":conversation.getBatchNo(),
+                "externalId",request.externalId()==null?"":request.externalId(),"messageCount",request.messages().size(),"status",conversation.getStatus());
     }
 
     private Map<String, Object> importFile(MultipartFile file, String batchNo, ConversationMetadata metadata) throws IOException {

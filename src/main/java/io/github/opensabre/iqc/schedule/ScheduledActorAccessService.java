@@ -32,6 +32,11 @@ public class ScheduledActorAccessService {
         var resolved=resolve(bound);return scope.asScheduledActor(resolved,callback);
     }
     public Resolved resolve(CreationBound bound) {
+        return resolve(bound,Set.of("iqc:pipeline:task:create","iqc:task:execute","iqc:schedule:publish"));
+    }
+    /** Required grants are selected by the owning server workflow, never from a received payload. */
+    public Resolved resolve(CreationBound bound,Set<String> requiredResources) {
+        if(requiredResources==null || requiredResources.isEmpty())throw IqcException.invalidState("后台工作流缺少固定授权要求");
         requireBackground();
         if(tokens.currentClaims()!=null)throw IqcException.invalidState("周期后台不能继承用户令牌");
         if(bound==null || !"iqc-schedule-owner-scope-v1".equals(bound.schemaVersion()) || bound.userId()==null
@@ -43,7 +48,7 @@ public class ScheduledActorAccessService {
                 || !current.accountValid() || !bound.owner().equals(current.username()) || current.roles()==null || current.resourceCodes()==null
                 || current.checkedAt()==null || current.checkedAt().isBefore(now.minusSeconds(30)) || current.checkedAt().isAfter(now.plusSeconds(5)))
             throw IqcException.accessDenied("周期负责人已失效或未取得当前授权证据");
-        if(!current.resourceCodes().containsAll(Set.of("iqc:pipeline:task:create","iqc:task:execute","iqc:schedule:publish")))
+        if(!current.resourceCodes().containsAll(requiredResources))
             throw IqcException.accessDenied("周期负责人已失去创建或执行权限");
         boolean currentAll=current.roles().stream().map(ScheduledActorAccessService::normalizeRole)
                 .anyMatch(role->Set.of("ADMIN","SUPER_ADMIN").contains(role)) || current.resourceCodes().contains("iqc:result:all");

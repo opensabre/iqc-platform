@@ -75,6 +75,13 @@ public class ConversationSelectionService {
         if(plannedAt==null)throw IqcException.invalidArgument("周期选数缺少计划时刻");
         return select(definition,plannedAt);
     }
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public Selection materializeTargetsAt(SelectorDefinition definition,Instant plannedAt,List<String> targets) {
+        if(plannedAt==null || targets==null || targets.isEmpty() || targets.size()>1000
+                || targets.stream().anyMatch(id->id==null || !id.matches("[A-Za-z0-9:_-]{1,64}")))
+            throw IqcException.invalidArgument("事件选数必须提供明确的有效目标会话");
+        return select(definition,plannedAt,targets.stream().distinct().toList());
+    }
     public void validate(SelectorDefinition definition) {
         if(definition==null) throw IqcException.invalidArgument("缺少Selector定义");
         if(json.valueToTree(definition).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length>128*1024) throw IqcException.invalidArgument("Selector超过128KiB");
@@ -83,12 +90,14 @@ public class ConversationSelectionService {
     private Selection select(SelectorDefinition definition) {
         return select(definition,Instant.now());
     }
-    private Selection select(SelectorDefinition definition,Instant plannedAt) {
+    private Selection select(SelectorDefinition definition,Instant plannedAt) {return select(definition,plannedAt,null);}
+    private Selection select(SelectorDefinition definition,Instant plannedAt,List<String> targets) {
         validate(definition);
         Instant anchor=plannedAt.truncatedTo(java.time.temporal.ChronoUnit.MILLIS);var window=resolve(definition.timeWindow(),anchor);
         boolean all=scope.canViewAll();String owner=scope.owner(),group=all?null:scope.groupId();
         var query=Wrappers.<Conversation>lambdaQuery().in(Conversation::getStatus,List.of("IMPORTED","IMPORTED_WITH_ERRORS")).gt(Conversation::getMessageCount,0);
         if(!all) query.and(q->q.eq(Conversation::getCreatedBy,owner).or(group!=null,n->n.eq(Conversation::getOwnerGroupId,group)));
+        if(targets!=null)query.in(Conversation::getId,targets);
         if(!definition.includeIds().isEmpty()) query.in(Conversation::getId,definition.includeIds());
         if(!definition.excludeIds().isEmpty()) query.notIn(Conversation::getId,definition.excludeIds());
         if(window!=null) {

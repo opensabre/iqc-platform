@@ -125,3 +125,10 @@
 事件/API触发前置：复用原Task JSON、Conversation/Message归档、角色规范和Pipeline执行器，新增productionInputs完整文本/上下文/来源摘要；新生产/试跑/周期Pipeline冻结实际消息数，幂等优先沿用首次快照，NO_DATA空清单。队列/恢复/重试读取冻结输入，各轮TaskItem保留完整消息清单并引用原轮成功产物，缺失检查点不能计作成功；结果提交校验文本/上下文与inputHash。任务级沿用真实跨EID产物，显式EID报告仅包含本轮实际输出。目录排除大型ruleSnapshotJson，详情完整读取；来源scope包含Pipeline/currentGroup交集。
 
 没有新增输入/消息/任务表，没有将生产输入写成金标或进入EVALUATION sink。旧任务/评测继续原协议。事件持久接收/API外部内容接入、可靠事件投递、自动重试/速率/成本预算仍待继续，I4未完成。协议见iqc-production-input-snapshots.md；本批仅编译，未新增/执行测试、SQL或部署。
+
+
+## I4 持久事件/API 接收（2026-10-06）
+
+复用原 Task 作为 WAITING_INPUT 接收记录，新增 V1.1.45 事件身份/完整接收证据，无并行 Inbox 表。明确 Pipeline/Selector 发布版本，支持既有归档目标与结构化内容，严格幂等重放、当前负责人授权、输入修订/ASR 就绪、Selector 单目标筛选、同一任务事务冻结及入队。取消/过期/身份冲突不复活，未知输入保持私有。抽取共享 API 导入而非复制入口；按实际正文和分析元数据验证归档重放。UI 补等待/过期/冲突显示及允许操作，组织权限新增 receive 资源。
+
+协议与边界见 iqc-event-api-triggers.md。当前仅直接 HTTP 接收和后台持久恢复；自动事件订阅/MQ/ASR 写回、失败尝试历史、自动失败重试及全局预算仍待开发，I4 未完成。没有新增或运行测试、迁移或部署；编译/构建与只读复核证据见协作交接。
