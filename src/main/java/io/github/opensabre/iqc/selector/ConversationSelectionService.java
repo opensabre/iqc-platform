@@ -69,14 +69,23 @@ public class ConversationSelectionService {
     }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public Selection materialize(SelectorDefinition definition) {return select(definition);}
+    /** Internal periodic trigger boundary: relative windows are anchored to the immutable planned tick. */
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public Selection materializeAt(SelectorDefinition definition,Instant plannedAt) {
+        if(plannedAt==null)throw IqcException.invalidArgument("周期选数缺少计划时刻");
+        return select(definition,plannedAt);
+    }
     public void validate(SelectorDefinition definition) {
         if(definition==null) throw IqcException.invalidArgument("缺少Selector定义");
         if(json.valueToTree(definition).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length>128*1024) throw IqcException.invalidArgument("Selector超过128KiB");
         int[] count={0};validateCondition(definition.condition(),0,count);validateCondition(definition.excludeCondition(),0,count);
     }
     private Selection select(SelectorDefinition definition) {
+        return select(definition,Instant.now());
+    }
+    private Selection select(SelectorDefinition definition,Instant plannedAt) {
         validate(definition);
-        Instant anchor=Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS);var window=resolve(definition.timeWindow(),anchor);
+        Instant anchor=plannedAt.truncatedTo(java.time.temporal.ChronoUnit.MILLIS);var window=resolve(definition.timeWindow(),anchor);
         boolean all=scope.canViewAll();String owner=scope.owner(),group=all?null:scope.groupId();
         var query=Wrappers.<Conversation>lambdaQuery().in(Conversation::getStatus,List.of("IMPORTED","IMPORTED_WITH_ERRORS")).gt(Conversation::getMessageCount,0);
         if(!all) query.and(q->q.eq(Conversation::getCreatedBy,owner).or(group!=null,n->n.eq(Conversation::getOwnerGroupId,group)));

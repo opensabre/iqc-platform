@@ -23,6 +23,13 @@ public interface IqcOrganizationClient {
             @RequestHeader("X-Opensabre-Resource-Registration-Token") String token,
             @RequestBody ResourceMappingSnapshot snapshot);
 
+    /** Fresh current account/role/resource projection, available only to the verified background service identity. */
+    @GetMapping("/internal/iqc/scheduler-access/{userId}")
+    Result<SchedulerAccess> schedulerAccess(@PathVariable("userId") String userId);
+
+    record SchedulerAccess(String schemaVersion,String userId,String username,boolean accountValid,String groupId,
+                           java.util.Set<String> roles,java.util.Set<String> resourceCodes,java.time.Instant checkedAt) { }
+
     record OrganizationUser(String id, String name, String username, String groupId, String groupName) {
     }
 

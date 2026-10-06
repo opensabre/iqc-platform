@@ -16,7 +16,24 @@ public class IqcDataScope {
     private final IqcOrganizationClient organizationClient;
     private final UserContextHolder userContext = UserContextHolder.getInstance();
 
+    private final ThreadLocal<io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved> scheduledActor=new ThreadLocal<>();
+
+    /** Domain-only synchronous scope boundary; caller must supply a fresh organization projection. */
+    public <T> T asScheduledActor(io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved actor,java.util.function.Supplier<T> callback) {
+        io.github.opensabre.iqc.schedule.ScheduledActorAccessService.requireBackground();
+        java.time.Instant now=java.time.Instant.now();
+        if(scheduledActor.get()!=null || actor==null || actor.owner()==null || actor.userId()==null || actor.checkedAt()==null
+                || actor.checkedAt().isBefore(now.minusSeconds(30)) || actor.checkedAt().isAfter(now.plusSeconds(5)))
+            throw new IllegalStateException("invalid or nested scheduled actor scope");
+        var original=new java.util.HashMap<>(userContext.getContext());
+        var context=new java.util.HashMap<String,String>();context.put(userContext.KEY_USERNAME,actor.owner());
+        context.put(userContext.KEY_USER_ID,actor.userId());context.put(userContext.KEY_ROLES,String.join(",",actor.roles()));
+        context.put(userContext.KEY_SCOPES,actor.all()?"iqc:result:all":"");
+        scheduledActor.set(actor);userContext.setContext(context);
+        try{return callback.get();}finally{scheduledActor.remove();if(original.isEmpty())userContext.clear();else userContext.setContext(original);}
+    }
     public String owner() {
+        var actor=scheduledActor.get();if(actor!=null)return actor.owner();
         String username = userContext.getUsername();
         if (username != null && !username.isBlank()) return username;
         String userId = userContext.getUserId();
@@ -24,6 +41,7 @@ public class IqcDataScope {
     }
 
     public boolean canViewAll() {
+        var actor=scheduledActor.get();if(actor!=null)return actor.all();
         return effectiveRoles().stream().map(this::normalizeRole)
                         .anyMatch(role -> role.equals("ADMIN") || role.equals("SUPER_ADMIN"))
                 || effectiveScopes().contains("iqc:result:all");
@@ -67,6 +85,7 @@ public class IqcDataScope {
     }
 
     public String groupId() {
+        var actor=scheduledActor.get();if(actor!=null)return actor.groupId();
         if (organizationClient == null) return null;
         String uniqueId = owner();
         try {
