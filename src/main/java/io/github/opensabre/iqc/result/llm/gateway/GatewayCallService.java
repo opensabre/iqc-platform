@@ -91,7 +91,7 @@ public class GatewayCallService {
             String taskId,String executionId,String nodeId,Integer runIndex,String conversationId,
             String modelProfileId,Integer modelProfileVersion,String pricingHash,String pricingCurrency,String calculatedCost,String costStatus,String requestedModelName,
             @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheReadInputTokens,
-            @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheWriteInputTokens,Integer maxOutputTokens,String outputTokenParameter,String outputLimitStatus,Integer toolRoundIndex,Integer contextWindowTokens,String deploymentRef) { }
+            @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheWriteInputTokens,Integer maxOutputTokens,String outputTokenParameter,String outputLimitStatus,Integer toolRoundIndex,Integer contextWindowTokens,String deploymentRef,LocalDateTime toolExecutionStartedAtUtc) { }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public io.github.opensabre.iqc.shared.IqcPage<CallView> page(String modelKey,String status,long current,long size){
         if(!scope.isIqcAdministrator())throw IqcException.accessDenied("只有质检管理员可以查看全局模型调用");
@@ -121,7 +121,7 @@ public class GatewayCallService {
                 value.getInputTokens(),value.getOutputTokens(),value.getTotalTokens(),value.getResponseModelId(),value.getUsageStatus(),value.getErrorType(),value.getCapacityReleasedAtUtc(),
                 value.getCapacityReleasedBy(),value.getCapacityReleaseReason(),value.getCapacityReleaseEvidence(),
                 value.getTaskId(),value.getExecutionId(),value.getNodeId(),value.getRunIndex(),value.getConversationId(),value.getModelProfileId(),
-                value.getModelProfileVersion(),value.getPricingHash(),value.getPricingCurrency(),value.getCalculatedCost()==null?null:value.getCalculatedCost().toPlainString(),value.getCostStatus(),value.getRequestedModelName(),value.getCacheReadInputTokens(),value.getCacheWriteInputTokens(),value.getMaxOutputTokens(),value.getOutputTokenParameter(),value.getOutputLimitStatus(),value.getToolRoundIndex(),value.getContextWindowTokens(),value.getDeploymentRef())).toList(),
+                value.getModelProfileVersion(),value.getPricingHash(),value.getPricingCurrency(),value.getCalculatedCost()==null?null:value.getCalculatedCost().toPlainString(),value.getCostStatus(),value.getRequestedModelName(),value.getCacheReadInputTokens(),value.getCacheWriteInputTokens(),value.getMaxOutputTokens(),value.getOutputTokenParameter(),value.getOutputLimitStatus(),value.getToolRoundIndex(),value.getContextWindowTokens(),value.getDeploymentRef(),value.getToolExecutionStartedAtUtc())).toList(),
                 page.getCurrent(),page.getSize(),page.getTotal());
     }
     /** Same snapshot and authorization as the paged facts; totals cover all matching pages. */
@@ -194,6 +194,21 @@ public class GatewayCallService {
             .eq(GatewayCapacity::getModelKey,key).last("FOR UPDATE"));
         if(row==null || row.getOccupied()==null || row.getOccupied()<0)throw IqcException.invalidState("模型容量证据缺失");return row;}
 
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.REPEATABLE_READ)
+    public void markToolsStarted(Handle handle,Context context){
+        var call=lock(handle);assertExecutionActive(context);
+        var source=context.execution();
+        if(!"CONFIRMED".equals(call.getStatus()) || !Objects.equals(call.getLogicalRecordId(),context.logicalRecordId())
+                || !Objects.equals(call.getRuleId(),context.ruleId()) || !Objects.equals(call.getTaskId(),source==null?null:source.taskId())
+                || !Objects.equals(call.getExecutionId(),source==null?null:source.executionId()))
+            throw new GatewayAdmissionException("MODEL_TOOL_EXPOSURE_SOURCE_INVALID");
+        if(call.getToolExecutionStartedAtUtc()!=null)return;
+        call.setToolExecutionStartedAtUtc(utc());
+        if(calls.updateById(call)!=1)throw new GatewayAdmissionException("MODEL_TOOL_EXPOSURE_UNCONFIRMED");
+    }
+    public boolean hasToolExposure(String taskId){
+        return calls.selectCount(Wrappers.<GatewayCall>lambdaQuery().eq(GatewayCall::getTaskId,taskId).isNotNull(GatewayCall::getToolExecutionStartedAtUtc))>0;
+    }
     @Transactional(readOnly=true,propagation=Propagation.REQUIRES_NEW,isolation=Isolation.REPEATABLE_READ)
     public void assertExecutionActive(Context context){
         if(context==null)throw new GatewayAdmissionException("CALL_CONTEXT_INVALID");

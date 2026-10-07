@@ -99,3 +99,9 @@ maxOutputTokens为严格JSON整数0到1000000；0清除，未提供/null保留�
 PRD16.1要求Model Registry具有contextWindow/deployment，现有原ModelProfile/ModelSnapshot仅endpoint/modelName和业务配置version，不提供上下文窗口或部署修订声明。复用原资产/快照/调用事实扩展，避免新Registry/部署表。声明不是供应商实际部署验证；缺失仍未知，不从profile配置version猜远端版本。
 
 窗口声明严格整数0–100000000，0清除，未提供/null保留，正值表示供应商声明的输入与输出总上下文Token；输出上限不得大于窗口，修改后合并原字段再次验证。deploymentRef受限128字符版本/部署参考标识，空字符串清除、未给保留。发布主备快照冻结；每次所选调用保存其声明，旧记录不回填。Token/金额硬预算仍需要可证明输入上界及远端限制，声明不能直接充当硬保证。
+
+## 工具副作用与任务自动重试实施前缺口（2026-10-07）
+
+原Provider/Router禁止工具后本轮重放，AutomaticRetryService仍只按Task失败/次数/退避发现，可能另建Execution重放工具。复用原Gateway call作为持久“可能已开始工具执行”证据，在工具网络前短事务写入，失败则不发工具；不新建工具结果/任务表。自动重试沿Task范围查看该证据，保守停止并显示TOOL_SIDE_EFFECT_REQUIRES_REVIEW。
+
+未建立工具外部幂等或逐失败项关联前，任何该Task的工具开始证据均停止自动失败重试，包括其他已成功项的工具，可能降低可用性；旧未记录事实无法追溯，不推断旧副作用。手动重跑仍是用户显式操作，不提供自动幂等证明。记录表示执行可能开始，非成功/失败/恰好一次；崩溃/工具部分执行也保留。

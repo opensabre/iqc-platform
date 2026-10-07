@@ -32,6 +32,7 @@ public class AutomaticRetryService {
     private final ScheduledActorAccessService actors;
     private final IqcDataScope scope;
     private final ObjectMapper json;
+    private final io.github.opensabre.iqc.result.llm.gateway.GatewayCallService modelCalls;
     private final ObjectProvider<InspectionTaskService> taskService;
     private final ObjectProvider<InspectionExecutionService> executionService;
     private final ObjectProvider<TriggerAttemptService> attempts;
@@ -90,7 +91,14 @@ public class AutomaticRetryService {
             throw IqcException.accessDenied("只有原稳定身份负责人可以启停重试");
         if(enabled && (Set.of("DELETED","CANCELLED","SUCCEEDED").contains(task.getStatus()) || exhausted(task,env.policy(),Instant.now())!=null))
             throw IqcException.invalidState("任务已终结或重试预算耗尽");
+        if(enabled && modelCalls.hasToolExposure(id))throw IqcException.invalidState("任务已有工具执行证据，不能自动重放外部工具");
         task.setAutomaticRetryEnabled(enabled);if(tasks.updateById(task)!=1)throw IqcException.invalidState("启停重试失败");return view(task);
+    }
+    private boolean stopToolReplay(InspectionTask task){
+        if(!modelCalls.hasToolExposure(task.getId()))return false;
+        task.setAutomaticRetryEnabled(false);task.setRetryError("TOOL_SIDE_EFFECT_REQUIRES_REVIEW");task.setRetryNotBeforeUtc(null);
+        if(tasks.updateById(task)!=1)throw IqcException.invalidState("停止工具任务自动重试失败");
+        return true;
     }
     private boolean hasInputs(InspectionTask task){try{return json.readTree(task.getRuleSnapshotJson()).has("productionInputs");}catch(Exception error){return false;}}
     private static boolean failed(InspectionTask task){return Set.of("FAILED","PARTIAL_FAILED").contains(task.getStatus());}
@@ -108,6 +116,7 @@ public class AutomaticRetryService {
     public Frame peek(String id,Instant now){
         ScheduledActorAccessService.requireBackground();var task=lock(id);
         if(!failed(task) || !Boolean.TRUE.equals(task.getAutomaticRetryEnabled()) || Boolean.TRUE.equals(task.getPauseRequested()) || Boolean.TRUE.equals(task.getCancelRequested()))return null;
+        if(stopToolReplay(task))return null;
         var env=envelope(task);String terminal=exhausted(task,env.policy(),now);
         if(terminal!=null){task.setAutomaticRetryEnabled(false);task.setRetryError(terminal);task.setRetryNotBeforeUtc(null);tasks.updateById(task);return null;}
         var execution=executions.selectById(task.getCurrentExecutionId());
@@ -128,7 +137,8 @@ public class AutomaticRetryService {
         var task=lock(frame.taskId());boolean queued=false;
         if(matches(task,frame) && Boolean.TRUE.equals(task.getAutomaticRetryEnabled()) && !Boolean.TRUE.equals(task.getPauseRequested()) && !Boolean.TRUE.equals(task.getCancelRequested())){
             var env=envelope(task);Instant now=Instant.now();
-            if(exhausted(task,env.policy(),now)!=null){task.setAutomaticRetryEnabled(false);task.setRetryError(exhausted(task,env.policy(),now));task.setRetryNotBeforeUtc(null);tasks.updateById(task);}
+            if(stopToolReplay(task)){/* Persistent external-tool exposure requires review. */}
+            else if(exhausted(task,env.policy(),now)!=null){task.setAutomaticRetryEnabled(false);task.setRetryError(exhausted(task,env.policy(),now));task.setRetryNotBeforeUtc(null);tasks.updateById(task);}
             else if(!now.isBefore(frame.retryAt()) && (task.getRetryNotBeforeUtc()==null || !now.isBefore(task.getRetryNotBeforeUtc().toInstant(ZoneOffset.UTC)))){
                 fresh(env,actor);
                 var execution=executions.selectById(frame.executionId());

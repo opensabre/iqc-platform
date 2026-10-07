@@ -31,6 +31,7 @@ public class GatewayCall {
     private String nodeId;
     private Integer runIndex;
     private Integer toolRoundIndex;
+    private LocalDateTime toolExecutionStartedAtUtc;
     private String ownerGroupId;
     private String conversationId;
     private String status;

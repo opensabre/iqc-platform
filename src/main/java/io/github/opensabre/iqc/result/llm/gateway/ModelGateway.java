@@ -24,8 +24,17 @@ public class ModelGateway {
         catch(GatewayAdmissionException denied){throw denied;}
         catch(RuntimeException unavailable){throw new GatewayAdmissionException("MODEL_TOOL_SOURCE_UNAVAILABLE");}
     }
+    public record Invocation<T>(T response,GatewayCallService.Handle handle) { }
+    public void markToolsStarted(GatewayCallService.Handle handle,GatewayCallService.Context context){
+        try{calls.markToolsStarted(handle,context);}
+        catch(GatewayAdmissionException denied){throw denied;}
+        catch(RuntimeException unavailable){throw new GatewayAdmissionException("MODEL_TOOL_EXPOSURE_UNCONFIRMED");}
+    }
     @Transactional(propagation=Propagation.NOT_SUPPORTED)
     public <T> T invoke(GatewayCallService.ModelIdentity model,GatewayCallService.Context context,Supplier<T> invoke,
+                        Function<T,GatewayCallService.Usage> usage){return invokeTracked(model,context,invoke,usage).response();}
+    @Transactional(propagation=Propagation.NOT_SUPPORTED)
+    public <T> Invocation<T> invokeTracked(GatewayCallService.ModelIdentity model,GatewayCallService.Context context,Supplier<T> invoke,
                         Function<T,GatewayCallService.Usage> usage){
         if(properties.getRateLimitMaxCount()<1 || properties.getRateLimitPeriod()<1)
             throw new GatewayAdmissionException("GATEWAY_RATE_CONFIGURATION_INVALID");
@@ -51,6 +60,6 @@ public class ModelGateway {
         try{calls.confirmed(handle,observed);}catch(RuntimeException failure){
             log.warn("Model response settlement unavailable call={} type={}",handle.callId(),failure.getClass().getSimpleName());
             throw new GatewayAdmissionException("MODEL_SETTLEMENT_UNCONFIRMED");}
-        return response;
+        return new Invocation<>(response,handle);
     }
 }

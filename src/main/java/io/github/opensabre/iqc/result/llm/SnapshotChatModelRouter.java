@@ -91,6 +91,10 @@ public class SnapshotChatModelRouter {
                 if(gateway!=null)gateway.assertToolExecutionAllowed(context);return delegate.call(arguments,toolContext);}
         }).toArray(ToolCallback[]::new);
     }
+    private static final class MeteredResponse extends ChatResponse {
+        private final io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Handle handle;
+        MeteredResponse(ChatResponse response,io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Handle handle){super(response.getResults(),response.getMetadata());this.handle=handle;}
+    }
     /** Marker prevents business-output parsing failures from replaying completed external tools. */
     private static final class ToolCycleResponse extends ChatResponse {
         ToolCycleResponse(ChatResponse response){super(response.getResults(),response.getMetadata());}
@@ -120,6 +124,10 @@ public class SnapshotChatModelRouter {
                         || !toolIds.add(tool.id()))throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_TOOL_ID_INVALID_OR_REPLAYED");
             }
             try{
+                if(gateway!=null){
+                    if(!(response instanceof MeteredResponse metered))throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_TOOL_CALL_IDENTITY_MISSING");
+                    gateway.markToolsStarted(metered.handle,context);
+                }
                 var result=toolManager.executeToolCalls(next,response);executed+=Math.toIntExact(count);
                 if(result.returnDirect())return new ToolCycleResponse(new ChatResponse(org.springframework.ai.model.tool.ToolExecutionResult.buildGenerations(result)));
                 next=new Prompt(result.conversationHistory(),next.getOptions());
@@ -152,7 +160,9 @@ public class SnapshotChatModelRouter {
         if(identity.output()!=null && prompt.getOptions()!=null && (prompt.getOptions().getMaxTokens()!=null
                 || (prompt.getOptions() instanceof OpenAiChatOptions openai && openai.getMaxCompletionTokens()!=null)))
             throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_OUTPUT_OVERRIDE_NOT_ALLOWED");
-        return gateway==null?model.call(prompt):gateway.invoke(identity,context,()->model.call(prompt),SnapshotChatModelRouter::usage);
+        if(gateway==null)return model.call(prompt);
+        var result=gateway.invokeTracked(identity,context,()->model.call(prompt),SnapshotChatModelRouter::usage);
+        return result.response()==null?null:new MeteredResponse(result.response(),result.handle());
     }
     public static io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Usage usage(ChatResponse response) {
         if(response==null || response.getMetadata()==null || response.getMetadata().getUsage()==null)
