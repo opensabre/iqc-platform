@@ -153,10 +153,26 @@ public class InspectionExecutionService {
         return queue(taskId, false);
     }
 
+    /** Compare the exact failed generation under the same Task lock used by manual queueing. */
+    @Transactional
+    public InspectionTask queueRetrySystem(String taskId,String expectedExecutionId,int expectedAttemptCount) {
+        if(expectedExecutionId==null || expectedExecutionId.isBlank() || expectedAttemptCount<1)
+            throw IqcException.invalidArgument("自动重试需要明确的失败执行轮次");
+        return queue(taskId,false,expectedExecutionId,expectedAttemptCount);
+    }
     private InspectionTask queue(String taskId, boolean enforceDataScope) {
-        InspectionTask task = taskMapper.selectById(taskId);
-        if (task == null) throw IqcException.notFound("质检任务不存在: " + taskId);
+        return queue(taskId,enforceDataScope,null,null);
+    }
+    private InspectionTask queue(String taskId,boolean enforceDataScope,String expectedExecutionId,Integer expectedAttemptCount) {
+        InspectionTask task = taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,taskId).last("FOR UPDATE"));
+        if (task == null) {if(expectedExecutionId!=null)return null;throw IqcException.notFound("质检任务不存在: " + taskId);}
         if (enforceDataScope && !dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权执行该质检任务");
+        if(expectedExecutionId!=null){
+            if(!Set.of("FAILED","PARTIAL_FAILED").contains(task.getStatus()) || !expectedExecutionId.equals(task.getCurrentExecutionId())
+                    || !java.util.Objects.equals(expectedAttemptCount,task.getAttemptCount()))return null;
+            if(!"PIPELINE".equals(task.getTaskType()) || !io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.hasSnapshot(readSnapshot(task.getRuleSnapshotJson())))
+                throw IqcException.invalidState("自动重试仅支持完整冻结的生产流水线任务");
+        }
         if ("CREATED".equals(task.getStatus()) || "FAILED".equals(task.getStatus()) || "PARTIAL_FAILED".equals(task.getStatus())) {
             JsonNode snapshot = readSnapshot(task.getRuleSnapshotJson());
             requireSupportedRouteRunCount(task, snapshot);
@@ -196,16 +212,20 @@ public class InspectionExecutionService {
                             (task.getTotalMessages() == null ? 0 : task.getTotalMessages()) - retryMessageIds.size());
                 }
             }
-            int claimed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
-                    .set(InspectionTask::getStatus, "QUEUED")
-                    .eq(InspectionTask::getId, taskId)
-                    .eq(InspectionTask::getStatus, previousStatus));
+            Integer previousAttemptCount=task.getAttemptCount();
+            if(previousAttemptCount!=null && (previousAttemptCount<0 || previousAttemptCount==Integer.MAX_VALUE))
+                throw IqcException.invalidState("执行轮次计数无效或已达上限");
+            var claim=Wrappers.<InspectionTask>lambdaUpdate().set(InspectionTask::getStatus,"QUEUED")
+                    .eq(InspectionTask::getId,taskId).eq(InspectionTask::getStatus,previousStatus);
+            if(previousExecutionId==null)claim.isNull(InspectionTask::getCurrentExecutionId);else claim.eq(InspectionTask::getCurrentExecutionId,previousExecutionId);
+            if(previousAttemptCount==null)claim.isNull(InspectionTask::getAttemptCount);else claim.eq(InspectionTask::getAttemptCount,previousAttemptCount);
+            int claimed=taskMapper.update(null,claim);
             if (claimed != 1) throw IqcException.invalidState("任务正在被其他请求处理");
             int attempt = task.getAttemptCount() == null ? 1 : task.getAttemptCount() + 1;
             TaskExecution execution = new TaskExecution();
             execution.setTaskId(taskId); execution.setAttemptNo(attempt); execution.setStatus("QUEUED"); execution.setProcessedMessages(0); execution.setFailedMessages(0);
             execution.setProcessedMessages(successfulMessages);
-            executionMapper.insert(execution);
+            if(executionMapper.insert(execution)!=1)throw IqcException.invalidState("新执行轮次保存失败");
             List<String> conversationIds = conversationIds(task);
             List<ConversationMessage> messages = productionInputs!=null?productionInputs.messages().values().stream().flatMap(List::stream).toList()
                     :evaluationInputs!=null?evaluationInputs.messages().values().stream().flatMap(List::stream).toList()
@@ -223,12 +243,12 @@ public class InspectionExecutionService {
                 TaskItem item = new TaskItem();
                 item.setTaskId(taskId); item.setExecutionId(execution.getId()); item.setMessageId(message.getId());
                 item.setConversationId(message.getConversationId()); item.setSequenceNo(++batchSequence); item.setStatus("PENDING"); item.setAttemptCount(0);
-                taskItemMapper.insert(item);
+                if(taskItemMapper.insert(item)!=1)throw IqcException.invalidState("执行工作项保存失败");
             }
             task = taskMapper.selectById(taskId);
             task.setCurrentExecutionId(execution.getId()); task.setAttemptCount(attempt);
             task.setProcessedMessages(successfulMessages); task.setFailedMessages(0);
-            taskMapper.updateById(task);
+            if(taskMapper.updateById(task)!=1)throw IqcException.invalidState("新执行轮次绑定失败");
             return task;
         } else {
             throw IqcException.taskNotExecutable("当前任务状态不可重复执行: " + task.getStatus());
@@ -326,7 +346,7 @@ public class InspectionExecutionService {
 
     @Transactional
     public InspectionTask resume(String taskId) {
-        InspectionTask task = taskMapper.selectById(taskId);
+        InspectionTask task = taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,taskId).last("FOR UPDATE"));
         if (task == null) throw IqcException.notFound("质检任务不存在: " + taskId);
         if (!dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权恢复该质检任务");
         if (task.getCurrentExecutionId() == null) throw IqcException.invalidState("任务没有可恢复的执行实例");
@@ -343,16 +363,19 @@ public class InspectionExecutionService {
         List<TaskItem> previousItems = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery().eq(TaskItem::getExecutionId, task.getCurrentExecutionId()));
         validateProductionCheckpoints(task,task.getCurrentExecutionId(),previousItems,productionInputs);
         List<TaskItem> unfinished = previousItems.stream().filter(item -> !List.of("SUCCEEDED", "CANCELLED").contains(item.getStatus())).toList();
-        int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
-                .set(InspectionTask::getStatus, "QUEUED")
-                .set(InspectionTask::getPauseRequested, false)
-                .eq(InspectionTask::getId, taskId)
-                .eq(InspectionTask::getStatus, "PAUSED"));
+        Integer previousAttemptCount=task.getAttemptCount();
+        if(previousAttemptCount!=null && (previousAttemptCount<0 || previousAttemptCount==Integer.MAX_VALUE))
+            throw IqcException.invalidState("执行轮次计数无效或已达上限");
+        var resumeClaim=Wrappers.<InspectionTask>lambdaUpdate().set(InspectionTask::getStatus,"QUEUED")
+                .set(InspectionTask::getPauseRequested,false).eq(InspectionTask::getId,taskId).eq(InspectionTask::getStatus,"PAUSED")
+                .eq(InspectionTask::getCurrentExecutionId,task.getCurrentExecutionId());
+        if(previousAttemptCount==null)resumeClaim.isNull(InspectionTask::getAttemptCount);else resumeClaim.eq(InspectionTask::getAttemptCount,previousAttemptCount);
+        int changed=taskMapper.update(null,resumeClaim);
         if (changed != 1) throw IqcException.invalidState("只有已暂停任务可以恢复");
         int attempt = task.getAttemptCount() == null ? 1 : task.getAttemptCount() + 1;
         TaskExecution execution = new TaskExecution(); execution.setTaskId(taskId); execution.setAttemptNo(attempt); execution.setStatus("QUEUED");
         execution.setProcessedMessages(Math.max(0, (task.getTotalMessages() == null ? previousItems.size() : task.getTotalMessages()) - unfinished.size())); execution.setFailedMessages(0);
-        executionMapper.insert(execution);
+        if(executionMapper.insert(execution)!=1)throw IqcException.invalidState("恢复执行轮次保存失败");
         int sequence = 0;
         if(productionInputs!=null){
             Map<String,TaskItem> previousByMessage=new LinkedHashMap<>();previousItems.forEach(item->previousByMessage.put(item.getMessageId(),item));
@@ -363,10 +386,11 @@ public class InspectionExecutionService {
         for (TaskItem previous : productionInputs!=null?List.<TaskItem>of():unfinished) {
             TaskItem item = new TaskItem(); item.setTaskId(taskId); item.setExecutionId(execution.getId()); item.setMessageId(previous.getMessageId());
             item.setConversationId(previous.getConversationId()); item.setSequenceNo(++sequence); item.setStatus("PENDING"); item.setAttemptCount(previous.getAttemptCount() == null ? 0 : previous.getAttemptCount());
-            taskItemMapper.insert(item);
+            if(taskItemMapper.insert(item)!=1)throw IqcException.invalidState("恢复工作项保存失败");
         }
         task = taskMapper.selectById(taskId); task.setCurrentExecutionId(execution.getId()); task.setAttemptCount(attempt);
-        task.setProcessedMessages(execution.getProcessedMessages()); task.setFailedMessages(0); taskMapper.updateById(task); return task;
+        task.setProcessedMessages(execution.getProcessedMessages()); task.setFailedMessages(0);
+        if(taskMapper.updateById(task)!=1)throw IqcException.invalidState("恢复执行轮次绑定失败");return task;
     }
 
     private void processConversation(InspectionTask task, String executionId, JsonNode ruleSnapshot, List<TaskItem> items,

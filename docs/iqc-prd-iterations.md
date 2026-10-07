@@ -145,3 +145,10 @@
 V1.1.47 单一追加表复用 Cron、归档订阅与接收 Task 物化调用：独立 STARTED、域事务内 FINISHED、回滚后独立 FAILED，旧记录不随退避/后续轮次覆盖。只有开始事实时保持未确认，不冒充成功/失败；父对象授权及稳定负责人限定查询，响应无完整范围/正文。三个详情入口复用同一尝试历史组件，组织权限 V20261004_17 增加只读资源。
 
 协议见 iqc-trigger-attempts.md。模型/节点尝试继续原 Trace/TaskExecution，自动失败重试/预算等仍待推进，I4/完整PRD不标记完成。仅编译与构建，没有新增或执行测试、SQL、真实身份/事务/模型/浏览器或部署。
+
+
+## I4 自动重试的执行轮次前置（2026-10-07）
+
+复用原queue/TaskExecution/TaskItem及生产完整清单，共享queue与resume改为Task行锁内解析前轮，并绑定状态/EID/count CAS及新轮次/工作项/绑定行数。新增仅供策略调度的queueRetrySystem精确失败轮次入口；陈旧观察无入队，限定完整冻结生产Pipeline。无新持久模型、页面、权限或framework改动。协议见iqc-automatic-retries.md。
+
+这是自动策略前置，次数/退避/期限和fresh授权策略服务、后台发现、UI及全局预算仍待继续，I4/完整PRD未完成。仅编译，未新增/执行测试、SQL、真实并发/模型或部署。
