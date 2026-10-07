@@ -49,3 +49,13 @@ GET /api/iqc/tasks/{id}/model-calls 先沿Task.get数据范围授权，可选择
 更新未提供pricingJson保留已有配置；空字符串显式清除。Agent主/备模型发布快照保存该版本价格；旧无价格快照省略null字段保持旧JSON摘要，不从当前ModelProfile回填旧历史。这里只配置并冻结声明价格，尚未计算调用费用或宣称实现预算；cache折扣/特殊计费另需明确协议，未知价格和用量不能填成本0。没有新增或执行测试、SQL、真实模型、浏览器或部署。
 
 模型更新/启停在原profile行锁内读取；更新防止版本为空/负值/int耗尽并断言写入一行，避免并发定价更新复用同一versionNo。既有ModelView安全投影增加价格字段，继续不返回secretRef。
+
+## 每调用冻结价格及计算费用（2026-10-07）
+
+V1.1.53仅扩展原调用事实，不新增账单/费用主表。受管资产与连接检查在准入前从原模型快照绑定profileId/version、canonical pricingJson/hash与声明币种；不读取现行ModelProfile补价。实际请求modelName与响应modelId分别记录；配置版本不是远端部署build版本，不混称。重试/fallback每次各自冻结所选模型价格，模型容量key继续沿实际声明端点/名称跨配置版本共享。
+
+只有无自动工具回合、已确认响应、完整且合法input/output/total用量和完整价格证据时，按(input×inputPerMillion+output×outputPerMillion)/1000000使用BigDecimal精确计算，DECIMAL(38,18)及API字符串无double/JS舍入。状态CALCULATED_FROM_DECLARED_PRICE表示按用户声明价格计算，不等同供应商发票费用。缺价/用量、未知响应、工具多回合范围不全或价格摘要无效分别未知，不填0；用户明确单价0及真实0Token才可能计算出0。
+
+原裸HTTP/legacy部署无冻结资产价格不借Agent主模型推测，旧调用不回填。cache折扣/特殊计费不支持本flat协议，供应商账单核对、传输逐HTTP、真实部署版本与Token/金额硬预算仍继续；费用计算及并发释放同一核销事务，人工占用恢复不制造费用。未新增或执行测试、SQL、真实模型/账单/浏览器或部署。
+
+缓存读/写Token沿Spring AI Usage显式值记录；HTTP只取观察到的prompt_tokens_details.cached_tokens，不猜不存在字段。已知缓存token为正时费用保持UNKNOWN_CACHE_BILLING，不能套flat价格冒充缓存账单。缺缓存字段仍保持null；声明价格计算不是证明缺缓存或供应商实际账单。

@@ -31,4 +31,14 @@ public record ModelPricing(String schemaVersion,String currency,String inputPerM
                     node.path("inputPerMillion").textValue(),node.path("outputPerMillion").textValue()));
         }catch(IqcException invalid){throw invalid;}catch(Exception invalid){throw IqcException.invalidArgument("定价JSON无效");}
     }
+    public static ModelPricing parse(String source){
+        String normalized=canonical(source);if(normalized==null)return null;
+        try{return new ObjectMapper().readValue(normalized,ModelPricing.class);}
+        catch(Exception invalid){throw IqcException.invalidArgument("冻结定价无法解析");}
+    }
+    public BigDecimal cost(long inputTokens,long outputTokens){
+        if(inputTokens<0 || outputTokens<0)throw IqcException.invalidArgument("计费用量无效");
+        return BigDecimal.valueOf(inputTokens).multiply(new BigDecimal(inputPerMillion))
+                .add(BigDecimal.valueOf(outputTokens).multiply(new BigDecimal(outputPerMillion))).movePointLeft(6);
+    }
 }

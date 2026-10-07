@@ -58,7 +58,7 @@ public class SnapshotChatModelRouter {
             ChatModel selected;
             try{selected=create(candidate);}catch(RuntimeException unavailable){last=unavailable;continue;}
             var identity=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity(candidate.path("provider").asText(),
-                    candidate.path("endpoint").asText(),candidate.path("modelName").asText());
+                    candidate.path("endpoint").asText(),candidate.path("modelName").asText(),price(candidate,callbacks.length==0));
             int retries=Math.max(0,Math.min(candidate.path("maxRetries").asInt(0),5));
             for(int attempt=0;attempt<=retries;attempt++)try{return invoke(selected,executablePrompt,identity,context);}
             catch(io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException denied){throw denied;}
@@ -71,8 +71,15 @@ public class SnapshotChatModelRouter {
             io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context){
         var selected=create(profile);
         var identity=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity(profile.path("provider").asText(),
-                profile.path("endpoint").asText(),profile.path("modelName").asText());
+                profile.path("endpoint").asText(),profile.path("modelName").asText(),price(profile,true));
         return invoke(selected,prompt,identity,context);
+    }
+    private static io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.PriceBinding price(JsonNode profile,boolean supported){
+        if(!profile.path("id").isTextual() || !profile.path("versionNo").isIntegralNumber() || !profile.path("versionNo").canConvertToInt())return null;
+        JsonNode value=profile.get("pricingJson");
+        if(value!=null && !value.isNull() && !value.isTextual())throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_PRICE_PROTOCOL_INVALID");
+        return new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.PriceBinding(profile.path("id").textValue(),profile.path("versionNo").intValue(),
+                value==null || value.isNull()?null:value.textValue(),supported);
     }
     private ChatResponse invoke(ChatModel model,Prompt prompt,
             io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity identity,
@@ -89,7 +96,7 @@ public class SnapshotChatModelRouter {
         return new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Usage(
                 usage.getPromptTokens()==null?null:usage.getPromptTokens().longValue(),
                 usage.getCompletionTokens()==null?null:usage.getCompletionTokens().longValue(),
-                usage.getTotalTokens()==null?null:usage.getTotalTokens().longValue(),metadata.getModel());
+                usage.getTotalTokens()==null?null:usage.getTotalTokens().longValue(),metadata.getModel(),usage.getCacheReadInputTokens(),usage.getCacheWriteInputTokens());
     }
     public ChatModel create(JsonNode model) {
         String provider=model.path("provider").asText();

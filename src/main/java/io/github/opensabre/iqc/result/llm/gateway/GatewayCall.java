@@ -6,6 +6,17 @@ import java.time.LocalDateTime;
 public class GatewayCall {
     @TableId private String callId;
     private String modelKey;
+    private String modelProfileId;
+    private String requestedModelName;
+    private Integer modelProfileVersion;
+    private String pricingJson;
+    private String pricingHash;
+    private Boolean billingSupported;
+    private String pricingCurrency;
+    private java.math.BigDecimal calculatedCost;
+    private String costStatus;
+    private Long cacheReadInputTokens;
+    private Long cacheWriteInputTokens;
     private String logicalRecordId;
     private String ruleId;
     private String owner;

@@ -13,7 +13,15 @@ import java.util.*;
 /** Short database transactions; never performs model I/O under a database lock. */
 @Service @RequiredArgsConstructor
 public class GatewayCallService {
-    public record ModelIdentity(String provider,String endpoint,String modelName) {
+    public record PriceBinding(String profileId,int version,String pricingJson,boolean billingSupported){
+        public PriceBinding {
+            if(profileId==null || !profileId.matches("[A-Za-z0-9:_-]{1,64}") || version<1)throw new GatewayAdmissionException("MODEL_PRICE_SOURCE_INVALID");
+            try{pricingJson=io.github.opensabre.iqc.modelprofile.ModelPricing.canonical(pricingJson);}
+            catch(RuntimeException invalid){throw new GatewayAdmissionException("MODEL_PRICE_PROTOCOL_INVALID");}
+        }
+    }
+    public record ModelIdentity(String provider,String endpoint,String modelName,PriceBinding price) {
+        public ModelIdentity(String provider,String endpoint,String modelName){this(provider,endpoint,modelName,null);}
         public ModelIdentity {
             if(provider==null || provider.isBlank() || provider.length()>64 || endpoint==null || endpoint.length()>2048
                     || modelName==null || modelName.isBlank() || modelName.length()>256)
@@ -38,8 +46,9 @@ public class GatewayCallService {
             throw new GatewayAdmissionException("CALL_CONTEXT_INVALID");}
     }
     public record Handle(String callId,String modelKey) { }
-    public record Usage(Long inputTokens,Long outputTokens,Long totalTokens,String responseModelId) {
-        private boolean invalid(){return negative(inputTokens) || negative(outputTokens) || negative(totalTokens)
+    public record Usage(Long inputTokens,Long outputTokens,Long totalTokens,String responseModelId,Long cacheReadInputTokens,Long cacheWriteInputTokens) {
+        public Usage(Long inputTokens,Long outputTokens,Long totalTokens,String responseModelId){this(inputTokens,outputTokens,totalTokens,responseModelId,null,null);}
+        private boolean invalid(){return negative(inputTokens) || negative(outputTokens) || negative(totalTokens) || negative(cacheReadInputTokens) || negative(cacheWriteInputTokens)
                 || (inputTokens!=null && outputTokens!=null && totalTokens!=null
                 && (inputTokens>Long.MAX_VALUE-outputTokens || inputTokens+outputTokens!=totalTokens));}
         private static boolean negative(Long value){return value!=null && value<0;}
@@ -61,7 +70,10 @@ public class GatewayCallService {
             @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long totalTokens,
             String responseModelId,String usageStatus,String errorType,LocalDateTime capacityReleasedAtUtc,
             String capacityReleasedBy,String capacityReleaseReason,String capacityReleaseEvidence,
-            String taskId,String executionId,String nodeId,Integer runIndex,String conversationId) { }
+            String taskId,String executionId,String nodeId,Integer runIndex,String conversationId,
+            String modelProfileId,Integer modelProfileVersion,String pricingHash,String pricingCurrency,String calculatedCost,String costStatus,String requestedModelName,
+            @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheReadInputTokens,
+            @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheWriteInputTokens) { }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public io.github.opensabre.iqc.shared.IqcPage<CallView> page(String modelKey,String status,long current,long size){
         if(!scope.isIqcAdministrator())throw IqcException.accessDenied("只有质检管理员可以查看全局模型调用");
@@ -90,7 +102,8 @@ public class GatewayCallService {
                 value.getLogicalRecordId(),value.getRuleId(),value.getOwner(),value.getStatus(),value.getReservedAtUtc(),value.getSettledAtUtc(),
                 value.getInputTokens(),value.getOutputTokens(),value.getTotalTokens(),value.getResponseModelId(),value.getUsageStatus(),value.getErrorType(),value.getCapacityReleasedAtUtc(),
                 value.getCapacityReleasedBy(),value.getCapacityReleaseReason(),value.getCapacityReleaseEvidence(),
-                value.getTaskId(),value.getExecutionId(),value.getNodeId(),value.getRunIndex(),value.getConversationId())).toList(),
+                value.getTaskId(),value.getExecutionId(),value.getNodeId(),value.getRunIndex(),value.getConversationId(),value.getModelProfileId(),
+                value.getModelProfileVersion(),value.getPricingHash(),value.getPricingCurrency(),value.getCalculatedCost()==null?null:value.getCalculatedCost().toPlainString(),value.getCostStatus(),value.getRequestedModelName(),value.getCacheReadInputTokens(),value.getCacheWriteInputTokens())).toList(),
                 page.getCurrent(),page.getSize(),page.getTotal());
     }
     public record CapacityView(String modelKey,
@@ -154,10 +167,15 @@ public class GatewayCallService {
             throw new GatewayAdmissionException("MODEL_CONCURRENCY_LIMIT_REACHED");
         bucket.setOccupied(bucket.getOccupied()+1);
         if(capacities.updateById(bucket)!=1)throw IqcException.invalidState("预留模型容量失败");
-        var call=new GatewayCall();call.setCallId(UUID.randomUUID().toString().replace("-",""));call.setModelKey(key);
+        var call=new GatewayCall();call.setCallId(UUID.randomUUID().toString().replace("-",""));call.setModelKey(key);call.setRequestedModelName(model.modelName());
         call.setLogicalRecordId(context.logicalRecordId());call.setRuleId(context.ruleId());call.setOwner(execution==null?context.owner():execution.owner());
         if(execution!=null){call.setTaskId(execution.taskId());call.setExecutionId(execution.executionId());call.setNodeId(execution.nodeId());
             call.setRunIndex(execution.runIndex());call.setOwnerGroupId(execution.ownerGroupId());call.setConversationId(execution.conversationId());}
+        var price=model.price();call.setCostStatus("UNKNOWN_PRICE");
+        if(price!=null){call.setModelProfileId(price.profileId());call.setModelProfileVersion(price.version());call.setPricingJson(price.pricingJson());
+            call.setPricingHash(price.pricingJson()==null?null:SelectorAssetService.hash(price.pricingJson()));call.setBillingSupported(price.billingSupported());
+            var declaration=io.github.opensabre.iqc.modelprofile.ModelPricing.parse(price.pricingJson());
+            if(declaration!=null){call.setPricingCurrency(declaration.currency());call.setCostStatus("UNKNOWN_RESPONSE");}}
         call.setStatus("RESERVED");call.setReservedAtUtc(utc());
         if(calls.insert(call)!=1)throw IqcException.invalidState("记录模型调用预留失败");return new Handle(call.getCallId(),key);
     }
@@ -173,20 +191,35 @@ public class GatewayCallService {
         if("CONFIRMED".equals(call.getStatus())){
             boolean invalid="INVALID".equals(usage.status());
             if(!Objects.equals(call.getUsageStatus(),usage.status()) || !Objects.equals(call.getInputTokens(),invalid?null:usage.inputTokens())
-                    || !Objects.equals(call.getOutputTokens(),invalid?null:usage.outputTokens()) || !Objects.equals(call.getTotalTokens(),invalid?null:usage.totalTokens()))
+                    || !Objects.equals(call.getOutputTokens(),invalid?null:usage.outputTokens()) || !Objects.equals(call.getTotalTokens(),invalid?null:usage.totalTokens())
+                    || !Objects.equals(call.getCacheReadInputTokens(),invalid?null:usage.cacheReadInputTokens())
+                    || !Objects.equals(call.getCacheWriteInputTokens(),invalid?null:usage.cacheWriteInputTokens()))
                 throw IqcException.invalidState("已核销用量事实不可替换");
             return;
         }
         if(!"RESERVED".equals(call.getStatus()))throw IqcException.invalidState("未知调用不能自动确认为完成");
         var bucket=capacity(handle.modelKey());if(call.getCapacityReleasedAtUtc()==null && bucket.getOccupied()<1)throw IqcException.invalidState("模型占用证据不一致");
         call.setUsageStatus(usage.status());
-        if(!"INVALID".equals(usage.status())){call.setInputTokens(usage.inputTokens());call.setOutputTokens(usage.outputTokens());call.setTotalTokens(usage.totalTokens());}
+        if(!"INVALID".equals(usage.status())){call.setInputTokens(usage.inputTokens());call.setOutputTokens(usage.outputTokens());call.setTotalTokens(usage.totalTokens());call.setCacheReadInputTokens(usage.cacheReadInputTokens());call.setCacheWriteInputTokens(usage.cacheWriteInputTokens());}
         String model=usage.responseModelId();
         if(model!=null && model.length()<=256 && model.codePoints().noneMatch(Character::isISOControl))call.setResponseModelId(model);
+        calculateCost(call,usage);
         call.setStatus("CONFIRMED");call.setSettledAtUtc(utc());
         boolean release=call.getCapacityReleasedAtUtc()==null;
         if(release)bucket.setOccupied(bucket.getOccupied()-1);
         if(calls.updateById(call)!=1 || (release && capacities.updateById(bucket)!=1))throw IqcException.invalidState("核销模型调用失败");
+    }
+    private void calculateCost(GatewayCall call,Usage usage){
+        if(call.getPricingJson()==null){call.setCostStatus("UNKNOWN_PRICE");return;}
+        if(!Objects.equals(call.getPricingHash(),SelectorAssetService.hash(call.getPricingJson()))){call.setCostStatus("PRICING_EVIDENCE_INVALID");return;}
+        if(!Boolean.TRUE.equals(call.getBillingSupported())){call.setCostStatus("UNKNOWN_REQUEST_SCOPE");return;}
+        if(!"COMPLETE".equals(usage.status())){call.setCostStatus("UNKNOWN_USAGE");return;}
+        if((usage.cacheReadInputTokens()!=null && usage.cacheReadInputTokens()>0) || (usage.cacheWriteInputTokens()!=null && usage.cacheWriteInputTokens()>0)){
+            call.setCostStatus("UNKNOWN_CACHE_BILLING");return;}
+
+        try{var price=io.github.opensabre.iqc.modelprofile.ModelPricing.parse(call.getPricingJson());
+            call.setCalculatedCost(price.cost(usage.inputTokens(),usage.outputTokens()));call.setCostStatus("CALCULATED_FROM_DECLARED_PRICE");
+        }catch(RuntimeException invalid){call.setCostStatus("PRICING_EVIDENCE_INVALID");}
     }
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.REPEATABLE_READ)
     public void unknown(Handle handle,RuntimeException failure){

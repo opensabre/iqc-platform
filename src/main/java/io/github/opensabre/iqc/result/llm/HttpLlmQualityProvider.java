@@ -133,7 +133,7 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
         var usage=response.path("usage");
         return new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Usage(
                 tokens(usage.path("prompt_tokens")),tokens(usage.path("completion_tokens")),tokens(usage.path("total_tokens")),
-                response.path("model").isTextual()?response.path("model").textValue():null);
+                response.path("model").isTextual()?response.path("model").textValue():null,tokens(usage.path("prompt_tokens_details").path("cached_tokens")),null);
     }
     private static Long tokens(JsonNode value){return value.isMissingNode() || value.isNull()?null:
             value.isIntegralNumber() && value.canConvertToLong()?value.longValue():-1L;}
