@@ -39,7 +39,7 @@ final class GatewayBudgetAccounting {
         call.setBudgetEvidenceRef(bucket.getBudgetEvidenceRef());call.setBudgetPolicyVersion(bucket.getPolicyVersion());call.setBudgetStatus("HELD");
     }
     static boolean settle(GatewayCapacity bucket,GatewayCall call,GatewayCallService.Usage usage){
-        if(call.getBudgetReservedTokens()==null)return false;
+        if(call.getBudgetReservedTokens()==null || call.getBudgetReconciledAtUtc()!=null)return false;
         boolean changed=false,tokenKnown="COMPLETE".equals(usage.status());
         boolean breached=!"INVALID".equals(usage.status()) && ((usage.totalTokens()!=null && usage.totalTokens()>call.getBudgetReservedTokens())
                 || (usage.outputTokens()!=null && call.getMaxOutputTokens()!=null && usage.outputTokens()>call.getMaxOutputTokens()));
@@ -63,6 +63,24 @@ final class GatewayBudgetAccounting {
         if(breached){changed|=!Boolean.TRUE.equals(bucket.getBudgetBreached());bucket.setBudgetBreached(true);call.setBudgetStatus("QUARANTINED");}
         else call.setBudgetStatus(tokenKnown?(costKnown?"SETTLED":"TOKEN_SETTLED_COST_HELD"):"HELD");
         return changed;
+    }
+    static void reconcile(GatewayCapacity bucket,GatewayCall call,long actualTokens,BigDecimal actualCost){
+        if(actualTokens<0 || call.getBudgetReservedTokens()==null)throw new GatewayAdmissionException("MODEL_BUDGET_EVIDENCE_INVALID");
+        long previous="COMPLETE".equals(call.getUsageStatus())?tokens(call.getTotalTokens()):tokens(call.getBudgetReservedTokens());
+        long committed=tokens(bucket.getTokenBudgetCommitted());
+        if(committed<previous)throw new GatewayAdmissionException("MODEL_BUDGET_EVIDENCE_INVALID");
+        bucket.setTokenBudgetCommitted(add(committed-previous,actualTokens));
+        if(call.getBudgetReservedCost()!=null){
+            if(!Objects.equals(bucket.getBudgetCurrency(),call.getBudgetCurrency()) || actualCost==null)
+                throw new GatewayAdmissionException("MODEL_BUDGET_CURRENCY_CHANGED");
+            var before="CALCULATED_FROM_DECLARED_PRICE".equals(call.getCostStatus())?amount(call.getCalculatedCost()):amount(call.getBudgetReservedCost());
+            var cost=amount(bucket.getCostBudgetCommitted());
+            if(cost.compareTo(before)<0)throw new GatewayAdmissionException("MODEL_BUDGET_EVIDENCE_INVALID");
+            bucket.setCostBudgetCommitted(storable(cost.subtract(before).add(amount(actualCost))));
+            if(actualCost.compareTo(call.getBudgetReservedCost())>0)bucket.setBudgetBreached(true);
+        }else if(actualCost!=null)throw new GatewayAdmissionException("MODEL_BUDGET_EVIDENCE_INVALID");
+        if(actualTokens>call.getBudgetReservedTokens())bucket.setBudgetBreached(true);
+        call.setBudgetReconciledTokens(actualTokens);call.setBudgetReconciledCost(actualCost);call.setBudgetStatus("RECONCILED");
     }
     private static long tokens(Long value){if(value==null || value<0)throw new GatewayAdmissionException("MODEL_BUDGET_EVIDENCE_INVALID");return value;}
     private static long add(long left,long right){try{return Math.addExact(left,right);}catch(ArithmeticException overflow){throw new GatewayAdmissionException("MODEL_BUDGET_ACCOUNTING_OVERFLOW");}}

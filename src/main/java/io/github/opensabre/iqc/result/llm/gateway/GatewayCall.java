@@ -17,6 +17,12 @@ public class GatewayCall {
     private String pricingCurrency;
     private java.math.BigDecimal calculatedCost;
     private String costStatus;
+    private Long budgetReconciledTokens;
+    private java.math.BigDecimal budgetReconciledCost;
+    private LocalDateTime budgetReconciledAtUtc;
+    private String budgetReconciledBy;
+    private String budgetReconciledUserId;
+    private String budgetReconciliationEvidence;
     private Long budgetReservedTokens;
     private java.math.BigDecimal budgetReservedCost;
     private String budgetCurrency;

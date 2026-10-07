@@ -204,6 +204,25 @@ public class GatewayCallService {
         row.setOccupied(row.getOccupied()-1);
         if(calls.updateById(call)!=1 || capacities.updateById(row)!=1)throw IqcException.invalidState("恢复模型容量失败");return view(row);
     }
+    @Transactional(isolation=Isolation.REPEATABLE_READ)
+    public CapacityView reconcileBudget(String callId,String modelKey,long actualTokens,java.math.BigDecimal actualCost,String evidence,boolean verified){
+        administrator();key(modelKey);var actor=actors.capture();
+        if(callId==null || !callId.matches("[a-f0-9]{32}") || !verified || evidence==null || !evidence.matches("[A-Za-z0-9:_./-]{1,128}"))
+            throw IqcException.invalidArgument("需要核对供应商最终用量、金额并提供凭据编号");
+        var call=lock(new Handle(callId,modelKey));var row=capacity(modelKey);
+        if(call.getBudgetReconciledAtUtc()!=null){
+            if(!Objects.equals(call.getBudgetReconciledTokens(),actualTokens) || !Objects.equals(call.getBudgetReconciliationEvidence(),evidence)
+                    || (call.getBudgetReconciledCost()==null?actualCost!=null:actualCost==null || call.getBudgetReconciledCost().compareTo(actualCost)!=0))
+                throw IqcException.invalidState("人工预算事实已冻结，不可替换");
+            return view(row);
+        }
+        if(!"CONFIRMED".equals(call.getStatus()) && call.getCapacityReleasedAtUtc()==null)
+            throw IqcException.invalidState("先核对远端已停止并恢复容量，再进行预算对账");
+        GatewayBudgetAccounting.reconcile(row,call,actualTokens,actualCost);
+        call.setBudgetReconciledAtUtc(utc());call.setBudgetReconciledBy(actor.owner());call.setBudgetReconciledUserId(actor.userId());call.setBudgetReconciliationEvidence(evidence);
+        if(calls.updateById(call)!=1 || capacities.updateById(row)!=1)throw IqcException.invalidState("人工预算对账保存失败");
+        return view(row);
+    }
     private static LocalDateTime utc(){return LocalDateTime.ofInstant(Instant.now(),ZoneOffset.UTC);}
     private GatewayCapacity capacity(String key){var row=capacities.selectOne(Wrappers.<GatewayCapacity>lambdaQuery()
             .eq(GatewayCapacity::getModelKey,key).last("FOR UPDATE"));
