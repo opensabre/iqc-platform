@@ -51,6 +51,10 @@ public class InspectionTask extends BasePo {
     private Long queuePriority;
     private Boolean pauseRequested;
     private Boolean cancelRequested;
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy=com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
+    private String modelBudgetWaitCode;
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy=com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
+    private String modelBudgetWaitKey;
     private String status;
     private Integer totalMessages;
     private Integer processedMessages;

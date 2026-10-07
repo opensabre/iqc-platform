@@ -47,7 +47,7 @@ public class ModelGateway {
         if(decision==null || !decision.allowed())throw new GatewayAdmissionException("MODEL_RATE_ADMISSION_DENIED");
         GatewayCallService.Handle handle;
         try{handle=calls.reserve(model,context,concurrencyLimit);}
-        catch(GatewayAdmissionException denied){throw denied;}
+        catch(GatewayAdmissionException denied){throw denied.withModelKey(model.key());}
         catch(RuntimeException unavailable){throw new GatewayAdmissionException("MODEL_CAPACITY_ADMISSION_UNAVAILABLE");}
         final T response;
         try{response=invoke.get();}

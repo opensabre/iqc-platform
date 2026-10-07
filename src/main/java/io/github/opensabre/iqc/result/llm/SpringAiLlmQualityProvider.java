@@ -207,6 +207,8 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
             recordUsage(usageId, ruleId, "success", UsageOutcome.SUCCESS);
             return result;
         } catch (RuntimeException exception) {
+            var budgetWait=io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException.budgetWait(exception);
+            if(budgetWait!=null)throw budgetWait;
             recordUsage(usageId, ruleId, "failure", UsageOutcome.FAILURE);
             return new LlmEvaluation(false, false, "LLM 调用失败: " + safeMessage(exception));
         }

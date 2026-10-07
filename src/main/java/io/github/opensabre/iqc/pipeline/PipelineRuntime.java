@@ -130,6 +130,8 @@ public final class PipelineRuntime implements AutoCloseable {
                 if(future!=null) future.cancel(true);
                 result=NodeResult.failure(NodeResult.Status.TIMEOUT,"Node deadline exceeded");
             } catch(Exception ex) {
+                var budgetWait=io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException.budgetWait(ex);
+                if(budgetWait!=null)throw budgetWait;
                 if(future!=null) future.cancel(true);
                 result=NodeResult.failure(NodeResult.Status.ERROR,ex instanceof RejectedExecutionException?"Executor capacity exhausted":"Node execution or output validation failed");
             }

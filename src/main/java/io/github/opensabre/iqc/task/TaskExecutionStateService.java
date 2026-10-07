@@ -12,10 +12,36 @@ import java.util.Date;
 import java.util.Set;
 
 /** Task first, then Execution: one transactional state boundary for the existing persistent rows. */
-@Service @RequiredArgsConstructor
+@Service
 public class TaskExecutionStateService {
     private final InspectionTaskMapper tasks;
     private final TaskExecutionMapper executions;
+    private final io.github.opensabre.iqc.task.dao.TaskItemMapper items;
+    private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.result.llm.gateway.GatewayCallService> modelCalls;
+    @org.springframework.beans.factory.annotation.Autowired
+    public TaskExecutionStateService(InspectionTaskMapper tasks,TaskExecutionMapper executions,io.github.opensabre.iqc.task.dao.TaskItemMapper items,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.result.llm.gateway.GatewayCallService> modelCalls){this.tasks=tasks;this.executions=executions;this.items=items;this.modelCalls=modelCalls;}
+    public TaskExecutionStateService(InspectionTaskMapper tasks,TaskExecutionMapper executions){this(tasks,executions,null,null);}
+    @Transactional
+    public boolean waitForBudget(String taskId,String executionId,io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException reason){
+        if(reason==null || io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException.budgetWait(reason)==null)return false;
+        var task=lock(taskId);var row=execution(task,executionId);
+        if(row==null || !"RUNNING".equals(task.getStatus()) || !"RUNNING".equals(row.getStatus())
+                || Boolean.TRUE.equals(task.getCancelRequested()) || Boolean.TRUE.equals(task.getPauseRequested())
+                || modelCalls==null || items==null || modelCalls.getObject().hasToolExposure(taskId))return false;
+        task.setStatus("PAUSED");task.setModelBudgetWaitCode(reason.getMessage());task.setModelBudgetWaitKey(reason.modelKey());
+        row.setStatus("PAUSED");row.setErrorMessage(reason.getMessage());
+        items.update(null,Wrappers.<io.github.opensabre.iqc.task.model.TaskItem>lambdaUpdate()
+            .eq(io.github.opensabre.iqc.task.model.TaskItem::getExecutionId,executionId).eq(io.github.opensabre.iqc.task.model.TaskItem::getStatus,"RUNNING")
+            .set(io.github.opensabre.iqc.task.model.TaskItem::getStatus,"PENDING"));
+        var progress=items.selectList(Wrappers.<io.github.opensabre.iqc.task.model.TaskItem>lambdaQuery()
+            .select(io.github.opensabre.iqc.task.model.TaskItem::getStatus).eq(io.github.opensabre.iqc.task.model.TaskItem::getExecutionId,executionId));
+        int processed=Math.max(0,(task.getTotalMessages()==null?progress.size():task.getTotalMessages())-progress.size())
+            +Math.toIntExact(progress.stream().filter(x->Set.of("SUCCEEDED","FAILED","CANCELLED").contains(x.getStatus())).count());
+        int failed=Math.toIntExact(progress.stream().filter(x->"FAILED".equals(x.getStatus())).count());
+        task.setProcessedMessages(processed);task.setFailedMessages(failed);row.setProcessedMessages(processed);row.setFailedMessages(failed);
+        requireUpdated(tasks.updateById(task));requireUpdated(executions.updateById(row));return true;
+    }
     private InspectionTask lock(String taskId) {
         return tasks.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,taskId).last("FOR UPDATE"));
     }

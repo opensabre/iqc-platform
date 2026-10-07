@@ -268,6 +268,10 @@ public class InspectionExecutionService {
             log.info("event=iqc_task_execution taskId={} executionId={} status={} elapsedMs={}",taskId,executionId,
                     completed==null?"UNKNOWN":completed.getStatus(),elapsedMillis(startedAt));
         } catch(RuntimeException exception) {
+            var budgetWait=io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException.budgetWait(exception);
+            if(claimed.get() && budgetWait!=null && states().waitForBudget(taskId,executionId,budgetWait)){
+                log.info("event=iqc_task_budget_wait taskId={} executionId={} reason={}",taskId,executionId,budgetWait.getMessage());return;
+            }
             boolean recorded=states().fail(taskId,executionId,claimed.get(),persistedErrorMessage(exception.getMessage()));
             log.error("event=iqc_task_execution taskId={} executionId={} failureRecorded={} errorType={} elapsedMs={}",
                     taskId,executionId,recorded,exception.getClass().getSimpleName(),elapsedMillis(startedAt),exception);
@@ -364,6 +368,16 @@ public class InspectionExecutionService {
         List<TaskItem> previousItems = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery().eq(TaskItem::getExecutionId, task.getCurrentExecutionId()));
         validateProductionCheckpoints(task,task.getCurrentExecutionId(),previousItems,productionInputs);
         List<TaskItem> unfinished = previousItems.stream().filter(item -> !List.of("SUCCEEDED", "CANCELLED").contains(item.getStatus())).toList();
+        if(task.getModelBudgetWaitCode()!=null){
+            if(!"PAUSED".equals(task.getStatus()))throw IqcException.invalidState("预算等待任务状态已变化");
+            var oldRun=executionMapper.selectOne(Wrappers.<TaskExecution>lambdaQuery().eq(TaskExecution::getId,task.getCurrentExecutionId()).eq(TaskExecution::getTaskId,taskId).last("FOR UPDATE"));
+            if(oldRun==null || !"PAUSED".equals(oldRun.getStatus()))throw IqcException.invalidState("预算等待轮次证据无效");
+            task.setStatus("QUEUED");task.setPauseRequested(false);task.setModelBudgetWaitCode(null);task.setModelBudgetWaitKey(null);
+            oldRun.setStatus("QUEUED");oldRun.setErrorMessage(null);
+            if(taskMapper.updateById(task)!=1 || executionMapper.update(null,Wrappers.<TaskExecution>lambdaUpdate().eq(TaskExecution::getId,oldRun.getId())
+                    .set(TaskExecution::getStatus,"QUEUED").set(TaskExecution::getErrorMessage,null))!=1)throw IqcException.invalidState("恢复预算等待任务失败");
+            return task;
+        }
         Integer previousAttemptCount=task.getAttemptCount();
         if(previousAttemptCount!=null && (previousAttemptCount<0 || previousAttemptCount==Integer.MAX_VALUE))
             throw IqcException.invalidState("执行轮次计数无效或已达上限");
@@ -511,6 +525,8 @@ public class InspectionExecutionService {
                     usageCounterRecorder.record(new UsageRecord(usageRecordId + ":success", null, "iqc-platform", "INSPECTION_MESSAGE", item.getMessageId(), "QUALITY_CHECK", UsageOutcome.SUCCESS));
                 }
             } catch (RuntimeException exception) {
+                var budgetWait=io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException.budgetWait(exception);
+                if(budgetWait!=null)throw budgetWait;
                 item.setStatus("FAILED"); item.setErrorMessage(persistedErrorMessage(exception.getMessage()));
                 usageCounterRecorder.record(new UsageRecord(usageRecordId + ":failure", null, "iqc-platform", "INSPECTION_MESSAGE", item.getMessageId(), "QUALITY_CHECK", UsageOutcome.FAILURE));
             }

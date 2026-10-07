@@ -154,6 +154,8 @@ final class ItemRouteRunner {
                 detected = cloneResult(result); detected.setRuleId(context.ruleId()); detected.setDeduction(0);
             }
         } catch (RuntimeException exception) {
+            var budgetWait=io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException.budgetWait(exception);
+            if(budgetWait!=null)throw budgetWait;
             // Do not store adapter exception text: it can contain credentials or complete prompts.
             detected = outcome(context, "ERROR", "检测阶段执行失败");
         }

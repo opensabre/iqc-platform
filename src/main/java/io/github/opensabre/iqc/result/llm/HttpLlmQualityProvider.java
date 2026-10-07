@@ -94,6 +94,8 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
                     ruleId, "QUALITY_EVALUATION", UsageOutcome.SUCCESS));
             return evaluation;
         } catch (RuntimeException exception) {
+            var budgetWait=io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException.budgetWait(exception);
+            if(budgetWait!=null)throw budgetWait;
             usageCounterRecorder.record(new UsageRecord(usageId + ":failure", null, "iqc-platform", "LLM_CALL",
                     ruleId, "QUALITY_EVALUATION", UsageOutcome.FAILURE));
             return new LlmEvaluation(false, false, "LLM 调用失败: " + safeMessage(exception));
