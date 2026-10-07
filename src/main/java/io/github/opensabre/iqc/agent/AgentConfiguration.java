@@ -105,7 +105,13 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
                                  List<McpSnapshot> mcpServers, List<SkillSnapshot> skills) { }
     public record ModelSnapshot(String id, String code, String name, String provider, String modelName,
                                 String endpoint, String secretRef, Double temperature, Integer timeoutSeconds,
-                                Integer maxRetries, Integer versionNo) { }
+                                Integer maxRetries, Integer versionNo,
+                                @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String pricingJson) {
+        public ModelSnapshot(String id,String code,String name,String provider,String modelName,String endpoint,String secretRef,
+                Double temperature,Integer timeoutSeconds,Integer maxRetries,Integer versionNo){
+            this(id,code,name,provider,modelName,endpoint,secretRef,temperature,timeoutSeconds,maxRetries,versionNo,null);
+        }
+    }
     public record McpSnapshot(String id, String code, String name, String transport, String endpoint,
                               String authType, String secretRef, Integer timeoutSeconds,
                               String allowedToolsJson, Integer versionNo) { }

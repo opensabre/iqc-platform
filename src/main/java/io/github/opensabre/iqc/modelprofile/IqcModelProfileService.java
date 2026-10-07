@@ -34,7 +34,8 @@ public class IqcModelProfileService {
         IqcModelProfile profile = require(id);
         if (blank(command.secretRef())) command = command.withSecretRef(profile.getSecretRef());
         command = command.withCode(profile.getCode()); validate(command); apply(profile, command);
-        profile.setVersionNo(profile.getVersionNo() + 1); mapper.updateById(profile); return profile;
+        if(profile.getVersionNo()==null || profile.getVersionNo()<1 || profile.getVersionNo()==Integer.MAX_VALUE)throw IqcException.invalidState("模型版本无效或已耗尽");
+        profile.setVersionNo(profile.getVersionNo() + 1); if(mapper.updateById(profile)!=1)throw IqcException.invalidState("更新模型失败"); return profile;
     }
     @Transactional
     public IqcModelProfile setEnabled(String id, boolean enabled) { IqcModelProfile profile = require(id); profile.setStatus(enabled ? "ENABLED" : "DISABLED"); mapper.updateById(profile); return profile; }
@@ -50,13 +51,15 @@ public class IqcModelProfileService {
         if (value.maxRetries() == null || value.maxRetries() < 0 || value.maxRetries() > 5) throw IqcException.invalidArgument("模型重试次数必须在 0 到 5 之间");
     }
     private IqcModelProfile findByCode(String code) { return mapper.selectOne(Wrappers.<IqcModelProfile>lambdaQuery().eq(IqcModelProfile::getCode, code)); }
-    private IqcModelProfile require(String id) { IqcModelProfile profile = mapper.selectById(id); if (profile == null) throw IqcException.notFound("模型配置不存在: " + id); return profile; }
-    private void apply(IqcModelProfile target, ModelCommand source) { target.setName(source.name().trim()); target.setCode(source.code().trim()); target.setDescription(source.description()); target.setProvider(source.provider()); target.setModelName(source.modelName().trim()); target.setEndpoint(source.endpoint()); target.setSecretRef(encryptSecret(source.secretRef())); target.setTemperature(source.temperature()); target.setTimeoutSeconds(source.timeoutSeconds()); target.setMaxRetries(source.maxRetries()); }
+    private IqcModelProfile require(String id) { IqcModelProfile profile = mapper.selectOne(Wrappers.<IqcModelProfile>lambdaQuery().eq(IqcModelProfile::getId,id).last("FOR UPDATE")); if (profile == null) throw IqcException.notFound("模型配置不存在: " + id); return profile; }
+    private void apply(IqcModelProfile target, ModelCommand source) { target.setName(source.name().trim()); target.setCode(source.code().trim()); target.setDescription(source.description()); target.setProvider(source.provider()); target.setModelName(source.modelName().trim()); target.setEndpoint(source.endpoint()); target.setSecretRef(encryptSecret(source.secretRef())); target.setTemperature(source.temperature()); target.setTimeoutSeconds(source.timeoutSeconds()); target.setMaxRetries(source.maxRetries()); if(source.pricingJson()!=null)target.setPricingJson(ModelPricing.canonical(source.pricingJson())); }
     private String encryptSecret(String value) { if (blank(value) || value.startsWith("env:") || value.startsWith("ENC(")) return value; return "ENC(" + encryptor.encrypt(value) + ")"; }
     private static boolean blank(String value) { return value == null || value.isBlank(); }
     public record ModelCommand(String name, String code, String description, String provider, String modelName,
-                               String endpoint, String secretRef, Double temperature, Integer timeoutSeconds, Integer maxRetries) {
-        ModelCommand withCode(String stableCode) { return new ModelCommand(name, stableCode, description, provider, modelName, endpoint, secretRef, temperature, timeoutSeconds, maxRetries); }
-        ModelCommand withSecretRef(String value) { return new ModelCommand(name, code, description, provider, modelName, endpoint, value, temperature, timeoutSeconds, maxRetries); }
+                               String endpoint, String secretRef, Double temperature, Integer timeoutSeconds, Integer maxRetries,String pricingJson) {
+        public ModelCommand(String name,String code,String description,String provider,String modelName,String endpoint,String secretRef,
+                Double temperature,Integer timeoutSeconds,Integer maxRetries){this(name,code,description,provider,modelName,endpoint,secretRef,temperature,timeoutSeconds,maxRetries,null);}
+        ModelCommand withCode(String stableCode) { return new ModelCommand(name, stableCode, description, provider, modelName, endpoint, secretRef, temperature, timeoutSeconds, maxRetries,pricingJson); }
+        ModelCommand withSecretRef(String value) { return new ModelCommand(name, code, description, provider, modelName, endpoint, value, temperature, timeoutSeconds, maxRetries,pricingJson); }
     }
 }

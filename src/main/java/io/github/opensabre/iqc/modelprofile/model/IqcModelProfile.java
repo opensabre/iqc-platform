@@ -13,5 +13,7 @@ public class IqcModelProfile extends BasePo {
     private String name; private String code; private String description;
     private String provider; private String modelName; private String endpoint; private String secretRef;
     private Double temperature; private Integer timeoutSeconds; private Integer maxRetries;
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy=com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
+    private String pricingJson;
     private String status; private Integer versionNo;
 }

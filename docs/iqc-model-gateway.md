@@ -41,3 +41,11 @@ GET /api/iqc/tasks/{id}/model-calls 先沿Task.get数据范围授权，可选择
 复用原连接检查API/资源及Router/Gateway，不新增表/API/权限。ModelConnectionTestService不再create(...).call直连，callProfile将一次检查纳入相同声明模型限次、全局容量和真实nullableToken记录；SDK重试仍为0，不隐藏额外检查请求。逻辑身份固定model-connection:profileId:versionNo，捕获请求scope的owner（无可信身份保留null），Task/EID/rule保持null而非虚构质检任务。
 
 治理拒绝/核销未确认用安全检查未完成消息，区别连接参数错误；不返回provider原异常、密钥或正文。没有执行真实连接检查、测试、迁移或部署。模型冻结定价及Token/金额硬预算仍继续。
+
+## 冻结模型价格前置（2026-10-07）
+
+复用原ModelProfile/versionNo、ModelCommand、Agent ModelSnapshot及AssetReferenceValidator，不新建ModelRegistry/价格主表/API/权限。V1.1.52仅增加pricingJson。可选iqc-model-flat-pricing-v1声明ISO币种、inputPerMillion/outputPerMillion非负精确十进制字符串（每百万token）；未知字段、重复键、尾随值、数字强制转换、指数、超长/超精度拒绝，单价最多1000000且12位小数。规范化不经过double/JS数字。
+
+更新未提供pricingJson保留已有配置；空字符串显式清除。Agent主/备模型发布快照保存该版本价格；旧无价格快照省略null字段保持旧JSON摘要，不从当前ModelProfile回填旧历史。这里只配置并冻结声明价格，尚未计算调用费用或宣称实现预算；cache折扣/特殊计费另需明确协议，未知价格和用量不能填成本0。没有新增或执行测试、SQL、真实模型、浏览器或部署。
+
+模型更新/启停在原profile行锁内读取；更新防止版本为空/负值/int耗尽并断言写入一行，避免并发定价更新复用同一versionNo。既有ModelView安全投影增加价格字段，继续不返回secretRef。
