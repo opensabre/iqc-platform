@@ -106,6 +106,33 @@ public class GatewayCallService {
                 value.getModelProfileVersion(),value.getPricingHash(),value.getPricingCurrency(),value.getCalculatedCost()==null?null:value.getCalculatedCost().toPlainString(),value.getCostStatus(),value.getRequestedModelName(),value.getCacheReadInputTokens(),value.getCacheWriteInputTokens())).toList(),
                 page.getCurrent(),page.getSize(),page.getTotal());
     }
+    /** Same snapshot and authorization as the paged facts; totals cover all matching pages. */
+    public record CurrencyCost(String currency,String callCount,String knownCount,String unknownCount,String knownSubtotal) { }
+    public record CostSummary(String callCount,String knownCount,String unknownCount,List<CurrencyCost> currencies) { }
+    public record CallPage(List<CallView> records,long current,long size,long total,CostSummary costSummary) { }
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public CallPage pageWithSummary(String modelKey,String status,long current,long size){
+        var page=page(modelKey,status,current,size);
+        return withSummary(page,modelKey,null,null,status);
+    }
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public CallPage taskPageWithSummary(String taskId,String executionId,String status,long current,long size){
+        var page=taskPage(taskId,executionId,status,current,size);
+        return withSummary(page,null,taskId,executionId,status);
+    }
+    private CallPage withSummary(io.github.opensabre.iqc.shared.IqcPage<CallView> page,String modelKey,String taskId,String executionId,String status){
+        java.math.BigInteger count=java.math.BigInteger.ZERO,known=java.math.BigInteger.ZERO;
+        var groups=new ArrayList<CurrencyCost>();
+        for(var group:calls.costGroups(modelKey,taskId,executionId,status)){
+            var n=java.math.BigInteger.valueOf(group.getCallCount());
+            var k=java.math.BigInteger.valueOf(group.getKnownCount());
+            count=count.add(n);known=known.add(k);
+            groups.add(new CurrencyCost(group.getCurrency(),n.toString(),k.toString(),n.subtract(k).toString(),
+                    group.getKnownSubtotal()==null?null:group.getKnownSubtotal().toPlainString()));
+        }
+        return new CallPage(page.records(),page.current(),page.size(),page.total(),
+                new CostSummary(count.toString(),known.toString(),count.subtract(known).toString(),List.copyOf(groups)));
+    }
     public record CapacityView(String modelKey,
             @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long occupied,
             Integer concurrencyLimit,Boolean managed,
