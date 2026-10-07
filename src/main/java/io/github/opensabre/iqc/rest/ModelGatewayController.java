@@ -15,16 +15,18 @@ public class ModelGatewayController {
     @GetMapping("/capacity/{modelKey}")
     @ResourcePermission(code="iqc:model-gateway:capacity:view",name="查看模型容量",type="iqc",description="质检管理员查看模型并发占用和配置版本")
     public GatewayCallService.CapacityView capacity(@PathVariable String modelKey){return calls.getCapacity(modelKey);}
-    public record ConfigureCapacity(com.fasterxml.jackson.databind.JsonNode concurrencyLimit,String expectedVersion) { }
+    public record ConfigureCapacity(com.fasterxml.jackson.databind.JsonNode concurrencyLimit,String expectedVersion,com.fasterxml.jackson.databind.JsonNode budget) {
+        public ConfigureCapacity(com.fasterxml.jackson.databind.JsonNode concurrencyLimit,String expectedVersion){this(concurrencyLimit,expectedVersion,null);}
+    }
     @PutMapping("/capacity/{modelKey}")
-    @ResourcePermission(code="iqc:model-gateway:capacity:configure",name="配置模型容量",type="iqc",description="质检管理员按版本调整全局模型并发上限")
+    @ResourcePermission(code="iqc:model-gateway:capacity:configure",name="配置模型容量",type="iqc",description="质检管理员按版本调整全局模型并发及累计预算")
     @io.github.opensabre.governance.audit.annotations.Audit(operationType=io.github.opensabre.governance.audit.annotations.OperationType.UPDATE,
-            description="调整模型并发容量",module="IQC_MODEL_GATEWAY",request=false,response=true)
+            description="调整模型容量及预算",module="IQC_MODEL_GATEWAY",request=false,response=true)
     public GatewayCallService.CapacityChange configure(@PathVariable String modelKey,@RequestBody ConfigureCapacity request){
         if(request==null || request.concurrencyLimit()==null || !request.concurrencyLimit().isIntegralNumber() || !request.concurrencyLimit().canConvertToInt()
                 || request.expectedVersion()==null || !request.expectedVersion().matches("0|[1-9][0-9]{0,18}"))
             throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("并发上限和版本必须为精确整数");
-        try{return calls.configureCapacity(modelKey,request.concurrencyLimit().intValue(),Long.parseLong(request.expectedVersion()));}
+        try{return calls.configureCapacity(modelKey,request.concurrencyLimit().intValue(),Long.parseLong(request.expectedVersion()),request.budget());}
         catch(NumberFormatException invalid){throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("容量版本无效");}
     }
     public record ReleaseCapacity(String modelKey,GatewayCallService.ReleaseReason reason,String evidence,Boolean remoteStopped) { }

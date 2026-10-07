@@ -91,7 +91,11 @@ public class GatewayCallService {
             String taskId,String executionId,String nodeId,Integer runIndex,String conversationId,
             String modelProfileId,Integer modelProfileVersion,String pricingHash,String pricingCurrency,String calculatedCost,String costStatus,String requestedModelName,
             @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheReadInputTokens,
-            @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheWriteInputTokens,Integer maxOutputTokens,String outputTokenParameter,String outputLimitStatus,Integer toolRoundIndex,Integer contextWindowTokens,String deploymentRef,LocalDateTime toolExecutionStartedAtUtc) { }
+            @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheWriteInputTokens,Integer maxOutputTokens,String outputTokenParameter,String outputLimitStatus,Integer toolRoundIndex,Integer contextWindowTokens,String deploymentRef,LocalDateTime toolExecutionStartedAtUtc,
+            @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long budgetReservedTokens,
+            String budgetReservedCost,String budgetCurrency,
+            @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long budgetPolicyVersion,
+            String budgetStatus,String budgetEvidenceRef) { }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public io.github.opensabre.iqc.shared.IqcPage<CallView> page(String modelKey,String status,long current,long size){
         if(!scope.isIqcAdministrator())throw IqcException.accessDenied("只有质检管理员可以查看全局模型调用");
@@ -121,7 +125,7 @@ public class GatewayCallService {
                 value.getInputTokens(),value.getOutputTokens(),value.getTotalTokens(),value.getResponseModelId(),value.getUsageStatus(),value.getErrorType(),value.getCapacityReleasedAtUtc(),
                 value.getCapacityReleasedBy(),value.getCapacityReleaseReason(),value.getCapacityReleaseEvidence(),
                 value.getTaskId(),value.getExecutionId(),value.getNodeId(),value.getRunIndex(),value.getConversationId(),value.getModelProfileId(),
-                value.getModelProfileVersion(),value.getPricingHash(),value.getPricingCurrency(),value.getCalculatedCost()==null?null:value.getCalculatedCost().toPlainString(),value.getCostStatus(),value.getRequestedModelName(),value.getCacheReadInputTokens(),value.getCacheWriteInputTokens(),value.getMaxOutputTokens(),value.getOutputTokenParameter(),value.getOutputLimitStatus(),value.getToolRoundIndex(),value.getContextWindowTokens(),value.getDeploymentRef(),value.getToolExecutionStartedAtUtc())).toList(),
+                value.getModelProfileVersion(),value.getPricingHash(),value.getPricingCurrency(),value.getCalculatedCost()==null?null:value.getCalculatedCost().toPlainString(),value.getCostStatus(),value.getRequestedModelName(),value.getCacheReadInputTokens(),value.getCacheWriteInputTokens(),value.getMaxOutputTokens(),value.getOutputTokenParameter(),value.getOutputLimitStatus(),value.getToolRoundIndex(),value.getContextWindowTokens(),value.getDeploymentRef(),value.getToolExecutionStartedAtUtc(),value.getBudgetReservedTokens(),decimal(value.getBudgetReservedCost()),value.getBudgetCurrency(),value.getBudgetPolicyVersion(),value.getBudgetStatus(),value.getBudgetEvidenceRef())).toList(),
                 page.getCurrent(),page.getSize(),page.getTotal());
     }
     /** Same snapshot and authorization as the paged facts; totals cover all matching pages. */
@@ -154,20 +158,31 @@ public class GatewayCallService {
     public record CapacityView(String modelKey,
             @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long occupied,
             Integer concurrencyLimit,Boolean managed,
-            @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long version) { }
+            @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long version,BudgetView budget) { }
+    public record BudgetView(String tokenLimit,String tokenCommitted,String tokenRemaining,String costLimit,String costCommitted,String costRemaining,
+            String currency,Integer contextWindow,String deploymentRef,String outputParameter,String pricingHash,String evidenceRef,boolean breached) { }
+    private static String decimal(java.math.BigDecimal value){return value==null?null:value.toPlainString();}
+    private static BudgetView budgetView(GatewayCapacity row){
+        String tokenRemaining=row.getTokenBudgetLimit()==null?null:java.math.BigInteger.valueOf(row.getTokenBudgetLimit()).subtract(java.math.BigInteger.valueOf(row.getTokenBudgetCommitted())).max(java.math.BigInteger.ZERO).toString();
+        String costRemaining=row.getCostBudgetLimit()==null?null:decimal(row.getCostBudgetLimit().subtract(row.getCostBudgetCommitted()).max(java.math.BigDecimal.ZERO));
+        return new BudgetView(row.getTokenBudgetLimit()==null?null:row.getTokenBudgetLimit().toString(),row.getTokenBudgetCommitted()==null?null:row.getTokenBudgetCommitted().toString(),tokenRemaining,
+            decimal(row.getCostBudgetLimit()),decimal(row.getCostBudgetCommitted()),costRemaining,row.getBudgetCurrency(),row.getBudgetContextWindow(),row.getBudgetDeploymentRef(),row.getBudgetOutputParameter(),row.getBudgetPricingHash(),row.getBudgetEvidenceRef(),Boolean.TRUE.equals(row.getBudgetBreached()));
+    }
     public record CapacityChange(CapacityView before,CapacityView after) { }
     public enum ReleaseReason { REMOTE_COMPLETED,REMOTE_CANCELLED,REQUEST_NOT_SENT }
     private void administrator(){if(!scope.isIqcAdministrator())throw IqcException.accessDenied("仅质检管理员可管理模型容量");}
     private static void key(String key){if(key==null || !key.matches("[a-f0-9]{64}"))throw IqcException.invalidArgument("模型键无效");}
-    private CapacityView view(GatewayCapacity row){return new CapacityView(row.getModelKey(),row.getOccupied(),row.getConcurrencyLimit(),row.getPolicyManaged(),row.getPolicyVersion());}
+    private CapacityView view(GatewayCapacity row){return new CapacityView(row.getModelKey(),row.getOccupied(),row.getConcurrencyLimit(),row.getPolicyManaged(),row.getPolicyVersion(),budgetView(row));}
     public CapacityView getCapacity(String modelKey){administrator();key(modelKey);var row=capacities.selectById(modelKey);
         if(row==null)throw IqcException.notFound("模型容量不存在");return view(row);}
     @Transactional(isolation=Isolation.REPEATABLE_READ)
-    public CapacityChange configureCapacity(String modelKey,int limit,long expectedVersion){
+    public CapacityChange configureCapacity(String modelKey,int limit,long expectedVersion){return configureCapacity(modelKey,limit,expectedVersion,null);}
+    @Transactional(isolation=Isolation.REPEATABLE_READ)
+    public CapacityChange configureCapacity(String modelKey,int limit,long expectedVersion,com.fasterxml.jackson.databind.JsonNode budget){
         administrator();key(modelKey);actors.capture();
         if(limit<0 || limit>10000 || expectedVersion<0 || expectedVersion==Long.MAX_VALUE)throw IqcException.invalidArgument("并发上限或版本无效");
         var row=capacity(modelKey);if(!Objects.equals(row.getPolicyVersion(),expectedVersion))throw IqcException.invalidState("容量配置已变化，请刷新");
-        var before=view(row);row.setConcurrencyLimit(limit);row.setPolicyManaged(true);row.setPolicyVersion(expectedVersion+1);
+        var before=view(row);GatewayBudgetPolicy.apply(row,budget);row.setConcurrencyLimit(limit);row.setPolicyManaged(true);row.setPolicyVersion(expectedVersion+1);
         if(capacities.updateById(row)!=1)throw IqcException.invalidState("更新模型容量失败");return new CapacityChange(before,view(row));
     }
     @Transactional(isolation=Isolation.REPEATABLE_READ)
