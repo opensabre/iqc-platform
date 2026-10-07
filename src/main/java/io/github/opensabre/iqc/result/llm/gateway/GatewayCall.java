@@ -1,0 +1,21 @@
+package io.github.opensabre.iqc.result.llm.gateway;
+import com.baomidou.mybatisplus.annotation.*;
+import lombok.Data;
+import java.time.LocalDateTime;
+@Data @TableName("iqc_model_gateway_call")
+public class GatewayCall {
+    @TableId private String callId;
+    private String modelKey;
+    private String logicalRecordId;
+    private String ruleId;
+    private String owner;
+    private String status;
+    private LocalDateTime reservedAtUtc;
+    private LocalDateTime settledAtUtc;
+    private Long inputTokens;
+    private Long outputTokens;
+    private Long totalTokens;
+    private String responseModelId;
+    private String usageStatus;
+    private String errorType;
+}

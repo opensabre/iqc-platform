@@ -20,15 +20,23 @@ import java.util.List;
 @Component
 public class SnapshotChatModelRouter {
     private final ChatModel defaultModel; private final ObjectMapper objectMapper; private final SecretReferenceResolver secrets;
+    private final io.github.opensabre.iqc.result.llm.gateway.ModelGateway gateway;
     @Autowired
-    public SnapshotChatModelRouter(ObjectProvider<ChatModel> defaultModel, ObjectMapper objectMapper, SecretReferenceResolver secrets) { this(defaultModel.getIfAvailable(), objectMapper, secrets); }
-    public SnapshotChatModelRouter(ChatModel defaultModel, ObjectMapper objectMapper, SecretReferenceResolver secrets) { this.defaultModel=defaultModel; this.objectMapper=objectMapper; this.secrets=secrets; }
+    public SnapshotChatModelRouter(ObjectProvider<ChatModel> defaultModel, ObjectMapper objectMapper, SecretReferenceResolver secrets,
+            io.github.opensabre.iqc.result.llm.gateway.ModelGateway gateway) {
+        this.defaultModel=defaultModel.getIfAvailable();this.objectMapper=objectMapper;this.secrets=secrets;this.gateway=gateway;
+    }
+    public SnapshotChatModelRouter(ChatModel defaultModel, ObjectMapper objectMapper, SecretReferenceResolver secrets) { this.defaultModel=defaultModel; this.objectMapper=objectMapper; this.secrets=secrets; this.gateway=null; }
 
     /** Uses the deployment default for legacy Agents and ordered snapshot models for schema 2.0. */
     public ChatResponse call(Prompt prompt, JsonNode agentSnapshot) {
         return call(prompt, agentSnapshot, new ToolCallback[0]);
     }
     public ChatResponse call(Prompt prompt, JsonNode agentSnapshot, ToolCallback[] callbacks) {
+        return call(prompt,agentSnapshot,callbacks,new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context(null,null,null));
+    }
+    public ChatResponse call(Prompt prompt, JsonNode agentSnapshot, ToolCallback[] callbacks,
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context) {
         Prompt executablePrompt = callbacks.length == 0 ? prompt : new Prompt(prompt.getInstructions(),
                 ToolCallingChatOptions.builder().toolCallbacks(callbacks).build());
         JsonNode config=config(agentSnapshot);
@@ -37,13 +45,43 @@ public class SnapshotChatModelRouter {
             throw new IllegalStateException("Agent 缺少已发布的模型资产快照");
         if(!managed || config.path("assetSnapshots").isMissingNode()) {
             if(defaultModel==null) throw new IllegalStateException("系统默认模型未启用");
-            return defaultModel.call(executablePrompt);
+            var options=defaultModel.getDefaultOptions();
+            String model=options==null || options.getModel()==null?"deployment-default":options.getModel();
+            String endpoint=options instanceof OpenAiChatOptions openai && openai.getBaseUrl()!=null?openai.getBaseUrl():"deployment-default";
+            return invoke(defaultModel,executablePrompt,new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity(
+                    defaultModel.getClass().getSimpleName(),endpoint,model),context);
         }
         List<JsonNode> candidates=new ArrayList<>(); candidates.add(config.path("assetSnapshots").path("primaryModel"));
         config.path("assetSnapshots").path("fallbackModels").forEach(candidates::add);
         RuntimeException last=null;
-        for(JsonNode candidate:candidates) try{return create(candidate).call(executablePrompt);}catch(RuntimeException exception){last=exception;}
+        for(JsonNode candidate:candidates) {
+            ChatModel selected;
+            try{selected=create(candidate);}catch(RuntimeException unavailable){last=unavailable;continue;}
+            var identity=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity(candidate.path("provider").asText(),
+                    candidate.path("endpoint").asText(),candidate.path("modelName").asText());
+            int retries=Math.max(0,Math.min(candidate.path("maxRetries").asInt(0),5));
+            for(int attempt=0;attempt<=retries;attempt++)try{return invoke(selected,executablePrompt,identity,context);}
+            catch(io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException denied){throw denied;}
+            catch(RuntimeException exception){last=exception;}
+        }
         throw last==null?new IllegalStateException("Agent 没有可用模型快照"):last;
+    }
+    private ChatResponse invoke(ChatModel model,Prompt prompt,
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity identity,
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context) {
+        return gateway==null?model.call(prompt):gateway.invoke(identity,context,()->model.call(prompt),SnapshotChatModelRouter::usage);
+    }
+    public static io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Usage usage(ChatResponse response) {
+        if(response==null || response.getMetadata()==null || response.getMetadata().getUsage()==null)
+            return io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Usage.missing();
+        var metadata=response.getMetadata();var usage=metadata.getUsage();
+        if(usage.getNativeUsage()==null && (usage.getPromptTokens()==null || usage.getPromptTokens()==0)
+                && (usage.getCompletionTokens()==null || usage.getCompletionTokens()==0) && (usage.getTotalTokens()==null || usage.getTotalTokens()==0))
+            return io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Usage.missing();
+        return new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Usage(
+                usage.getPromptTokens()==null?null:usage.getPromptTokens().longValue(),
+                usage.getCompletionTokens()==null?null:usage.getCompletionTokens().longValue(),
+                usage.getTotalTokens()==null?null:usage.getTotalTokens().longValue(),metadata.getModel());
     }
     public ChatModel create(JsonNode model) {
         String provider=model.path("provider").asText();
@@ -51,7 +89,7 @@ public class SnapshotChatModelRouter {
         String apiKey="OLLAMA".equals(provider)&&model.path("secretRef").asText("").isBlank()?"ollama":secrets.resolve(model.path("secretRef").asText());
         OpenAiChatOptions options=OpenAiChatOptions.builder().baseUrl(model.path("endpoint").asText()).apiKey(apiKey)
                 .model(model.path("modelName").asText()).temperature(model.path("temperature").asDouble(0.1))
-                .timeout(Duration.ofSeconds(model.path("timeoutSeconds").asInt(60))).maxRetries(model.path("maxRetries").asInt(0)).build();
+                .timeout(Duration.ofSeconds(model.path("timeoutSeconds").asInt(60))).maxRetries(0).build();
         return OpenAiChatModel.builder().options(options).build();
     }
     private JsonNode config(JsonNode snapshot){if(snapshot==null)return objectMapper.nullNode();JsonNode config=snapshot.path("configJson");if(config.isTextual())try{return objectMapper.readTree(config.asText());}catch(Exception ignored){return objectMapper.nullNode();}return config;}

@@ -184,8 +184,8 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
         String ruleId = rule.path("id").asText("unknown");
         recordUsage(usageId, ruleId, "attempt", UsageOutcome.ATTEMPT);
         try {
-            enforceRateLimit();
-            LlmEvaluation result = callWithRetry(content, rule, agentSnapshot, preRuleFindings, conversation, candidate);
+            if(modelRouter==null)enforceRateLimit();
+            LlmEvaluation result = callWithRetry(content, rule, agentSnapshot, preRuleFindings, conversation, candidate,stableId);
             recordUsage(usageId, ruleId, "success", UsageOutcome.SUCCESS);
             return result;
         } catch (RuntimeException exception) {
@@ -195,7 +195,7 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
     }
 
     private LlmEvaluation callWithRetry(String content, JsonNode rule, JsonNode agentSnapshot,
-                                        JsonNode preRuleFindings, boolean conversation, boolean candidate) {
+                                        JsonNode preRuleFindings, boolean conversation, boolean candidate,String recordId) {
         RuntimeException last = null;
         int attempts = Math.max(1, Math.min(properties.getMaxAttempts(), 3));
         for (int attempt = 1; attempt <= attempts; attempt++) {
@@ -208,7 +208,8 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
                 ChatResponse response;
                 try (SnapshotMcpToolProvider.Session tools = mcpTools.open(agentSnapshot)) {
                     response = modelRouter == null ? chatModel.call(prompt)
-                            : modelRouter.call(prompt, agentSnapshot, tools.callbacks());
+                            : modelRouter.call(prompt, agentSnapshot, tools.callbacks(),
+                                    new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context(recordId,rule.path("id").asText("unknown"),null));
                 }
                 String text = response == null || response.getResult() == null
                         ? null : response.getResult().getOutput().getText();
@@ -223,6 +224,8 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
                     }
                 }
                 return evaluation;
+            } catch (io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException denied) {
+                throw denied;
             } catch (RuntimeException exception) {
                 last = exception;
                 backoff(attempt, attempts);

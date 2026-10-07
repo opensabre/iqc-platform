@@ -30,9 +30,17 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
     private final GovernanceRateLimiter rateLimiter;
     private final UsageCounterRecorder usageCounterRecorder;
     private final LlmQualityProperties properties;
+    private final io.github.opensabre.iqc.result.llm.gateway.ModelGateway gateway;
 
     public HttpLlmQualityProvider(ObjectMapper objectMapper, GovernanceRateLimiter rateLimiter,
                                   UsageCounterRecorder usageCounterRecorder, LlmQualityProperties properties) {
+        this(objectMapper,rateLimiter,usageCounterRecorder,properties,null);
+    }
+    @org.springframework.beans.factory.annotation.Autowired
+    public HttpLlmQualityProvider(ObjectMapper objectMapper, GovernanceRateLimiter rateLimiter,
+                                  UsageCounterRecorder usageCounterRecorder, LlmQualityProperties properties,
+                                  io.github.opensabre.iqc.result.llm.gateway.ModelGateway gateway) {
+        this.gateway=gateway;
         this.objectMapper = objectMapper;
         this.rateLimiter = rateLimiter;
         this.usageCounterRecorder = usageCounterRecorder;
@@ -61,6 +69,7 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
         usageCounterRecorder.record(new UsageRecord(usageId + ":attempt", null, "iqc-platform", "LLM_CALL",
                 ruleId, "QUALITY_EVALUATION", UsageOutcome.ATTEMPT));
         try {
+            if(gateway==null){
             var decision = rateLimiter.check(RateLimitCheckRequest.builder()
                     .sceneCode("iqc-llm-call")
                     .key(properties.getModel())
@@ -75,7 +84,8 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
             if (decision != null && !decision.allowed()) {
                 throw new IllegalStateException("LLM 调用达到限次: " + decision.errorMessage());
             }
-            LlmEvaluation evaluation = callWithRetry(content, rule, preRuleFindings);
+            }
+            LlmEvaluation evaluation = callWithRetry(content, rule, preRuleFindings,stableId);
             usageCounterRecorder.record(new UsageRecord(usageId + ":success", null, "iqc-platform", "LLM_CALL",
                     ruleId, "QUALITY_EVALUATION", UsageOutcome.SUCCESS));
             return evaluation;
@@ -86,18 +96,22 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
         }
     }
 
-    private LlmEvaluation callWithRetry(String content, JsonNode rule, JsonNode preRuleFindings) {
+    private LlmEvaluation callWithRetry(String content, JsonNode rule, JsonNode preRuleFindings,String recordId) {
         RuntimeException last = null;
         int attempts = Math.max(1, Math.min(properties.getMaxAttempts(), 3));
         for (int attempt = 1; attempt <= attempts; attempt++) {
             try {
-                JsonNode response = restClient.post().uri(properties.getPath())
+                java.util.function.Supplier<JsonNode> request=()->restClient.post().uri(properties.getPath())
                         .body(Map.of("model", properties.getModel(), "temperature", 0,
                                 "response_format", Map.of("type", "json_object"),
                                 "messages", List.of(
                                         Map.of("role", "system", "content", "你是质检规则执行器。只返回 JSON，不要 Markdown。必须包含 hit 布尔值和 reason 字符串；规则要求的标签值放入 labelValues 数组，可扩展的新标签放入 candidates 数组，不得臆造。"),
                                 Map.of("role", "user", "content", prompt(content, rule, preRuleFindings)))))
                         .retrieve().body(JsonNode.class);
+                JsonNode response=gateway==null?request.get():gateway.invoke(
+                        new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity("HTTP",properties.getEndpoint(),properties.getModel()),
+                        new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context(recordId,rule.path("id").asText("unknown"),null),request,
+                        HttpLlmQualityProvider::usage);
                 return parseEvaluation(response);
             } catch (RestClientException | IllegalArgumentException exception) {
                 last = new IllegalStateException(exception.getMessage(), exception);
@@ -109,6 +123,16 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
         }
         throw last == null ? new IllegalStateException("LLM 未返回结果") : last;
     }
+
+    private static io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Usage usage(JsonNode response) {
+        if(response==null)return io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Usage.missing();
+        var usage=response.path("usage");
+        return new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Usage(
+                tokens(usage.path("prompt_tokens")),tokens(usage.path("completion_tokens")),tokens(usage.path("total_tokens")),
+                response.path("model").isTextual()?response.path("model").textValue():null);
+    }
+    private static Long tokens(JsonNode value){return value.isMissingNode() || value.isNull()?null:
+            value.isIntegralNumber() && value.canConvertToLong()?value.longValue():-1L;}
 
     JsonNode parseStructuredResponse(JsonNode response) {
         JsonNode content = response == null ? null : response.path("choices").path(0).path("message").path("content");
