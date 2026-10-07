@@ -35,7 +35,7 @@ public class PeriodicScheduleDispatcher {
                     int allowance=definition.misfirePolicy()==PeriodicDefinition.MisfirePolicy.CATCH_UP?definition.maximumCatchUp():1;
                     if(entry.getValue()>=allowance){iterator.remove();continue;}
                     attempt=attempts.begin(new TriggerAttemptService.Context(TriggerAttemptService.Kind.PERIODIC,id,frame.revisionId(),frame.revisionHash(),frame.dueAt(),frame.snapshot().ownerBound()));
-                    var actor=actors.resolve(frame.snapshot().ownerBound());var captured=frame;var currentAttempt=attempt;
+                    var actor=actors.resolve(frame.snapshot().ownerBound(),PeriodicScheduleService.grants(frame.snapshot().definition()));var captured=frame;var currentAttempt=attempt;
                     stage=TriggerAttemptService.FailureStage.MATERIALIZATION;
                     boolean fired=scope.asScheduledActor(actor,()->runner.periodic(currentAttempt,captured,now,actor));
                     if(!fired){iterator.remove();continue;}

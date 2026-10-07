@@ -37,6 +37,7 @@ public class TaskTriggerService {
     private final InspectionTaskService tasks;
     private final InspectionExecutionService executions;
     private final ObjectMapper json;
+    private final io.github.opensabre.iqc.task.retry.AutomaticRetryService automaticRetries;
     private final org.springframework.transaction.PlatformTransactionManager transactionManager;
     private ObjectMapper exact(){return json.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
             .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
@@ -46,7 +47,8 @@ public class TaskTriggerService {
     private <T>T read(String text,Class<T> type){try{return exact().readValue(text,type);}catch(Exception failure){throw IqcException.invalidArgument("触发协议或冻结配置无效");}}
     public static Set<String> grants(TaskTriggerRequest request){var grants=new HashSet<>(Set.of("iqc:pipeline:task:create","iqc:task:execute","iqc:trigger:receive"));
         if(request.content()!=null)grants.add("iqc:conversation:upload");
-        if("archive-subscription".equals(request.source()))grants.add("iqc:subscription:publish");return Set.copyOf(grants);}
+        if("archive-subscription".equals(request.source()))grants.add("iqc:subscription:publish");
+        if(request.retryPolicy()!=null)grants.add("iqc:task:retry-policy:configure");return Set.copyOf(grants);}
     public InspectionTask receive(String requestJson){
         var transaction=new org.springframework.transaction.support.TransactionTemplate(transactionManager);
         transaction.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
@@ -108,7 +110,8 @@ public class TaskTriggerService {
         if(target!=null && !scope.canView(target.getCreatedBy(),target.getOwnerGroupId()))throw IqcException.accessDenied("无权使用事件目标会话");
         boolean sourceGroup=target!=null && Objects.equals(group,target.getOwnerGroupId());
         row.setOwnerGroupId(group!=null && group.equals(bound.groupId()) && group.equals(pipelineGroup) && (selector==null || group.equals(selector.ownerGroupId())) && sourceGroup?group:null);
-        if(rows.insert(row)!=1)throw IqcException.invalidState("触发接收记录保存失败");return row;
+        if(rows.insert(row)!=1)throw IqcException.invalidState("触发接收记录保存失败");
+        if(request.retryPolicy()!=null){automaticRetries.freeze(row.getId(),request.retryPolicy(),bound,grants(request));return rows.selectById(row.getId());}return row;
     }
     private Accepted accepted(InspectionTask row){
         if(row.getTriggerRequestJson()==null || row.getTriggerRequestJson().length()>32*1024*1024

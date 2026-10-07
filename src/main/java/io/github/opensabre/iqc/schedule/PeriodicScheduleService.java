@@ -37,6 +37,7 @@ public class PeriodicScheduleService {
     private final InspectionExecutionService executions;
     private final IqcDataScope scope;
     private final ObjectMapper json;
+    private final io.github.opensabre.iqc.task.retry.AutomaticRetryService automaticRetries;
 
     private ObjectMapper exact(){return json.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
             .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));}
@@ -119,7 +120,7 @@ public class PeriodicScheduleService {
         require(id,false);if(current<1 || size<1 || size>100)throw IqcException.invalidArgument("无效周期实例分页");
         var query=Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getPeriodicScheduleId,id);
         if(!scope.canViewAll()){String group=scope.groupId();query.and(q->{q.eq(InspectionTask::getCreatedBy,scope.owner());if(group!=null)q.or().eq(InspectionTask::getOwnerGroupId,group);});}
-        query.select(InspectionTask.class,field->!"ruleSnapshotJson".equals(field.getProperty()));
+        query.select(InspectionTask.class,field->!Set.of("ruleSnapshotJson","triggerRequestJson","retryPolicyJson").contains(field.getProperty()));
         return IqcPage.from(taskRows.selectPage(new Page<>(current,size),query.orderByDesc(InspectionTask::getPlannedAtUtc)));
     }
     public List<Instant> preview(PeriodicDefinition definition,Instant from,int size){if(definition==null)throw IqcException.invalidArgument("缺少周期定义");return definition.preview(from,size);}
@@ -141,7 +142,7 @@ public class PeriodicScheduleService {
                 || !utc(frame.dueAt()).equals(row.getNextPlannedAtUtc()))return false;
         var version=revisions.selectById(row.getActiveRevisionId());var release=snapshot(version);
         if(!frame.revisionHash().equals(version.getContentHash()) || !scope.owner().equals(release.ownerBound().owner()))throw IqcException.invalidState("周期触发来源已变化");
-        validateActor(release.ownerBound(),actor);
+        validateActor(release,actor);
         var tick=release.definition().tick(frame.dueAt(),now);
         var existing=taskRows.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getPeriodicScheduleId,row.getId())
                 .eq(InspectionTask::getPeriodicRevisionId,version.getId()).eq(InspectionTask::getPlannedAtUtc,utc(tick.plannedAt())));
@@ -173,19 +174,25 @@ public class PeriodicScheduleService {
                 }
             }
         }
-        validateActor(release.ownerBound(),actor);
-        if(existing!=null && "CREATED".equals(existing.getStatus()))executions.queueSystem(existing.getId());
+        validateActor(release,actor);
+        if(existing!=null && "CREATED".equals(existing.getStatus())){
+            if(release.definition().retryPolicy()!=null)automaticRetries.freeze(existing.getId(),release.definition().retryPolicy(),release.ownerBound(),grants(release.definition()));
+            executions.queueSystem(existing.getId());
+        }
         row.setNextPlannedAtUtc(tick.nextAt()==null?null:utc(tick.nextAt()));if(tick.nextAt()==null)row.setStatus("DISABLED");
         row.setLastError(null);row.setRetryNotBeforeUtc(null);update(row);return true;
     }
-    private void validateActor(ScheduledActorAccessService.CreationBound bound,ScheduledActorAccessService.Resolved actor) {
-        Instant now=Instant.now();
+    public static Set<String> grants(PeriodicDefinition definition){
+        var required=new HashSet<>(Set.of("iqc:pipeline:task:create","iqc:task:execute","iqc:schedule:publish"));
+        if(definition.retryPolicy()!=null)required.add("iqc:task:retry-policy:configure");return Set.copyOf(required);
+    }
+    private void validateActor(Published release,ScheduledActorAccessService.Resolved actor) {
+        var bound=release.ownerBound();Instant now=Instant.now();
         if(actor==null || actor.checkedAt()==null || actor.checkedAt().isBefore(now.minusSeconds(30))
                 || actor.checkedAt().isAfter(now.plusSeconds(5)) || !bound.userId().equals(actor.userId())
                 || !bound.owner().equals(actor.owner()) || !scope.owner().equals(actor.owner())
                 || scope.canViewAll()!=actor.all() || !Objects.equals(scope.groupId(),actor.groupId())
-                || actor.resourceCodes()==null || !actor.resourceCodes().containsAll(Set.of(
-                    "iqc:pipeline:task:create","iqc:task:execute","iqc:schedule:publish")))
+                || actor.resourceCodes()==null || !actor.resourceCodes().containsAll(grants(release.definition())))
             throw IqcException.accessDenied("周期事务未取得有效且未过期的负责人授权");
     }
     @Transactional public void defer(Frame frame,Instant now){

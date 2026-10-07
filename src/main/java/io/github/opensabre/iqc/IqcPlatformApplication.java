@@ -41,6 +41,11 @@ public class IqcPlatformApplication {
 
     @Bean
     public ObjectMapper iqcObjectMapper() {
-        return new ObjectMapper();
+        // Preserve existing Date timestamp serialization and legacy JSON digests.
+        // Persisted scheduling protocols require textual Java time values.
+        var time = new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule();
+        time.addSerializer(java.time.Instant.class, com.fasterxml.jackson.databind.ser.std.ToStringSerializer.instance);
+        time.addSerializer(java.time.LocalDateTime.class, com.fasterxml.jackson.databind.ser.std.ToStringSerializer.instance);
+        return new ObjectMapper().registerModule(time);
     }
 }

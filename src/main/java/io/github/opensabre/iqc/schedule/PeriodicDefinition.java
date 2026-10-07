@@ -6,11 +6,17 @@ import java.time.*;
 import java.util.*;
 
 public record PeriodicDefinition(String schemaVersion,String cron,String zoneId,Instant effectiveFrom,Instant effectiveUntil,
-        MisfirePolicy misfirePolicy,int maximumCatchUp,int concurrency,PipelineReference pipeline,SelectorAssetService.Reference selector) {
+        MisfirePolicy misfirePolicy,int maximumCatchUp,int concurrency,PipelineReference pipeline,SelectorAssetService.Reference selector,
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        io.github.opensabre.iqc.task.retry.AutomaticRetryPolicy retryPolicy) {
     public static final String SCHEMA="iqc-periodic-definition-v1";
     public enum MisfirePolicy { SKIP,FIRE_LATEST,CATCH_UP }
     public record PipelineReference(String pipelineId,int versionNo) { }
     public record Tick(Instant plannedAt,Instant nextAt,boolean skip,Instant missedFrom,Instant missedUntil) { }
+    public PeriodicDefinition(String schemaVersion,String cron,String zoneId,Instant effectiveFrom,Instant effectiveUntil,
+            MisfirePolicy misfirePolicy,int maximumCatchUp,int concurrency,PipelineReference pipeline,SelectorAssetService.Reference selector){
+        this(schemaVersion,cron,zoneId,effectiveFrom,effectiveUntil,misfirePolicy,maximumCatchUp,concurrency,pipeline,selector,null);
+    }
     public PeriodicDefinition {
         if(!SCHEMA.equals(schemaVersion) || cron==null || cron.length()>256 || zoneId==null || effectiveFrom==null
                 || (effectiveUntil!=null && !effectiveUntil.isAfter(effectiveFrom)) || misfirePolicy==null

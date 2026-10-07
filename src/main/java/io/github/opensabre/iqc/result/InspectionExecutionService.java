@@ -248,6 +248,7 @@ public class InspectionExecutionService {
             task = taskMapper.selectById(taskId);
             task.setCurrentExecutionId(execution.getId()); task.setAttemptCount(attempt);
             task.setProcessedMessages(successfulMessages); task.setFailedMessages(0);
+            task.setRetryNotBeforeUtc(null);task.setRetryError(null);
             if(taskMapper.updateById(task)!=1)throw IqcException.invalidState("新执行轮次绑定失败");
             return task;
         } else {
@@ -390,6 +391,7 @@ public class InspectionExecutionService {
         }
         task = taskMapper.selectById(taskId); task.setCurrentExecutionId(execution.getId()); task.setAttemptCount(attempt);
         task.setProcessedMessages(execution.getProcessedMessages()); task.setFailedMessages(0);
+        task.setRetryNotBeforeUtc(null);task.setRetryError(null);
         if(taskMapper.updateById(task)!=1)throw IqcException.invalidState("恢复执行轮次绑定失败");return task;
     }
 

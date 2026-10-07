@@ -24,7 +24,7 @@ public class EventSubscriptionDispatcher {
             try{
                 frame=subscriptions.peek(id,now);if(frame==null)continue;
                 attempt=attempts.begin(new TriggerAttemptService.Context(TriggerAttemptService.Kind.SUBSCRIPTION,id,frame.revisionId(),frame.revisionHash(),null,frame.snapshot().ownerBound()));
-                var actor=actors.resolve(frame.snapshot().ownerBound(),EventSubscriptionService.grants());var current=frame;var currentAttempt=attempt;
+                var actor=actors.resolve(frame.snapshot().ownerBound(),EventSubscriptionService.grants(frame.snapshot().definition()));var current=frame;var currentAttempt=attempt;
                 stage=TriggerAttemptService.FailureStage.MATERIALIZATION;
                 scope.asScheduledActor(actor,()->runner.subscription(currentAttempt,current,actor));
             }catch(RuntimeException failure){

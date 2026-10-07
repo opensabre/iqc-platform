@@ -123,10 +123,13 @@ public class EventSubscriptionService {
         require(id,false);if(current<1 || size<1 || size>100)throw IqcException.invalidArgument("无效事件订阅实例分页");
         var query=Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getEventSubscriptionId,id);
         if(!scope.canViewAll()){String group=scope.groupId();query.and(q->{q.eq(InspectionTask::getCreatedBy,scope.owner());if(group!=null)q.or().eq(InspectionTask::getOwnerGroupId,group);});}
-        query.select(InspectionTask.class,field->!Set.of("ruleSnapshotJson","triggerRequestJson").contains(field.getProperty()));
+        query.select(InspectionTask.class,field->!Set.of("ruleSnapshotJson","triggerRequestJson","retryPolicyJson").contains(field.getProperty()));
         return IqcPage.from(taskRows.selectPage(new Page<>(current,size),query.orderByDesc(InspectionTask::getCreatedTime).orderByDesc(InspectionTask::getId)));
     }
     public static Set<String> grants(){return Set.of("iqc:pipeline:task:create","iqc:task:execute","iqc:trigger:receive","iqc:subscription:publish");}
+    public static Set<String> grants(EventSubscriptionDefinition definition){
+        var required=new HashSet<>(grants());if(definition.retryPolicy()!=null)required.add("iqc:task:retry-policy:configure");return Set.copyOf(required);
+    }
     public List<String> due(Instant now){
         ScheduledActorAccessService.requireBackground();
         return schedules.selectList(Wrappers.<EventSubscription>lambdaQuery().select(EventSubscription::getId)
@@ -157,7 +160,7 @@ public class EventSubscriptionService {
         if(actor==null || actor.checkedAt()==null || actor.checkedAt().isBefore(now.minusSeconds(30)) || actor.checkedAt().isAfter(now.plusSeconds(5))
                 || !Objects.equals(actor.userId(),bound.userId()) || !Objects.equals(actor.owner(),bound.owner()) || !Objects.equals(scope.owner(),actor.owner())
                 || scope.canViewAll()!=actor.all() || !Objects.equals(scope.groupId(),actor.groupId()) || actor.resourceCodes()==null
-                || !actor.resourceCodes().containsAll(grants()))throw IqcException.accessDenied("订阅发现未取得有效的当前负责人授权");
+                || !actor.resourceCodes().containsAll(grants(release.definition())))throw IqcException.accessDenied("订阅发现未取得有效的当前负责人授权");
     }
     @Transactional(isolation=Isolation.REPEATABLE_READ)
     public int fire(Frame frame,ScheduledActorAccessService.Resolved actor){
@@ -199,7 +202,7 @@ public class EventSubscriptionService {
             var request=new TaskTriggerRequest("iqc-task-trigger-v1","archive-subscription",eventId(version.getId(),conversation.getId(),conversation.getSourceFingerprint()),
                     definition.eventType(),conversation.getCreatedTime().toInstant(),Instant.now().plusSeconds(definition.waitSeconds()),release.name(),
                     definition.pipeline(),definition.selector(),new TaskTriggerRequest.Target(conversation.getId(),null,null,conversation.getSourceFingerprint()),
-                    null,definition.concurrency(),"ASRCompleted".equals(definition.eventType()));
+                    null,definition.concurrency(),"ASRCompleted".equals(definition.eventType()),definition.retryPolicy());
             var receipt=triggers.receiveSubscription(request,release.ownerBound(),actor,release.pipeline(),release.selector(),row.getId(),version.getId());
             if(receipt.getOwnerGroupId()!=null && !Objects.equals(receipt.getOwnerGroupId(),row.getOwnerGroupId())){
                 if(taskRows.update(null,Wrappers.<InspectionTask>lambdaUpdate().eq(InspectionTask::getId,receipt.getId()).set(InspectionTask::getOwnerGroupId,null))!=1)

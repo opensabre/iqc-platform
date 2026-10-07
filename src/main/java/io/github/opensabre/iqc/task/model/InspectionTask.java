@@ -9,6 +9,14 @@ import lombok.EqualsAndHashCode;
 @TableName("iqc_inspection_task")
 @EqualsAndHashCode(callSuper = true)
 public class InspectionTask extends BasePo {
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String retryPolicyJson;
+    private String retryPolicyHash;
+    private Boolean automaticRetryEnabled;
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy=com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
+    private java.time.LocalDateTime retryNotBeforeUtc;
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy=com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
+    private String retryError;
     private String eventSubscriptionId;
     private String eventSubscriptionRevisionId;
     private String triggerSource;

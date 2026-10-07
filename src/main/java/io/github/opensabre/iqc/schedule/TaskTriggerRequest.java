@@ -5,8 +5,14 @@ import java.time.Instant;
 
 public record TaskTriggerRequest(String schemaVersion,String source,String eventId,String eventType,Instant occurredAt,Instant expiresAt,
         String name,PeriodicDefinition.PipelineReference pipeline,SelectorAssetService.Reference selector,
-        Target target,ApiConversationInput content,int concurrency,boolean requireASR) {
+        Target target,ApiConversationInput content,int concurrency,boolean requireASR,
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        io.github.opensabre.iqc.task.retry.AutomaticRetryPolicy retryPolicy) {
     public record Target(String conversationId,String sourceType,String externalId,String inputRevision) { }
+    public TaskTriggerRequest(String schemaVersion,String source,String eventId,String eventType,Instant occurredAt,Instant expiresAt,
+            String name,PeriodicDefinition.PipelineReference pipeline,SelectorAssetService.Reference selector,Target target,ApiConversationInput content,int concurrency,boolean requireASR){
+        this(schemaVersion,source,eventId,eventType,occurredAt,expiresAt,name,pipeline,selector,target,content,concurrency,requireASR,null);
+    }
     public TaskTriggerRequest {
         if(!"iqc-task-trigger-v1".equals(schemaVersion) || source==null || !source.matches("[A-Za-z0-9:_-]{1,64}")
                 || eventId==null || eventId.isBlank() || !eventId.equals(eventId.strip()) || eventId.length()>128 || eventId.chars().anyMatch(Character::isISOControl)

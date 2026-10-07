@@ -673,6 +673,9 @@ public class InspectionTaskService {
         if(receipt==null)taskMapper.insert(task);
         else {
             task.setId(receipt.getId());task.setCreatedBy(receipt.getCreatedBy());task.setCreatedTime(receipt.getCreatedTime());
+            task.setRetryPolicyJson(receipt.getRetryPolicyJson());task.setRetryPolicyHash(receipt.getRetryPolicyHash());
+            task.setAutomaticRetryEnabled(receipt.getAutomaticRetryEnabled());
+            task.setRetryNotBeforeUtc(receipt.getRetryNotBeforeUtc());task.setRetryError(receipt.getRetryError());
             task.setEventSubscriptionId(receipt.getEventSubscriptionId());task.setEventSubscriptionRevisionId(receipt.getEventSubscriptionRevisionId());
             task.setTriggerSource(receipt.getTriggerSource());task.setTriggerEventId(receipt.getTriggerEventId());
             task.setTriggerPayloadHash(receipt.getTriggerPayloadHash());task.setTriggerRequestHash(receipt.getTriggerRequestHash());task.setTriggerRequestJson(receipt.getTriggerRequestJson());
@@ -987,7 +990,7 @@ public class InspectionTaskService {
         if (status != null && !status.isBlank()) query.eq(InspectionTask::getStatus, status.trim());
         if (taskType != null && !taskType.isBlank()) query.eq(InspectionTask::getTaskType, taskType.trim());
         // Large frozen transcripts belong to authorized task detail, not every list row.
-        query.select(InspectionTask.class,field->!java.util.Set.of("ruleSnapshotJson","triggerRequestJson").contains(field.getProperty()));
+        query.select(InspectionTask.class,field->!java.util.Set.of("ruleSnapshotJson","triggerRequestJson","retryPolicyJson").contains(field.getProperty()));
         return IqcPage.from(taskMapper.selectPage(page, query));
     }
 
@@ -1064,11 +1067,16 @@ public class InspectionTaskService {
         int cancelled = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
                 .set(InspectionTask::getStatus, targetStatus)
                 .set(InspectionTask::getCancelRequested, true)
+                .set(InspectionTask::getAutomaticRetryEnabled, false)
+                .set(InspectionTask::getRetryNotBeforeUtc, null)
                 .eq(InspectionTask::getId, id)
-                .in(InspectionTask::getStatus, "SCHEDULED", "MATERIALIZING", "CREATED", "QUEUED", "RUNNING", "PAUSE_REQUESTED", "PAUSED", "WAITING_INPUT"));
+                .in(InspectionTask::getStatus, "SCHEDULED", "MATERIALIZING", "CREATED", "QUEUED", "RUNNING", "PAUSE_REQUESTED", "PAUSED", "WAITING_INPUT", "FAILED", "PARTIAL_FAILED"));
         if (cancelled == 1 && !running && task.getCurrentExecutionId() != null) {
             TaskExecution execution = executionMapper.selectById(task.getCurrentExecutionId());
-            if (execution != null) { execution.setStatus("CANCELLED"); executionMapper.updateById(execution); }
+            if (execution != null && List.of("QUEUED", "PAUSED").contains(execution.getStatus())) {
+                execution.setStatus("CANCELLED");
+                if (executionMapper.updateById(execution) != 1) throw IqcException.invalidState("取消执行轮次失败");
+            }
         }
         return taskMapper.selectById(id);
     }
@@ -1099,7 +1107,10 @@ public class InspectionTaskService {
 
     @Transactional
     public void deleteTerminal(String id) {
-        InspectionTask task = get(id);
+        get(id);
+        InspectionTask task = taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery()
+                .eq(InspectionTask::getId, id).last("FOR UPDATE"));
+        if (task == null) throw IqcException.notFound("任务不存在");
         if (!List.of("SUCCEEDED", "PARTIAL_FAILED", "FAILED", "NO_DATA", "CANCELLED", "TRIGGER_EXPIRED", "TRIGGER_CONFLICT").contains(task.getStatus())) {
             throw IqcException.invalidState("只有终态任务可以删除");
         }

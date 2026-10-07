@@ -2,8 +2,14 @@ package io.github.opensabre.iqc.schedule;
 import io.github.opensabre.iqc.selector.SelectorAssetService;
 import java.time.Instant;
 public record EventSubscriptionDefinition(String schemaVersion,String eventType,Instant effectiveFrom,Instant effectiveUntil,
-        int waitSeconds,int concurrency,PeriodicDefinition.PipelineReference pipeline,SelectorAssetService.Reference selector) {
+        int waitSeconds,int concurrency,PeriodicDefinition.PipelineReference pipeline,SelectorAssetService.Reference selector,
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        io.github.opensabre.iqc.task.retry.AutomaticRetryPolicy retryPolicy) {
     public static final String SCHEMA="iqc-event-subscription-v1";
+    public EventSubscriptionDefinition(String schemaVersion,String eventType,Instant effectiveFrom,Instant effectiveUntil,
+            int waitSeconds,int concurrency,PeriodicDefinition.PipelineReference pipeline,SelectorAssetService.Reference selector){
+        this(schemaVersion,eventType,effectiveFrom,effectiveUntil,waitSeconds,concurrency,pipeline,selector,null);
+    }
     public EventSubscriptionDefinition {
         if(!SCHEMA.equals(schemaVersion) || (eventType==null || !java.util.Set.of("ConversationCompleted","ASRCompleted").contains(eventType))
                 || effectiveFrom==null || waitSeconds<1 || waitSeconds>604800 || concurrency<1 || concurrency>32
