@@ -232,7 +232,6 @@ public class GatewayCallService {
         if(bucket.getOccupied()==Long.MAX_VALUE || (effectiveLimit>0 && bucket.getOccupied()>=effectiveLimit))
             throw new GatewayAdmissionException("MODEL_CONCURRENCY_LIMIT_REACHED");
         bucket.setOccupied(bucket.getOccupied()+1);
-        if(capacities.updateById(bucket)!=1)throw IqcException.invalidState("预留模型容量失败");
         var call=new GatewayCall();call.setCallId(UUID.randomUUID().toString().replace("-",""));call.setModelKey(key);call.setRequestedModelName(model.modelName());
         if(model.deployment()!=null){call.setContextWindowTokens(model.deployment().contextWindowTokens());call.setDeploymentRef(model.deployment().deploymentRef());}
         var output=model.output();call.setOutputLimitStatus(output==null?"NOT_DECLARED":"UNKNOWN_RESPONSE");
@@ -245,6 +244,8 @@ public class GatewayCallService {
             call.setPricingHash(price.pricingJson()==null?null:SelectorAssetService.hash(price.pricingJson()));call.setBillingSupported(price.billingSupported());
             var declaration=io.github.opensabre.iqc.modelprofile.ModelPricing.parse(price.pricingJson());
             if(declaration!=null){call.setPricingCurrency(declaration.currency());call.setCostStatus("UNKNOWN_RESPONSE");}}
+        GatewayBudgetAccounting.reserve(bucket,call);
+        if(capacities.updateById(bucket)!=1)throw IqcException.invalidState("预留模型容量失败");
         call.setStatus("RESERVED");call.setReservedAtUtc(utc());
         if(calls.insert(call)!=1)throw IqcException.invalidState("记录模型调用预留失败");return new Handle(call.getCallId(),key);
     }
@@ -274,10 +275,11 @@ public class GatewayCallService {
         if(model!=null && model.length()<=256 && model.codePoints().noneMatch(Character::isISOControl))call.setResponseModelId(model);
         observeOutputLimit(call,usage);
         calculateCost(call,usage);
+        boolean budgetChanged=GatewayBudgetAccounting.settle(bucket,call,usage);
         call.setStatus("CONFIRMED");call.setSettledAtUtc(utc());
         boolean release=call.getCapacityReleasedAtUtc()==null;
         if(release)bucket.setOccupied(bucket.getOccupied()-1);
-        if(calls.updateById(call)!=1 || (release && capacities.updateById(bucket)!=1))throw IqcException.invalidState("核销模型调用失败");
+        if(calls.updateById(call)!=1 || ((release || budgetChanged) && capacities.updateById(bucket)!=1))throw IqcException.invalidState("核销模型调用失败");
     }
     private static void observeOutputLimit(GatewayCall call,Usage usage){
         if(call.getMaxOutputTokens()==null){call.setOutputLimitStatus("NOT_DECLARED");return;}

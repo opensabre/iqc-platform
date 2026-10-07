@@ -8,4 +8,15 @@ public class GatewayCapacity {
     private Integer concurrencyLimit;
     private Boolean policyManaged;
     private Long policyVersion;
+    private Long tokenBudgetLimit;
+    private Long tokenBudgetCommitted;
+    private java.math.BigDecimal costBudgetLimit;
+    private java.math.BigDecimal costBudgetCommitted;
+    private String budgetCurrency;
+    private Integer budgetContextWindow;
+    private String budgetDeploymentRef;
+    private String budgetEvidenceRef;
+    private String budgetOutputParameter;
+    private String budgetPricingHash;
+    private Boolean budgetBreached;
 }
