@@ -180,3 +180,8 @@ V1.1.47 单一追加表复用 Cron、归档订阅与接收 Task 物化调用：�
 复用原执行器/Task/Execution/RouteTrace/Pipeline节点，仅V1.1.51扩展原调用事实与索引。ModelCallContext显式贯穿普通消息/会话、逐项及Pipeline，保留真实根Task/EID、节点/检测轮次、输入会话与owner/group，不解析逻辑字符串、不取线程局部身份或使用临时stageTask ID。准入检查真实轮次归属/当前EID、RUNNING及取消暂停意图；任务范围授权后按任意原真实EID查询。UI复用调用组件进详情，权限V20261004_21四IQC角色仅任务范围读，全局容量管理不扩权。
 
 缺来源旧数据保留null，旧适配器仍沿原默认重载。模型价格/部署身份、Token/金额预算、工具/legacy逐HTTP计量及真实范围/事务/模型验收继续；完整PRD未完成。没有新增或执行测试、迁移或部署。
+
+
+## I7 模型连接检查统一Gateway（2026-10-07）
+
+连接检查复用原API/权限，通过Router.callProfile接入相同模型准入及实际nullableToken记录；无伪Task/EID/rule。治理阻断/核销未确认不误报密钥错误，不回传原异常。无新表/权限/框架修改。仅编译，未新增或执行测试、真实模型调用、SQL或部署；定价及硬预算仍继续，完整PRD未完成。

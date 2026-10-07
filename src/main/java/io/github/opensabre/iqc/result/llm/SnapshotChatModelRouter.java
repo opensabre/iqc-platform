@@ -66,6 +66,14 @@ public class SnapshotChatModelRouter {
         }
         throw last==null?new IllegalStateException("Agent 没有可用模型快照"):last;
     }
+    /** Administrative connection checks share the same admission and response accounting boundary. */
+    public ChatResponse callProfile(Prompt prompt,JsonNode profile,
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context){
+        var selected=create(profile);
+        var identity=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity(profile.path("provider").asText(),
+                profile.path("endpoint").asText(),profile.path("modelName").asText());
+        return invoke(selected,prompt,identity,context);
+    }
     private ChatResponse invoke(ChatModel model,Prompt prompt,
             io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity identity,
             io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context) {
