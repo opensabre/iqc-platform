@@ -9,6 +9,12 @@ public class GatewayCall {
     private String logicalRecordId;
     private String ruleId;
     private String owner;
+    private String taskId;
+    private String executionId;
+    private String nodeId;
+    private Integer runIndex;
+    private String ownerGroupId;
+    private String conversationId;
     private String status;
     private LocalDateTime reservedAtUtc;
     private LocalDateTime settledAtUtc;

@@ -63,6 +63,10 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
     @Override
     public LlmEvaluation evaluate(String content, JsonNode rule, JsonNode agentSnapshot,
                                   JsonNode preRuleFindings, String recordId) {
+        return evaluate(content,rule,agentSnapshot,preRuleFindings,recordId,null);
+    }
+    @Override
+    public LlmEvaluation evaluate(String content,JsonNode rule,JsonNode agentSnapshot,JsonNode preRuleFindings,String recordId,ModelCallContext callContext){
         String stableId = recordId == null || recordId.isBlank() ? stableId(content, rule) : recordId;
         String usageId = "llm-call:" + stableId;
         String ruleId = rule.path("id").asText("unknown");
@@ -85,7 +89,7 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
                 throw new IllegalStateException("LLM 调用达到限次: " + decision.errorMessage());
             }
             }
-            LlmEvaluation evaluation = callWithRetry(content, rule, preRuleFindings,stableId);
+            LlmEvaluation evaluation = callWithRetry(content, rule, preRuleFindings,stableId,callContext);
             usageCounterRecorder.record(new UsageRecord(usageId + ":success", null, "iqc-platform", "LLM_CALL",
                     ruleId, "QUALITY_EVALUATION", UsageOutcome.SUCCESS));
             return evaluation;
@@ -96,7 +100,7 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
         }
     }
 
-    private LlmEvaluation callWithRetry(String content, JsonNode rule, JsonNode preRuleFindings,String recordId) {
+    private LlmEvaluation callWithRetry(String content, JsonNode rule, JsonNode preRuleFindings,String recordId,ModelCallContext callContext) {
         RuntimeException last = null;
         int attempts = Math.max(1, Math.min(properties.getMaxAttempts(), 3));
         for (int attempt = 1; attempt <= attempts; attempt++) {
@@ -110,7 +114,7 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
                         .retrieve().body(JsonNode.class);
                 JsonNode response=gateway==null?request.get():gateway.invoke(
                         new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity("HTTP",properties.getEndpoint(),properties.getModel()),
-                        new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context(recordId,rule.path("id").asText("unknown"),null),request,
+                        new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context(recordId,rule.path("id").asText("unknown"),callContext==null?null:callContext.owner(),callContext),request,
                         HttpLlmQualityProvider::usage);
                 return parseEvaluation(response);
             } catch (RestClientException | IllegalArgumentException exception) {

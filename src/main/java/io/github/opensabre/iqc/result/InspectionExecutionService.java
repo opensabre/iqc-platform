@@ -1089,6 +1089,13 @@ public class InspectionExecutionService {
             Map<String, List<ConversationMessage>> quotes,
             io.github.opensabre.iqc.scheme.SchemeDependencyResolver.DetectionContext context,
             List<ConversationMessage> inputs, InspectionResult upstream, int runIndex) {
+        return evaluateItemRouteStage(task,rules,quotes,context,inputs,upstream,runIndex,
+                modelCallContext(task,context.contextKey(),runIndex,inputs.isEmpty()?null:inputs.getFirst().getConversationId()));
+    }
+    private InspectionResult evaluateItemRouteStage(InspectionTask task,Map<String,JsonNode> rules,
+            Map<String,List<ConversationMessage>> quotes,io.github.opensabre.iqc.scheme.SchemeDependencyResolver.DetectionContext context,
+            List<ConversationMessage> inputs,InspectionResult upstream,int runIndex,
+            io.github.opensabre.iqc.result.llm.ModelCallContext callContext){
             JsonNode original = rules.get(context.ruleId());
             if (original == null) throw io.github.opensabre.iqc.governance.IqcException.invalidState("逐项冻结规则不存在");
             var rule = (ObjectNode) original.deepCopy(); rule.put("deduction", 0); rule.put("veto", false);
@@ -1127,12 +1134,12 @@ public class InspectionExecutionService {
             for (var batch : batches) {
                 if ("CANDIDATE".equals(context.phase())) {
                     var decoded = ItemCandidateOutput.decode(objectMapper, llmQualityProvider.evaluateCandidates(batch, rule,
-                            readSnapshot(task.getAgentSnapshotJson()), recordId + ":" + batch.getFirst().getId()));
+                            readSnapshot(task.getAgentSnapshotJson()), recordId + ":" + batch.getFirst().getId(),callContext));
                     results.add(decoded.result()); decodedQuotes.addAll(decoded.quotes());
                 } else {
                     var anchor = "CONVERSATION".equals(context.inputScope()) ? applicable.getFirst() : batch.getFirst();
                     results.add(evaluateSingle(stageTask, anchor, rule, findings, batch,
-                            new LinkedHashMap<>(), new LinkedHashMap<>(), 0));
+                            new LinkedHashMap<>(), new LinkedHashMap<>(), 0,callContext));
                 }
             }
             var aggregate = aggregateItemStage(results, rule.path("labelFactTargets").isArray());
@@ -1158,7 +1165,8 @@ public class InspectionExecutionService {
         var context = new io.github.opensabre.iqc.scheme.SchemeDependencyResolver.DetectionContext(nodeId,
                 rule.path("id").asText(), rule.path("versionNo").asInt(), inputScope, phase, null);
         return evaluateItemRouteStage(stageTask, Map.of(context.ruleId(), rule), new LinkedHashMap<>(),
-                context, inputs, upstream, Math.max(0,attempt - 1));
+                context, inputs, upstream, Math.max(0,attempt - 1),
+                modelCallContext(task,nodeId,Math.max(0,attempt-1),inputs.isEmpty()?null:inputs.getFirst().getConversationId()));
     }
 
     /** Projects only item terminal contexts into the existing independent business scoring engine. */
@@ -1338,6 +1346,17 @@ public class InspectionExecutionService {
                                             JsonNode preRuleFindings, List<ConversationMessage> conversationMessages,
                                             Map<String, List<LlmQualityProvider.LlmEvaluation>> conversationLlmRuns,
                                             Map<String, String> conversationFactOwners, int runIndex) {
+        return evaluateSingle(task,message,rule,preRuleFindings,conversationMessages,conversationLlmRuns,conversationFactOwners,runIndex,
+                modelCallContext(task,null,runIndex,message.getConversationId()));
+    }
+    private static io.github.opensabre.iqc.result.llm.ModelCallContext modelCallContext(InspectionTask task,String nodeId,int runIndex,String conversationId){
+        if(task.getId()==null || task.getCurrentExecutionId()==null || task.getCreatedBy()==null || conversationId==null)return null;
+        return new io.github.opensabre.iqc.result.llm.ModelCallContext(task.getId(),task.getCurrentExecutionId(),nodeId,runIndex,
+                task.getCreatedBy(),task.getOwnerGroupId(),conversationId);
+    }
+    private InspectionResult evaluateSingle(InspectionTask task,ConversationMessage message,JsonNode rule,JsonNode preRuleFindings,
+            List<ConversationMessage> conversationMessages,Map<String,List<LlmQualityProvider.LlmEvaluation>> conversationLlmRuns,
+            Map<String,String> conversationFactOwners,int runIndex,io.github.opensabre.iqc.result.llm.ModelCallContext callContext){
         InspectionResult result = new InspectionResult();
         result.setTaskId(task.getId()); result.setConversationId(message.getConversationId()); result.setMessageId(message.getId());
         result.setRuleId(rule == null ? null : rule.path("id").asText(null)); result.setSpeakerRole(message.getSpeakerRole());
@@ -1399,15 +1418,14 @@ public class InspectionExecutionService {
                         int nextRun = priorRuns.size();
                         String conversationRecordId = "inspection-conversation:" + task.getId() + ":"
                                 + task.getCurrentExecutionId() + ":" + message.getConversationId() + ":rule:" + contextKey + ":run:" + nextRun;
-                        priorRuns.add(preRuleFindings == null ? llmQualityProvider.evaluateConversation(conversationMessages, rule,
-                                readSnapshot(task.getAgentSnapshotJson()), conversationRecordId)
-                                : llmQualityProvider.evaluateConversation(conversationMessages, rule,
-                                readSnapshot(task.getAgentSnapshotJson()), preRuleFindings, conversationRecordId));
+                        var measured=callContext==null?null:new io.github.opensabre.iqc.result.llm.ModelCallContext(callContext.taskId(),callContext.executionId(),
+                                callContext.nodeId(),callContext.nodeId()==null?nextRun:callContext.runIndex(),callContext.owner(),callContext.ownerGroupId(),callContext.conversationId());
+                        priorRuns.add(llmQualityProvider.evaluateConversation(conversationMessages,rule,readSnapshot(task.getAgentSnapshotJson()),
+                                preRuleFindings,conversationRecordId,measured));
                     }
                     evaluation = priorRuns.get(runIndex);
-                } else evaluation = preRuleFindings == null
-                        ? llmQualityProvider.evaluate(message.getContent(), rule, readSnapshot(task.getAgentSnapshotJson()), recordId)
-                        : llmQualityProvider.evaluate(message.getContent(), rule, readSnapshot(task.getAgentSnapshotJson()), preRuleFindings, recordId);
+                } else evaluation=llmQualityProvider.evaluate(message.getContent(),rule,readSnapshot(task.getAgentSnapshotJson()),
+                        preRuleFindings,recordId,callContext);
                 result.setDetectorMetricsJson(structuredOutputMetrics(1,evaluation.validStructuredOutput(objectMapper,conversationFacts)?1:0));
                 if (!evaluation.supported()) {
                     result.setResultStatus("ERROR"); result.setScore(0); result.setRiskLevel("HIGH"); result.setDeduction(0);

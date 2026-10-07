@@ -4,6 +4,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 /** LLM 规则的适配器边界，正式模型必须返回可校验的结构化结果。 */
 public interface LlmQualityProvider {
+    default LlmEvaluation evaluate(String content,JsonNode rule,JsonNode agentSnapshot,JsonNode preRuleFindings,String recordId,ModelCallContext context){
+        return evaluate(content,rule,agentSnapshot,preRuleFindings,recordId);
+    }
+    default LlmEvaluation evaluateConversation(java.util.List<io.github.opensabre.iqc.conversation.model.ConversationMessage> messages,
+            JsonNode rule,JsonNode agentSnapshot,JsonNode preRuleFindings,String recordId,ModelCallContext context){
+        return evaluateConversation(messages,rule,agentSnapshot,preRuleFindings,recordId);
+    }
+    default LlmEvaluation evaluateCandidates(java.util.List<io.github.opensabre.iqc.conversation.model.ConversationMessage> messages,
+            JsonNode rule,JsonNode agentSnapshot,String recordId,ModelCallContext context){
+        return evaluateCandidates(messages,rule,agentSnapshot,recordId);
+    }
     /** Candidate extraction is explicit; legacy boolean judgments cannot stand in for complete extraction. */
     default LlmEvaluation evaluateCandidates(java.util.List<io.github.opensabre.iqc.conversation.model.ConversationMessage> messages,
                                            JsonNode rule, JsonNode agentSnapshot, String recordId) {

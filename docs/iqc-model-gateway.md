@@ -25,3 +25,13 @@
 未知或崩溃RESERVED可由管理员明确确认远端已完成/取消或请求未发送，并提供核对凭据编号后恢复一次容量。操作不是远端自动验证，管理员对外部核对事实负责，特别是RESERVED必须确认原发起进程不会恢复后再次发出请求，远端停止本身不足以释放尚可能恢复的发起者；不允许基于TTL推断停止。锁序call→capacity与响应核销一致；恢复、保存稳定操作人/原因/凭据同事务，重复相同凭据幂等，替换拒绝。保留原UNKNOWN/RESERVED及未知Token，不冒充响应成功或费用0。RESERVED后迟到真实响应仍可记录，但不再重复减少已释放占用。
 
 GET/PUT /api/iqc/model-gateway/capacity/{modelKey} 和 POST /calls/{callId}/capacity-release 分别要求 capacity:view/configure、calls:release及服务端质检管理员角色。容量政策管理与已释放状态在模型调用页面展示；没有框架修改。实际远端核对/事务并发、SQL迁移及浏览器运行尚未验收，完整硬预算及Task/EID归属仍待继续。
+
+## 执行来源关联（2026-10-07）
+
+复用原 Task/TaskExecution、RouteExecutionTrace 与 Pipeline NodeContext。V1.1.51 仅扩展原调用事实 taskId/executionId/nodeId/runIndex/ownerGroupId/conversationId，并建立任务轮次查询索引，无新任务/节点/调用表。
+
+ModelCallContext 在执行器显式创建和逐层传递，普通消息/会话、逐项候选/复核及Pipeline桥接沿真实根Task/EID，不解析逻辑recordId、不借用异步线程用户，也不把为缓存隔离生成的stageTask临时ID当真实根身份。节点未定义的旧规则调用nodeId保持null；runIndex为原检测/节点轮次，适配器retry/fallback各自callId沿同一来源。
+
+reserve 在独立短事务校验Task当前EID、Execution归属、运行状态/暂停取消意图及保存的owner/group一致；陈旧来源停止准入，不冒充新任务。该一致读不等于能撤销已发远端请求；记录只证明捕获的来源，原执行器EID提交fence继续复用。缺少来源的旧调用保留null，旧适配器默认重载继续可用，不从字符串猜历史关联。
+
+GET /api/iqc/tasks/{id}/model-calls 先沿Task.get数据范围授权，可选择已存在且属于本任务的EID，再查询显式字段。全局查询仍管理员独有。任务详情复用原调用记录组件，权限iqc:task:model-calls:view四IQC角色；不开放全局容量管理给普通任务查看者。真实权限/模型/数据库事务运行、迁移尚未验收；部署版本/冻结价格、Token硬上限及传输层工具计量仍继续。

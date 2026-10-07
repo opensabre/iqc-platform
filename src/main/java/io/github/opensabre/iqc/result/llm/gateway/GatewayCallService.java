@@ -31,7 +31,8 @@ public class GatewayCallService {
         public String key(){return SelectorAssetService.hash(frame(provider)+frame(endpoint)+frame(modelName));}
         private static String frame(String value){return value.getBytes(StandardCharsets.UTF_8).length+":"+value;}
     }
-    public record Context(String logicalRecordId,String ruleId,String owner) {
+    public record Context(String logicalRecordId,String ruleId,String owner,io.github.opensabre.iqc.result.llm.ModelCallContext execution) {
+        public Context(String logicalRecordId,String ruleId,String owner){this(logicalRecordId,ruleId,owner,null);}
         public Context {bounded(logicalRecordId,512);bounded(ruleId,128);bounded(owner,128);}
         private static void bounded(String value,int size){if(value!=null && (value.length()>size || value.codePoints().anyMatch(Character::isISOControl)))
             throw new GatewayAdmissionException("CALL_CONTEXT_INVALID");}
@@ -48,15 +49,19 @@ public class GatewayCallService {
     }
     private final GatewayCapacityMapper capacities;
     private final GatewayCallMapper calls;
+    private final io.github.opensabre.iqc.task.dao.InspectionTaskMapper taskRows;
+    private final io.github.opensabre.iqc.task.dao.TaskExecutionMapper executionRows;
     private final io.github.opensabre.iqc.shared.IqcDataScope scope;
     private final io.github.opensabre.iqc.schedule.ScheduledActorAccessService actors;
+    private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.task.InspectionTaskService> taskService;
     public record CallView(String callId,String modelKey,String logicalRecordId,String ruleId,String owner,String status,
             LocalDateTime reservedAtUtc,LocalDateTime settledAtUtc,
             @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long inputTokens,
             @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long outputTokens,
             @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long totalTokens,
             String responseModelId,String usageStatus,String errorType,LocalDateTime capacityReleasedAtUtc,
-            String capacityReleasedBy,String capacityReleaseReason,String capacityReleaseEvidence) { }
+            String capacityReleasedBy,String capacityReleaseReason,String capacityReleaseEvidence,
+            String taskId,String executionId,String nodeId,Integer runIndex,String conversationId) { }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public io.github.opensabre.iqc.shared.IqcPage<CallView> page(String modelKey,String status,long current,long size){
         if(!scope.isIqcAdministrator())throw IqcException.accessDenied("只有质检管理员可以查看全局模型调用");
@@ -64,12 +69,28 @@ public class GatewayCallService {
                 || (status!=null && !Set.of("RESERVED","CONFIRMED","UNKNOWN").contains(status)))throw IqcException.invalidArgument("模型调用分页条件无效");
         var query=Wrappers.<GatewayCall>lambdaQuery();if(modelKey!=null)query.eq(GatewayCall::getModelKey,modelKey);
         if(status!=null)query.eq(GatewayCall::getStatus,status);
+        return readPage(query,current,size);
+    }
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public io.github.opensabre.iqc.shared.IqcPage<CallView> taskPage(String taskId,String executionId,String status,long current,long size){
+        taskService.getObject().get(taskId);
+        if(current<1 || size<1 || size>100 || (status!=null && !Set.of("RESERVED","CONFIRMED","UNKNOWN").contains(status)))
+            throw IqcException.invalidArgument("模型调用分页条件无效");
+        if(executionId!=null){var run=executionRows.selectById(executionId);
+            if(run==null || !Objects.equals(run.getTaskId(),taskId))throw IqcException.notFound("任务执行轮次不存在");}
+        var query=Wrappers.<GatewayCall>lambdaQuery().eq(GatewayCall::getTaskId,taskId);
+        if(executionId!=null)query.eq(GatewayCall::getExecutionId,executionId);
+        if(status!=null)query.eq(GatewayCall::getStatus,status);
+        return readPage(query,current,size);
+    }
+    private io.github.opensabre.iqc.shared.IqcPage<CallView> readPage(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<GatewayCall> query,long current,long size){
         var page=calls.selectPage(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(current,size),
                 query.orderByDesc(GatewayCall::getReservedAtUtc).orderByDesc(GatewayCall::getCallId));
         return new io.github.opensabre.iqc.shared.IqcPage<>(page.getRecords().stream().map(value->new CallView(value.getCallId(),value.getModelKey(),
                 value.getLogicalRecordId(),value.getRuleId(),value.getOwner(),value.getStatus(),value.getReservedAtUtc(),value.getSettledAtUtc(),
                 value.getInputTokens(),value.getOutputTokens(),value.getTotalTokens(),value.getResponseModelId(),value.getUsageStatus(),value.getErrorType(),value.getCapacityReleasedAtUtc(),
-                value.getCapacityReleasedBy(),value.getCapacityReleaseReason(),value.getCapacityReleaseEvidence())).toList(),
+                value.getCapacityReleasedBy(),value.getCapacityReleaseReason(),value.getCapacityReleaseEvidence(),
+                value.getTaskId(),value.getExecutionId(),value.getNodeId(),value.getRunIndex(),value.getConversationId())).toList(),
                 page.getCurrent(),page.getSize(),page.getTotal());
     }
     public record CapacityView(String modelKey,
@@ -118,6 +139,14 @@ public class GatewayCallService {
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.REPEATABLE_READ)
     public Handle reserve(ModelIdentity model,Context context,int limit){
         if(model==null || context==null || limit<0 || limit>10000)throw new GatewayAdmissionException("GATEWAY_CONFIGURATION_INVALID");
+        var execution=context.execution();
+        if(execution!=null){
+            var task=taskRows.selectById(execution.taskId());var run=executionRows.selectById(execution.executionId());
+            if(task==null || run==null || !Objects.equals(run.getTaskId(),execution.taskId())
+                    || !Objects.equals(task.getCurrentExecutionId(),execution.executionId()) || !Objects.equals(task.getCreatedBy(),execution.owner())
+                    || !Objects.equals(task.getOwnerGroupId(),execution.ownerGroupId()) || !"RUNNING".equals(task.getStatus())
+                    || !"RUNNING".equals(run.getStatus()) || Boolean.TRUE.equals(task.getCancelRequested()) || Boolean.TRUE.equals(task.getPauseRequested()))throw new GatewayAdmissionException("MODEL_EXECUTION_PROVENANCE_STALE");
+        }
         String key=model.key();capacities.ensure(key,limit);var bucket=capacity(key);
         if(!Boolean.TRUE.equals(bucket.getPolicyManaged()) && !Objects.equals(bucket.getConcurrencyLimit(),limit))throw new GatewayAdmissionException("GATEWAY_CONCURRENCY_POLICY_MISMATCH");
         int effectiveLimit=bucket.getConcurrencyLimit();
@@ -126,7 +155,9 @@ public class GatewayCallService {
         bucket.setOccupied(bucket.getOccupied()+1);
         if(capacities.updateById(bucket)!=1)throw IqcException.invalidState("预留模型容量失败");
         var call=new GatewayCall();call.setCallId(UUID.randomUUID().toString().replace("-",""));call.setModelKey(key);
-        call.setLogicalRecordId(context.logicalRecordId());call.setRuleId(context.ruleId());call.setOwner(context.owner());
+        call.setLogicalRecordId(context.logicalRecordId());call.setRuleId(context.ruleId());call.setOwner(execution==null?context.owner():execution.owner());
+        if(execution!=null){call.setTaskId(execution.taskId());call.setExecutionId(execution.executionId());call.setNodeId(execution.nodeId());
+            call.setRunIndex(execution.runIndex());call.setOwnerGroupId(execution.ownerGroupId());call.setConversationId(execution.conversationId());}
         call.setStatus("RESERVED");call.setReservedAtUtc(utc());
         if(calls.insert(call)!=1)throw IqcException.invalidState("记录模型调用预留失败");return new Handle(call.getCallId(),key);
     }

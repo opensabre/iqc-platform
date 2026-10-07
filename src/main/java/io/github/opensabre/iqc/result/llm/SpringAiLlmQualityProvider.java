@@ -94,7 +94,11 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
     @Override
     public LlmEvaluation evaluate(String content, JsonNode rule, JsonNode agentSnapshot,
                                   JsonNode preRuleFindings, String recordId) {
-        return evaluateInput(content, rule, agentSnapshot, preRuleFindings, recordId, false);
+        return evaluate(content,rule,agentSnapshot,preRuleFindings,recordId,null);
+    }
+    @Override
+    public LlmEvaluation evaluate(String content,JsonNode rule,JsonNode agentSnapshot,JsonNode preRuleFindings,String recordId,ModelCallContext callContext){
+        return evaluateInput(content,rule,agentSnapshot,preRuleFindings,recordId,false,false,callContext);
     }
 
     /** Sanitizes message content only, preserving stable identities and rejecting partial/oversized input. */
@@ -108,6 +112,11 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
     @Override
     public LlmEvaluation evaluateConversation(List<io.github.opensabre.iqc.conversation.model.ConversationMessage> messages,
                                              JsonNode rule, JsonNode agentSnapshot, JsonNode preRuleFindings, String recordId) {
+        return evaluateConversation(messages,rule,agentSnapshot,preRuleFindings,recordId,null);
+    }
+    @Override
+    public LlmEvaluation evaluateConversation(List<io.github.opensabre.iqc.conversation.model.ConversationMessage> messages,
+            JsonNode rule,JsonNode agentSnapshot,JsonNode preRuleFindings,String recordId,ModelCallContext callContext){
         final String input;
         try { input = conversationInput(messages); }
         catch (IllegalArgumentException exception) {
@@ -120,13 +129,18 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
                 return new LlmEvaluation(false, false, "会话复核初筛证据无效或超限，禁止丢弃或截断");
             context = preRuleFindings.deepCopy(); sanitizeReviewText(context);
         }
-        return evaluateInput(input, rule, agentSnapshot, context, recordId, true);
+        return evaluateInput(input,rule,agentSnapshot,context,recordId,true,false,callContext);
     }
 
     /** Uses the same bounded identity-bearing input and governance facilities, with a distinct output contract. */
     @Override
     public LlmEvaluation evaluateCandidates(List<io.github.opensabre.iqc.conversation.model.ConversationMessage> messages,
                                             JsonNode rule, JsonNode agentSnapshot, String recordId) {
+        return evaluateCandidates(messages,rule,agentSnapshot,recordId,null);
+    }
+    @Override
+    public LlmEvaluation evaluateCandidates(List<io.github.opensabre.iqc.conversation.model.ConversationMessage> messages,
+            JsonNode rule,JsonNode agentSnapshot,String recordId,ModelCallContext callContext){
         if (rule == null || !rule.isObject() || rule.has("labelFactTargets"))
             return new LlmEvaluation(false, false, "候选抽取规则无效或混入标签事实目标");
         final String input;
@@ -134,7 +148,7 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
         catch (IllegalArgumentException exception) {
             return new LlmEvaluation(false, false, "候选输入身份或范围无效");
         }
-        return evaluateInput(input, rule, agentSnapshot, null, recordId, true, true);
+        return evaluateInput(input,rule,agentSnapshot,null,recordId,true,true,callContext);
     }
 
     private void sanitizeReviewText(JsonNode node) {
@@ -179,13 +193,17 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
 
     private LlmEvaluation evaluateInput(String content, JsonNode rule, JsonNode agentSnapshot,
                                        JsonNode preRuleFindings, String recordId, boolean conversation, boolean candidate) {
+        return evaluateInput(content,rule,agentSnapshot,preRuleFindings,recordId,conversation,candidate,null);
+    }
+    private LlmEvaluation evaluateInput(String content,JsonNode rule,JsonNode agentSnapshot,JsonNode preRuleFindings,String recordId,
+            boolean conversation,boolean candidate,ModelCallContext callContext){
         String stableId = recordId == null || recordId.isBlank() ? stableId(content, rule) : recordId;
         String usageId = "llm-call:" + stableId;
         String ruleId = rule.path("id").asText("unknown");
         recordUsage(usageId, ruleId, "attempt", UsageOutcome.ATTEMPT);
         try {
             if(modelRouter==null)enforceRateLimit();
-            LlmEvaluation result = callWithRetry(content, rule, agentSnapshot, preRuleFindings, conversation, candidate,stableId);
+            LlmEvaluation result = callWithRetry(content, rule, agentSnapshot, preRuleFindings, conversation, candidate,stableId,callContext);
             recordUsage(usageId, ruleId, "success", UsageOutcome.SUCCESS);
             return result;
         } catch (RuntimeException exception) {
@@ -195,7 +213,7 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
     }
 
     private LlmEvaluation callWithRetry(String content, JsonNode rule, JsonNode agentSnapshot,
-                                        JsonNode preRuleFindings, boolean conversation, boolean candidate,String recordId) {
+                                        JsonNode preRuleFindings, boolean conversation, boolean candidate,String recordId,ModelCallContext callContext) {
         RuntimeException last = null;
         int attempts = Math.max(1, Math.min(properties.getMaxAttempts(), 3));
         for (int attempt = 1; attempt <= attempts; attempt++) {
@@ -209,7 +227,7 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
                 try (SnapshotMcpToolProvider.Session tools = mcpTools.open(agentSnapshot)) {
                     response = modelRouter == null ? chatModel.call(prompt)
                             : modelRouter.call(prompt, agentSnapshot, tools.callbacks(),
-                                    new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context(recordId,rule.path("id").asText("unknown"),null));
+                                    new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context(recordId,rule.path("id").asText("unknown"),callContext==null?null:callContext.owner(),callContext));
                 }
                 String text = response == null || response.getResult() == null
                         ? null : response.getResult().getOutput().getText();
