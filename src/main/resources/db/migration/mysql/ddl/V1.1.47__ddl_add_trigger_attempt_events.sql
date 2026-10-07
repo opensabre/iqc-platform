@@ -1,0 +1,28 @@
+-- Append-only trigger facts; the existing Task/Execution tables remain the operational state.
+CREATE TABLE iqc_trigger_attempt_event (
+ id varchar(64) NOT NULL,
+ attempt_id varchar(64) NOT NULL,
+ phase varchar(16) NOT NULL,
+ trigger_kind varchar(32) NOT NULL,
+ parent_id varchar(64) NOT NULL,
+ revision_id varchar(64) DEFAULT NULL,
+ evidence_hash varchar(64) NOT NULL,
+ owner_user_id varchar(64) NOT NULL,
+ context_hash varchar(64) NOT NULL,
+ context_json text NOT NULL,
+ planned_at_utc datetime(3) DEFAULT NULL,
+ recorded_at_utc datetime(3) NOT NULL,
+ outcome varchar(32) DEFAULT NULL,
+ processed_units int DEFAULT NULL,
+ error_type varchar(128) DEFAULT NULL,
+ failure_stage varchar(32) DEFAULT NULL,
+ error_code varchar(64) DEFAULT NULL,
+ created_by varchar(128) NOT NULL,
+ created_time datetime(3) DEFAULT NULL,
+ updated_by varchar(128) DEFAULT NULL,
+ updated_time datetime(3) DEFAULT NULL,
+ PRIMARY KEY(id),
+ UNIQUE KEY uk_iqc_trigger_attempt_phase(attempt_id,phase),
+ KEY idx_iqc_trigger_attempt_parent(trigger_kind,parent_id,recorded_at_utc,id),
+ KEY idx_iqc_trigger_attempt_owner(owner_user_id,created_by)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
