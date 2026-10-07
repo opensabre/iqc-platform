@@ -20,8 +20,15 @@ public class GatewayCallService {
             catch(RuntimeException invalid){throw new GatewayAdmissionException("MODEL_PRICE_PROTOCOL_INVALID");}
         }
     }
-    public record ModelIdentity(String provider,String endpoint,String modelName,PriceBinding price) {
-        public ModelIdentity(String provider,String endpoint,String modelName){this(provider,endpoint,modelName,null);}
+    public record OutputConstraint(int limit,String parameter,boolean singleResponseScope){
+        public OutputConstraint {
+            if(limit<1 || limit>1000000 || !Set.of("MAX_TOKENS","MAX_COMPLETION_TOKENS").contains(parameter==null?"":parameter))
+                throw new GatewayAdmissionException("MODEL_OUTPUT_CONSTRAINT_INVALID");
+        }
+    }
+    public record ModelIdentity(String provider,String endpoint,String modelName,PriceBinding price,OutputConstraint output) {
+        public ModelIdentity(String provider,String endpoint,String modelName,PriceBinding price){this(provider,endpoint,modelName,price,null);}
+        public ModelIdentity(String provider,String endpoint,String modelName){this(provider,endpoint,modelName,null,null);}
         public ModelIdentity {
             if(provider==null || provider.isBlank() || provider.length()>64 || endpoint==null || endpoint.length()>2048
                     || modelName==null || modelName.isBlank() || modelName.length()>256)
@@ -73,7 +80,7 @@ public class GatewayCallService {
             String taskId,String executionId,String nodeId,Integer runIndex,String conversationId,
             String modelProfileId,Integer modelProfileVersion,String pricingHash,String pricingCurrency,String calculatedCost,String costStatus,String requestedModelName,
             @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheReadInputTokens,
-            @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheWriteInputTokens) { }
+            @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheWriteInputTokens,Integer maxOutputTokens,String outputTokenParameter,String outputLimitStatus) { }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public io.github.opensabre.iqc.shared.IqcPage<CallView> page(String modelKey,String status,long current,long size){
         if(!scope.isIqcAdministrator())throw IqcException.accessDenied("只有质检管理员可以查看全局模型调用");
@@ -103,7 +110,7 @@ public class GatewayCallService {
                 value.getInputTokens(),value.getOutputTokens(),value.getTotalTokens(),value.getResponseModelId(),value.getUsageStatus(),value.getErrorType(),value.getCapacityReleasedAtUtc(),
                 value.getCapacityReleasedBy(),value.getCapacityReleaseReason(),value.getCapacityReleaseEvidence(),
                 value.getTaskId(),value.getExecutionId(),value.getNodeId(),value.getRunIndex(),value.getConversationId(),value.getModelProfileId(),
-                value.getModelProfileVersion(),value.getPricingHash(),value.getPricingCurrency(),value.getCalculatedCost()==null?null:value.getCalculatedCost().toPlainString(),value.getCostStatus(),value.getRequestedModelName(),value.getCacheReadInputTokens(),value.getCacheWriteInputTokens())).toList(),
+                value.getModelProfileVersion(),value.getPricingHash(),value.getPricingCurrency(),value.getCalculatedCost()==null?null:value.getCalculatedCost().toPlainString(),value.getCostStatus(),value.getRequestedModelName(),value.getCacheReadInputTokens(),value.getCacheWriteInputTokens(),value.getMaxOutputTokens(),value.getOutputTokenParameter(),value.getOutputLimitStatus())).toList(),
                 page.getCurrent(),page.getSize(),page.getTotal());
     }
     /** Same snapshot and authorization as the paged facts; totals cover all matching pages. */
@@ -195,6 +202,8 @@ public class GatewayCallService {
         bucket.setOccupied(bucket.getOccupied()+1);
         if(capacities.updateById(bucket)!=1)throw IqcException.invalidState("预留模型容量失败");
         var call=new GatewayCall();call.setCallId(UUID.randomUUID().toString().replace("-",""));call.setModelKey(key);call.setRequestedModelName(model.modelName());
+        var output=model.output();call.setOutputLimitStatus(output==null?"NOT_DECLARED":"UNKNOWN_RESPONSE");
+        if(output!=null){call.setMaxOutputTokens(output.limit());call.setOutputTokenParameter(output.parameter());call.setOutputLimitSingleResponse(output.singleResponseScope());}
         call.setLogicalRecordId(context.logicalRecordId());call.setRuleId(context.ruleId());call.setOwner(execution==null?context.owner():execution.owner());
         if(execution!=null){call.setTaskId(execution.taskId());call.setExecutionId(execution.executionId());call.setNodeId(execution.nodeId());
             call.setRunIndex(execution.runIndex());call.setOwnerGroupId(execution.ownerGroupId());call.setConversationId(execution.conversationId());}
@@ -230,11 +239,18 @@ public class GatewayCallService {
         if(!"INVALID".equals(usage.status())){call.setInputTokens(usage.inputTokens());call.setOutputTokens(usage.outputTokens());call.setTotalTokens(usage.totalTokens());call.setCacheReadInputTokens(usage.cacheReadInputTokens());call.setCacheWriteInputTokens(usage.cacheWriteInputTokens());}
         String model=usage.responseModelId();
         if(model!=null && model.length()<=256 && model.codePoints().noneMatch(Character::isISOControl))call.setResponseModelId(model);
+        observeOutputLimit(call,usage);
         calculateCost(call,usage);
         call.setStatus("CONFIRMED");call.setSettledAtUtc(utc());
         boolean release=call.getCapacityReleasedAtUtc()==null;
         if(release)bucket.setOccupied(bucket.getOccupied()-1);
         if(calls.updateById(call)!=1 || (release && capacities.updateById(bucket)!=1))throw IqcException.invalidState("核销模型调用失败");
+    }
+    private static void observeOutputLimit(GatewayCall call,Usage usage){
+        if(call.getMaxOutputTokens()==null){call.setOutputLimitStatus("NOT_DECLARED");return;}
+        if(!Boolean.TRUE.equals(call.getOutputLimitSingleResponse())){call.setOutputLimitStatus("UNKNOWN_REQUEST_SCOPE");return;}
+        if("INVALID".equals(usage.status()) || usage.outputTokens()==null){call.setOutputLimitStatus("UNKNOWN_USAGE");return;}
+        call.setOutputLimitStatus(usage.outputTokens()>call.getMaxOutputTokens()?"OBSERVED_OVER_LIMIT":"OBSERVED_WITHIN_LIMIT");
     }
     private void calculateCost(GatewayCall call,Usage usage){
         if(call.getPricingJson()==null){call.setCostStatus("UNKNOWN_PRICE");return;}

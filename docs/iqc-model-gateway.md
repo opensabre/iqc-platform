@@ -73,3 +73,11 @@ V1.1.53仅扩展原调用事实，不新增账单/费用主表。受管资产与
 maxOutputTokens为严格JSON整数0到1000000；0清除，未提供/null保留原配置。正值必须明确outputTokenParameter为MAX_TOKENS或MAX_COMPLETION_TOKENS，分别发送max_tokens或max_completion_tokens，不会同时发两种。Agent主备发布快照冻结上限与参数，旧null省略保持原摘要；历史快照不借现行配置补上限。连接检查沿原profile使用相同参数。坏快照限制在密钥解析/远端调用前拒绝，禁止fallback绕过坏限制。
 
 上限只表示请求参数，供应商接受/遵守及推理token语义需按实际模型核验；自动工具每回合适用模型默认上限，但累计工具回合不等于这个上限。Legacy默认模型/HTTP部署沿原配置，本资产字段不臆造其请求限制。尚未形成输入token可证明上界或累计Token/金额硬预算；没有运行测试、迁移、真实模型或部署。
+
+## 调用输出限制证据（2026-10-07）
+
+复用原call事实及受管模型选项，不创建平行限制表/API。V1.1.55在reserve时保存当次所选模型的输出上限/参数及单响应范围，与原价格/Task来源同一事务；重试/fallback各自记录所选值，旧记录不回填。无声明NOT_DECLARED，有声明待响应UNKNOWN_RESPONSE；自动工具多回合UNKNOWN_REQUEST_SCOPE，输出用量缺失/无效UNKNOWN_USAGE。
+
+仅可观察单响应且供应商返回合法输出Token时比较上限，标记OBSERVED_WITHIN_LIMIT或OBSERVED_OVER_LIMIT。部分usage中合法output存在可以观察，不能制造缺失input/total。超限保留真实Token和声明费用，不截断事实，也不重发已完成请求；在上限内仅说明该响应观测值，不证明供应商以后遵守限制。max_completion_tokens的完整推理范围仍依赖供应商用量协议。Legacy/HTTP上限未知保持未声明。累计Token/金额硬预算及传输范围仍继续；没有测试/SQL/真实模型/部署证据。
+
+存在冻结输出限制时，Prompt运行时携带输出上限覆盖项会在reserve前拒绝，防止模型默认选项被覆盖后留下错误请求证据。既有调用只构造消息/工具选项，不携带输出覆盖；未修改framework。

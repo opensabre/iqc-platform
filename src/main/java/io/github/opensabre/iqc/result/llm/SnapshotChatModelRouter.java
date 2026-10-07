@@ -58,7 +58,7 @@ public class SnapshotChatModelRouter {
             ChatModel selected;
             try{selected=create(candidate);}catch(io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException denied){throw denied;}catch(RuntimeException unavailable){last=unavailable;continue;}
             var identity=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity(candidate.path("provider").asText(),
-                    candidate.path("endpoint").asText(),candidate.path("modelName").asText(),price(candidate,callbacks.length==0));
+                    candidate.path("endpoint").asText(),candidate.path("modelName").asText(),price(candidate,callbacks.length==0),outputConstraint(candidate,callbacks.length==0));
             int retries=Math.max(0,Math.min(candidate.path("maxRetries").asInt(0),5));
             for(int attempt=0;attempt<=retries;attempt++)try{return invoke(selected,executablePrompt,identity,context);}
             catch(io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException denied){throw denied;}
@@ -71,8 +71,13 @@ public class SnapshotChatModelRouter {
             io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context){
         var selected=create(profile);
         var identity=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity(profile.path("provider").asText(),
-                profile.path("endpoint").asText(),profile.path("modelName").asText(),price(profile,true));
+                profile.path("endpoint").asText(),profile.path("modelName").asText(),price(profile,true),outputConstraint(profile,true));
         return invoke(selected,prompt,identity,context);
+    }
+    private static io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.OutputConstraint outputConstraint(JsonNode profile,boolean singleResponseScope){
+        var cap=profile.get("maxOutputTokens");if(cap==null || cap.isNull())return null;
+        if(!cap.isIntegralNumber() || !cap.canConvertToInt())throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_OUTPUT_LIMIT_INVALID");
+        return new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.OutputConstraint(cap.intValue(),profile.path("outputTokenParameter").asText(""),singleResponseScope);
     }
     private static io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.PriceBinding price(JsonNode profile,boolean supported){
         if(!profile.path("id").isTextual() || !profile.path("versionNo").isIntegralNumber() || !profile.path("versionNo").canConvertToInt())return null;
@@ -84,6 +89,9 @@ public class SnapshotChatModelRouter {
     private ChatResponse invoke(ChatModel model,Prompt prompt,
             io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity identity,
             io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context) {
+        if(identity.output()!=null && prompt.getOptions()!=null && (prompt.getOptions().getMaxTokens()!=null
+                || (prompt.getOptions() instanceof OpenAiChatOptions openai && openai.getMaxCompletionTokens()!=null)))
+            throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_OUTPUT_OVERRIDE_NOT_ALLOWED");
         return gateway==null?model.call(prompt):gateway.invoke(identity,context,()->model.call(prompt),SnapshotChatModelRouter::usage);
     }
     public static io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Usage usage(ChatResponse response) {
