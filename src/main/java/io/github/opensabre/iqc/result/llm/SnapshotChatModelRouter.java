@@ -66,7 +66,7 @@ public class SnapshotChatModelRouter {
             ChatModel selected;
             try{selected=create(candidate);}catch(io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException denied){throw denied;}catch(RuntimeException unavailable){last=unavailable;continue;}
             var identity=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity(candidate.path("provider").asText(),
-                    candidate.path("endpoint").asText(),candidate.path("modelName").asText(),price(candidate,true),outputConstraint(candidate,true));
+                    candidate.path("endpoint").asText(),candidate.path("modelName").asText(),price(candidate,true),outputConstraint(candidate,true),deployment(candidate));
             int retries=Math.max(0,Math.min(candidate.path("maxRetries").asInt(0),5));
             for(int attempt=0;attempt<=retries;attempt++)try{return invokeToolCycle(selected,executablePrompt,identity,context);}
             catch(io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException denied){throw denied;}
@@ -79,7 +79,7 @@ public class SnapshotChatModelRouter {
             io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context){
         var selected=create(profile);
         var identity=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity(profile.path("provider").asText(),
-                profile.path("endpoint").asText(),profile.path("modelName").asText(),price(profile,true),outputConstraint(profile,true));
+                profile.path("endpoint").asText(),profile.path("modelName").asText(),price(profile,true),outputConstraint(profile,true),deployment(profile));
         return invoke(selected,prompt,identity,context.forToolRound(0));
     }
     private ToolCallback[] guardTools(ToolCallback[] callbacks,io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context){
@@ -126,6 +126,14 @@ public class SnapshotChatModelRouter {
             }catch(RuntimeException failure){throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_TOOL_EXECUTION_UNCONFIRMED");}
         }
     }
+    private static io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.DeploymentDeclaration deployment(JsonNode profile){
+        var window=profile.get("contextWindowTokens");var ref=profile.get("deploymentRef");
+        if((window==null || window.isNull()) && (ref==null || ref.isNull()))return null;
+        if(window!=null && !window.isNull() && (!window.isIntegralNumber() || !window.canConvertToInt()))
+            throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_CONTEXT_WINDOW_INVALID");
+        if(ref!=null && !ref.isNull() && !ref.isTextual())throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_DEPLOYMENT_REFERENCE_INVALID");
+        return new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.DeploymentDeclaration(window==null || window.isNull()?null:window.intValue(),ref==null || ref.isNull()?null:ref.textValue());
+    }
     private static io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.OutputConstraint outputConstraint(JsonNode profile,boolean singleResponseScope){
         var cap=profile.get("maxOutputTokens");if(cap==null || cap.isNull())return null;
         if(!cap.isIntegralNumber() || !cap.canConvertToInt())throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_OUTPUT_LIMIT_INVALID");
@@ -169,6 +177,9 @@ public class SnapshotChatModelRouter {
             if(!List.of("MAX_TOKENS","MAX_COMPLETION_TOKENS").contains(parameter))
                 throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_OUTPUT_PARAMETER_INVALID");
         }else if(!parameter.isBlank())throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_OUTPUT_LIMIT_MISSING");
+        var declaration=deployment(model);
+        if(declaration!=null && declaration.contextWindowTokens()!=null && cap!=null && !cap.isNull() && cap.intValue()>declaration.contextWindowTokens())
+            throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_OUTPUT_EXCEEDS_CONTEXT_WINDOW");
         String apiKey="OLLAMA".equals(provider)&&model.path("secretRef").asText("").isBlank()?"ollama":secrets.resolve(model.path("secretRef").asText());
         var builder=OpenAiChatOptions.builder().baseUrl(model.path("endpoint").asText()).apiKey(apiKey)
                 .model(model.path("modelName").asText()).temperature(model.path("temperature").asDouble(0.1))

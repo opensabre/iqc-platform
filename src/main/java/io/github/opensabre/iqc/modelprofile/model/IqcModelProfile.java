@@ -19,5 +19,9 @@ public class IqcModelProfile extends BasePo {
     private Integer maxOutputTokens;
     @com.baomidou.mybatisplus.annotation.TableField(updateStrategy=com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private String outputTokenParameter;
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy=com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
+    private Integer contextWindowTokens;
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy=com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
+    private String deploymentRef;
     private String status; private Integer versionNo;
 }

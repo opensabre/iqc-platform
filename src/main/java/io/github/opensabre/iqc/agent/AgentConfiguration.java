@@ -108,14 +108,20 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
                                 Integer maxRetries, Integer versionNo,
                                 @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String pricingJson,
                                 @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) Integer maxOutputTokens,
-                                @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String outputTokenParameter) {
+                                @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String outputTokenParameter,
+                                @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) Integer contextWindowTokens,
+                                @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String deploymentRef) {
+        public ModelSnapshot(String id,String code,String name,String provider,String modelName,String endpoint,String secretRef,
+                Double temperature,Integer timeoutSeconds,Integer maxRetries,Integer versionNo,String pricingJson,Integer maxOutputTokens,String outputTokenParameter){
+            this(id,code,name,provider,modelName,endpoint,secretRef,temperature,timeoutSeconds,maxRetries,versionNo,pricingJson,maxOutputTokens,outputTokenParameter,null,null);
+        }
         public ModelSnapshot(String id,String code,String name,String provider,String modelName,String endpoint,String secretRef,
                 Double temperature,Integer timeoutSeconds,Integer maxRetries,Integer versionNo,String pricingJson){
-            this(id,code,name,provider,modelName,endpoint,secretRef,temperature,timeoutSeconds,maxRetries,versionNo,pricingJson,null,null);
+            this(id,code,name,provider,modelName,endpoint,secretRef,temperature,timeoutSeconds,maxRetries,versionNo,pricingJson,null,null,null,null);
         }
         public ModelSnapshot(String id,String code,String name,String provider,String modelName,String endpoint,String secretRef,
                 Double temperature,Integer timeoutSeconds,Integer maxRetries,Integer versionNo){
-            this(id,code,name,provider,modelName,endpoint,secretRef,temperature,timeoutSeconds,maxRetries,versionNo,null,null,null);
+            this(id,code,name,provider,modelName,endpoint,secretRef,temperature,timeoutSeconds,maxRetries,versionNo,null,null,null,null,null);
         }
     }
     public record McpSnapshot(String id, String code, String name, String transport, String endpoint,

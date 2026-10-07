@@ -6,6 +6,8 @@ import java.time.LocalDateTime;
 public class GatewayCall {
     @TableId private String callId;
     private String modelKey;
+    private Integer contextWindowTokens;
+    private String deploymentRef;
     private String modelProfileId;
     private String requestedModelName;
     private Integer modelProfileVersion;

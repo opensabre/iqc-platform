@@ -26,10 +26,19 @@ public class GatewayCallService {
                 throw new GatewayAdmissionException("MODEL_OUTPUT_CONSTRAINT_INVALID");
         }
     }
-    public record ModelIdentity(String provider,String endpoint,String modelName,PriceBinding price,OutputConstraint output) {
-        public ModelIdentity(String provider,String endpoint,String modelName,PriceBinding price){this(provider,endpoint,modelName,price,null);}
-        public ModelIdentity(String provider,String endpoint,String modelName){this(provider,endpoint,modelName,null,null);}
+    public record DeploymentDeclaration(Integer contextWindowTokens,String deploymentRef){
+        public DeploymentDeclaration {
+            if(contextWindowTokens!=null && (contextWindowTokens<1 || contextWindowTokens>100000000))throw new GatewayAdmissionException("MODEL_CONTEXT_WINDOW_INVALID");
+            if(deploymentRef!=null && !deploymentRef.matches("[A-Za-z0-9][A-Za-z0-9:_./@+-]{0,127}"))throw new GatewayAdmissionException("MODEL_DEPLOYMENT_REFERENCE_INVALID");
+        }
+    }
+    public record ModelIdentity(String provider,String endpoint,String modelName,PriceBinding price,OutputConstraint output,DeploymentDeclaration deployment) {
+        public ModelIdentity(String provider,String endpoint,String modelName,PriceBinding price){this(provider,endpoint,modelName,price,null,null);}
+        public ModelIdentity(String provider,String endpoint,String modelName){this(provider,endpoint,modelName,null,null,null);}
+        public ModelIdentity(String provider,String endpoint,String modelName,PriceBinding price,OutputConstraint output){this(provider,endpoint,modelName,price,output,null);}
         public ModelIdentity {
+            if(deployment!=null && deployment.contextWindowTokens()!=null && output!=null && output.limit()>deployment.contextWindowTokens())
+                throw new GatewayAdmissionException("MODEL_OUTPUT_EXCEEDS_CONTEXT_WINDOW");
             if(provider==null || provider.isBlank() || provider.length()>64 || endpoint==null || endpoint.length()>2048
                     || modelName==null || modelName.isBlank() || modelName.length()>256)
                 throw new GatewayAdmissionException("MODEL_IDENTITY_INVALID");
@@ -82,7 +91,7 @@ public class GatewayCallService {
             String taskId,String executionId,String nodeId,Integer runIndex,String conversationId,
             String modelProfileId,Integer modelProfileVersion,String pricingHash,String pricingCurrency,String calculatedCost,String costStatus,String requestedModelName,
             @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheReadInputTokens,
-            @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheWriteInputTokens,Integer maxOutputTokens,String outputTokenParameter,String outputLimitStatus,Integer toolRoundIndex) { }
+            @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheWriteInputTokens,Integer maxOutputTokens,String outputTokenParameter,String outputLimitStatus,Integer toolRoundIndex,Integer contextWindowTokens,String deploymentRef) { }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public io.github.opensabre.iqc.shared.IqcPage<CallView> page(String modelKey,String status,long current,long size){
         if(!scope.isIqcAdministrator())throw IqcException.accessDenied("只有质检管理员可以查看全局模型调用");
@@ -112,7 +121,7 @@ public class GatewayCallService {
                 value.getInputTokens(),value.getOutputTokens(),value.getTotalTokens(),value.getResponseModelId(),value.getUsageStatus(),value.getErrorType(),value.getCapacityReleasedAtUtc(),
                 value.getCapacityReleasedBy(),value.getCapacityReleaseReason(),value.getCapacityReleaseEvidence(),
                 value.getTaskId(),value.getExecutionId(),value.getNodeId(),value.getRunIndex(),value.getConversationId(),value.getModelProfileId(),
-                value.getModelProfileVersion(),value.getPricingHash(),value.getPricingCurrency(),value.getCalculatedCost()==null?null:value.getCalculatedCost().toPlainString(),value.getCostStatus(),value.getRequestedModelName(),value.getCacheReadInputTokens(),value.getCacheWriteInputTokens(),value.getMaxOutputTokens(),value.getOutputTokenParameter(),value.getOutputLimitStatus(),value.getToolRoundIndex())).toList(),
+                value.getModelProfileVersion(),value.getPricingHash(),value.getPricingCurrency(),value.getCalculatedCost()==null?null:value.getCalculatedCost().toPlainString(),value.getCostStatus(),value.getRequestedModelName(),value.getCacheReadInputTokens(),value.getCacheWriteInputTokens(),value.getMaxOutputTokens(),value.getOutputTokenParameter(),value.getOutputLimitStatus(),value.getToolRoundIndex(),value.getContextWindowTokens(),value.getDeploymentRef())).toList(),
                 page.getCurrent(),page.getSize(),page.getTotal());
     }
     /** Same snapshot and authorization as the paged facts; totals cover all matching pages. */
@@ -210,6 +219,7 @@ public class GatewayCallService {
         bucket.setOccupied(bucket.getOccupied()+1);
         if(capacities.updateById(bucket)!=1)throw IqcException.invalidState("预留模型容量失败");
         var call=new GatewayCall();call.setCallId(UUID.randomUUID().toString().replace("-",""));call.setModelKey(key);call.setRequestedModelName(model.modelName());
+        if(model.deployment()!=null){call.setContextWindowTokens(model.deployment().contextWindowTokens());call.setDeploymentRef(model.deployment().deploymentRef());}
         var output=model.output();call.setOutputLimitStatus(output==null?"NOT_DECLARED":"UNKNOWN_RESPONSE");
         if(output!=null){call.setMaxOutputTokens(output.limit());call.setOutputTokenParameter(output.parameter());call.setOutputLimitSingleResponse(output.singleResponseScope());}
         call.setToolRoundIndex(context.toolRoundIndex());call.setLogicalRecordId(context.logicalRecordId());call.setRuleId(context.ruleId());call.setOwner(execution==null?context.owner():execution.owner());

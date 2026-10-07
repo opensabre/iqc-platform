@@ -26,14 +26,14 @@ public class IqcModelProfileService {
     public IqcModelProfile create(ModelCommand command) {
         validate(command);
         if (findByCode(command.code()) != null) throw IqcException.invalidState("模型配置编码已存在: " + command.code());
-        IqcModelProfile profile = new IqcModelProfile(); apply(profile, command); profile.setStatus("ENABLED"); profile.setVersionNo(1); mapper.insert(profile); return profile;
+        IqcModelProfile profile = new IqcModelProfile(); apply(profile, command); validateWindow(profile); profile.setStatus("ENABLED"); profile.setVersionNo(1); mapper.insert(profile); return profile;
     }
     /** Updates model parameters but keeps the stable profile code. */
     @Transactional
     public IqcModelProfile update(String id, ModelCommand command) {
         IqcModelProfile profile = require(id);
         if (blank(command.secretRef())) command = command.withSecretRef(profile.getSecretRef());
-        command = command.withCode(profile.getCode()); validate(command); apply(profile, command);
+        command = command.withCode(profile.getCode()); validate(command); apply(profile, command); validateWindow(profile);
         if(profile.getVersionNo()==null || profile.getVersionNo()<1 || profile.getVersionNo()==Integer.MAX_VALUE)throw IqcException.invalidState("模型版本无效或已耗尽");
         profile.setVersionNo(profile.getVersionNo() + 1); if(mapper.updateById(profile)!=1)throw IqcException.invalidState("更新模型失败"); return profile;
     }
@@ -53,6 +53,9 @@ public class IqcModelProfileService {
             if(limit!=null && !java.util.Set.of("MAX_TOKENS","MAX_COMPLETION_TOKENS").contains(value.outputTokenParameter()==null?"":value.outputTokenParameter()))
                 throw IqcException.invalidArgument("请选择输出Token参数类型");
         }else if(value.outputTokenParameter()!=null)throw IqcException.invalidArgument("修改输出参数必须同时提供上限");
+        contextWindow(value.contextWindowTokens());
+        if(value.deploymentRef()!=null && !value.deploymentRef().isEmpty() && !value.deploymentRef().matches("[A-Za-z0-9][A-Za-z0-9:_./@+-]{0,127}"))
+            throw IqcException.invalidArgument("部署参考标识格式无效，最多128字符");
         if (value.maxRetries() == null || value.maxRetries() < 0 || value.maxRetries() > 5) throw IqcException.invalidArgument("模型重试次数必须在 0 到 5 之间");
     }
     private static Integer outputLimit(com.fasterxml.jackson.databind.JsonNode value){
@@ -61,18 +64,45 @@ public class IqcModelProfileService {
             throw IqcException.invalidArgument("输出Token上限必须为0到1000000的整数");
         return value.intValue()==0?null:value.intValue();
     }
+    private static Integer contextWindow(com.fasterxml.jackson.databind.JsonNode value){
+        if(value==null || value.isNull())return null;
+        if(!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue()<0 || value.intValue()>100000000)
+            throw IqcException.invalidArgument("上下文窗口需为0到100000000的整数");
+        return value.intValue()==0?null:value.intValue();
+    }
+    private static void validateWindow(IqcModelProfile profile){
+        if(profile.getContextWindowTokens()!=null && profile.getMaxOutputTokens()!=null && profile.getMaxOutputTokens()>profile.getContextWindowTokens())
+            throw IqcException.invalidArgument("输出Token上限不能超过上下文窗口");
+    }
     private IqcModelProfile findByCode(String code) { return mapper.selectOne(Wrappers.<IqcModelProfile>lambdaQuery().eq(IqcModelProfile::getCode, code)); }
     private IqcModelProfile require(String id) { IqcModelProfile profile = mapper.selectOne(Wrappers.<IqcModelProfile>lambdaQuery().eq(IqcModelProfile::getId,id).last("FOR UPDATE")); if (profile == null) throw IqcException.notFound("模型配置不存在: " + id); return profile; }
-    private void apply(IqcModelProfile target, ModelCommand source) { target.setName(source.name().trim()); target.setCode(source.code().trim()); target.setDescription(source.description()); target.setProvider(source.provider()); target.setModelName(source.modelName().trim()); target.setEndpoint(source.endpoint()); target.setSecretRef(encryptSecret(source.secretRef())); target.setTemperature(source.temperature()); target.setTimeoutSeconds(source.timeoutSeconds()); target.setMaxRetries(source.maxRetries()); if(source.maxOutputTokens()!=null && !source.maxOutputTokens().isNull()){target.setMaxOutputTokens(outputLimit(source.maxOutputTokens()));target.setOutputTokenParameter(target.getMaxOutputTokens()==null?null:source.outputTokenParameter());} if(source.pricingJson()!=null)target.setPricingJson(ModelPricing.canonical(source.pricingJson())); }
+    private void apply(IqcModelProfile target,ModelCommand source){
+        target.setName(source.name().trim());target.setCode(source.code().trim());target.setDescription(source.description());
+        target.setProvider(source.provider());target.setModelName(source.modelName().trim());target.setEndpoint(source.endpoint());
+        target.setSecretRef(encryptSecret(source.secretRef()));target.setTemperature(source.temperature());
+        target.setTimeoutSeconds(source.timeoutSeconds());target.setMaxRetries(source.maxRetries());
+        if(source.maxOutputTokens()!=null && !source.maxOutputTokens().isNull()){
+            target.setMaxOutputTokens(outputLimit(source.maxOutputTokens()));
+            target.setOutputTokenParameter(target.getMaxOutputTokens()==null?null:source.outputTokenParameter());
+        }
+        if(source.contextWindowTokens()!=null && !source.contextWindowTokens().isNull())
+            target.setContextWindowTokens(contextWindow(source.contextWindowTokens()));
+        if(source.deploymentRef()!=null)target.setDeploymentRef(source.deploymentRef().isEmpty()?null:source.deploymentRef());
+        if(source.pricingJson()!=null)target.setPricingJson(ModelPricing.canonical(source.pricingJson()));
+    }
     private String encryptSecret(String value) { if (blank(value) || value.startsWith("env:") || value.startsWith("ENC(")) return value; return "ENC(" + encryptor.encrypt(value) + ")"; }
     private static boolean blank(String value) { return value == null || value.isBlank(); }
     public record ModelCommand(String name, String code, String description, String provider, String modelName,
-                               String endpoint, String secretRef, Double temperature, Integer timeoutSeconds, Integer maxRetries,String pricingJson,com.fasterxml.jackson.databind.JsonNode maxOutputTokens,String outputTokenParameter) {
+                               String endpoint, String secretRef, Double temperature, Integer timeoutSeconds, Integer maxRetries,String pricingJson,com.fasterxml.jackson.databind.JsonNode maxOutputTokens,String outputTokenParameter,com.fasterxml.jackson.databind.JsonNode contextWindowTokens,String deploymentRef) {
         public ModelCommand(String name,String code,String description,String provider,String modelName,String endpoint,String secretRef,
-                Double temperature,Integer timeoutSeconds,Integer maxRetries){this(name,code,description,provider,modelName,endpoint,secretRef,temperature,timeoutSeconds,maxRetries,null,null,null);}
+                Double temperature,Integer timeoutSeconds,Integer maxRetries){this(name,code,description,provider,modelName,endpoint,secretRef,temperature,timeoutSeconds,maxRetries,null,null,null,null,null);}
         public ModelCommand(String name,String code,String description,String provider,String modelName,String endpoint,String secretRef,
-                Double temperature,Integer timeoutSeconds,Integer maxRetries,String pricingJson){this(name,code,description,provider,modelName,endpoint,secretRef,temperature,timeoutSeconds,maxRetries,pricingJson,null,null);}
-        ModelCommand withCode(String stableCode) { return new ModelCommand(name, stableCode, description, provider, modelName, endpoint, secretRef, temperature, timeoutSeconds, maxRetries,pricingJson,maxOutputTokens,outputTokenParameter); }
-        ModelCommand withSecretRef(String value) { return new ModelCommand(name, code, description, provider, modelName, endpoint, value, temperature, timeoutSeconds, maxRetries,pricingJson,maxOutputTokens,outputTokenParameter); }
+                Double temperature,Integer timeoutSeconds,Integer maxRetries,String pricingJson){this(name,code,description,provider,modelName,endpoint,secretRef,temperature,timeoutSeconds,maxRetries,pricingJson,null,null,null,null);}
+        public ModelCommand(String name,String code,String description,String provider,String modelName,String endpoint,String secretRef,
+                Double temperature,Integer timeoutSeconds,Integer maxRetries,String pricingJson,com.fasterxml.jackson.databind.JsonNode maxOutputTokens,String outputTokenParameter){
+            this(name,code,description,provider,modelName,endpoint,secretRef,temperature,timeoutSeconds,maxRetries,pricingJson,maxOutputTokens,outputTokenParameter,null,null);
+        }
+        ModelCommand withCode(String stableCode) { return new ModelCommand(name, stableCode, description, provider, modelName, endpoint, secretRef, temperature, timeoutSeconds, maxRetries,pricingJson,maxOutputTokens,outputTokenParameter,contextWindowTokens,deploymentRef); }
+        ModelCommand withSecretRef(String value) { return new ModelCommand(name, code, description, provider, modelName, endpoint, value, temperature, timeoutSeconds, maxRetries,pricingJson,maxOutputTokens,outputTokenParameter,contextWindowTokens,deploymentRef); }
     }
 }
