@@ -32,7 +32,7 @@ public class AgentAssetReferenceValidator {
                 !agent ? List.of() : distinct(config.mcpServerIds()).stream().map(id -> { var x=mcps.selectById(id); return new McpSnapshot(x.getId(),x.getCode(),x.getName(),x.getTransport(),x.getEndpoint(),x.getAuthType(),x.getSecretRef(),x.getTimeoutSeconds(),x.getAllowedToolsJson(),x.getVersionNo()); }).toList(),
                 !agent ? List.of() : distinct(config.skillIds()).stream().map(id -> { var x=skills.selectById(id); return new SkillSnapshot(x.getId(),x.getCode(),x.getName(),x.getDescription(),x.getInstructions(),x.getInputSchemaJson(),x.getOutputSchemaJson(),x.getVersionNo()); }).toList());
     }
-    private ModelSnapshot model(String id) { var x=models.selectById(id); return new ModelSnapshot(x.getId(),x.getCode(),x.getName(),x.getProvider(),x.getModelName(),x.getEndpoint(),x.getSecretRef(),x.getTemperature(),x.getTimeoutSeconds(),x.getMaxRetries(),x.getVersionNo(),io.github.opensabre.iqc.modelprofile.ModelPricing.canonical(x.getPricingJson())); }
+    private ModelSnapshot model(String id) { var x=models.selectById(id); return new ModelSnapshot(x.getId(),x.getCode(),x.getName(),x.getProvider(),x.getModelName(),x.getEndpoint(),x.getSecretRef(),x.getTemperature(),x.getTimeoutSeconds(),x.getMaxRetries(),x.getVersionNo(),io.github.opensabre.iqc.modelprofile.ModelPricing.canonical(x.getPricingJson()),x.getMaxOutputTokens(),x.getOutputTokenParameter()); }
     private void requireEnabledModel(String id) { var item=models.selectById(id); if(item==null||!"ENABLED".equals(item.getStatus())) throw IqcException.invalidState("模型配置不存在或已停用: "+id); }
     private static List<String> distinct(List<String> ids) { return ids==null ? List.of() : List.copyOf(new LinkedHashSet<>(ids)); }
 }

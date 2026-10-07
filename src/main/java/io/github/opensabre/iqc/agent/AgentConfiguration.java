@@ -106,10 +106,16 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
     public record ModelSnapshot(String id, String code, String name, String provider, String modelName,
                                 String endpoint, String secretRef, Double temperature, Integer timeoutSeconds,
                                 Integer maxRetries, Integer versionNo,
-                                @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String pricingJson) {
+                                @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String pricingJson,
+                                @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) Integer maxOutputTokens,
+                                @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String outputTokenParameter) {
+        public ModelSnapshot(String id,String code,String name,String provider,String modelName,String endpoint,String secretRef,
+                Double temperature,Integer timeoutSeconds,Integer maxRetries,Integer versionNo,String pricingJson){
+            this(id,code,name,provider,modelName,endpoint,secretRef,temperature,timeoutSeconds,maxRetries,versionNo,pricingJson,null,null);
+        }
         public ModelSnapshot(String id,String code,String name,String provider,String modelName,String endpoint,String secretRef,
                 Double temperature,Integer timeoutSeconds,Integer maxRetries,Integer versionNo){
-            this(id,code,name,provider,modelName,endpoint,secretRef,temperature,timeoutSeconds,maxRetries,versionNo,null);
+            this(id,code,name,provider,modelName,endpoint,secretRef,temperature,timeoutSeconds,maxRetries,versionNo,null,null,null);
         }
     }
     public record McpSnapshot(String id, String code, String name, String transport, String endpoint,

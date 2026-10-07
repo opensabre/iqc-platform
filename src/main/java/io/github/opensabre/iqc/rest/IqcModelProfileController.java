@@ -33,7 +33,7 @@ public class IqcModelProfileController {
 
     public record ModelView(String id, String name, String code, String description, String provider,
                             String modelName, String endpoint, Double temperature, Integer timeoutSeconds,
-                            Integer maxRetries, String status, Integer versionNo, boolean secretConfigured,String pricingJson) {
-        static ModelView from(IqcModelProfile value) { return new ModelView(value.getId(), value.getName(), value.getCode(), value.getDescription(), value.getProvider(), value.getModelName(), value.getEndpoint(), value.getTemperature(), value.getTimeoutSeconds(), value.getMaxRetries(), value.getStatus(), value.getVersionNo(), value.getSecretRef() != null && !value.getSecretRef().isBlank(),value.getPricingJson()); }
+                            Integer maxRetries, String status, Integer versionNo, boolean secretConfigured,String pricingJson,Integer maxOutputTokens,String outputTokenParameter) {
+        static ModelView from(IqcModelProfile value) { return new ModelView(value.getId(), value.getName(), value.getCode(), value.getDescription(), value.getProvider(), value.getModelName(), value.getEndpoint(), value.getTemperature(), value.getTimeoutSeconds(), value.getMaxRetries(), value.getStatus(), value.getVersionNo(), value.getSecretRef() != null && !value.getSecretRef().isBlank(),value.getPricingJson(),value.getMaxOutputTokens(),value.getOutputTokenParameter()); }
     }
 }

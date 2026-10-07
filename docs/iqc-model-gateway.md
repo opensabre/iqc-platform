@@ -65,3 +65,11 @@ V1.1.53仅扩展原调用事实，不新增账单/费用主表。受管资产与
 复用原调用事实和两个GET分页接口、既有管理员/任务数据范围授权，无新表、权限或汇总API。响应原分页字段保留，追加costSummary。SQL在数据库按声明币种聚合全部匹配记录，保留状态/modelKey/Task/EID过滤，不加载所有调用到内存；分页与汇总在同一只读REPEATABLE_READ事务中查询。
 
 仅CALCULATED_FROM_DECLARED_PRICE、金额非空且币种非空的调用纳入已知小计，其他调用全计未知。无已知费用的分组小计为null，空结果计数0；不把未知费用填0。计数及BigDecimal小计作为字符串返回，按币种分别展示，不汇率换算、不宣称完整费用或供应商账单。历史无费用字段的调用仍在未知覆盖中。全局查询聚合扫描成本随历史增加，索引/保留策略及生产容量验收仍须继续。没有运行测试、SQL、模型调用或部署。
+
+## 单次请求输出上限（2026-10-07）
+
+复用原ModelProfile/version、Agent ModelSnapshot、模型配置API/权限和Spring AI OpenAiChatOptions。源码检索framework/Sysadmin与当前IQC未发现现成资产输出上限；现有SDK提供maxTokens及maxCompletionTokens。V1.1.54仅扩展原profile两字段，不新增模型/政策表或基础设施。
+
+maxOutputTokens为严格JSON整数0到1000000；0清除，未提供/null保留原配置。正值必须明确outputTokenParameter为MAX_TOKENS或MAX_COMPLETION_TOKENS，分别发送max_tokens或max_completion_tokens，不会同时发两种。Agent主备发布快照冻结上限与参数，旧null省略保持原摘要；历史快照不借现行配置补上限。连接检查沿原profile使用相同参数。坏快照限制在密钥解析/远端调用前拒绝，禁止fallback绕过坏限制。
+
+上限只表示请求参数，供应商接受/遵守及推理token语义需按实际模型核验；自动工具每回合适用模型默认上限，但累计工具回合不等于这个上限。Legacy默认模型/HTTP部署沿原配置，本资产字段不臆造其请求限制。尚未形成输入token可证明上界或累计Token/金额硬预算；没有运行测试、迁移、真实模型或部署。
