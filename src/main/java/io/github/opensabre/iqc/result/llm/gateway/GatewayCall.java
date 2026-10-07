@@ -28,6 +28,7 @@ public class GatewayCall {
     private String executionId;
     private String nodeId;
     private Integer runIndex;
+    private Integer toolRoundIndex;
     private String ownerGroupId;
     private String conversationId;
     private String status;

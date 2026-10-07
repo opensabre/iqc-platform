@@ -81,3 +81,15 @@ maxOutputTokens为严格JSON整数0到1000000；0清除，未提供/null保留�
 仅可观察单响应且供应商返回合法输出Token时比较上限，标记OBSERVED_WITHIN_LIMIT或OBSERVED_OVER_LIMIT。部分usage中合法output存在可以观察，不能制造缺失input/total。超限保留真实Token和声明费用，不截断事实，也不重发已完成请求；在上限内仅说明该响应观测值，不证明供应商以后遵守限制。max_completion_tokens的完整推理范围仍依赖供应商用量协议。Legacy/HTTP上限未知保持未声明。累计Token/金额硬预算及传输范围仍继续；没有测试/SQL/真实模型/部署证据。
 
 存在冻结输出限制时，Prompt运行时携带输出上限覆盖项会在reserve前拒绝，防止模型默认选项被覆盖后留下错误请求证据。既有调用只构造消息/工具选项，不携带输出覆盖；未修改framework。
+
+## 工具回合实施前复用及缺口（2026-10-07）
+
+本地实际spring-ai-openai/model 2.0.0 javap显示OpenAiChatModel.call→internalCall只返回单响应，没有executeToolCalls或递归续调；ToolCallingChatOptions也没有旧版internalToolExecutionEnabled。当前代码仅把callbacks传入Prompt后调用一次，不能完成模型要求的工具续调。复用SDK ToolCallingManager.executeToolCalls/ToolExecutionResult.conversationHistory，不创建自定义工具协议或平行MCP服务。
+
+受管OpenAiChatModel显式循环，每次响应独立Gateway reserve/settle及同来源工具回合编号；重用快照工具白名单、原会话Session关闭及请求输出限制。最多配置8次工具执行（允许初次响应及8次续调），超限停止而不fallback；工具执行异常或执行过工具后的模型异常停止整轮重试，避免重复外部副作用。旧未知ChatModel行为不能假定单响应，不自动改造成同协议。每次受管回合的价格/输出观察不再因注册工具而一概判UNKNOWN_REQUEST_SCOPE；依然需要实际网络/供应商范围验收，不宣称任意自定义ChatModel/传输已全覆盖。
+
+部署默认模型若为当前OpenAiChatModel并传入工具，也沿显式循环（其隐藏SDK重试/缺价范围仍未知）；其他自定义默认ChatModel带工具拒绝，不能冒充单响应计量。工具次数另限制默认64（配置1–256），轮次配置1–32，工具多候选响应拒绝而非执行不明确分支。完成工具后的业务JSON解析失败也停止原Provider整轮重试，防止重放已经执行过的工具。单次响应最终返回保留该次metadata，不把多响应token伪装成最终响应总用量；全程费用沿每调用事实汇总。
+
+每个工具Callback复用原Task/EID/current/status/暂停取消来源校验，独立只读短事务完成后才执行网络工具；旧无执行来源仍不能猜Task。SDK工具异常处理器明确抛出，不能把策略拒绝变成可继续的工具错误文本。此校验是执行前观察，不能撤销已经发送的远端工具请求；没有持久工具副作用幂等账本，外部跨Task重放仍需要工具方幂等协议。
+
+工具调用ID在本轮需非空/受限且不重复，包括跨续调的重复ID；整批ID先校验再执行工具，防止同一轮内重放。该内存集合不提供跨进程/跨Task幂等。

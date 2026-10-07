@@ -46,9 +46,11 @@ public class GatewayCallService {
         public String key(){return SelectorAssetService.hash(frame(provider)+frame(endpoint)+frame(modelName));}
         private static String frame(String value){return value.getBytes(StandardCharsets.UTF_8).length+":"+value;}
     }
-    public record Context(String logicalRecordId,String ruleId,String owner,io.github.opensabre.iqc.result.llm.ModelCallContext execution) {
-        public Context(String logicalRecordId,String ruleId,String owner){this(logicalRecordId,ruleId,owner,null);}
-        public Context {bounded(logicalRecordId,512);bounded(ruleId,128);bounded(owner,128);}
+    public record Context(String logicalRecordId,String ruleId,String owner,io.github.opensabre.iqc.result.llm.ModelCallContext execution,Integer toolRoundIndex) {
+        public Context(String logicalRecordId,String ruleId,String owner){this(logicalRecordId,ruleId,owner,null,null);}
+        public Context(String logicalRecordId,String ruleId,String owner,io.github.opensabre.iqc.result.llm.ModelCallContext execution){this(logicalRecordId,ruleId,owner,execution,null);}
+        public Context forToolRound(int index){return new Context(logicalRecordId,ruleId,owner,execution,index);}
+        public Context {if(toolRoundIndex!=null && (toolRoundIndex<0 || toolRoundIndex>32))throw new GatewayAdmissionException("MODEL_TOOL_ROUND_INVALID");bounded(logicalRecordId,512);bounded(ruleId,128);bounded(owner,128);}
         private static void bounded(String value,int size){if(value!=null && (value.length()>size || value.codePoints().anyMatch(Character::isISOControl)))
             throw new GatewayAdmissionException("CALL_CONTEXT_INVALID");}
     }
@@ -80,7 +82,7 @@ public class GatewayCallService {
             String taskId,String executionId,String nodeId,Integer runIndex,String conversationId,
             String modelProfileId,Integer modelProfileVersion,String pricingHash,String pricingCurrency,String calculatedCost,String costStatus,String requestedModelName,
             @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheReadInputTokens,
-            @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheWriteInputTokens,Integer maxOutputTokens,String outputTokenParameter,String outputLimitStatus) { }
+            @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long cacheWriteInputTokens,Integer maxOutputTokens,String outputTokenParameter,String outputLimitStatus,Integer toolRoundIndex) { }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public io.github.opensabre.iqc.shared.IqcPage<CallView> page(String modelKey,String status,long current,long size){
         if(!scope.isIqcAdministrator())throw IqcException.accessDenied("只有质检管理员可以查看全局模型调用");
@@ -110,7 +112,7 @@ public class GatewayCallService {
                 value.getInputTokens(),value.getOutputTokens(),value.getTotalTokens(),value.getResponseModelId(),value.getUsageStatus(),value.getErrorType(),value.getCapacityReleasedAtUtc(),
                 value.getCapacityReleasedBy(),value.getCapacityReleaseReason(),value.getCapacityReleaseEvidence(),
                 value.getTaskId(),value.getExecutionId(),value.getNodeId(),value.getRunIndex(),value.getConversationId(),value.getModelProfileId(),
-                value.getModelProfileVersion(),value.getPricingHash(),value.getPricingCurrency(),value.getCalculatedCost()==null?null:value.getCalculatedCost().toPlainString(),value.getCostStatus(),value.getRequestedModelName(),value.getCacheReadInputTokens(),value.getCacheWriteInputTokens(),value.getMaxOutputTokens(),value.getOutputTokenParameter(),value.getOutputLimitStatus())).toList(),
+                value.getModelProfileVersion(),value.getPricingHash(),value.getPricingCurrency(),value.getCalculatedCost()==null?null:value.getCalculatedCost().toPlainString(),value.getCostStatus(),value.getRequestedModelName(),value.getCacheReadInputTokens(),value.getCacheWriteInputTokens(),value.getMaxOutputTokens(),value.getOutputTokenParameter(),value.getOutputLimitStatus(),value.getToolRoundIndex())).toList(),
                 page.getCurrent(),page.getSize(),page.getTotal());
     }
     /** Same snapshot and authorization as the paged facts; totals cover all matching pages. */
@@ -183,9 +185,9 @@ public class GatewayCallService {
             .eq(GatewayCapacity::getModelKey,key).last("FOR UPDATE"));
         if(row==null || row.getOccupied()==null || row.getOccupied()<0)throw IqcException.invalidState("模型容量证据缺失");return row;}
 
-    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.REPEATABLE_READ)
-    public Handle reserve(ModelIdentity model,Context context,int limit){
-        if(model==null || context==null || limit<0 || limit>10000)throw new GatewayAdmissionException("GATEWAY_CONFIGURATION_INVALID");
+    @Transactional(readOnly=true,propagation=Propagation.REQUIRES_NEW,isolation=Isolation.REPEATABLE_READ)
+    public void assertExecutionActive(Context context){
+        if(context==null)throw new GatewayAdmissionException("CALL_CONTEXT_INVALID");
         var execution=context.execution();
         if(execution!=null){
             var task=taskRows.selectById(execution.taskId());var run=executionRows.selectById(execution.executionId());
@@ -194,6 +196,12 @@ public class GatewayCallService {
                     || !Objects.equals(task.getOwnerGroupId(),execution.ownerGroupId()) || !"RUNNING".equals(task.getStatus())
                     || !"RUNNING".equals(run.getStatus()) || Boolean.TRUE.equals(task.getCancelRequested()) || Boolean.TRUE.equals(task.getPauseRequested()))throw new GatewayAdmissionException("MODEL_EXECUTION_PROVENANCE_STALE");
         }
+    }
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.REPEATABLE_READ)
+    public Handle reserve(ModelIdentity model,Context context,int limit){
+        if(model==null || context==null || limit<0 || limit>10000)throw new GatewayAdmissionException("GATEWAY_CONFIGURATION_INVALID");
+        var execution=context.execution();
+        assertExecutionActive(context);
         String key=model.key();capacities.ensure(key,limit);var bucket=capacity(key);
         if(!Boolean.TRUE.equals(bucket.getPolicyManaged()) && !Objects.equals(bucket.getConcurrencyLimit(),limit))throw new GatewayAdmissionException("GATEWAY_CONCURRENCY_POLICY_MISMATCH");
         int effectiveLimit=bucket.getConcurrencyLimit();
@@ -204,7 +212,7 @@ public class GatewayCallService {
         var call=new GatewayCall();call.setCallId(UUID.randomUUID().toString().replace("-",""));call.setModelKey(key);call.setRequestedModelName(model.modelName());
         var output=model.output();call.setOutputLimitStatus(output==null?"NOT_DECLARED":"UNKNOWN_RESPONSE");
         if(output!=null){call.setMaxOutputTokens(output.limit());call.setOutputTokenParameter(output.parameter());call.setOutputLimitSingleResponse(output.singleResponseScope());}
-        call.setLogicalRecordId(context.logicalRecordId());call.setRuleId(context.ruleId());call.setOwner(execution==null?context.owner():execution.owner());
+        call.setToolRoundIndex(context.toolRoundIndex());call.setLogicalRecordId(context.logicalRecordId());call.setRuleId(context.ruleId());call.setOwner(execution==null?context.owner():execution.owner());
         if(execution!=null){call.setTaskId(execution.taskId());call.setExecutionId(execution.executionId());call.setNodeId(execution.nodeId());
             call.setRunIndex(execution.runIndex());call.setOwnerGroupId(execution.ownerGroupId());call.setConversationId(execution.conversationId());}
         var price=model.price();call.setCostStatus("UNKNOWN_PRICE");

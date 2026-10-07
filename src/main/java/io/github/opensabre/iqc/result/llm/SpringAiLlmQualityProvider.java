@@ -217,6 +217,7 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
         RuntimeException last = null;
         int attempts = Math.max(1, Math.min(properties.getMaxAttempts(), 3));
         for (int attempt = 1; attempt <= attempts; attempt++) {
+            boolean toolCycle=false;
             try {
                 String context = preRuleFindings == null ? "无" : preRuleFindings.toString();
                 Prompt prompt = new Prompt(List.of(new SystemMessage(agentSystemPrompt(agentSnapshot)
@@ -228,6 +229,7 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
                     response = modelRouter == null ? chatModel.call(prompt)
                             : modelRouter.call(prompt, agentSnapshot, tools.callbacks(),
                                     new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context(recordId,rule.path("id").asText("unknown"),callContext==null?null:callContext.owner(),callContext));
+                    toolCycle=SnapshotChatModelRouter.toolsExecuted(response);
                 }
                 String text = response == null || response.getResult() == null
                         ? null : response.getResult().getOutput().getText();
@@ -245,6 +247,7 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
             } catch (io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException denied) {
                 throw denied;
             } catch (RuntimeException exception) {
+                if(toolCycle)throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_TOOL_RESULT_INVALID");
                 last = exception;
                 backoff(attempt, attempts);
             }

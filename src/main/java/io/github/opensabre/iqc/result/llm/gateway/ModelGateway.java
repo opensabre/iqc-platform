@@ -19,6 +19,11 @@ public class ModelGateway {
     private final GovernanceRateLimiter rateLimiter;
     private final LlmQualityProperties properties;
     @Value("${iqc.llm.gateway.concurrency-limit:0}") private int concurrencyLimit;
+    public void assertToolExecutionAllowed(GatewayCallService.Context context){
+        try{calls.assertExecutionActive(context);}
+        catch(GatewayAdmissionException denied){throw denied;}
+        catch(RuntimeException unavailable){throw new GatewayAdmissionException("MODEL_TOOL_SOURCE_UNAVAILABLE");}
+    }
     @Transactional(propagation=Propagation.NOT_SUPPORTED)
     public <T> T invoke(GatewayCallService.ModelIdentity model,GatewayCallService.Context context,Supplier<T> invoke,
                         Function<T,GatewayCallService.Usage> usage){

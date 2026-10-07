@@ -21,6 +21,9 @@ import java.util.List;
 public class SnapshotChatModelRouter {
     private final ChatModel defaultModel; private final ObjectMapper objectMapper; private final SecretReferenceResolver secrets;
     private final io.github.opensabre.iqc.result.llm.gateway.ModelGateway gateway;
+    private final org.springframework.ai.model.tool.ToolCallingManager toolManager=org.springframework.ai.model.tool.ToolCallingManager.builder().toolExecutionExceptionProcessor(failure->{throw failure;}).build();
+    @org.springframework.beans.factory.annotation.Value("${iqc.llm.gateway.max-tool-rounds:8}") private int maxToolRounds=8;
+    @org.springframework.beans.factory.annotation.Value("${iqc.llm.gateway.max-tool-calls:64}") private int maxToolCalls=64;
     @Autowired
     public SnapshotChatModelRouter(ObjectProvider<ChatModel> defaultModel, ObjectMapper objectMapper, SecretReferenceResolver secrets,
             io.github.opensabre.iqc.result.llm.gateway.ModelGateway gateway) {
@@ -38,7 +41,7 @@ public class SnapshotChatModelRouter {
     public ChatResponse call(Prompt prompt, JsonNode agentSnapshot, ToolCallback[] callbacks,
             io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context) {
         Prompt executablePrompt = callbacks.length == 0 ? prompt : new Prompt(prompt.getInstructions(),
-                ToolCallingChatOptions.builder().toolCallbacks(callbacks).build());
+                ToolCallingChatOptions.builder().toolCallbacks(guardTools(callbacks,context)).build());
         JsonNode config=config(agentSnapshot);
         boolean managed = io.github.opensabre.iqc.agent.AgentConfiguration.usesManagedAssets(config.path("schemaVersion").asText());
         if ("3.0".equals(config.path("schemaVersion").asText()) && (!config.path("assetSnapshots").isObject() || !config.path("assetSnapshots").path("primaryModel").isObject()))
@@ -48,8 +51,13 @@ public class SnapshotChatModelRouter {
             var options=defaultModel.getDefaultOptions();
             String model=options==null || options.getModel()==null?"deployment-default":options.getModel();
             String endpoint=options instanceof OpenAiChatOptions openai && openai.getBaseUrl()!=null?openai.getBaseUrl():"deployment-default";
-            return invoke(defaultModel,executablePrompt,new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity(
-                    defaultModel.getClass().getSimpleName(),endpoint,model),context);
+            var identity=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity(
+                    options instanceof OpenAiChatOptions?"OPENAI":defaultModel.getClass().getSimpleName(),endpoint,model);
+            if(callbacks.length>0){
+                if(!(defaultModel instanceof OpenAiChatModel))throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_TOOL_RUNTIME_UNSUPPORTED");
+                return invokeToolCycle(defaultModel,executablePrompt,identity,context);
+            }
+            return invoke(defaultModel,executablePrompt,identity,context);
         }
         List<JsonNode> candidates=new ArrayList<>(); candidates.add(config.path("assetSnapshots").path("primaryModel"));
         config.path("assetSnapshots").path("fallbackModels").forEach(candidates::add);
@@ -58,9 +66,9 @@ public class SnapshotChatModelRouter {
             ChatModel selected;
             try{selected=create(candidate);}catch(io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException denied){throw denied;}catch(RuntimeException unavailable){last=unavailable;continue;}
             var identity=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity(candidate.path("provider").asText(),
-                    candidate.path("endpoint").asText(),candidate.path("modelName").asText(),price(candidate,callbacks.length==0),outputConstraint(candidate,callbacks.length==0));
+                    candidate.path("endpoint").asText(),candidate.path("modelName").asText(),price(candidate,true),outputConstraint(candidate,true));
             int retries=Math.max(0,Math.min(candidate.path("maxRetries").asInt(0),5));
-            for(int attempt=0;attempt<=retries;attempt++)try{return invoke(selected,executablePrompt,identity,context);}
+            for(int attempt=0;attempt<=retries;attempt++)try{return invokeToolCycle(selected,executablePrompt,identity,context);}
             catch(io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException denied){throw denied;}
             catch(RuntimeException exception){last=exception;}
         }
@@ -72,7 +80,51 @@ public class SnapshotChatModelRouter {
         var selected=create(profile);
         var identity=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity(profile.path("provider").asText(),
                 profile.path("endpoint").asText(),profile.path("modelName").asText(),price(profile,true),outputConstraint(profile,true));
-        return invoke(selected,prompt,identity,context);
+        return invoke(selected,prompt,identity,context.forToolRound(0));
+    }
+    private ToolCallback[] guardTools(ToolCallback[] callbacks,io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context){
+        return java.util.Arrays.stream(callbacks).map(delegate->new ToolCallback(){
+            public org.springframework.ai.tool.definition.ToolDefinition getToolDefinition(){return delegate.getToolDefinition();}
+            public org.springframework.ai.tool.metadata.ToolMetadata getToolMetadata(){return delegate.getToolMetadata();}
+            public String call(String arguments){if(gateway!=null)gateway.assertToolExecutionAllowed(context);return delegate.call(arguments);}
+            public String call(String arguments,org.springframework.ai.chat.model.ToolContext toolContext){
+                if(gateway!=null)gateway.assertToolExecutionAllowed(context);return delegate.call(arguments,toolContext);}
+        }).toArray(ToolCallback[]::new);
+    }
+    /** Marker prevents business-output parsing failures from replaying completed external tools. */
+    private static final class ToolCycleResponse extends ChatResponse {
+        ToolCycleResponse(ChatResponse response){super(response.getResults(),response.getMetadata());}
+    }
+    public static boolean toolsExecuted(ChatResponse response){return response instanceof ToolCycleResponse;}
+    private ChatResponse invokeToolCycle(ChatModel model,Prompt initial,
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity identity,
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context){
+        Prompt next=initial;int executed=0;var toolIds=new java.util.HashSet<String>();
+        for(int round=0;;round++){
+            ChatResponse response;
+            try{response=invoke(model,next,identity,context.forToolRound(round));}
+            catch(io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException denied){throw denied;}
+            catch(RuntimeException failure){if(round>0)throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_TOOL_CONTINUATION_UNCONFIRMED");throw failure;}
+            if(response==null){if(round>0)throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_TOOL_CONTINUATION_EMPTY");return null;}
+            if(!response.hasToolCalls())return round==0?response:new ToolCycleResponse(response);
+            if(maxToolRounds<1 || maxToolRounds>32 || maxToolCalls<1 || maxToolCalls>256)
+                throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_TOOL_POLICY_INVALID");
+            if(round>=maxToolRounds)throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_TOOL_ROUND_LIMIT_REACHED");
+            long count;
+            try{count=response.getResults().stream().mapToLong(x->x.getOutput().getToolCalls().size()).sum();}
+            catch(RuntimeException malformed){throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_TOOL_RESPONSE_INVALID");}
+            if(response.getResults().size()!=1 || count<1 || count>maxToolCalls-executed)
+                throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_TOOL_CALL_LIMIT_REACHED");
+            for(var tool:response.getResult().getOutput().getToolCalls()){
+                if(tool.id()==null || tool.id().isBlank() || tool.id().length()>128 || tool.id().codePoints().anyMatch(Character::isISOControl)
+                        || !toolIds.add(tool.id()))throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_TOOL_ID_INVALID_OR_REPLAYED");
+            }
+            try{
+                var result=toolManager.executeToolCalls(next,response);executed+=Math.toIntExact(count);
+                if(result.returnDirect())return new ToolCycleResponse(new ChatResponse(org.springframework.ai.model.tool.ToolExecutionResult.buildGenerations(result)));
+                next=new Prompt(result.conversationHistory(),next.getOptions());
+            }catch(RuntimeException failure){throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_TOOL_EXECUTION_UNCONFIRMED");}
+        }
     }
     private static io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.OutputConstraint outputConstraint(JsonNode profile,boolean singleResponseScope){
         var cap=profile.get("maxOutputTokens");if(cap==null || cap.isNull())return null;
