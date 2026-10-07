@@ -6,4 +6,6 @@ public class GatewayCapacity {
     @TableId private String modelKey;
     private Long occupied;
     private Integer concurrencyLimit;
+    private Boolean policyManaged;
+    private Long policyVersion;
 }

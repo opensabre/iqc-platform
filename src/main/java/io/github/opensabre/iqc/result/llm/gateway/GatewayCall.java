@@ -18,4 +18,9 @@ public class GatewayCall {
     private String responseModelId;
     private String usageStatus;
     private String errorType;
+    private LocalDateTime capacityReleasedAtUtc;
+    private String capacityReleasedBy;
+    private String capacityReleasedUserId;
+    private String capacityReleaseReason;
+    private String capacityReleaseEvidence;
 }
