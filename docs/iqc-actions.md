@@ -38,3 +38,13 @@ Mapper 增加固定最多100条的到期发现、version 条件领取、claimTok
 Condition字段kind/code/value/children；ALWAYS无操作数；ALL/ANY要求非空子组，NOT单子节点。叶支持FINDING_EQUALS、FINDING_STATE、ITEM_STATUS、RISK_AT_LEAST、FINAL_SCORE_BELOW、RESULT_STATUS，引用代码在草稿冻结和执行验证中必须属于同版声明。树最多100节点/16层，无脚本或网络。Finding值相等要求KNOWN且有值，数值按BigDecimal比较；缺失Finding/业务项、风险UNKNOWN或非FINAL评分产生UNKNOWN。状态条件可显式匹配ERROR/NOT_EVALUATED等已知状态；NOT不将UNKNOWN改成MATCH。业务标签/业务元数据条件、独立风险政策和配置编辑表单继续迭代。
 
 新字段null采用NON_NULL，旧五/六参数构造保留；freeze构造保留actionPolicy，使用原发布快照和contentHash，不另建策略表。原评测/试运行检测路径不调用ActionPolicy.evaluate或动作执行；本批尚无业务入队/worker，因此不声称配置已产生副作用。前端现有PipelineReleaseEditor增加字段类型、保留和只读摘要，完整编辑/执行记录UI仍待开发。
+
+## 适配契约实施前缺口
+公共通知、复核和样本能力具有不同返回语义，不能用HTTP无异常统一判成功，也不能以调用方配置声明重试安全。增加动作内部适配接口，绑定type与明确适配协议版本、由适配实现声明安全重试，传入已冻结且摘要匹配的请求。确认结论必须带关联幂等键和证据引用；未知不得被默认转换成可重试失败。复用原ActionExecutionContract结果和plan，不建立第二套状态或通知表。此批不注册模拟适配器，不产生网络调用；真实配置校验/公共服务映射和事务调度后续接入。
+
+## 适配接口与 SAVE_RESULT
+ActionAdapter.Definition声明type、正整数version和实现自身的retrySafe；Request.executionId是本动作账本行ID，Source.executionId仍是生产TaskExecution ID，不能混用。Request校验稳定幂等键、冻结input和policy原文摘要，Receipt关联同一幂等键，确认结论要求真实持久证据，成功要求实际输出引用且无错误。失败/未知错误仅用有界代码，不携带用户载荷或异常正文。requireRequest用于拒绝串回执；它不能取代来源/授权/claim围栏。
+
+SavedResultActionAdapter（SAVE_RESULT v1，重复只读确认安全）实际读取原ConversationInspectionResultMapper，不新增结果表、不重跑AI、不改分析结果。只允许空配置，核对冻结政策内实际actionId/type、原result决策引用、任务/EID/会话以及保存的trace/评分/业务项/状态/risk/finalScore一致，实际保存结果ID同时作为证据与输出。此处SAVE_RESULT表示确认生产路径已保存的产物，不把动作中心变成第二条分析结果保存路径。记录缺失/变化、结构或数据库异常均UNKNOWN，不能伪造持久失败回执或自动重发。
+
+当前只有接口和这个真实保存产物适配器，尚无注册分派/生产入队/worker/当前权限核验，也未调用数据库执行它；不会因此创建COMPLETE记录。工单/辅导未注册假适配器，公共通知、Webhook、复核/风险/样本/标签仍需各自真实协议与幂等证明。适配版本与发布配置的完整冻结绑定也须由后续入队/分派服务完成。
