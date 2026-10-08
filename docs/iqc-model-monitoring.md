@@ -53,3 +53,7 @@ Micrometer计数采用浮点、随实例重启，不能作为精确账单/预算
 
 ## 图表界面接入
 模型管理页增加ModelMonitoring，独立iqc:model:monitoring:view权限。沿现有opensabre-admin ECharts组件适配：保留core/line/grid/legend/tooltip/Canvas，IQC应用显式引入同一echarts依赖；native ResizeObserver替代未安装VueUse，仅加载折线图，保留源MIT声明。更新options全量替换，卸载清理observer/实例。固定7组图展示九组查询，六时间范围、手动刷新、请求代次/卸载围栏；错误独立提示，解析成功但全无有效点显示未知/无样本，不补0。未知ratio用百分比、latency用毫秒，Tokenkind保留区别；界面不宣称业务失败率/GPU/账单。真正指标、鉴权和浏览器显示仍未验证。
+
+## 数据来源和IQC采集状态
+浏览器GET `/api/iqc/model-gateway/monitoring/status`，独立IQC_ADMIN资源`iqc:model:monitoring:status:view`。沿同一内部Feign转发控制面/monitoring/iqc/models/status；复用MonitoringDataSourceStatus，仅固定`up{job="opensabre-applications",application="iqc-platform"}`。控制面查询不可用返回availablefalse，IQC内部调用失败为明确查询错误，成功但空vector不等于Targets已健康。IQC不透传底层错误信息，targets最多1MiB。
+前端与历史查询并行读取并保留同一请求代次围栏：严格success/vector/sample，展示Prometheus报告的UP/DOWN/未知个数，查询失败/解析失败/成功无IQC目标分别显示。UP只代表Prometheus采集状态，不证明模型业务成功或预算核销正确；不展示其他应用目标或凭据。实际状态、抓取授权和浏览器仍未验证。
