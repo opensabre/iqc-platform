@@ -4,7 +4,6 @@ import io.github.opensabre.governance.client.dto.RateLimitCheckRequest;
 import io.github.opensabre.governance.ratelimit.GovernanceRateLimiter;
 import io.github.opensabre.governance.ratelimit.enums.*;
 import io.github.opensabre.iqc.result.llm.LlmQualityProperties;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -13,11 +12,29 @@ import java.util.*;
 import java.util.function.*;
 
 /** One explicit model invocation. SDK/tool transport internals are a separate boundary. */
-@Component @RequiredArgsConstructor @Slf4j
+@Component @Slf4j
 public class ModelGateway {
     private final GatewayCallService calls;
     private final GovernanceRateLimiter rateLimiter;
     private final LlmQualityProperties properties;
+    private final io.micrometer.core.instrument.MeterRegistry meters;
+    @org.springframework.beans.factory.annotation.Autowired
+    public ModelGateway(GatewayCallService calls,GovernanceRateLimiter rateLimiter,LlmQualityProperties properties,
+            org.springframework.beans.factory.ObjectProvider<io.micrometer.core.instrument.MeterRegistry> meters){
+        this.calls=calls;this.rateLimiter=rateLimiter;this.properties=properties;this.meters=meters.getIfAvailable();
+    }
+    public ModelGateway(GatewayCallService calls,GovernanceRateLimiter rateLimiter,LlmQualityProperties properties){
+        this.calls=calls;this.rateLimiter=rateLimiter;this.properties=properties;this.meters=null;
+    }
+    private void recordInvocation(long started,String outcome){
+        if(meters==null)return;
+        try{io.micrometer.core.instrument.Timer.builder("iqc.model.gateway.invocation")
+            .description("Explicit model supplier invocation duration; excludes admission and settlement")
+            .tag("outcome",outcome).publishPercentileHistogram()
+            .minimumExpectedValue(java.time.Duration.ofMillis(1)).maximumExpectedValue(java.time.Duration.ofMinutes(10))
+            .register(meters).record(Math.max(0,System.nanoTime()-started),java.util.concurrent.TimeUnit.NANOSECONDS);}
+        catch(RuntimeException unavailable){log.debug("Model invocation metric unavailable type={}",unavailable.getClass().getSimpleName());}
+    }
     @Value("${iqc.llm.gateway.concurrency-limit:0}") private int concurrencyLimit;
     public void assertToolExecutionAllowed(GatewayCallService.Context context){
         try{calls.assertExecutionActive(context);}
@@ -49,8 +66,8 @@ public class ModelGateway {
         try{handle=calls.reserve(model,context,concurrencyLimit);}
         catch(GatewayAdmissionException denied){throw denied.withModelKey(model.key());}
         catch(RuntimeException unavailable){throw new GatewayAdmissionException("MODEL_CAPACITY_ADMISSION_UNAVAILABLE");}
-        final T response;
-        try{response=invoke.get();}
+        final T response;long invocationStarted=System.nanoTime();String invocationOutcome="UNKNOWN";
+        try{try{response=invoke.get();invocationOutcome="RESPONDED";}finally{recordInvocation(invocationStarted,invocationOutcome);}}
         catch(RuntimeException failure){try{calls.unknown(handle,failure);}catch(RuntimeException appendFailure){
                 log.warn("Model call remains unconfirmed call={} type={}",handle.callId(),appendFailure.getClass().getSimpleName());}
             throw failure;}

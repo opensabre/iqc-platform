@@ -165,3 +165,6 @@ API：`POST /api/iqc/agent-assets/models/{id}/budget`，独立资源`iqc:model:b
 
 读取API：`GET /api/iqc/agent-assets/models/{id}/budget`，独立资源`iqc:model:budget:view`仅IQC_ADMIN。返回当前保存模型的预算声明、价格摘要/币种及capacity（不存在明确null）。RR只读事务内profile/capacity为同一快照，提交仍重新锁profile和capacity按双版本复核；读取不初始化，不使用读取失败作为未创建。
 模型列表“预算”复用原ModelGatewayCalls容量表单和权限，初次账本采用version0和可编辑并发默认1，明确未创建及未预算历史不补计。预算声明及价格绑定当前保存模型版本，保存调用profile budget接口；成功后替换读取状态，不再显示未创建。声明不足的模型配置需先保存窗口/部署/输出限制。未新增页面、表或预算组件，真实数据库/供应商/浏览器尚未验证。
+
+## 系统层模型性能监控实施前复用
+PRD14系统层TPS/P50/P95/P99/失败率及18.2监控复用现有Actuator/Micrometer/Prometheus，不新增采集服务或持久化模型。当前Gateway有每调用账本但无运行时模型耗时直方图。计时仅Supplier模型调用边界，每显式重试/工具续调独立样本；排除预算准入和账本核销时间，响应返回不代表质检成功，异常只说明结果未知，不猜远端失败。仅固定outcome标签，不加Task/用户/模型键高基数或端点秘密。查询控制面、GPU和实例抓取仍待接入。
