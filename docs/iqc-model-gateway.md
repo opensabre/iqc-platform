@@ -149,3 +149,5 @@ Gateway将预算准入结果连同真实模型key显式传递，Provider及Pipel
 恢复API：`POST /api/iqc/model-gateway/capacity/{modelKey}/budget-recovery`，body为expectedVersion精确Long字符串和budget完整原九字段政策；独立资源`iqc:model-gateway:budget:recover`，仅IQC_ADMIN。返回CapacityChange记录前后状态供原Audit存储。无自动恢复，不重置committed、不改原call人工/响应事实；若仍有HELD/TOKEN_SETTLED_COST_HELD/QUARANTINED或状态缺失参与调用，需先逐call最终对账。该批管理界面尚待接入，SQL和事务运行尚未验证。
 
 恢复事务采用READ_COMMITTED：管理员身份读取可能早于capacity锁取得，恢复条件必须读取取得容量锁后的当前调用事实，避免复用先前RR快照漏掉刚完成的未知调用；持有容量锁期间禁止新准入及预算核销提交，不反向锁call。
+
+隔离恢复UI已接入原容量弹窗。仅具备独立恢复权限且当前已隔离时显示入口，占用非0时禁用；重新核定复用原完整预算表单，清空旧凭据及确认，冻结并发上限。提交调用独立恢复API，成功保留累计承诺并更新政策版本，服务仍核验全部账本和版本。界面按钮不替代后端校验，供应商实际契约/运行事务/浏览器尚未验证。
