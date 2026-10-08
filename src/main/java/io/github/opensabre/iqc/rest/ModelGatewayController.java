@@ -54,4 +54,16 @@ public class ModelGatewayController {
         catch(NumberFormatException invalid){throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("对账Token超出范围");}
     }
 
+    public record RecoverBudget(String expectedVersion,com.fasterxml.jackson.databind.JsonNode budget) { }
+    @PostMapping("/capacity/{modelKey}/budget-recovery")
+    @ResourcePermission(code="iqc:model-gateway:budget:recover",name="恢复模型预算隔离",type="iqc",description="管理员完成最终对账并重新核定供应商契约后恢复模型预算")
+    @io.github.opensabre.governance.audit.annotations.Audit(operationType=io.github.opensabre.governance.audit.annotations.OperationType.UPDATE,
+            description="重新核定并恢复模型预算隔离",module="IQC_MODEL_GATEWAY",request=false,response=true)
+    public GatewayCallService.CapacityChange recoverBudget(@PathVariable String modelKey,@RequestBody RecoverBudget request){
+        if(request==null || request.expectedVersion()==null || !request.expectedVersion().matches("0|[1-9][0-9]{0,18}"))
+            throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("恢复隔离需要有效政策版本");
+        try{return calls.recoverBudget(modelKey,Long.parseLong(request.expectedVersion()),request.budget());}
+        catch(NumberFormatException invalid){throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("政策版本超出范围");}
+    }
+
 }

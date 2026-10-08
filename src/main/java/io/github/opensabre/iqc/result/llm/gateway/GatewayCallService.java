@@ -185,6 +185,30 @@ public class GatewayCallService {
         var before=view(row);GatewayBudgetPolicy.apply(row,budget);row.setConcurrencyLimit(limit);row.setPolicyManaged(true);row.setPolicyVersion(expectedVersion+1);
         if(capacities.updateById(row)!=1)throw IqcException.invalidState("更新模型容量失败");return new CapacityChange(before,view(row));
     }
+    @Transactional(isolation=Isolation.READ_COMMITTED)
+    public CapacityChange recoverBudget(String modelKey,long expectedVersion,com.fasterxml.jackson.databind.JsonNode policy){
+        administrator();key(modelKey);actors.capture();
+        if(expectedVersion<0 || expectedVersion==Long.MAX_VALUE || policy==null || policy.isNull())
+            throw IqcException.invalidArgument("恢复隔离需要完整新核定政策和有效版本");
+        var row=capacity(modelKey);
+        if(!Objects.equals(row.getPolicyVersion(),expectedVersion))throw IqcException.invalidState("预算政策已变化，请刷新");
+        if(!Boolean.TRUE.equals(row.getBudgetBreached()))throw IqcException.invalidState("模型未处于预算隔离");
+        if(row.getOccupied()!=0)throw IqcException.invalidState("先核对所有模型请求已停止并核销或恢复并发占用");
+        long unresolved=calls.selectCount(Wrappers.<GatewayCall>lambdaQuery().eq(GatewayCall::getModelKey,modelKey)
+                .isNotNull(GatewayCall::getBudgetReservedTokens).and(q->q.isNull(GatewayCall::getBudgetStatus)
+                    .or().notIn(GatewayCall::getBudgetStatus,List.of("SETTLED","RECONCILED"))));
+        if(unresolved!=0)throw IqcException.invalidState("还有未核定预算调用，请先完成最终预算对账");
+        var before=view(row);String oldEvidence=row.getBudgetEvidenceRef();
+        GatewayBudgetPolicy.apply(row,policy);
+        if(Objects.equals(oldEvidence,row.getBudgetEvidenceRef()))throw IqcException.invalidArgument("恢复需提供重新核定的独立凭据");
+        if(row.getTokenBudgetCommitted()==null || row.getTokenBudgetCommitted()<0 || row.getCostBudgetCommitted()==null || row.getCostBudgetCommitted().signum()<0
+                || (row.getTokenBudgetLimit()!=null && row.getTokenBudgetCommitted()>row.getTokenBudgetLimit())
+                || (row.getCostBudgetLimit()!=null && row.getCostBudgetCommitted().compareTo(row.getCostBudgetLimit())>0))
+            throw IqcException.invalidState("累计预算事实无效或仍超重新核定的限额");
+        row.setBudgetBreached(false);row.setPolicyVersion(expectedVersion+1);row.setPolicyManaged(true);
+        if(capacities.updateById(row)!=1)throw IqcException.invalidState("恢复模型预算隔离失败");
+        return new CapacityChange(before,view(row));
+    }
     @Transactional(isolation=Isolation.REPEATABLE_READ)
     public CapacityView releaseCapacity(String callId,String modelKey,ReleaseReason reason,String evidence,boolean remoteStopped){
         administrator();key(modelKey);var actor=actors.capture();
