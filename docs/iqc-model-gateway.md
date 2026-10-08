@@ -154,3 +154,8 @@ Gateway将预算准入结果连同真实模型key显式传递，Provider及Pipel
 
 ## 首次调用前预算配置实施前复用
 复用ModelProfile版本、ModelIdentity物理键、GatewayCapacityMapper.ensure及原configureCapacity版本CAS，不建立新模型注册表。缺口是容量仅首个reserve创建，原管理入口依赖已有call。先扩展事务核心：只初始化原capacity行，不发模型请求；完整政策必须与选定模型版本声明一致，原账本已存在时仍按expectedVersion CAS而非覆盖重置。profile选择/权限/API及界面后续接入，不可让用户任意声明端点绕开模型资产。
+
+### 首次配置管理接口缺口
+复用原模型管理Controller/Mapper和预算事务核心；新增模型id下的明确预算配置动作，独立管理员资源。服务锁定原profile并核对versionNo，再构建与调用相同的ModelIdentity，调用原账本初始化；不读取密钥或发送网络，不接受客户端provider/endpoint/modelName。返回profileId/version和容量前后值供原Audit。并发profile修改按同一行锁串行，原模型status禁用时拒绝。
+
+API：`POST /api/iqc/agent-assets/models/{id}/budget`，独立资源`iqc:model:budget:configure`仅IQC_ADMIN。body：modelVersion精确JSON整数、capacityVersion精确Long字符串、concurrencyLimit精确JSON整数、budget原完整政策。未有capacity使用version0，已有账本需当前版本；冲突拒绝且事务回滚，不发试探模型请求。返回modelProfileId/modelVersion/capacity.before/after，Audit requestfalse/responsetrue。UI入口和首次配置前读取已有账本版本仍需接入。
