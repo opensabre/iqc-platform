@@ -47,3 +47,6 @@ Micrometer计数采用浮点、随实例重启，不能作为精确账单/预算
 复用现有OpenFeign starter的InternalTokenInterceptor逐跳签名及受信任角色上下文，不创建新鉴权或Prometheus客户端。IQC后端新增固定控制面Feign接口，仅固定base-gateway-admin服务、固定路径、受限range；browser权限仍在IQC产品，不改变应用产品唯一归属。查询失败返回明确错误，不伪无数据。
 
 浏览器入口：`GET /api/iqc/model-gateway/monitoring/history?range=1h`，独立资源`iqc:model:monitoring:view`仅IQC_ADMIN。ModelMonitoringService通过原IqcDataScope再验证管理员，只允许15m/1h/6h/24h/7d/30d，再调用固定控制面Feign目标。检查标准Result成功、range/时间/step及九组series契约，单组返回限制1MiB，失败不透传底层异常/端点，不返回空值伪健康。保留控制面start/end/step与原matrix字符串，UI解析还未接入。内部Feign签名/角色传播及实际控制面结果未运行核验；必须先发布相应控制面接口才能可用。
+
+## 前端历史解析复用与缺口
+已有opensabre-admin/history-chart.ts提供ECharts line配置，但原matrix函数解析异常返回[]、Number(NaN/Inf)不区分协议错误；IQC应用尚无ECharts依赖。先沿该配置形状接入IQC固定history API，域内适配严格校验Prometheus success/matrix/序列标签/时间网格和数值，真实空matrix保持空、NaN/Inf及缺采样转null且connectNulls false。控制面源码queryRange用Instant.getEpochSecond，因此前端网格按返回start/end秒取整与step对齐；不臆造零值，不将解析失败当无数据。图表组件/依赖接入和交互仍待实现，本批只有API与解析适配。未新增采集服务或持久模型。
