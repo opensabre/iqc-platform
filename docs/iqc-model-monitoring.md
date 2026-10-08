@@ -42,3 +42,8 @@ sum by (outcome) (rate(iqc_model_gateway_settlement_total[5m]))
 ```
 
 Micrometer计数采用浮点、随实例重启，不能作为精确账单/预算/持久审计依据；即使Token计数为0，也需usage覆盖/抓取状态才能区分无消耗与未知。注册/计数异常仅日志，不改变准入、网络、返回及账本事务。缺失覆盖、崩溃窗口和未采集实例仍待运行验收，不宣称全局完整计量。
+
+## 查询转发实施前复用
+复用现有OpenFeign starter的InternalTokenInterceptor逐跳签名及受信任角色上下文，不创建新鉴权或Prometheus客户端。IQC后端新增固定控制面Feign接口，仅固定base-gateway-admin服务、固定路径、受限range；browser权限仍在IQC产品，不改变应用产品唯一归属。查询失败返回明确错误，不伪无数据。
+
+浏览器入口：`GET /api/iqc/model-gateway/monitoring/history?range=1h`，独立资源`iqc:model:monitoring:view`仅IQC_ADMIN。ModelMonitoringService通过原IqcDataScope再验证管理员，只允许15m/1h/6h/24h/7d/30d，再调用固定控制面Feign目标。检查标准Result成功、range/时间/step及九组series契约，单组返回限制1MiB，失败不透传底层异常/端点，不返回空值伪健康。保留控制面start/end/step与原matrix字符串，UI解析还未接入。内部Feign签名/角色传播及实际控制面结果未运行核验；必须先发布相应控制面接口才能可用。

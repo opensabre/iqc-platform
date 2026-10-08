@@ -251,3 +251,5 @@ Gateway预算拒绝显式key/原因经Provider、itemRoute/Pipeline及Future向�
 - I3/I7模型网关Supplier计时复用Micrometer Timer直方图，固定RESPONDED/UNKNOWN标签，为显式调用结束吞吐及P50/P95/P99提供序列。原业务状态/账本不改，未知不等于远端失败；采集/控制面/业务失败率/GPU等尚未完成，详iqc-model-monitoring.md。
 
 - 模型网关沿已有Micrometer追加准入阶段/核销结果/用量覆盖及nullableToken趋势计数，固定有限标签。仅确认核销后记录供应商已知合法Token，不将未知当0、不改变精确预算账本。查询控制面及采集/业务系统完整指标仍未完成。
+
+- IQC模型监控转发API复用OpenFeign内部逐跳签名和固定查询控制面；产品应用唯一归属不改，独立IQC_ADMIN资源/按钮26。成功返回固定历史窗口及九组矩阵，失败不伪无数据。控制面需要同步候选接口，身份/抓取/浏览器运行验收和UI未完成。

@@ -21,7 +21,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 @EnableScheduling
 @EnableConfigurationProperties({LlmQualityProperties.class, ConversationUploadProperties.class})
 @EnableMethodCache(basePackages = "io.github.opensabre.iqc")
-@EnableFeignClients(clients = IqcOrganizationClient.class)
+@EnableFeignClients(clients = {IqcOrganizationClient.class,io.github.opensabre.iqc.shared.IqcModelMonitoringClient.class})
 public class IqcPlatformApplication {
 
     public static void main(String[] args) {
