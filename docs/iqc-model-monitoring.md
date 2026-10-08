@@ -50,3 +50,6 @@ Micrometer计数采用浮点、随实例重启，不能作为精确账单/预算
 
 ## 前端历史解析复用与缺口
 已有opensabre-admin/history-chart.ts提供ECharts line配置，但原matrix函数解析异常返回[]、Number(NaN/Inf)不区分协议错误；IQC应用尚无ECharts依赖。先沿该配置形状接入IQC固定history API，域内适配严格校验Prometheus success/matrix/序列标签/时间网格和数值，真实空matrix保持空、NaN/Inf及缺采样转null且connectNulls false。控制面源码queryRange用Instant.getEpochSecond，因此前端网格按返回start/end秒取整与step对齐；不臆造零值，不将解析失败当无数据。图表组件/依赖接入和交互仍待实现，本批只有API与解析适配。未新增采集服务或持久模型。
+
+## 图表界面接入
+模型管理页增加ModelMonitoring，独立iqc:model:monitoring:view权限。沿现有opensabre-admin ECharts组件适配：保留core/line/grid/legend/tooltip/Canvas，IQC应用显式引入同一echarts依赖；native ResizeObserver替代未安装VueUse，仅加载折线图，保留源MIT声明。更新options全量替换，卸载清理observer/实例。固定7组图展示九组查询，六时间范围、手动刷新、请求代次/卸载围栏；错误独立提示，解析成功但全无有效点显示未知/无样本，不补0。未知ratio用百分比、latency用毫秒，Tokenkind保留区别；界面不宣称业务失败率/GPU/账单。真正指标、鉴权和浏览器显示仍未验证。
