@@ -175,6 +175,30 @@ public class GatewayCallService {
     private CapacityView view(GatewayCapacity row){return new CapacityView(row.getModelKey(),row.getOccupied(),row.getConcurrencyLimit(),row.getPolicyManaged(),row.getPolicyVersion(),budgetView(row));}
     public CapacityView getCapacity(String modelKey){administrator();key(modelKey);var row=capacities.selectById(modelKey);
         if(row==null)throw IqcException.notFound("模型容量不存在");return view(row);}
+    /** Seed the same physical bucket before any remote call; never resets an existing ledger. */
+    @Transactional(isolation=Isolation.REPEATABLE_READ)
+    public CapacityChange initializeBudget(ModelIdentity model,int limit,long expectedVersion,com.fasterxml.jackson.databind.JsonNode policy){
+        administrator();actors.capture();
+        if(model==null || limit<0 || limit>10000 || expectedVersion<0 || expectedVersion==Long.MAX_VALUE
+                || policy==null || !policy.isObject())throw IqcException.invalidArgument("首次预算配置需要有效模型声明和完整政策");
+        var declaration=model.deployment();var output=model.output();
+        if(declaration==null || declaration.contextWindowTokens()==null || declaration.deploymentRef()==null || output==null || !output.singleResponseScope())
+            throw IqcException.invalidArgument("模型版本需声明上下文窗口、部署及单次响应输出限制");
+        capacities.ensure(model.key(),limit);
+        var proposed=new GatewayCapacity();proposed.setBudgetCurrency(capacity(model.key()).getBudgetCurrency());GatewayBudgetPolicy.apply(proposed,policy);
+        if(!Objects.equals(proposed.getBudgetContextWindow(),declaration.contextWindowTokens())
+                || !Objects.equals(proposed.getBudgetDeploymentRef(),declaration.deploymentRef())
+                || !Objects.equals(proposed.getBudgetOutputParameter(),output.parameter()))
+            throw IqcException.invalidArgument("预算核定声明必须与所选模型版本一致");
+        if(proposed.getCostBudgetLimit()!=null){
+            var price=model.price();
+            if(price==null || !price.billingSupported() || price.pricingJson()==null
+                    || !Objects.equals(proposed.getBudgetPricingHash(),SelectorAssetService.hash(price.pricingJson()))
+                    || !Objects.equals(proposed.getBudgetCurrency(),io.github.opensabre.iqc.modelprofile.ModelPricing.parse(price.pricingJson()).currency()))
+                throw IqcException.invalidArgument("预算核定价格必须与所选模型版本一致");
+        }
+        return configureCapacity(model.key(),limit,expectedVersion,policy);
+    }
     @Transactional(isolation=Isolation.REPEATABLE_READ)
     public CapacityChange configureCapacity(String modelKey,int limit,long expectedVersion){return configureCapacity(modelKey,limit,expectedVersion,null);}
     @Transactional(isolation=Isolation.REPEATABLE_READ)
