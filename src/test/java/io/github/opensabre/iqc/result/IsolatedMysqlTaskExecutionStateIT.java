@@ -49,6 +49,8 @@ class IsolatedMysqlTaskExecutionStateIT {
     private static JdbcTemplate jdbc;
     private static TaskExecutionStateService states;
     private static final String BUDGET_KEY = "a".repeat(64);
+    private static final java.util.concurrent.atomic.AtomicReference<Runnable> BEFORE_ITEM_UPDATE =
+            new java.util.concurrent.atomic.AtomicReference<>();
 
     @BeforeAll
     static void start() throws Exception {
@@ -56,7 +58,7 @@ class IsolatedMysqlTaskExecutionStateIT {
         try (var connection = DriverManager.getConnection(
                 "jdbc:mysql://127.0.0.1:34307/?useSSL=false&allowPublicKeyRetrieval=true", "root", "");
              var statement = connection.createStatement()) {
-            statement.execute("CREATE DATABASE iqc_worker_state_validation CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+            statement.execute("CREATE DATABASE IF NOT EXISTS iqc_worker_state_validation CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
         }
         Flyway.configure().dataSource(URL, "root", "").locations("classpath:db/migration/mysql")
                 .baselineOnMigrate(false).cleanDisabled(true).load().migrate();
@@ -73,6 +75,7 @@ class IsolatedMysqlTaskExecutionStateIT {
 
     @BeforeEach
     void fixture() {
+        BEFORE_ITEM_UPDATE.set(null);
         jdbc.execute("DROP TRIGGER IF EXISTS reject_execution_state_write");
         jdbc.update("DELETE FROM iqc_model_gateway_call");
         jdbc.update("DELETE FROM iqc_task_item");
@@ -364,6 +367,90 @@ class IsolatedMysqlTaskExecutionStateIT {
                 started ? java.sql.Timestamp.valueOf("2026-10-08 00:00:01") : null);
     }
 
+    @Test
+    void budgetPauseWinningTaskLockRejectsConcurrentToolStart() throws Exception {
+        budgetFixture();
+        var gateway = context.getBean(GatewayCallService.class);
+        var source = toolSource();
+        var checkedExposure = new CountDownLatch(1);
+        var releasePause = new CountDownLatch(1);
+        // This hook pauses before actual item SQL, after real exposure lookup while Task/Execution locks are held.
+        BEFORE_ITEM_UPDATE.set(() -> {
+            checkedExposure.countDown();
+            await(releasePause);
+        });
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var pause = workers.submit(() -> states.waitForBudget("worker-task", "current-eid", budgetReason()));
+            java.util.concurrent.Future<String> tools = null;
+            try {
+                assertThat(checkedExposure.await(10, TimeUnit.SECONDS)).isTrue();
+                tools = workers.submit(() -> {
+                    try {
+                        gateway.markToolsStarted(new GatewayCallService.Handle("call-worker-task", BUDGET_KEY), source);
+                        return "STARTED";
+                    } catch (GatewayAdmissionException stale) { return stale.getMessage(); }
+                });
+                awaitToolCompletionOrTaskLockWait(tools);
+            } finally {
+                releasePause.countDown();
+            }
+            assertThat(pause.get(10, TimeUnit.SECONDS)).isTrue();
+            assertThat(tools).isNotNull();
+            assertThat(tools.get(10, TimeUnit.SECONDS)).isEqualTo("MODEL_EXECUTION_PROVENANCE_STALE");
+        } finally {
+            releasePause.countDown();
+            BEFORE_ITEM_UPDATE.set(null);
+        }
+        assertStatus("PAUSED", "PAUSED");
+        assertThat(jdbc.queryForObject("SELECT tool_execution_started_at_utc FROM iqc_model_gateway_call WHERE call_id='call-worker-task'",
+                java.sql.Timestamp.class)).isNull();
+    }
+
+    @Test
+    void actualToolStartWinningFirstPreventsBudgetPause() {
+        budgetFixture();
+        var source = toolSource();
+        context.getBean(GatewayCallService.class).markToolsStarted(
+                new GatewayCallService.Handle("call-worker-task", BUDGET_KEY), source);
+        assertThat(states.waitForBudget("worker-task", "current-eid", budgetReason())).isFalse();
+        assertStatus("RUNNING", "RUNNING");
+        assertThat(itemStatus("working-item")).isEqualTo("RUNNING");
+        assertThat(jdbc.queryForObject("SELECT tool_execution_started_at_utc FROM iqc_model_gateway_call WHERE call_id='call-worker-task'",
+                java.sql.Timestamp.class)).isNotNull();
+    }
+
+    private static GatewayCallService.Context toolSource() {
+        jdbc.update("UPDATE iqc_inspection_task SET created_by='alice' WHERE id='worker-task'");
+        toolCall("worker-task", "current-eid", false);
+        return new GatewayCallService.Context(null, null, "alice",
+                new io.github.opensabre.iqc.result.llm.ModelCallContext(
+                        "worker-task", "current-eid", "tool-node", 0, "alice", null, "conversation-1"));
+    }
+
+    /** Observe real InnoDB contention instead of relying on a thread sleep to make the race deterministic. */
+    private static void awaitToolCompletionOrTaskLockWait(java.util.concurrent.Future<String> tools) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!tools.isDone()) {
+            Integer waiting = jdbc.queryForObject("""
+                    SELECT COUNT(*) FROM performance_schema.data_lock_waits w
+                    JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                    WHERE l.OBJECT_SCHEMA=DATABASE() AND l.OBJECT_NAME='iqc_inspection_task'
+                    """, Integer.class);
+            if (waiting != null && waiting > 0) return;
+            if (System.nanoTime() >= deadline) throw new IllegalStateException("Tool transaction neither finished nor waited for Task lock");
+            Thread.sleep(10);
+        }
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(15, TimeUnit.SECONDS)) throw new IllegalStateException("Budget pause barrier timed out");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(interrupted);
+        }
+    }
+
     /** Bounded child-process protocol; every child has its own Spring context and database connections. */
     private static final class WorkerProcess implements AutoCloseable {
         private final Process process;
@@ -488,8 +575,19 @@ class IsolatedMysqlTaskExecutionStateIT {
         TaskExecutionStateService taskExecutionStateService(SqlSessionFactory factory,
                 org.springframework.beans.factory.ObjectProvider<GatewayCallService> gateway) {
             var session = new SqlSessionTemplate(factory);
+            var actualItems = session.getMapper(TaskItemMapper.class);
+            // Intercept only the scheduling seam; every mapper result and SQL write remains real.
+            var items = (TaskItemMapper) java.lang.reflect.Proxy.newProxyInstance(TaskItemMapper.class.getClassLoader(),
+                    new Class<?>[]{TaskItemMapper.class}, (proxy, method, arguments) -> {
+                        if (method.getName().equals("update")) {
+                            var hook = BEFORE_ITEM_UPDATE.getAndSet(null);
+                            if (hook != null) hook.run();
+                        }
+                        try { return method.invoke(actualItems, arguments); }
+                        catch (java.lang.reflect.InvocationTargetException failure) { throw failure.getCause(); }
+                    });
             return new TaskExecutionStateService(session.getMapper(InspectionTaskMapper.class),
-                    session.getMapper(TaskExecutionMapper.class), session.getMapper(TaskItemMapper.class), gateway);
+                    session.getMapper(TaskExecutionMapper.class), items, gateway);
         }
 
         @Bean

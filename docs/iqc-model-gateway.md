@@ -171,3 +171,10 @@ PRD14系统层TPS/P50/P95/P99/失败率及18.2监控复用现有Actuator/Microme
 
 ### 准入、核销及Token运行指标复用
 继续复用ModelGateway短事务返回和MeterRegistry，不另建实时Token账本。固定阶段/结果标签统计准入和核销；仅已确认核销且合法的nullable供应商Token加入运行计数，缺失不补0、无效不计。Micrometer浮点计数仅运行趋势，不能替代原精确Long/BigDecimal账本及预算。
+
+
+## 工具启动与预算暂停的共同状态边界
+
+带Task/EID来源的 `markToolsStarted` 按Task→Execution→Call取得短事务行锁，再沿用当前轮次、运行状态及来源校验。预算暂停先获得Task锁时，工具标记等待其提交并拒绝PAUSED来源；工具启动标记先提交时，原预算等待查询看到已有工具证据并拒绝自动暂停。模型响应的Call行锁本身不能替代此共同Task锁。
+
+标记事务提交返回后才调用实际工具，锁不包围工具I/O；既有无执行来源调用协议保留。这保证数据库准入顺序，不代表能够撤销已经发送的工具请求或自动重放未知副作用。真实并发复现和验收见 `iqc-prd-b-tool-budget-race.md`。
