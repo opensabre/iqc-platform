@@ -249,3 +249,5 @@ Gateway预算拒绝显式key/原因经Provider、itemRoute/Pipeline及Future向�
 - 模型预算GET明确未创建capacity:null，与读取失败区分；模型列表预算入口复用原容量表单，首次调用前可配置，保存时profile及capacity双版本校验。无调用历史仍可进入；未预算历史不补计。运行和浏览器验收未完成。
 
 - I3/I7模型网关Supplier计时复用Micrometer Timer直方图，固定RESPONDED/UNKNOWN标签，为显式调用结束吞吐及P50/P95/P99提供序列。原业务状态/账本不改，未知不等于远端失败；采集/控制面/业务失败率/GPU等尚未完成，详iqc-model-monitoring.md。
+
+- 模型网关沿已有Micrometer追加准入阶段/核销结果/用量覆盖及nullableToken趋势计数，固定有限标签。仅确认核销后记录供应商已知合法Token，不将未知当0、不改变精确预算账本。查询控制面及采集/业务系统完整指标仍未完成。

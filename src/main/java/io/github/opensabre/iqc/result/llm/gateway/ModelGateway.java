@@ -35,6 +35,18 @@ public class ModelGateway {
             .register(meters).record(Math.max(0,System.nanoTime()-started),java.util.concurrent.TimeUnit.NANOSECONDS);}
         catch(RuntimeException unavailable){log.debug("Model invocation metric unavailable type={}",unavailable.getClass().getSimpleName());}
     }
+    private void metric(String name,double value,String... tags){
+        if(meters==null)return;
+        try{meters.counter(name,tags).increment(value);}
+        catch(RuntimeException unavailable){log.debug("Model gateway metric unavailable type={}",unavailable.getClass().getSimpleName());}
+    }
+    private void recordUsage(GatewayCallService.Usage usage){
+        metric("iqc.model.gateway.usage",1,"status",usage.status());
+        if("INVALID".equals(usage.status()))return;
+        reportedTokens("input",usage.inputTokens());reportedTokens("output",usage.outputTokens());reportedTokens("total",usage.totalTokens());
+        reportedTokens("cache_read_input",usage.cacheReadInputTokens());reportedTokens("cache_write_input",usage.cacheWriteInputTokens());
+    }
+    private void reportedTokens(String kind,Long value){if(value!=null)metric("iqc.model.gateway.tokens",value.doubleValue(),"kind",kind);}
     @Value("${iqc.llm.gateway.concurrency-limit:0}") private int concurrencyLimit;
     public void assertToolExecutionAllowed(GatewayCallService.Context context){
         try{calls.assertExecutionActive(context);}
@@ -53,30 +65,37 @@ public class ModelGateway {
     @Transactional(propagation=Propagation.NOT_SUPPORTED)
     public <T> Invocation<T> invokeTracked(GatewayCallService.ModelIdentity model,GatewayCallService.Context context,Supplier<T> invoke,
                         Function<T,GatewayCallService.Usage> usage){
-        if(properties.getRateLimitMaxCount()<1 || properties.getRateLimitPeriod()<1)
-            throw new GatewayAdmissionException("GATEWAY_RATE_CONFIGURATION_INVALID");
+        if(properties.getRateLimitMaxCount()<1 || properties.getRateLimitPeriod()<1){
+            metric("iqc.model.gateway.admission",1,"stage","CONFIGURATION","outcome","DENIED");
+            throw new GatewayAdmissionException("GATEWAY_RATE_CONFIGURATION_INVALID");}
         io.github.opensabre.governance.ratelimit.RateLimitDecision decision;
         try{decision=rateLimiter.check(RateLimitCheckRequest.builder().sceneCode("iqc-model-gateway-call").key(model.key()).keyPrefix("iqc:gateway")
                 .algorithm(RateLimitAlgorithmType.SLIDING_WINDOW).dimensions(List.of(RateLimitDimension.BUSINESS))
                 .dimensionValues(Map.of(RateLimitDimension.BUSINESS,model.key())).maxCount(properties.getRateLimitMaxCount())
                 .period(properties.getRateLimitPeriod()).enabled(true).build());}
-        catch(RuntimeException unavailable){throw new GatewayAdmissionException("MODEL_RATE_ADMISSION_UNAVAILABLE");}
-        if(decision==null || !decision.allowed())throw new GatewayAdmissionException("MODEL_RATE_ADMISSION_DENIED");
+        catch(RuntimeException unavailable){metric("iqc.model.gateway.admission",1,"stage","RATE","outcome","UNAVAILABLE");throw new GatewayAdmissionException("MODEL_RATE_ADMISSION_UNAVAILABLE");}
+        if(decision==null || !decision.allowed()){metric("iqc.model.gateway.admission",1,"stage","RATE","outcome","DENIED");throw new GatewayAdmissionException("MODEL_RATE_ADMISSION_DENIED");}
+        metric("iqc.model.gateway.admission",1,"stage","RATE","outcome","ACCEPTED");
         GatewayCallService.Handle handle;
         try{handle=calls.reserve(model,context,concurrencyLimit);}
-        catch(GatewayAdmissionException denied){throw denied.withModelKey(model.key());}
-        catch(RuntimeException unavailable){throw new GatewayAdmissionException("MODEL_CAPACITY_ADMISSION_UNAVAILABLE");}
+        catch(GatewayAdmissionException denied){metric("iqc.model.gateway.admission",1,"stage","CAPACITY","outcome","DENIED");throw denied.withModelKey(model.key());}
+        catch(RuntimeException unavailable){metric("iqc.model.gateway.admission",1,"stage","CAPACITY","outcome","UNAVAILABLE");throw new GatewayAdmissionException("MODEL_CAPACITY_ADMISSION_UNAVAILABLE");}
+        metric("iqc.model.gateway.admission",1,"stage","CAPACITY","outcome","ACCEPTED");
         final T response;long invocationStarted=System.nanoTime();String invocationOutcome="UNKNOWN";
         try{try{response=invoke.get();invocationOutcome="RESPONDED";}finally{recordInvocation(invocationStarted,invocationOutcome);}}
-        catch(RuntimeException failure){try{calls.unknown(handle,failure);}catch(RuntimeException appendFailure){
+        catch(RuntimeException failure){try{calls.unknown(handle,failure);metric("iqc.model.gateway.settlement",1,"outcome","UNKNOWN_RECORDED");}catch(RuntimeException appendFailure){
+                metric("iqc.model.gateway.settlement",1,"outcome","UNKNOWN_UNCONFIRMED");
                 log.warn("Model call remains unconfirmed call={} type={}",handle.callId(),appendFailure.getClass().getSimpleName());}
             throw failure;}
         GatewayCallService.Usage observed;
         try{observed=usage.apply(response);}catch(RuntimeException invalidUsage){observed=new GatewayCallService.Usage(-1L,null,null,null);}
+        if(observed==null)observed=GatewayCallService.Usage.missing();
         // A failed settlement leaves RESERVED occupancy; never repeat a successful request to repair accounting.
         try{calls.confirmed(handle,observed);}catch(RuntimeException failure){
+            metric("iqc.model.gateway.settlement",1,"outcome","RESPONSE_UNCONFIRMED");
             log.warn("Model response settlement unavailable call={} type={}",handle.callId(),failure.getClass().getSimpleName());
             throw new GatewayAdmissionException("MODEL_SETTLEMENT_UNCONFIRMED");}
+        metric("iqc.model.gateway.settlement",1,"outcome","RESPONSE_CONFIRMED");recordUsage(observed);
         return new Invocation<>(response,handle);
     }
 }

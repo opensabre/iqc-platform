@@ -24,3 +24,21 @@ histogram_quantile(0.95, sum by (le) (rate(iqc_model_gateway_invocation_seconds_
 ## 验收状态
 
 当前只有应用埋点与编译证据。未验证真实registry/Actuator序列、Prometheus Targets/抓取授权、控制面查询或浏览器；不代表已部署、指标可查或完整PRD系统层完成。已有共享监控配置由部署层管理，未修改framework源码。
+
+## 准入、核销和Token覆盖
+
+- `iqc_model_gateway_admission_total`：stage为CONFIGURATION/RATE/CAPACITY，outcome为DENIED/UNAVAILABLE/ACCEPTED。配置非法只记录CONFIGURATION拒绝，RATE通过后才进入CAPACITY（包括来源、并发、预算校验）；不可将不同阶段ACCEPTED相加作为请求数。RATE DENIED也包括本地未得到有效allowed决策，不证明远端治理服务正常。
+- `iqc_model_gateway_settlement_total`：RESPONSE_CONFIRMED/RESPONSE_UNCONFIRMED/UNKNOWN_RECORDED/UNKNOWN_UNCONFIRMED表示本地账本方法是否完成。响应事实确认不等于业务成功；UNKNOWN记录成功仍不证明远端执行结果。手工对账/迟到后台账本动作不回填运行计数。
+- `iqc_model_gateway_usage_total`：只有confirmed返回后记录，status为COMPLETE/PARTIAL/MISSING/INVALID。空usage归MISSING；无效usage不进入Token计数。
+- `iqc_model_gateway_tokens_total`：kind为input/output/total/cache_read_input/cache_write_input；分别累加本次confirmed返回的已知合法nullable值。部分用量可贡献已知项，缺失项不记录，已知0允许记录。不同kind重叠，尤其total包含input/output，不能全部求和。缓存Token不代表免费或支持缓存计费。
+
+Token趋势查询示例：
+
+```promql
+sum by (kind) (rate(iqc_model_gateway_tokens_total[5m]))
+sum by (status) (rate(iqc_model_gateway_usage_total[5m]))
+sum by (stage,outcome) (rate(iqc_model_gateway_admission_total[5m]))
+sum by (outcome) (rate(iqc_model_gateway_settlement_total[5m]))
+```
+
+Micrometer计数采用浮点、随实例重启，不能作为精确账单/预算/持久审计依据；即使Token计数为0，也需usage覆盖/抓取状态才能区分无消耗与未知。注册/计数异常仅日志，不改变准入、网络、返回及账本事务。缺失覆盖、崩溃窗口和未采集实例仍待运行验收，不宣称全局完整计量。

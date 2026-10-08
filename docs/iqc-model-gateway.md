@@ -168,3 +168,6 @@ API：`POST /api/iqc/agent-assets/models/{id}/budget`，独立资源`iqc:model:b
 
 ## 系统层模型性能监控实施前复用
 PRD14系统层TPS/P50/P95/P99/失败率及18.2监控复用现有Actuator/Micrometer/Prometheus，不新增采集服务或持久化模型。当前Gateway有每调用账本但无运行时模型耗时直方图。计时仅Supplier模型调用边界，每显式重试/工具续调独立样本；排除预算准入和账本核销时间，响应返回不代表质检成功，异常只说明结果未知，不猜远端失败。仅固定outcome标签，不加Task/用户/模型键高基数或端点秘密。查询控制面、GPU和实例抓取仍待接入。
+
+### 准入、核销及Token运行指标复用
+继续复用ModelGateway短事务返回和MeterRegistry，不另建实时Token账本。固定阶段/结果标签统计准入和核销；仅已确认核销且合法的nullable供应商Token加入运行计数，缺失不补0、无效不计。Micrometer浮点计数仅运行趋势，不能替代原精确Long/BigDecimal账本及预算。
