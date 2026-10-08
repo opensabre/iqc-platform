@@ -176,6 +176,29 @@ public class PipelineAssetService {
     public static boolean isPipeline(JsonNode snapshot) { return snapshot!=null && snapshot.has("pipelineSnapshot"); }
     public PipelineRelease taskRelease(JsonNode snapshot) { validateTask(snapshot); return convert(snapshot.path("pipelineSnapshot").path("release")); }
 
+    /** Worker validation of an actual published production snapshot, without a thread user scope. */
+    public PipelineRelease publishedTaskRelease(JsonNode snapshot) {
+        if (!isPipeline(snapshot) || snapshot.has("evaluationSnapshot"))
+            throw IqcException.invalidState("动作来源必须是已发布生产流水线");
+        validateTask(snapshot);
+        var marker=snapshot.path("pipelineSnapshot");
+        if (!"PIPELINE".equals(snapshot.path("executionStrategy").path("mode").asText())
+                || !marker.path("trial").isBoolean() || marker.path("trial").booleanValue()
+                || !marker.path("versionNo").isIntegralNumber() || !marker.path("versionNo").canConvertToInt()
+                || marker.path("versionNo").intValue()<1
+                || (marker.has("draftRevision") && !marker.path("draftRevision").isNull()))
+            throw IqcException.invalidState("动作来源缺少生产发布版本");
+        var version=versions.selectOne(Wrappers.<PipelineAssetVersion>lambdaQuery()
+                .eq(PipelineAssetVersion::getPipelineId,marker.path("pipelineId").asText())
+                .eq(PipelineAssetVersion::getVersionNo,marker.path("versionNo").intValue()));
+        if (version==null || !hash(version.getSnapshotJson()).equals(version.getContentHash())
+                || !Objects.equals(version.getContentHash(),marker.path("contentHash").asText())
+                || !parse(version.getSnapshotJson()).equals(marker.path("release")))
+            throw IqcException.invalidState("动作来源与发布流水线不一致");
+        validatePublicationEvidence(version);
+        return convert(marker.path("release"));
+    }
+
     private PipelineRelease freeze(PipelineRelease release) {
         if(release==null) throw IqcException.invalidArgument("流水线配置不能为空");
         var nodes=new ArrayList<PipelineDefinition.Node>(); var codes=new HashSet<String>();
