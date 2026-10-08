@@ -6,6 +6,11 @@ import io.github.opensabre.iqc.task.TaskExecutionStateService;
 import io.github.opensabre.iqc.task.InspectionTaskService;
 import io.github.opensabre.iqc.task.dao.InspectionTaskMapper;
 import io.github.opensabre.iqc.task.dao.TaskExecutionMapper;
+import io.github.opensabre.iqc.task.dao.TaskItemMapper;
+import io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException;
+import io.github.opensabre.iqc.result.llm.gateway.GatewayCallMapper;
+import io.github.opensabre.iqc.result.llm.gateway.GatewayCapacityMapper;
+import io.github.opensabre.iqc.result.llm.gateway.GatewayCallService;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
@@ -43,6 +48,7 @@ class IsolatedMysqlTaskExecutionStateIT {
     private static AnnotationConfigApplicationContext context;
     private static JdbcTemplate jdbc;
     private static TaskExecutionStateService states;
+    private static final String BUDGET_KEY = "a".repeat(64);
 
     @BeforeAll
     static void start() throws Exception {
@@ -68,6 +74,8 @@ class IsolatedMysqlTaskExecutionStateIT {
     @BeforeEach
     void fixture() {
         jdbc.execute("DROP TRIGGER IF EXISTS reject_execution_state_write");
+        jdbc.update("DELETE FROM iqc_model_gateway_call");
+        jdbc.update("DELETE FROM iqc_task_item");
         jdbc.update("DELETE FROM iqc_task_execution");
         jdbc.update("DELETE FROM iqc_inspection_task");
         jdbc.update("""
@@ -218,6 +226,144 @@ class IsolatedMysqlTaskExecutionStateIT {
         jdbc.update("UPDATE iqc_inspection_task SET updated_time='2000-01-01 00:00:00' WHERE id='worker-task'");
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "MODEL_TOKEN_BUDGET_EXHAUSTED", "MODEL_COST_BUDGET_EXHAUSTED", "MODEL_BUDGET_QUARANTINED",
+            "MODEL_BUDGET_BOUND_UNVERIFIED", "MODEL_COST_BUDGET_PRICE_UNVERIFIED"})
+    void validBudgetWaitPreservesCheckpointsAndCountsCarriedProgress(String reason) {
+        budgetFixture();
+        assertThat(states.waitForBudget("worker-task", "current-eid", new GatewayAdmissionException(reason, BUDGET_KEY)))
+                .isTrue();
+        assertStatus("PAUSED", "PAUSED");
+        assertThat(itemStatus("working-item")).isEqualTo("PENDING");
+        assertThat(itemStatus("waiting-item")).isEqualTo("PENDING");
+        assertThat(itemStatus("done-item")).isEqualTo("SUCCEEDED");
+        assertThat(itemStatus("failed-item")).isEqualTo("FAILED");
+        assertThat(itemStatus("old-item")).isEqualTo("RUNNING");
+        assertThat(jdbc.queryForObject("SELECT result_id FROM iqc_task_item WHERE id='done-item'", String.class))
+                .isEqualTo("frozen-result");
+        assertThat(jdbc.queryForObject("SELECT attempt_count FROM iqc_task_item WHERE id='working-item'", Integer.class))
+                .isEqualTo(1);
+        assertProgress(4, 1); // Two terminal items plus two earlier checkpoints absent from this round's work list.
+        assertThat(jdbc.queryForObject("SELECT model_budget_wait_code FROM iqc_inspection_task", String.class)).isEqualTo(reason);
+        assertThat(jdbc.queryForObject("SELECT model_budget_wait_key FROM iqc_inspection_task", String.class)).isEqualTo(BUDGET_KEY);
+        states.finish("worker-task", "current-eid", 6, 0);
+        assertStatus("PAUSED", "PAUSED");
+    }
+
+    @Test
+    void invalidOrUnboundAdmissionEvidenceCannotPauseExecution() {
+        budgetFixture();
+        for (GatewayAdmissionException reason : new GatewayAdmissionException[] {
+                null, new GatewayAdmissionException("MODEL_TOKEN_BUDGET_EXHAUSTED"),
+                new GatewayAdmissionException("MODEL_TOKEN_BUDGET_EXHAUSTED", "not-a-model-key"),
+                new GatewayAdmissionException("MODEL_RATE_LIMITED", BUDGET_KEY),
+                new GatewayAdmissionException("MODEL_CAPACITY_EXHAUSTED", BUDGET_KEY)}) {
+            assertThat(states.waitForBudget("worker-task", "current-eid", reason)).isFalse();
+        }
+        assertStatus("RUNNING", "RUNNING");
+        assertThat(itemStatus("working-item")).isEqualTo("RUNNING");
+        assertThat(jdbc.queryForObject("SELECT model_budget_wait_key FROM iqc_inspection_task", String.class)).isNull();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "PAUSE_REQUESTED,false,false", "CANCEL_REQUESTED,false,false", "RUNNING,true,false", "RUNNING,false,true"})
+    void pendingControlRequestPreventsBudgetWait(String status, boolean pause, boolean cancel) {
+        budgetFixture();
+        jdbc.update("UPDATE iqc_inspection_task SET status=?,pause_requested=?,cancel_requested=? WHERE id='worker-task'",
+                status, pause, cancel);
+        assertThat(states.waitForBudget("worker-task", "current-eid", budgetReason())).isFalse();
+        assertStatus(status, "RUNNING");
+        assertThat(itemStatus("working-item")).isEqualTo("RUNNING");
+    }
+
+    @Test
+    void oldExecutionCannotPauseCurrentRoundOrResetItsItems() {
+        budgetFixture();
+        assertThat(states.waitForBudget("worker-task", "old-eid", budgetReason())).isFalse();
+        assertStatus("RUNNING", "RUNNING");
+        assertThat(itemStatus("working-item")).isEqualTo("RUNNING");
+        assertThat(itemStatus("old-item")).isEqualTo("RUNNING");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"current-eid", "old-eid"})
+    void toolExposureInAnyRoundPreventsAutomaticBudgetWait(String executionId) {
+        budgetFixture();
+        toolCall("worker-task", executionId, true);
+        assertThat(context.getBean(GatewayCallService.class).hasToolExposure("worker-task")).isTrue();
+        assertThat(states.waitForBudget("worker-task", "current-eid", budgetReason())).isFalse();
+        assertStatus("RUNNING", "RUNNING");
+        assertThat(itemStatus("working-item")).isEqualTo("RUNNING");
+    }
+
+    @Test
+    void unrelatedToolExposureAndUnstartedCurrentCallDoNotBlockBudgetWait() {
+        budgetFixture();
+        toolCall("another-task", "another-eid", true);
+        toolCall("worker-task", "current-eid", false);
+        assertThat(context.getBean(GatewayCallService.class).hasToolExposure("worker-task")).isFalse();
+        assertThat(states.waitForBudget("worker-task", "current-eid", budgetReason())).isTrue();
+        assertStatus("PAUSED", "PAUSED");
+    }
+
+    @Test
+    void executionWriteFailureRollsBackBudgetPauseItemResetAndProgress() {
+        budgetFixture();
+        rejectExecutionWrite();
+        assertThatThrownBy(() -> states.waitForBudget("worker-task", "current-eid", budgetReason()))
+                .hasStackTraceContaining("isolated execution write rejection");
+        assertStatus("RUNNING", "RUNNING");
+        assertThat(itemStatus("working-item")).isEqualTo("RUNNING");
+        assertProgress(0, 0);
+        assertThat(jdbc.queryForObject("SELECT model_budget_wait_code FROM iqc_inspection_task", String.class)).isNull();
+        assertThat(jdbc.queryForObject("SELECT model_budget_wait_key FROM iqc_inspection_task", String.class)).isNull();
+        jdbc.execute("DROP TRIGGER reject_execution_state_write");
+        assertThat(states.waitForBudget("worker-task", "current-eid", budgetReason())).isTrue();
+        assertStatus("PAUSED", "PAUSED");
+        assertThat(itemStatus("working-item")).isEqualTo("PENDING");
+        assertProgress(4, 1);
+    }
+
+    /** Two completed prior checkpoints are represented by total_messages minus this round's work list. */
+    private static void budgetFixture() {
+        assertThat(states.claim("worker-task", "current-eid")).isTrue();
+        jdbc.update("UPDATE iqc_inspection_task SET total_messages=6 WHERE id='worker-task'");
+        jdbc.update("""
+                INSERT INTO iqc_task_item(id,task_id,execution_id,message_id,sequence_no,status,result_id,attempt_count)
+                VALUES ('done-item','worker-task','current-eid','done-message',1,'SUCCEEDED','frozen-result',1),
+                  ('failed-item','worker-task','current-eid','failed-message',2,'FAILED',NULL,1),
+                  ('working-item','worker-task','current-eid','working-message',3,'RUNNING',NULL,1),
+                  ('waiting-item','worker-task','current-eid','waiting-message',4,'PENDING',NULL,0),
+                  ('old-item','worker-task','old-eid','old-message',1,'RUNNING',NULL,1)
+                """);
+    }
+
+    private static GatewayAdmissionException budgetReason() {
+        return new GatewayAdmissionException("MODEL_TOKEN_BUDGET_EXHAUSTED", BUDGET_KEY);
+    }
+
+    private static String itemStatus(String id) {
+        return jdbc.queryForObject("SELECT status FROM iqc_task_item WHERE id=?", String.class, id);
+    }
+
+    private static void assertProgress(int processed, int failed) {
+        for (String table : new String[]{"iqc_inspection_task", "iqc_task_execution"}) {
+            String filter = table.equals("iqc_task_execution") ? " WHERE id='current-eid'" : " WHERE id='worker-task'";
+            assertThat(jdbc.queryForObject("SELECT processed_messages FROM " + table + filter, Integer.class)).isEqualTo(processed);
+            assertThat(jdbc.queryForObject("SELECT failed_messages FROM " + table + filter, Integer.class)).isEqualTo(failed);
+        }
+    }
+
+    private static void toolCall(String taskId, String executionId, boolean started) {
+        jdbc.update("""
+                INSERT INTO iqc_model_gateway_call(call_id,model_key,task_id,execution_id,status,reserved_at_utc,tool_execution_started_at_utc)
+                VALUES (?, ?, ?, ?, 'CONFIRMED', '2026-10-08 00:00:00', ?)
+                """, "call-" + taskId, BUDGET_KEY, taskId, executionId,
+                started ? java.sql.Timestamp.valueOf("2026-10-08 00:00:01") : null);
+    }
+
     /** Bounded child-process protocol; every child has its own Spring context and database connections. */
     private static final class WorkerProcess implements AutoCloseable {
         private final Process process;
@@ -329,6 +475,9 @@ class IsolatedMysqlTaskExecutionStateIT {
             configuration.setMapUnderscoreToCamelCase(true);
             configuration.addMapper(InspectionTaskMapper.class);
             configuration.addMapper(TaskExecutionMapper.class);
+            configuration.addMapper(TaskItemMapper.class);
+            configuration.addMapper(GatewayCallMapper.class);
+            configuration.addMapper(GatewayCapacityMapper.class);
             var factory = new MybatisSqlSessionFactoryBean();
             factory.setDataSource(source);
             factory.setConfiguration(configuration);
@@ -336,10 +485,20 @@ class IsolatedMysqlTaskExecutionStateIT {
         }
 
         @Bean
-        TaskExecutionStateService taskExecutionStateService(SqlSessionFactory factory) {
+        TaskExecutionStateService taskExecutionStateService(SqlSessionFactory factory,
+                org.springframework.beans.factory.ObjectProvider<GatewayCallService> gateway) {
             var session = new SqlSessionTemplate(factory);
             return new TaskExecutionStateService(session.getMapper(InspectionTaskMapper.class),
-                    session.getMapper(TaskExecutionMapper.class));
+                    session.getMapper(TaskExecutionMapper.class), session.getMapper(TaskItemMapper.class), gateway);
+        }
+
+        @Bean
+        GatewayCallService gatewayCallService(SqlSessionFactory factory,
+                org.springframework.beans.factory.ObjectProvider<InspectionTaskService> tasks) {
+            var session = new SqlSessionTemplate(factory);
+            // Budget waiting only queries persisted exposure; no model, scope, or actor operation is invoked.
+            return new GatewayCallService(session.getMapper(GatewayCapacityMapper.class), session.getMapper(GatewayCallMapper.class),
+                    session.getMapper(InspectionTaskMapper.class), session.getMapper(TaskExecutionMapper.class), null, null, tasks);
         }
 
         @Bean
