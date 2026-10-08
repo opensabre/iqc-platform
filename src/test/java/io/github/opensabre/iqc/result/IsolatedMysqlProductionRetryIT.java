@@ -5,6 +5,9 @@ import io.github.opensabre.iqc.conversation.ProductionInputSnapshotService;
 import io.github.opensabre.iqc.conversation.dao.ConversationMessageMapper;
 import io.github.opensabre.iqc.selector.SelectorAssetService;
 import io.github.opensabre.iqc.task.dao.*;
+import io.github.opensabre.iqc.task.retry.*;
+import io.github.opensabre.iqc.schedule.*;
+import io.github.opensabre.iqc.shared.IqcDataScope;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.junit.jupiter.api.*;
 import org.mybatis.spring.SqlSessionTemplate;
@@ -49,6 +52,9 @@ class IsolatedMysqlProductionRetryIT {
     @BeforeEach
     void fixture() throws Exception {
         jdbc.execute("DROP TRIGGER IF EXISTS reject_retry_item_write");
+        jdbc.execute("DROP TRIGGER IF EXISTS reject_retry_finish_write");
+        jdbc.update("DELETE FROM iqc_trigger_attempt_event");
+        jdbc.update("DELETE FROM iqc_model_gateway_call");
         jdbc.update("DELETE FROM iqc_task_item");
         jdbc.update("DELETE FROM iqc_task_execution");
         jdbc.update("DELETE FROM iqc_inspection_task");
@@ -193,6 +199,99 @@ class IsolatedMysqlProductionRetryIT {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_task_execution", Integer.class)).isEqualTo(1);
     }
 
+    /** Prepare real frozen policy and failed-generation evidence without any remote identity lookup. */
+    private AutomaticRetryService.Frame automaticFrame() throws Exception {
+        var bound = new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1", "user-alice", "alice", false, "group");
+        var policy = new AutomaticRetryPolicy("iqc-automatic-retry-v1", 3, 1, 2, 10, null);
+        var env = new AutomaticRetryService.Envelope("iqc-automatic-retry-envelope-v1", "retry-task", policy, bound,
+                java.util.Set.of(AutomaticRetryService.CONFIGURE, "iqc:pipeline:task:create", "iqc:task:execute"));
+        String body = json.writeValueAsString(env);
+        jdbc.update("UPDATE iqc_inspection_task SET created_by='alice',automatic_retry_enabled=TRUE,retry_policy_json=?,retry_policy_hash=? WHERE id='retry-task'",
+                body, SelectorAssetService.hash(body));
+        jdbc.update("UPDATE iqc_task_execution SET updated_time=UTC_TIMESTAMP()-INTERVAL 60 SECOND WHERE id='failed-eid'");
+        return context.getBean(AutomaticRetryService.class).peek("retry-task", java.time.Instant.now());
+    }
+
+    private ScheduledActorAccessService.Resolved actor() {
+        return new ScheduledActorAccessService.Resolved("user-alice", "alice", false, "group", java.util.Set.of(),
+                java.util.Set.of(AutomaticRetryService.CONFIGURE, "iqc:pipeline:task:create", "iqc:task:execute"), java.time.Instant.now());
+    }
+
+    private TriggerAttemptService.Handle begin(AutomaticRetryService.Frame frame) {
+        assertThat(frame).isNotNull();
+        return context.getBean(TriggerAttemptService.class).begin(new TriggerAttemptService.Context(TriggerAttemptService.Kind.TASK,
+                frame.taskId(), frame.executionId(), frame.policyHash(), frame.retryAt(), frame.envelope().ownerBound()));
+    }
+
+    @Test
+    void automaticFireCommitsQueueAndPositiveAttemptTogether() throws Exception {
+        var frame = automaticFrame(); var handle = begin(frame);
+        assertThat(context.getBean(AutomaticRetryService.class).fire(frame, actor(), handle)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT status FROM iqc_inspection_task", String.class)).isEqualTo("QUEUED");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_task_execution", Integer.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT outcome FROM iqc_trigger_attempt_event WHERE phase='FINISHED'", String.class))
+                .isEqualTo("DOMAIN_COMMITTED");
+        assertThat(jdbc.queryForObject("SELECT processed_units FROM iqc_trigger_attempt_event WHERE phase='FINISHED'", Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    void automaticQueueFailureRetainsStartAndAllowsIndependentFailureFact() throws Exception {
+        var frame = automaticFrame(); var handle = begin(frame);
+        jdbc.execute("""
+                CREATE TRIGGER reject_retry_item_write BEFORE INSERT ON iqc_task_item FOR EACH ROW
+                BEGIN IF NEW.execution_id <> 'failed-eid' THEN
+                  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'isolated automatic queue rejection';
+                END IF; END
+                """);
+        try {
+            assertThatThrownBy(() -> context.getBean(AutomaticRetryService.class).fire(frame, actor(), handle))
+                    .hasStackTraceContaining("isolated automatic queue rejection");
+            assertOriginalGeneration();
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_trigger_attempt_event", Integer.class)).isEqualTo(1);
+            context.getBean(TriggerAttemptService.class).failed(handle, TriggerAttemptService.FailureStage.MATERIALIZATION,
+                    new IllegalStateException("secret message must not persist"));
+            assertThat(jdbc.queryForObject("SELECT outcome FROM iqc_trigger_attempt_event WHERE phase='FINISHED'", String.class)).isEqualTo("FAILED");
+            assertThat(jdbc.queryForObject("SELECT error_type FROM iqc_trigger_attempt_event WHERE phase='FINISHED'", String.class)).isEqualTo("IllegalStateException");
+            assertThat(jdbc.queryForObject("SELECT failure_stage FROM iqc_trigger_attempt_event WHERE phase='FINISHED'", String.class)).isEqualTo("MATERIALIZATION");
+        } finally { jdbc.execute("DROP TRIGGER IF EXISTS reject_retry_item_write"); }
+    }
+
+    @Test
+    void attemptFinishInsertFailureRollsBackEntireSuccessfullyPreparedQueue() throws Exception {
+        var frame = automaticFrame(); var handle = begin(frame);
+        jdbc.execute("""
+                CREATE TRIGGER reject_retry_finish_write BEFORE INSERT ON iqc_trigger_attempt_event FOR EACH ROW
+                BEGIN IF NEW.phase = 'FINISHED' THEN
+                  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'isolated attempt finish rejection';
+                END IF; END
+                """);
+        try {
+            assertThatThrownBy(() -> context.getBean(AutomaticRetryService.class).fire(frame, actor(), handle))
+                    .hasStackTraceContaining("isolated attempt finish rejection");
+            assertOriginalGeneration();
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_task_item", Integer.class)).isEqualTo(2);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_trigger_attempt_event", Integer.class)).isEqualTo(1);
+        } finally { jdbc.execute("DROP TRIGGER IF EXISTS reject_retry_finish_write"); }
+    }
+
+    @Test
+    void obsoleteAutomaticObservationAppendsNoChangeWithoutNewExecution() throws Exception {
+        var frame = automaticFrame(); var handle = begin(frame);
+        jdbc.update("UPDATE iqc_inspection_task SET automatic_retry_enabled=FALSE WHERE id='retry-task'");
+        assertThat(context.getBean(AutomaticRetryService.class).fire(frame, actor(), handle)).isFalse();
+        assertOriginalGeneration();
+        assertThat(jdbc.queryForObject("SELECT outcome FROM iqc_trigger_attempt_event WHERE phase='FINISHED'", String.class)).isEqualTo("NO_CHANGE");
+    }
+
+    @Test
+    void lateFailureFactCannotOverwriteCommittedPositiveAttempt() throws Exception {
+        var frame = automaticFrame(); var handle = begin(frame);
+        assertThat(context.getBean(AutomaticRetryService.class).fire(frame, actor(), handle)).isTrue();
+        context.getBean(TriggerAttemptService.class).failed(handle, TriggerAttemptService.FailureStage.MATERIALIZATION, new IllegalStateException());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_trigger_attempt_event", Integer.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT outcome FROM iqc_trigger_attempt_event WHERE phase='FINISHED'", String.class)).isEqualTo("DOMAIN_COMMITTED");
+    }
+
     private void assertManifest(String executionId) {
         var rows = jdbc.queryForList("SELECT message_id,status,attempt_count,result_id,error_message FROM iqc_task_item WHERE execution_id=? ORDER BY sequence_no", executionId);
         assertThat(rows).hasSize(2);
@@ -206,10 +305,38 @@ class IsolatedMysqlProductionRetryIT {
     @Configuration(proxyBeanMethods = false)
     @Import(IsolatedMysqlTaskExecutionStateIT.DatabaseConfiguration.class)
     static class RetryConfiguration {
-        @Bean ObjectMapper objectMapper() { return new ObjectMapper().findAndRegisterModules(); }
+        @Bean ObjectMapper objectMapper() { return new ObjectMapper().findAndRegisterModules()
+                .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS); }
         @Bean ConversationMessageMapper messages() { return mock(ConversationMessageMapper.class); }
         @Bean ProductionInputSnapshotService productionInputSnapshots(ObjectMapper json) {
             return new ProductionInputSnapshotService(null, null, null, json);
+        }
+        @Bean IqcDataScope retryScope() {
+            var scope = mock(IqcDataScope.class);
+            when(scope.owner()).thenReturn("alice"); when(scope.groupId()).thenReturn("group");
+            when(scope.canView("alice", "group")).thenReturn(true);
+            return scope;
+        }
+        @Bean io.github.opensabre.iqc.conversation.dao.ConversationMapper retryConversations() {
+            var mapper = mock(io.github.opensabre.iqc.conversation.dao.ConversationMapper.class);
+            var row = new io.github.opensabre.iqc.conversation.model.Conversation();
+            row.setCreatedBy("alice"); row.setOwnerGroupId("group");
+            when(mapper.selectById("conversation")).thenReturn(row);
+            return mapper;
+        }
+        @Bean TriggerAttemptService triggerAttempts(SqlSessionFactory factory, ObjectMapper json) {
+            return new TriggerAttemptService(new SqlSessionTemplate(factory).getMapper(io.github.opensabre.iqc.schedule.dao.TriggerAttemptEventMapper.class),
+                    json, null, null, null, null, null);
+        }
+        @Bean AutomaticRetryService automaticRetries(SqlSessionFactory factory, ObjectMapper json, IqcDataScope scope,
+                io.github.opensabre.iqc.conversation.dao.ConversationMapper conversations,
+                io.github.opensabre.iqc.result.llm.gateway.GatewayCallService calls,
+                org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.task.InspectionTaskService> tasks,
+                org.springframework.beans.factory.ObjectProvider<InspectionExecutionService> queue,
+                org.springframework.beans.factory.ObjectProvider<TriggerAttemptService> attempts) {
+            var session = new SqlSessionTemplate(factory);
+            return new AutomaticRetryService(session.getMapper(InspectionTaskMapper.class), session.getMapper(TaskExecutionMapper.class),
+                    conversations, null, scope, json, calls, tasks, queue, attempts);
         }
         @Bean InspectionExecutionService retryQueue(SqlSessionFactory factory, ObjectMapper json,
                 ConversationMessageMapper messages, ProductionInputSnapshotService inputs) {
