@@ -95,7 +95,7 @@ public class GatewayCallService {
             @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long budgetReservedTokens,
             String budgetReservedCost,String budgetCurrency,
             @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long budgetPolicyVersion,
-            String budgetStatus,String budgetEvidenceRef) { }
+            String budgetStatus,String budgetEvidenceRef,ReconciliationView reconciliation) { }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public io.github.opensabre.iqc.shared.IqcPage<CallView> page(String modelKey,String status,long current,long size){
         if(!scope.isIqcAdministrator())throw IqcException.accessDenied("只有质检管理员可以查看全局模型调用");
@@ -125,7 +125,7 @@ public class GatewayCallService {
                 value.getInputTokens(),value.getOutputTokens(),value.getTotalTokens(),value.getResponseModelId(),value.getUsageStatus(),value.getErrorType(),value.getCapacityReleasedAtUtc(),
                 value.getCapacityReleasedBy(),value.getCapacityReleaseReason(),value.getCapacityReleaseEvidence(),
                 value.getTaskId(),value.getExecutionId(),value.getNodeId(),value.getRunIndex(),value.getConversationId(),value.getModelProfileId(),
-                value.getModelProfileVersion(),value.getPricingHash(),value.getPricingCurrency(),value.getCalculatedCost()==null?null:value.getCalculatedCost().toPlainString(),value.getCostStatus(),value.getRequestedModelName(),value.getCacheReadInputTokens(),value.getCacheWriteInputTokens(),value.getMaxOutputTokens(),value.getOutputTokenParameter(),value.getOutputLimitStatus(),value.getToolRoundIndex(),value.getContextWindowTokens(),value.getDeploymentRef(),value.getToolExecutionStartedAtUtc(),value.getBudgetReservedTokens(),decimal(value.getBudgetReservedCost()),value.getBudgetCurrency(),value.getBudgetPolicyVersion(),value.getBudgetStatus(),value.getBudgetEvidenceRef())).toList(),
+                value.getModelProfileVersion(),value.getPricingHash(),value.getPricingCurrency(),value.getCalculatedCost()==null?null:value.getCalculatedCost().toPlainString(),value.getCostStatus(),value.getRequestedModelName(),value.getCacheReadInputTokens(),value.getCacheWriteInputTokens(),value.getMaxOutputTokens(),value.getOutputTokenParameter(),value.getOutputLimitStatus(),value.getToolRoundIndex(),value.getContextWindowTokens(),value.getDeploymentRef(),value.getToolExecutionStartedAtUtc(),value.getBudgetReservedTokens(),decimal(value.getBudgetReservedCost()),value.getBudgetCurrency(),value.getBudgetPolicyVersion(),value.getBudgetStatus(),value.getBudgetEvidenceRef(),reconciliationView(value))).toList(),
                 page.getCurrent(),page.getSize(),page.getTotal());
     }
     /** Same snapshot and authorization as the paged facts; totals cover all matching pages. */
@@ -204,24 +204,34 @@ public class GatewayCallService {
         row.setOccupied(row.getOccupied()-1);
         if(calls.updateById(call)!=1 || capacities.updateById(row)!=1)throw IqcException.invalidState("恢复模型容量失败");return view(row);
     }
+    public record ReconciliationView(String callId,String modelKey,String tokens,String cost,String currency,LocalDateTime atUtc,String owner,String userId,String evidence) { }
+    public record ReconciliationChange(CapacityView before,CapacityView after,ReconciliationView reconciliation) { }
+    private static ReconciliationView reconciliationView(GatewayCall call){
+        if(call.getBudgetReconciledAtUtc()==null)return null;
+        return new ReconciliationView(call.getCallId(),call.getModelKey(),call.getBudgetReconciledTokens().toString(),decimal(call.getBudgetReconciledCost()),call.getBudgetCurrency(),
+            call.getBudgetReconciledAtUtc(),call.getBudgetReconciledBy(),call.getBudgetReconciledUserId(),call.getBudgetReconciliationEvidence());
+    }
     @Transactional(isolation=Isolation.REPEATABLE_READ)
-    public CapacityView reconcileBudget(String callId,String modelKey,long actualTokens,java.math.BigDecimal actualCost,String evidence,boolean verified){
+    public ReconciliationChange reconcileBudget(String callId,String modelKey,long actualTokens,java.math.BigDecimal actualCost,String currency,String evidence,boolean verified){
         administrator();key(modelKey);var actor=actors.capture();
         if(callId==null || !callId.matches("[a-f0-9]{32}") || !verified || evidence==null || !evidence.matches("[A-Za-z0-9:_./-]{1,128}"))
             throw IqcException.invalidArgument("需要核对供应商最终用量、金额并提供凭据编号");
         var call=lock(new Handle(callId,modelKey));var row=capacity(modelKey);
+        var before=view(row);
+        if(call.getBudgetReservedCost()!=null ? !Objects.equals(call.getBudgetCurrency(),currency) : currency!=null)
+            throw IqcException.invalidArgument("对账币种必须与原预算币种一致，未参与金额预算不可填写金额或币种");
         if(call.getBudgetReconciledAtUtc()!=null){
             if(!Objects.equals(call.getBudgetReconciledTokens(),actualTokens) || !Objects.equals(call.getBudgetReconciliationEvidence(),evidence)
                     || (call.getBudgetReconciledCost()==null?actualCost!=null:actualCost==null || call.getBudgetReconciledCost().compareTo(actualCost)!=0))
                 throw IqcException.invalidState("人工预算事实已冻结，不可替换");
-            return view(row);
+            return new ReconciliationChange(before,view(row),reconciliationView(call));
         }
         if(!"CONFIRMED".equals(call.getStatus()) && call.getCapacityReleasedAtUtc()==null)
             throw IqcException.invalidState("先核对远端已停止并恢复容量，再进行预算对账");
         GatewayBudgetAccounting.reconcile(row,call,actualTokens,actualCost);
         call.setBudgetReconciledAtUtc(utc());call.setBudgetReconciledBy(actor.owner());call.setBudgetReconciledUserId(actor.userId());call.setBudgetReconciliationEvidence(evidence);
         if(calls.updateById(call)!=1 || capacities.updateById(row)!=1)throw IqcException.invalidState("人工预算对账保存失败");
-        return view(row);
+        return new ReconciliationChange(before,view(row),reconciliationView(call));
     }
     private static LocalDateTime utc(){return LocalDateTime.ofInstant(Instant.now(),ZoneOffset.UTC);}
     private GatewayCapacity capacity(String key){var row=capacities.selectOne(Wrappers.<GatewayCapacity>lambdaQuery()

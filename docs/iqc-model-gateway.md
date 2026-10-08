@@ -136,3 +136,9 @@ Gateway将预算准入结果连同真实模型key显式传递，Provider及Pipel
 
 ## 人工预算对账实施前复用
 现有GatewayCall/Capacity、管理员Actor和容量恢复已可复用；未找到公共模型账单核销能力。扩展原call保存独立人工事实，不改原usage/cost，不新增账本表。已确认响应或已提供远端停止凭据才可核对；调用锁→容量锁，同一凭据冻结且幂等，不自动解除预算隔离。迟到响应保留原始事实但不再重复预算核销。此批仅事务核心，管理API/UI尚待接入。
+
+### 管理入口复用与权限缺口
+原容量释放接口仅授权并发恢复，不能兼任修改预算金额。沿原ModelGatewayController/CallPage/ModelGatewayCalls接入对账，新增独立IQC_ADMIN资源及按钮；复用Audit记录容量前后和人工事实，不创建新页面或通用审计模型。金额输入与冻结预算币种强匹配，Token和金额通过字符串保持精度。
+
+人工对账入口：`POST /api/iqc/model-gateway/calls/{callId}/budget-reconciliation`，独立资源`iqc:model-gateway:calls:reconcile`仅IQC_ADMIN授予。body：modelKey、tokens精确Long字符串、cost精确非负金额字符串或null、currency原预算币种或null、evidence受限128字符、verified true。未参与金额预算不得填金额和币种。返回before/after容量和reconciliation（callId/modelKey/人工用量金额/Actor/UTC/凭据）；Audit关闭请求正文、记录返回值，不采集账单正文。原调用分页及Task调用分页增加可空reconciliation；原声明价汇总仍只计算响应事实，人工预算核对不混入。
+界面复用原调用表，管理员在已确认响应或已恢复并发占用且参与预算的记录上操作。输入保持字符串精度，确认每次打开重置，保存时阻止重复提交，关闭/切换后旧响应不覆盖新弹窗。运行事务、权限和浏览器尚未验证。

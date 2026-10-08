@@ -38,4 +38,20 @@ public class ModelGatewayController {
         if(request==null)throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("缺少恢复凭据");
         return calls.releaseCapacity(callId,request.modelKey(),request.reason(),request.evidence(),Boolean.TRUE.equals(request.remoteStopped()));
     }
+    public record ReconcileBudget(String modelKey,com.fasterxml.jackson.databind.JsonNode tokens,com.fasterxml.jackson.databind.JsonNode cost,
+            String currency,String evidence,Boolean verified) { }
+    @PostMapping("/calls/{callId}/budget-reconciliation")
+    @ResourcePermission(code="iqc:model-gateway:calls:reconcile",name="核对模型预算",type="iqc",description="质检管理员根据供应商最终凭据核对预算承诺")
+    @io.github.opensabre.governance.audit.annotations.Audit(operationType=io.github.opensabre.governance.audit.annotations.OperationType.UPDATE,
+            description="核对模型预算",module="IQC_MODEL_GATEWAY",request=false,response=true)
+    public GatewayCallService.ReconciliationChange reconcile(@PathVariable String callId,@RequestBody ReconcileBudget request){
+        if(request==null || request.tokens()==null || !request.tokens().isTextual() || !request.tokens().textValue().matches("0|[1-9][0-9]{0,18}")
+                || (request.cost()!=null && !request.cost().isNull() && (!request.cost().isTextual()
+                    || !request.cost().textValue().matches("(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{1,18})?"))))
+            throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("对账Token和金额必须为精确非负数字字符串");
+        try{return calls.reconcileBudget(callId,request.modelKey(),Long.parseLong(request.tokens().textValue()),
+            request.cost()==null || request.cost().isNull()?null:new java.math.BigDecimal(request.cost().textValue()),request.currency(),request.evidence(),Boolean.TRUE.equals(request.verified()));}
+        catch(NumberFormatException invalid){throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("对账Token超出范围");}
+    }
+
 }
