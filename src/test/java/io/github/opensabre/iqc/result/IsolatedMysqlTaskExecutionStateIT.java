@@ -3,6 +3,7 @@ package io.github.opensabre.iqc.result;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.spring.MybatisSqlSessionFactoryBean;
 import io.github.opensabre.iqc.task.TaskExecutionStateService;
+import io.github.opensabre.iqc.task.InspectionTaskService;
 import io.github.opensabre.iqc.task.dao.InspectionTaskMapper;
 import io.github.opensabre.iqc.task.dao.TaskExecutionMapper;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -22,6 +23,12 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 import javax.sql.DataSource;
 import java.sql.DriverManager;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -145,6 +152,147 @@ class IsolatedMysqlTaskExecutionStateIT {
         assertThat(jdbc.queryForObject("SELECT processed_messages FROM iqc_inspection_task", Integer.class)).isEqualTo(2);
     }
 
+    @Test
+    void independentJvmTransactionsGrantExactlyOneClaim() throws Exception {
+        try (var first = new WorkerProcess("compete"); var second = new WorkerProcess("compete")) {
+            assertThat(first.signal("READY:")).isEqualTo("READY:compete");
+            assertThat(second.signal("READY:")).isEqualTo("READY:compete");
+            first.release();
+            second.release();
+            assertThat(java.util.List.of(first.signal("CLAIMED:"), second.signal("CLAIMED:")))
+                    .containsExactlyInAnyOrder("CLAIMED:true", "CLAIMED:false");
+            first.requireCleanExit();
+            second.requireCleanExit();
+        }
+        assertStatus("RUNNING", "RUNNING");
+    }
+
+    @Test
+    void killedClaimingJvmLeavesDurableStateThatAnotherJvmRecovers() throws Exception {
+        try (var crashed = new WorkerProcess("claim-hold")) {
+            assertThat(crashed.signal("CLAIMED:")).isEqualTo("CLAIMED:true");
+            assertStatus("RUNNING", "RUNNING");
+            crashed.kill();
+        }
+        // Advance only this fixture's heartbeat past the timeout; no wall-clock sleeps or global clock changes.
+        expireHeartbeat();
+        try (var recovery = new WorkerProcess("recover")) {
+            assertThat(recovery.signal("RECOVERED:")).isEqualTo("RECOVERED:1");
+            recovery.requireCleanExit();
+        }
+        assertStatus("FAILED", "FAILED");
+        assertThat(jdbc.queryForObject("SELECT error_message FROM iqc_task_execution WHERE id='current-eid'", String.class))
+                .contains("超时");
+        states.finish("worker-task", "current-eid", 3, 0);
+        assertThat(states.fail("worker-task", "current-eid", true, "late callback")).isFalse();
+        assertStatus("FAILED", "FAILED");
+    }
+
+    @Test
+    void newJvmPreservesExpiredQueuedRowAndCanClaimIt() throws Exception {
+        expireHeartbeat();
+        try (var restarted = new WorkerProcess("recover-then-claim")) {
+            assertThat(restarted.signal("RECOVERED:")).isEqualTo("RECOVERED:0");
+            assertThat(restarted.signal("CLAIMED:")).isEqualTo("CLAIMED:true");
+            restarted.requireCleanExit();
+        }
+        assertStatus("RUNNING", "RUNNING");
+        assertThat(executionStatus("old-eid")).isEqualTo("QUEUED");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"PAUSE_REQUESTED,PAUSED", "CANCEL_REQUESTED,CANCELLED"})
+    void recoveryInAnotherJvmPreservesPendingControlRequest(String request, String expected) throws Exception {
+        assertThat(states.claim("worker-task", "current-eid")).isTrue();
+        jdbc.update("UPDATE iqc_inspection_task SET status=? WHERE id='worker-task'", request);
+        expireHeartbeat();
+        try (var recovery = new WorkerProcess("recover")) {
+            assertThat(recovery.signal("RECOVERED:")).isEqualTo("RECOVERED:1");
+            recovery.requireCleanExit();
+        }
+        assertStatus(expected, expected);
+        assertThat(executionStatus("old-eid")).isEqualTo("QUEUED");
+    }
+
+    private static void expireHeartbeat() {
+        jdbc.update("UPDATE iqc_inspection_task SET updated_time='2000-01-01 00:00:00' WHERE id='worker-task'");
+    }
+
+    /** Bounded child-process protocol; every child has its own Spring context and database connections. */
+    private static final class WorkerProcess implements AutoCloseable {
+        private final Process process;
+        private final BufferedReader output;
+
+        WorkerProcess(String command) throws Exception {
+            String classpath = System.getProperty("surefire.test.class.path", System.getProperty("java.class.path"));
+            process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                    "-cp", classpath, ProcessMain.class.getName(), command).redirectErrorStream(true).start();
+            output = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+        }
+
+        String signal(String prefix) throws Exception {
+            return CompletableFuture.supplyAsync(() -> {
+                var messages = new StringBuilder();
+                try {
+                    for (String line; (line = output.readLine()) != null;) {
+                        messages.append(line).append('\n');
+                        if (line.startsWith(prefix)) return line;
+                    }
+                } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+                throw new IllegalStateException("Child exited without " + prefix + ":\n" + messages);
+            }).get(30, TimeUnit.SECONDS);
+        }
+
+        void release() throws Exception {
+            process.getOutputStream().write(1);
+            process.getOutputStream().flush();
+        }
+
+        void requireCleanExit() throws Exception {
+            assertThat(process.onExit().get(10, TimeUnit.SECONDS).exitValue()).isZero();
+        }
+
+        void kill() throws Exception {
+            process.destroyForcibly();
+            process.onExit().get(10, TimeUnit.SECONDS);
+        }
+
+        @Override
+        public void close() throws Exception {
+            if (process.isAlive()) kill();
+            output.close();
+            process.getOutputStream().close();
+        }
+    }
+
+    /** Entry point for isolated process boundaries; never starts the application scheduler or model clients. */
+    public static final class ProcessMain {
+        public static void main(String[] arguments) throws Exception {
+            IsolatedMysqlMigrationIT.verifyIsolatedServer();
+            try (var child = new AnnotationConfigApplicationContext(DatabaseConfiguration.class)) {
+                var state = child.getBean(TaskExecutionStateService.class);
+                String command = arguments[0];
+                if (command.startsWith("recover")) {
+                    int count = child.getBean(InspectionTaskService.class).recoverStaleExecutions(Duration.ofMinutes(1), false);
+                    System.out.println("RECOVERED:" + count);
+                    if (command.equals("recover-then-claim")) {
+                        System.out.println("CLAIMED:" + state.claim("worker-task", "current-eid"));
+                    }
+                } else if (command.equals("compete")) {
+                    System.out.println("READY:compete");
+                    System.out.flush();
+                    if (System.in.read() < 0) throw new IllegalStateException("Parent closed claim barrier");
+                    System.out.println("CLAIMED:" + state.claim("worker-task", "current-eid"));
+                } else if (command.equals("claim-hold")) {
+                    System.out.println("CLAIMED:" + state.claim("worker-task", "current-eid"));
+                    System.out.flush();
+                    System.in.read(); // The parent forcibly terminates this JVM after the committed claim.
+                } else throw new IllegalArgumentException("Unknown isolated process command");
+                System.out.flush();
+            }
+        }
+    }
+
     /** Inject a real second-row database error after the service has updated the Task row. */
     private static void rejectExecutionWrite() {
         jdbc.execute("""
@@ -192,6 +340,14 @@ class IsolatedMysqlTaskExecutionStateIT {
             var session = new SqlSessionTemplate(factory);
             return new TaskExecutionStateService(session.getMapper(InspectionTaskMapper.class),
                     session.getMapper(TaskExecutionMapper.class));
+        }
+
+        @Bean
+        InspectionTaskService inspectionTaskService(SqlSessionFactory factory) {
+            var session = new SqlSessionTemplate(factory);
+            // Recovery only uses these two real mappers; unrelated creation clients are deliberately absent.
+            return new InspectionTaskService(session.getMapper(InspectionTaskMapper.class), null, null, null, null,
+                    new com.fasterxml.jackson.databind.ObjectMapper(), session.getMapper(TaskExecutionMapper.class), null, null);
         }
     }
 }
