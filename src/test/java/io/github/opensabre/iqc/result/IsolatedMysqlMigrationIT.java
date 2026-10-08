@@ -207,8 +207,19 @@ class IsolatedMysqlMigrationIT {
             try (var query = connection.createStatement();
                  var history = query.executeQuery("SELECT version,success FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1")) {
                 assertThat(history.next()).isTrue();
-                assertThat(history.getString(1)).isEqualTo("1.1.61");
+                assertThat(history.getString(1)).isEqualTo("1.1.62");
                 assertThat(history.getBoolean(2)).isTrue();
+            }
+            try (var query = connection.createStatement();
+                 var actionKey = query.executeQuery("""
+                         SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index),MAX(non_unique)
+                         FROM information_schema.statistics
+                         WHERE table_schema=DATABASE() AND table_name='iqc_action_execution'
+                         AND index_name='uk_iqc_action_idempotency'
+                         """)) {
+                assertThat(actionKey.next()).isTrue();
+                assertThat(actionKey.getString(1)).isEqualTo("idempotency_key");
+                assertThat(actionKey.getInt(2)).isZero();
             }
         }
     }

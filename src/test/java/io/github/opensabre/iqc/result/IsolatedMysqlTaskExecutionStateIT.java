@@ -566,6 +566,7 @@ class IsolatedMysqlTaskExecutionStateIT {
             configuration.addMapper(GatewayCallMapper.class);
             configuration.addMapper(GatewayCapacityMapper.class);
             configuration.addMapper(io.github.opensabre.iqc.schedule.dao.TriggerAttemptEventMapper.class);
+            configuration.addMapper(io.github.opensabre.iqc.action.ActionExecutionMapper.class);
             var factory = new MybatisSqlSessionFactoryBean();
             factory.setDataSource(source);
             factory.setConfiguration(configuration);
