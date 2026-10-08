@@ -245,3 +245,5 @@ Gateway预算拒绝显式key/原因经Provider、itemRoute/Pipeline及Future向�
 - 预算隔离恢复UI复用原容量弹窗和预算声明表单，独立恢复权限、占用为0入口、重新核定确认及新凭据，提交原budget-recovery API。预算账本不清零；未知预留须先最终对账。实际事务和浏览器验收仍待完成。
 
 - 首次调用前预算管理API接入原模型资产id，服务锁定profile并核对保存版本，再创建原物理模型capacity/政策CAS；独立IQC_ADMIN资源和Audit，无密钥/模型网络。模型管理UI入口和运行验收待接入。
+
+- 模型预算GET明确未创建capacity:null，与读取失败区分；模型列表预算入口复用原容量表单，首次调用前可配置，保存时profile及capacity双版本校验。无调用历史仍可进入；未预算历史不补计。运行和浏览器验收未完成。

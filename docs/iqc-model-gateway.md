@@ -159,3 +159,9 @@ Gateway将预算准入结果连同真实模型key显式传递，Provider及Pipel
 复用原模型管理Controller/Mapper和预算事务核心；新增模型id下的明确预算配置动作，独立管理员资源。服务锁定原profile并核对versionNo，再构建与调用相同的ModelIdentity，调用原账本初始化；不读取密钥或发送网络，不接受客户端provider/endpoint/modelName。返回profileId/version和容量前后值供原Audit。并发profile修改按同一行锁串行，原模型status禁用时拒绝。
 
 API：`POST /api/iqc/agent-assets/models/{id}/budget`，独立资源`iqc:model:budget:configure`仅IQC_ADMIN。body：modelVersion精确JSON整数、capacityVersion精确Long字符串、concurrencyLimit精确JSON整数、budget原完整政策。未有capacity使用version0，已有账本需当前版本；冲突拒绝且事务回滚，不发试探模型请求。返回modelProfileId/modelVersion/capacity.before/after，Audit requestfalse/responsetrue。UI入口和首次配置前读取已有账本版本仍需接入。
+
+### 模型预算读取复用缺口
+现有capacity GET对不存在返回404，不能把所有错误解释成初始版本0。新增原模型budget GET，复用ModelIdentity及CapacityView，以capacity:null明确未创建；读取错误仍失败。返回保存模型version、预算绑定所需价格摘要/币种和窗口部署输出声明，无密钥或远端调用；只读一致快照，不创建capacity。
+
+读取API：`GET /api/iqc/agent-assets/models/{id}/budget`，独立资源`iqc:model:budget:view`仅IQC_ADMIN。返回当前保存模型的预算声明、价格摘要/币种及capacity（不存在明确null）。RR只读事务内profile/capacity为同一快照，提交仍重新锁profile和capacity按双版本复核；读取不初始化，不使用读取失败作为未创建。
+模型列表“预算”复用原ModelGatewayCalls容量表单和权限，初次账本采用version0和可编辑并发默认1，明确未创建及未预算历史不补计。预算声明及价格绑定当前保存模型版本，保存调用profile budget接口；成功后替换读取状态，不再显示未创建。声明不足的模型配置需先保存窗口/部署/输出限制。未新增页面、表或预算组件，真实数据库/供应商/浏览器尚未验证。

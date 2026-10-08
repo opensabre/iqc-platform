@@ -175,6 +175,7 @@ public class GatewayCallService {
     private CapacityView view(GatewayCapacity row){return new CapacityView(row.getModelKey(),row.getOccupied(),row.getConcurrencyLimit(),row.getPolicyManaged(),row.getPolicyVersion(),budgetView(row));}
     public CapacityView getCapacity(String modelKey){administrator();key(modelKey);var row=capacities.selectById(modelKey);
         if(row==null)throw IqcException.notFound("模型容量不存在");return view(row);}
+    public CapacityView findCapacity(String modelKey){administrator();key(modelKey);var row=capacities.selectById(modelKey);return row==null?null:view(row);}
     /** Seed the same physical bucket before any remote call; never resets an existing ledger. */
     @Transactional(isolation=Isolation.REPEATABLE_READ)
     public CapacityChange initializeBudget(ModelIdentity model,int limit,long expectedVersion,com.fasterxml.jackson.databind.JsonNode policy){

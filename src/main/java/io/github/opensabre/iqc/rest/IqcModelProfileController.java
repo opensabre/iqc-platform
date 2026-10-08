@@ -34,6 +34,10 @@ public class IqcModelProfileController {
     @PostMapping("/{id}/test") @ResourcePermission(code="iqc:model:test", name="测试模型连接", type="iqc", description="测试 Agent 模型配置连通性")
     public ConnectionTestResult test(@PathVariable String id) { return connectionTestService.test(id); }
 
+    @GetMapping("/{id}/budget")
+    @ResourcePermission(code="iqc:model:budget:view",name="查看模型预算配置",type="iqc",description="查看保存模型版本及首次调用前预算账本状态")
+    public io.github.opensabre.iqc.modelprofile.ModelBudgetConfigurationService.Snapshot budget(@PathVariable String id){return budgets.read(id);}
+
     @PostMapping("/{id}/budget")
     @ResourcePermission(code="iqc:model:budget:configure",name="配置模型预算",type="iqc",description="按已保存模型版本在首次调用前配置预算")
     @Audit(operationType=OperationType.UPDATE,description="按模型版本配置预算",module="IQC_MODEL_GATEWAY",request=false,response=true)
