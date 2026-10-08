@@ -249,11 +249,16 @@ public class PipelineAssetService {
         for(var item:release.items()) if(!codes.contains(item.findingCode())
                 || item.appliesWhenFindingCode()!=null && !codes.contains(item.appliesWhenFindingCode()))
             throw IqcException.invalidArgument("业务项目或适用条件引用未声明的事实编码");
-        var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes),release.fusion(),release.scoring(),release.items(),release.publicationGate());
+        if(release.actionPolicy()!=null)release.actionPolicy().validateReferences(codes,
+                release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));
+        var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes),release.fusion(),release.scoring(),release.items(),release.publicationGate(),release.actionPolicy());
         runtime.validate(frozen.pipeline()); return frozen;
     }
     private void validateFrozen(PipelineRelease release) {
         runtime.validate(release.pipeline());
+        if(release.actionPolicy()!=null)release.actionPolicy().validateReferences(
+                release.pipeline().nodes().stream().map(node->node.config().path("findingDefinition").path("code").asText()).collect(java.util.stream.Collectors.toSet()),
+                release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));
         for(var node:release.pipeline().nodes()) {
             var config=node.config(); var rule=config.path("ruleSnapshot"); var current=rules.selectById(rule.path("id").asText());
             if(current==null || "DISABLED".equals(current.getStatus())) throw IqcException.invalidState("流水线依赖规则已停用");

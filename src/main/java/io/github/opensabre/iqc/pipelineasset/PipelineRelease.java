@@ -12,11 +12,17 @@ import java.util.HashSet;
 public record PipelineRelease(String schemaVersion, PipelineDefinition pipeline, FusionPolicy fusion,
                               InspectionScoring.Policy scoring, List<ItemMapping> items,
                               @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-                              PublicationGatePolicy publicationGate) {
+                              PublicationGatePolicy publicationGate,
+                              @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                              io.github.opensabre.iqc.action.ActionPolicy actionPolicy) {
     public static final String SCHEMA = "iqc-pipeline-release-v1";
     public PipelineRelease(String schemaVersion,PipelineDefinition pipeline,FusionPolicy fusion,
+                           InspectionScoring.Policy scoring,List<ItemMapping> items,PublicationGatePolicy publicationGate) {
+        this(schemaVersion,pipeline,fusion,scoring,items,publicationGate,null);
+    }
+    public PipelineRelease(String schemaVersion,PipelineDefinition pipeline,FusionPolicy fusion,
                            InspectionScoring.Policy scoring,List<ItemMapping> items) {
-        this(schemaVersion,pipeline,fusion,scoring,items,null);
+        this(schemaVersion,pipeline,fusion,scoring,items,null,null);
     }
     public record ItemMapping(String itemCode, String findingCode, SchemeDefinition.HitMeaning hitMeaning,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
