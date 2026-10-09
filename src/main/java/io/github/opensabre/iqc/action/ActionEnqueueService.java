@@ -23,6 +23,7 @@ public class ActionEnqueueService {
     public static final Set<String> REQUIRED_GRANTS=Set.of("iqc:pipeline:task:create","iqc:task:execute","iqc:action:enqueue");
     private final ActionProductionSourceValidator sources;
     private final ActionExecutionMapper executions;
+    private final ActionDiscoveryMapper discovery;
     private final ActionAdapterRegistry adapters;
     private final IqcDataScope scope;
     private final ObjectMapper json;
@@ -70,6 +71,7 @@ public class ActionEnqueueService {
                 saved.add(key);
             }
             requireFresh(actor);
+            discovery.complete(reference.resultId());
             return List.copyOf(saved);
         } catch(com.fasterxml.jackson.core.JsonProcessingException failure) {
             throw IqcException.invalidState("冻结动作策略无法序列化");

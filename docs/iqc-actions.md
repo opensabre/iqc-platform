@@ -92,3 +92,10 @@ ActionDispatchStateService后台短事务按观察id/version/token CAS，失联�
 
 ## 回执结算与重发准入分离
 成功、最终失败和UNKNOWN的回执无需再调用当前适配器配置校验，仍要求完整冻结请求/策略版本、receipt key及claim围栏匹配。仅CONFIRMED_RETRYABLE_FAILURE检查当前精确版本定义是否与领取声明一致且retrySafe；缺失/配置无效则保留真实失败回执并进入FAILED，不自动重发，不把已确认失败改成UNKNOWN，也不让真实成功停留在RUNNING。该批未执行真实SQL/并发回执验收。
+
+## 已提交生产结果的后台发现
+复用已有ConversationInspectionResult增加两个nullable UTC检查点字段（V1.1.63），不建平行结果/Outbox表。已有动作账本只包含MATCH动作，不能表示零匹配的结果；因此完成检查点归属原结果，并由ActionEnqueueService与全部动作入队同一事务提交。回滚不会留下“已发现但动作未入队”的标记；重复发现继续复用稳定幂等键。
+
+ActionProductionDiscovery与原dispatcher共享默认关闭的iqc.actions.enabled开关。只定位当前EID的PIPELINE结果、可执行任务状态和具有actionOwnerBound的冻结快照；最多100个轻量来源定位，逐条加载任务快照，组织授权解析在入队事务外，再由原validator锁定和重新核验当前持久来源。候选扫描不替代最终发布/输入/权限核验，不在分析事务中回调。失败延迟5分钟再次发现，已完成标记不被延期覆盖；无需写假的远端失败或动作回执。数据库扫描/延期写失败沿调度异常机制报告。
+
+检查点表示该冻结生产结果的策略已被检查，UNKNOWN/NO_MATCH不产生动作；后续人工修订应有独立来源版本，不能清空检查点重用旧结果宣称新决策。currentEID切换后的旧来源仍不支持，权限iqc:action:enqueue尚待真实资源注册，其他适配、恢复入口和发现状态UI未完成。SQL尚未执行，开关未开启，无真实结果自动入队/发送验收。
