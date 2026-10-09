@@ -26,6 +26,16 @@ public interface ActionExecutionMapper extends BaseMapper<ActionExecution> {
         """)
     List<ActionExecution> findLost(@Param("cutoff") LocalDateTime cutoff);
 
+    /** Prerequisite wait preserves attempt count and outcomes; version fences concurrent observations. */
+    @Update("""
+        UPDATE iqc_action_execution SET next_attempt_at_utc=#{after},version=version+1,
+          updated_by='system',updated_time=#{now}
+        WHERE id=#{id} AND version=#{version} AND version < 9223372036854775807
+          AND status IN ('PENDING','WAITING_RETRY') AND #{after}>#{now}
+          AND ((status='PENDING' AND next_attempt_at_utc IS NULL) OR next_attempt_at_utc<=#{now})
+        """)
+    int deferPrerequisite(@Param("id") String id,@Param("version") long version,
+                          @Param("now") LocalDateTime now,@Param("after") LocalDateTime after);
     /** A claim is committed before external I/O; callers must validate the frozen source first. */
     @Update("""
         UPDATE iqc_action_execution

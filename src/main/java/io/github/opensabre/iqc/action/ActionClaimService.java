@@ -78,6 +78,11 @@ public class ActionClaimService {
                 return null;
             }
             if(action.type()==ActionExecutionContract.Type.CREATE_REVIEW && "RUNNING".equals(validated.taskStatus()))return null;
+            if(!binding.adapter().ready(action,validated)) {
+                ActionEnqueueService.requireFresh(actor);
+                executions.deferPrerequisite(id,expectedVersion,utc,utc.plusMinutes(1));
+                return null;
+            }
             String token=UUID.randomUUID().toString().replace("-","");
             var request=new ActionAdapter.Request(id,row.getIdempotencyKey(),source,binding.definition(),row.getAttemptCount()+1,
                     row.getInputSnapshotJson(),row.getInputSnapshotHash(),policyBody);
