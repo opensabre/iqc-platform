@@ -82,3 +82,10 @@ ActionDispatchStateService后台短事务按观察id/version/token CAS，失联�
 
 配置iqc.actions.enabled=true才创建调度bean，默认关闭；scan-delay-ms默认5000，claim-lease-seconds默认900且限60–86400。超时是缺确认而非远端失败证明，尚未取消远端请求，也不能以租期过了断言未发生副作用；仅隔离不重发。真实适配器的超时/幂等/保留回执必须与该租期共同验收。当前未开启配置/运行tick/迁移或网络，权限注册、生产发现/入队调用、阻塞恢复、完整尝试历史与其他实际适配未完成。
 队列发现SQL仅返回id/version，失联发现仅返回id/version/token/claimedAt；不在一轮内加载100份完整LONGTEXT快照。分派按定位逐条读取最新完整记录，先确认观察版本/ready状态再解码，领取服务继续完成最终CAS；仍未验收真实负载/内存或大型快照持久成本。
+
+## 授权结果动作记录查询
+复用原ConversationInspectionResult/InspectionTask和IqcDataScope.canView，不增加动作中心的平行数据范围模型。GET /api/iqc/conversation-results/{id}/actions（iqc:action:history:view）先取最小结果/任务字段授权，再按实际result/task/EID/conversation/owner检索最多100项；只选择状态、尝试、UTC时间、回执/输出引用和有界原因代码。View不返回claimToken、ownerBound、冻结输入/trace/策略配置，不提供发送、重试或恢复入口。
+
+前端结果详情复用原页面与permission composable，ActionHistoryPanel只在权限就绪且有history:view时加载，按result/权限变化和卸载废弃旧响应、清空旧记录；手动刷新，无自动轮询。加载失败明确显示错误，不以空记录当成功；类型/状态保留原始可识别值。UTC字段明确标注，不假设无时区LocalDateTime已转本地时间。
+
+组织权限DML V20261004_28资源/按钮900247注册该GET，仅沿原IQC_ADMIN/QUALITY_MANAGER/INSPECTOR/VIEWER只读角色，仍由来源数据范围限制；不授予iqc:action:enqueue/执行或全局读。迁移/API/浏览器尚未运行，不能用编译/构建替代访问控制和真实数据库验收。
