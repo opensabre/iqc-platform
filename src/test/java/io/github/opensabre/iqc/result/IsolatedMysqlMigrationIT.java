@@ -171,6 +171,8 @@ class IsolatedMysqlMigrationIT {
     private static void assertCurrentSchema(String url) throws Exception {
         try (var connection = DriverManager.getConnection(url, "root", "")) {
             for (String[] expected : new String[][] {
+                    {"iqc_inspection_conversation_result", "action_discovered_at_utc", "datetime", "YES", null},
+                    {"iqc_inspection_conversation_result", "action_discovery_after_utc", "datetime", "YES", null},
                     {"iqc_inspection_task", "trigger_request_json", "longtext", "YES", null},
                     {"iqc_inspection_task", "model_budget_wait_key", "char", "YES", null},
                     {"iqc_inspection_task", "periodic_schedule_id", "varchar", "YES", null},
@@ -207,7 +209,7 @@ class IsolatedMysqlMigrationIT {
             try (var query = connection.createStatement();
                  var history = query.executeQuery("SELECT version,success FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1")) {
                 assertThat(history.next()).isTrue();
-                assertThat(history.getString(1)).isEqualTo("1.1.62");
+                assertThat(history.getString(1)).isEqualTo("1.1.63");
                 assertThat(history.getBoolean(2)).isTrue();
             }
             try (var query = connection.createStatement();

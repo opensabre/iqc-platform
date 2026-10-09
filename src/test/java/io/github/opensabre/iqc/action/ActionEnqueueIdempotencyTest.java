@@ -22,9 +22,10 @@ class ActionEnqueueIdempotencyTest {
     private final ObjectMapper json=new ObjectMapper();
     private final ActionProductionSourceValidator sources=mock(ActionProductionSourceValidator.class);
     private final ActionExecutionMapper rows=mock(ActionExecutionMapper.class);
+    private final ActionDiscoveryMapper discovery=mock(ActionDiscoveryMapper.class);
     private final ActionAdapterRegistry adapters=mock(ActionAdapterRegistry.class);
     private final IqcDataScope scope=mock(IqcDataScope.class);
-    private final ActionEnqueueService service=new ActionEnqueueService(sources,rows,adapters,scope,json);
+    private final ActionEnqueueService service=new ActionEnqueueService(sources,rows,discovery,adapters,scope,json);
     private final ActionProductionSourceValidator.Reference reference=new ActionProductionSourceValidator.Reference("task","execution","conversation","result","alice");
     private final AtomicReference<ActionExecution> saved=new AtomicReference<>();
     private ActionPolicy policy;
@@ -32,6 +33,10 @@ class ActionEnqueueIdempotencyTest {
         when(scope.owner()).thenReturn("alice");when(scope.groupId()).thenReturn("group");
         policy=new ActionPolicy(ActionPolicy.SCHEMA,List.of(action("save",ActionPolicy.Kind.ALWAYS)));
         source("user");
+        var adapter=mock(ActionAdapter.class);
+        when(adapter.requiredResources()).thenReturn(Set.of());
+        when(adapters.require(any())).thenReturn(new ActionAdapterRegistry.Binding(
+                new ActionAdapter.Definition(ActionExecutionContract.Type.SAVE_RESULT,1,true),adapter));
         when(rows.insert(any(ActionExecution.class))).thenAnswer(call->{saved.set(call.getArgument(0));return 1;});
     }
     private ActionPolicy.Action action(String id,ActionPolicy.Kind kind) {
@@ -48,6 +53,27 @@ class ActionEnqueueIdempotencyTest {
     private ScheduledActorAccessService.Resolved actor() {
         return new ScheduledActorAccessService.Resolved("user","alice",false,"group",Set.of(),ActionEnqueueService.REQUIRED_GRANTS,Instant.now());
     }
+    @Test void emptyPolicyCompletesDiscoveryWithoutCreatingActions() {
+        policy=new ActionPolicy(ActionPolicy.SCHEMA,List.of());source("user");
+        assertTrue(service.enqueue(reference,actor()).isEmpty());
+        verify(discovery).complete("result");verifyNoInteractions(rows,adapters);
+    }
+    @Test void emptyPolicyStillRejectsReusedUsername() {
+        policy=new ActionPolicy(ActionPolicy.SCHEMA,List.of());source("old-user");
+        assertThrows(IqcException.class,()->service.enqueue(reference,actor()));
+        verifyNoInteractions(discovery,rows,adapters);
+    }
+    @Test void missingOperationGrantBlocksLedgerWithoutCreatingAttempt() {
+        var adapter=mock(ActionAdapter.class);
+        when(adapter.requiredResources()).thenReturn(Set.of("iqc:review:create"));
+        when(adapters.require(any())).thenReturn(new ActionAdapterRegistry.Binding(
+                new ActionAdapter.Definition(ActionExecutionContract.Type.SAVE_RESULT,1,true),adapter));
+        service.enqueue(reference,actor());
+        assertEquals("BLOCKED_AUTHORIZATION",saved.get().getStatus());
+        assertEquals("ACTION_OPERATION_GRANT_MISSING",saved.get().getLastErrorCode());
+        assertEquals(0,saved.get().getAttemptCount());assertNull(saved.get().getOutcome());
+        verify(discovery).complete("result");
+    }
     @Test void matchingActionFreezesSourceAndStartsWithoutAttemptOrOutcome() throws Exception {
         var ids=service.enqueue(reference,actor());var row=saved.get();
         assertEquals(List.of(row.getId()),ids);assertEquals(row.getId(),row.getIdempotencyKey());
@@ -61,7 +87,7 @@ class ActionEnqueueIdempotencyTest {
     }
     @Test void unknownConditionCreatesNoActionAndDoesNotCheckAdapter() {
         policy=new ActionPolicy(ActionPolicy.SCHEMA,List.of(action("save",ActionPolicy.Kind.RESULT_STATUS)));source("user");
-        assertTrue(service.enqueue(reference,actor()).isEmpty());verifyNoInteractions(rows,adapters);
+        assertTrue(service.enqueue(reference,actor()).isEmpty());verify(discovery).complete("result");verifyNoInteractions(rows,adapters);
     }
     @Test void reusedUsernameCannotReplaceFrozenStableIdentity() {
         source("old-user");assertThrows(IqcException.class,()->service.enqueue(reference,actor()));

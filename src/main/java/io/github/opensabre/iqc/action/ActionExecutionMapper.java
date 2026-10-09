@@ -10,10 +10,12 @@ import java.util.List;
 public interface ActionExecutionMapper extends BaseMapper<ActionExecution> {
     /** Discovery is advisory: only a successful conditional claim grants execution. */
     @Select("""
-        SELECT id,version FROM iqc_action_execution
-        WHERE status IN ('PENDING','WAITING_RETRY')
-          AND ((status='PENDING' AND next_attempt_at_utc IS NULL) OR next_attempt_at_utc <= #{now})
-        ORDER BY next_attempt_at_utc,id LIMIT 100
+        SELECT a.id,a.version FROM iqc_action_execution a
+        WHERE a.status IN ('PENDING','WAITING_RETRY')
+          AND ((a.status='PENDING' AND a.next_attempt_at_utc IS NULL) OR a.next_attempt_at_utc <= #{now})
+          AND (a.action_type <> 'CREATE_REVIEW' OR EXISTS (
+              SELECT 1 FROM iqc_inspection_task t WHERE t.id=a.task_id AND t.status <> 'RUNNING'))
+        ORDER BY a.next_attempt_at_utc,a.id LIMIT 100
         """)
     List<ActionExecution> findDue(@Param("now") LocalDateTime now);
 
@@ -24,6 +26,16 @@ public interface ActionExecutionMapper extends BaseMapper<ActionExecution> {
         """)
     List<ActionExecution> findLost(@Param("cutoff") LocalDateTime cutoff);
 
+    /** Prerequisite wait preserves attempt count and outcomes; version fences concurrent observations. */
+    @Update("""
+        UPDATE iqc_action_execution SET next_attempt_at_utc=#{after},version=version+1,
+          updated_by='system',updated_time=#{now}
+        WHERE id=#{id} AND version=#{version} AND version < 9223372036854775807
+          AND status IN ('PENDING','WAITING_RETRY') AND #{after}>#{now}
+          AND ((status='PENDING' AND next_attempt_at_utc IS NULL) OR next_attempt_at_utc<=#{now})
+        """)
+    int deferPrerequisite(@Param("id") String id,@Param("version") long version,
+                          @Param("now") LocalDateTime now,@Param("after") LocalDateTime after);
     /** A claim is committed before external I/O; callers must validate the frozen source first. */
     @Update("""
         UPDATE iqc_action_execution

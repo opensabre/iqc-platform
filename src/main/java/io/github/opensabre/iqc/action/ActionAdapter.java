@@ -50,6 +50,10 @@ public interface ActionAdapter {
         }
     }
     Definition definition();
+    /** Existing owning-operation grants, chosen by the server implementation. */
+    default java.util.Set<String> requiredResources(){return java.util.Set.of();}
+    /** Local read-only prerequisites, under the source locks. No external I/O or side effects. */
+    default boolean ready(ActionPolicy.Action action,ActionProductionSourceValidator.Validated source){return true;}
     /** Pure local configuration validation; resolve secrets and authorize separately before execution. */
     void validateConfiguration(JsonNode configuration);
     /** Called after claim commit, outside a database transaction. Ambiguous exceptions mean UNKNOWN. */

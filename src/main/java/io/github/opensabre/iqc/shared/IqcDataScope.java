@@ -32,6 +32,14 @@ public class IqcDataScope {
         scheduledActor.set(actor);userContext.setContext(context);
         try{return callback.get();}finally{scheduledActor.remove();if(original.isEmpty())userContext.clear();else userContext.setContext(original);}
     }
+    /** Local side-effect preflight using the existing scheduled actor, without network calls under locks. */
+    public void requireScheduledResources(Set<String> resources) {
+        var actor=scheduledActor.get();var now=java.time.Instant.now();
+        if(resources==null || resources.isEmpty() || actor==null || actor.checkedAt()==null
+                || actor.checkedAt().isBefore(now.minusSeconds(30)) || actor.checkedAt().isAfter(now.plusSeconds(5))
+                || actor.resourceCodes()==null || !actor.resourceCodes().containsAll(resources))
+            throw io.github.opensabre.iqc.governance.IqcException.accessDenied("后台业务操作缺少当前授权证据");
+    }
     public String owner() {
         var actor=scheduledActor.get();if(actor!=null)return actor.owner();
         String username = userContext.getUsername();

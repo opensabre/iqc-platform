@@ -32,7 +32,12 @@ public class ActionProductionSourceValidator {
     public record Reference(String taskId,String executionId,String conversationId,String resultId,String owner) { }
     public record Validated(Reference reference,String ownerGroupId,String decisionReference,
                             String inputSnapshotJson,String inputSnapshotHash,ActionPolicy policy,ActionPolicy.Context context,
-                            io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound ownerBound) { }
+                            io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound ownerBound,String taskStatus) {
+        public Validated(Reference reference,String ownerGroupId,String decisionReference,String inputSnapshotJson,String inputSnapshotHash,
+                         ActionPolicy policy,ActionPolicy.Context context,io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound ownerBound) {
+            this(reference,ownerGroupId,decisionReference,inputSnapshotJson,inputSnapshotHash,policy,context,ownerBound,null);
+        }
+    }
     private final InspectionTaskMapper tasks;
     private final TaskExecutionMapper executions;
     private final ConversationInspectionResultMapper results;
@@ -126,7 +131,7 @@ public class ActionProductionSourceValidator {
             var facts=new java.util.HashMap<String,FindingFusion.Result>();fused.forEach(fact->facts.put(fact.code(),fact));
             var context=new ActionPolicy.Context(facts,decisions,score.scoreStatus(),score.finalScore(),risk,result.getResultStatus());
             return new Validated(reference,task.getOwnerGroupId(),result.getId(),body,PipelineAssetService.hash(body),
-                    release.actionPolicy(),context,ownerBound);
+                    release.actionPolicy(),context,ownerBound,task.getStatus());
         } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException failure) {
             throw IqcException.invalidState("动作生产来源快照无效");
         }

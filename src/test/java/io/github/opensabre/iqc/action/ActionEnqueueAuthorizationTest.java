@@ -13,9 +13,10 @@ import static org.mockito.Mockito.*;
 class ActionEnqueueAuthorizationTest {
     private final ActionProductionSourceValidator sources=mock(ActionProductionSourceValidator.class);
     private final ActionExecutionMapper rows=mock(ActionExecutionMapper.class);
+    private final ActionDiscoveryMapper discovery=mock(ActionDiscoveryMapper.class);
     private final ActionAdapterRegistry adapters=mock(ActionAdapterRegistry.class);
     private final IqcDataScope scope=mock(IqcDataScope.class);
-    private final ActionEnqueueService service=new ActionEnqueueService(sources,rows,adapters,scope,new ObjectMapper());
+    private final ActionEnqueueService service=new ActionEnqueueService(sources,rows,discovery,adapters,scope,new ObjectMapper());
     private final ActionProductionSourceValidator.Reference reference=new ActionProductionSourceValidator.Reference("task","execution","conversation","result","alice");
     @BeforeEach void scope() {when(scope.owner()).thenReturn("alice");when(scope.groupId()).thenReturn("group");}
     private ScheduledActorAccessService.Resolved actor(String owner,boolean all,String group,Set<String> grants,Instant time) {

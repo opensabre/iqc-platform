@@ -31,6 +31,7 @@ class IsolatedMysqlActionSettlementIT {
         @Bean ObjectMapper json() {return new ObjectMapper();}
         @Bean ActionAdapterRegistry registry() {
             var adapter=mock(ActionAdapter.class);
+            when(adapter.ready(any(),any())).thenReturn(true);
             when(adapter.definition()).thenReturn(new ActionAdapter.Definition(ActionExecutionContract.Type.SAVE_RESULT,1,true));
             return new ActionAdapterRegistry(List.of(adapter));
         }

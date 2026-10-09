@@ -46,12 +46,22 @@ public class ActionSettlementService {
         try {
             var policy=json.readValue(row.getPolicySnapshotJson(),ActionPolicy.class);
             var action=policy.actions().stream().filter(value->row.getActionId().equals(value.actionId())).findFirst().orElse(null);
-            if(action==null || !action.type().name().equals(row.getActionType()))
+            if(action==null || !action.type().name().equals(row.getActionType())
+                    || action.effectiveAdapterVersion()!=request.adapter().version())
                 throw IqcException.invalidState("动作结算缺少冻结策略");
-            var binding=adapters.require(action);
-            if(!binding.definition().equals(request.adapter()))throw IqcException.invalidState("动作结算适配协议不一致");
+            // Receipt recording survives adapter removal or configuration changes after the send.
+            // Only a new retry requires a currently available, unchanged safe adapter definition.
+            boolean retrySafe=false;
+            if(receipt.outcome()==ActionExecutionContract.Outcome.CONFIRMED_RETRYABLE_FAILURE) {
+                try {
+                    var binding=adapters.require(action);
+                    retrySafe=binding.definition().equals(request.adapter()) && binding.definition().retrySafe();
+                } catch(RuntimeException unavailable) {
+                    retrySafe=false;
+                }
+            }
             Instant now=Instant.now().truncatedTo(ChronoUnit.MILLIS);
-            var plan=ActionExecutionContract.plan(receipt.outcome(),request.attempt(),binding.definition().retrySafe(),action.retry(),now);
+            var plan=ActionExecutionContract.plan(receipt.outcome(),request.attempt(),retrySafe,action.retry(),now);
             LocalDateTime due=plan.notBefore()==null?null:LocalDateTime.ofInstant(plan.notBefore(),ZoneOffset.UTC);
             if(due!=null && (due.getYear()<1000 || due.getYear()>9999))throw IqcException.invalidState("动作重试时间超出存储范围");
             return executions.settle(row.getId(),claimVersion,claimToken,plan.next(),receipt.outcome(),due,

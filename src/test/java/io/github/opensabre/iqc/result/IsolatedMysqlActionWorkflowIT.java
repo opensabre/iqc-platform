@@ -37,7 +37,7 @@ class IsolatedMysqlActionWorkflowIT {
         @Bean ActionProductionSourceValidator sources() {return mock(ActionProductionSourceValidator.class);}
         @Bean IqcDataScope scope() {return mock(IqcDataScope.class);}
         @Bean ActionEnqueueService enqueue(ActionProductionSourceValidator source,ActionExecutionMapper rows,ActionAdapterRegistry registry,IqcDataScope scope,ObjectMapper json) {
-            return new ActionEnqueueService(source,rows,registry,scope,json);
+            return new ActionEnqueueService(source,rows,mock(ActionDiscoveryMapper.class),registry,scope,json);
         }
         @Bean ActionClaimService claims(ActionExecutionMapper rows,ActionProductionSourceValidator source,ActionAdapterRegistry registry,IqcDataScope scope,ObjectMapper json) {
             return new ActionClaimService(rows,source,registry,scope,json);
