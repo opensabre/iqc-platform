@@ -25,7 +25,8 @@ public class SavedResultActionAdapter implements ActionAdapter {
             var source=request.source();
             var policy=json.readValue(request.policySnapshotJson(),ActionPolicy.class);
             var configured=policy.actions().stream().filter(action->source.actionId().equals(action.actionId())).findFirst().orElse(null);
-            if(configured==null || configured.type()!=DEFINITION.type())return unknown(request,"ACTION_POLICY_MISMATCH");
+            if(configured==null || configured.type()!=DEFINITION.type() || configured.effectiveAdapterVersion()!=DEFINITION.version())
+                return unknown(request,"ACTION_POLICY_MISMATCH");
             validateConfiguration(configured.configuration());
             var frozen=json.readTree(request.inputSnapshotJson());
             if(frozen==null || !"iqc-action-production-input-v1".equals(frozen.path("schemaVersion").asText())

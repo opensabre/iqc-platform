@@ -48,3 +48,10 @@ ActionAdapter.Definition声明type、正整数version和实现自身的retrySafe
 SavedResultActionAdapter（SAVE_RESULT v1，重复只读确认安全）实际读取原ConversationInspectionResultMapper，不新增结果表、不重跑AI、不改分析结果。只允许空配置，核对冻结政策内实际actionId/type、原result决策引用、任务/EID/会话以及保存的trace/评分/业务项/状态/risk/finalScore一致，实际保存结果ID同时作为证据与输出。此处SAVE_RESULT表示确认生产路径已保存的产物，不把动作中心变成第二条分析结果保存路径。记录缺失/变化、结构或数据库异常均UNKNOWN，不能伪造持久失败回执或自动重发。
 
 当前只有接口和这个真实保存产物适配器，尚无注册分派/生产入队/worker/当前权限核验，也未调用数据库执行它；不会因此创建COMPLETE记录。工单/辅导未注册假适配器，公共通知、Webhook、复核/风险/样本/标签仍需各自真实协议与幂等证明。适配版本与发布配置的完整冻结绑定也须由后续入队/分派服务完成。
+
+## 明确适配版本与分派注册
+ActionPolicy.Action可选adapterVersion要求正整数；早期v1缺失字段固定解释为1，不采用当前最新适配器。null保持不序列化，旧7参数构造保留原字段体，避免给旧政策补字段而改变摘要。显式版本属于原发布快照/hash，不创建额外配置副本。
+
+ActionAdapterRegistry只注册实际Spring适配bean，以type/version唯一键，重复启动失败。require按冻结策略的精确版本选择，未实现的其他八类动作/缺失版本明确拒绝，不模拟成功，不退到其他版本；再次核对实现definition不变，并调用本地配置校验。SAVE_RESULT也检查冻结策略有效版本等于自身v1。相同版本的语义/retrySafe必须保持不变，实现变化须升版本并保留旧实现或将旧动作隔离；注册比较只能发现进程内definition变化，不能证明不同部署二进制等价。
+
+本批是待接入的注册/选择能力，不调用适配execute，不代表生产入队、执行服务或完整冻结部署契约已完成。后续服务须调用require并保持claim/settle围栏、当前授权和未知隔离，动作政策存在但适配器未提供时不能派发。

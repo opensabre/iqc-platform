@@ -21,15 +21,24 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
     public enum Kind {ALWAYS,ALL,ANY,NOT,FINDING_EQUALS,FINDING_STATE,ITEM_STATUS,RISK_AT_LEAST,FINAL_SCORE_BELOW,RESULT_STATUS}
     public record Action(String actionId,ActionExecutionContract.Type type,Condition condition,
                          Idempotency idempotency,AutomaticRetryPolicy retry,FailureHandling failureHandling,
-                         JsonNode configuration) {
+                         JsonNode configuration,
+                         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                         Integer adapterVersion) {
+        public Action(String actionId,ActionExecutionContract.Type type,Condition condition,
+                      Idempotency idempotency,AutomaticRetryPolicy retry,FailureHandling failureHandling,JsonNode configuration) {
+            this(actionId,type,condition,idempotency,retry,failureHandling,configuration,null);
+        }
         public Action {
             code(actionId);Objects.requireNonNull(type);Objects.requireNonNull(condition);
             Objects.requireNonNull(idempotency);Objects.requireNonNull(failureHandling);
+            // Earlier v1 snapshots have a fixed v1 interpretation, never "latest".
+            if(adapterVersion!=null && adapterVersion<1)throw new IllegalArgumentException("Action adapter version must be positive");
             if(configuration==null || !configuration.isObject() || configuration.toString().length()>65536)
                 throw new IllegalArgumentException("Action adapter configuration must be a bounded object");
             configuration=configuration.deepCopy();
         }
         @Override public JsonNode configuration(){return configuration.deepCopy();}
+        public int effectiveAdapterVersion(){return adapterVersion==null?1:adapterVersion;}
     }
     public record Condition(Kind kind,String code,JsonNode value,List<Condition> children) {
         public Condition {
