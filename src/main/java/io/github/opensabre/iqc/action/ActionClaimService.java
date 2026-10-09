@@ -72,6 +72,12 @@ public class ActionClaimService {
                 executions.blockReady(id,expectedVersion,"BLOCKED_ADAPTER","ADAPTER_CONFIGURATION_UNAVAILABLE",utc);
                 return null;
             }
+            if(!actor.resourceCodes().containsAll(binding.adapter().requiredResources())) {
+                ActionEnqueueService.requireFresh(actor);
+                executions.blockReady(id,expectedVersion,"BLOCKED_AUTHORIZATION","ACTION_OPERATION_GRANT_MISSING",utc);
+                return null;
+            }
+            if(action.type()==ActionExecutionContract.Type.CREATE_REVIEW && "RUNNING".equals(validated.taskStatus()))return null;
             String token=UUID.randomUUID().toString().replace("-","");
             var request=new ActionAdapter.Request(id,row.getIdempotencyKey(),source,binding.definition(),row.getAttemptCount()+1,
                     row.getInputSnapshotJson(),row.getInputSnapshotHash(),policyBody);

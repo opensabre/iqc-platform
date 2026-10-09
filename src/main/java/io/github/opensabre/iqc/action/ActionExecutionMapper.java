@@ -10,10 +10,12 @@ import java.util.List;
 public interface ActionExecutionMapper extends BaseMapper<ActionExecution> {
     /** Discovery is advisory: only a successful conditional claim grants execution. */
     @Select("""
-        SELECT id,version FROM iqc_action_execution
-        WHERE status IN ('PENDING','WAITING_RETRY')
-          AND ((status='PENDING' AND next_attempt_at_utc IS NULL) OR next_attempt_at_utc <= #{now})
-        ORDER BY next_attempt_at_utc,id LIMIT 100
+        SELECT a.id,a.version FROM iqc_action_execution a
+        WHERE a.status IN ('PENDING','WAITING_RETRY')
+          AND ((a.status='PENDING' AND a.next_attempt_at_utc IS NULL) OR a.next_attempt_at_utc <= #{now})
+          AND (a.action_type <> 'CREATE_REVIEW' OR EXISTS (
+              SELECT 1 FROM iqc_inspection_task t WHERE t.id=a.task_id AND t.status <> 'RUNNING'))
+        ORDER BY a.next_attempt_at_utc,a.id LIMIT 100
         """)
     List<ActionExecution> findDue(@Param("now") LocalDateTime now);
 

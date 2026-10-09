@@ -56,7 +56,12 @@ public class ActionEnqueueService {
                 if(action.retry()!=null && action.retry().effectiveUntil()!=null && !Instant.now().isBefore(action.retry().effectiveUntil())) {
                     row.setStatus("EXPIRED");row.setLastErrorCode("ACTION_POLICY_EXPIRED");
                 } else {
-                    try {adapters.require(action);}
+                    try {
+                        var binding=adapters.require(action);
+                        if(!actor.resourceCodes().containsAll(binding.adapter().requiredResources())) {
+                            row.setStatus("BLOCKED_AUTHORIZATION");row.setLastErrorCode("ACTION_OPERATION_GRANT_MISSING");
+                        }
+                    }
                     catch(IqcException | IllegalArgumentException unavailable) {
                         row.setStatus("BLOCKED_ADAPTER");row.setLastErrorCode("ADAPTER_CONFIGURATION_UNAVAILABLE");
                     }

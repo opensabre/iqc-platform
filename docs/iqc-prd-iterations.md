@@ -259,3 +259,5 @@ Gateway预算拒绝显式key/原因经Provider、itemRoute/Pipeline及Future向�
 I5补充：已编码后台生产结果发现与原结果UTC检查点，完成标记与匹配动作入队原子提交，失败延后发现。默认关闭；enqueue权限注册、历史EID来源、其他八类适配/恢复与运行验收仍未完成。
 
 I5补充：已编码负责人生产结果动作检查请求POST接口（iqc:action:enqueue），对应组织资源/按钮900248与DML_29。接口只安排发现，不直接发送/重试，来源稳定身份与所有权仍须核验；后台重新解析三项当前权限。接口/UI/真实授权与SQL未验收。
+
+I5补充：CREATE_REVIEW v1实际适配复用原BusinessItemReviewService/requestId/ResultReview，独立短事务再次核验冻结来源与已结束任务，产物提交后回执引用真实复核ID。后台扫描与领取保留运行任务的复核动作待执行；复用review:create额外原业务权限，缺授权阻塞不执行。配置预期修订冲突保留原人工流程；真实SQL/复核并发/恢复/二审未验收。

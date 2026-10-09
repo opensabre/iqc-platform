@@ -42,6 +42,8 @@ public class ActionExecutionService {
             if(action==null)throw IqcException.invalidState("执行缺少冻结动作");
             var binding=adapters.require(action);
             if(!binding.definition().equals(request.adapter()))throw IqcException.invalidState("执行适配协议发生变化");
+            if(!actor.resourceCodes().containsAll(binding.adapter().requiredResources()))
+                throw IqcException.accessDenied("动作缺少原业务操作权限");
             ActionEnqueueService.requireFresh(actor);
             receipt=binding.adapter().execute(request);
             if(receipt==null)throw IqcException.invalidState("动作适配器未返回回执");
