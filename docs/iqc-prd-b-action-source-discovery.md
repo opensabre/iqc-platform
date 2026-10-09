@@ -8,4 +8,4 @@ B6aae9b2后实现ActionSourceDiscovery与ActionSourceDiscoveryMapper，复用稳
 
 三项服务测试：首100无身份不阻塞第101；单条失败继续下一来源；末尾重放。实际MySQL两项新SQL覆盖exclusive keyset、current execution、owner映射与暂停/试运行排除，复用此前五项真实来源回归。定向3项Maven exit0，独立MySQL来源/发现7项exit0，均0 failures/errors/skipped；日志 `/private/tmp/iqc-b-action-discovery-tests.log`、`/private/tmp/iqc-b-action-discovery-mysql.log`。完整默认回归exit0、92报告/764项0 failures/errors/skipped，所有默认报告本次22:06:37..22:09:59刷新，日志 `/private/tmp/iqc-b-action-discovery-full.log`。diffcheck通过，临时MySQL正常shutdown且服务exit0，无推送/合入A/部署。
 
-权限注册仍未完成，组织未授予iqc:action:enqueue时真实解析拒绝；未开启动作开关、未真实组织调用或发送。不得因新增发现代码称整条生产链完成。A查询/controller草稿仍由A处理，framework不改。完整PRD继续。
+后续注册快照代码已声明后台能力（见[资源声明](iqc-prd-b-action-resource-registration.md)），真实组织发布/授权未执行；组织未授予iqc:action:enqueue时真实解析拒绝；未开启动作开关、未真实组织调用或发送。不得因新增发现代码称整条生产链完成。A查询/controller草稿仍由A处理，framework不改。完整PRD继续。
