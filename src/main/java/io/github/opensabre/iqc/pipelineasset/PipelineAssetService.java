@@ -176,6 +176,29 @@ public class PipelineAssetService {
     public static boolean isPipeline(JsonNode snapshot) { return snapshot!=null && snapshot.has("pipelineSnapshot"); }
     public PipelineRelease taskRelease(JsonNode snapshot) { validateTask(snapshot); return convert(snapshot.path("pipelineSnapshot").path("release")); }
 
+    /** Worker validation of an actual published production snapshot, without a thread user scope. */
+    public PipelineRelease publishedTaskRelease(JsonNode snapshot) {
+        if (!isPipeline(snapshot) || snapshot.has("evaluationSnapshot"))
+            throw IqcException.invalidState("动作来源必须是已发布生产流水线");
+        validateTask(snapshot);
+        var marker=snapshot.path("pipelineSnapshot");
+        if (!"PIPELINE".equals(snapshot.path("executionStrategy").path("mode").asText())
+                || !marker.path("trial").isBoolean() || marker.path("trial").booleanValue()
+                || !marker.path("versionNo").isIntegralNumber() || !marker.path("versionNo").canConvertToInt()
+                || marker.path("versionNo").intValue()<1
+                || (marker.has("draftRevision") && !marker.path("draftRevision").isNull()))
+            throw IqcException.invalidState("动作来源缺少生产发布版本");
+        var version=versions.selectOne(Wrappers.<PipelineAssetVersion>lambdaQuery()
+                .eq(PipelineAssetVersion::getPipelineId,marker.path("pipelineId").asText())
+                .eq(PipelineAssetVersion::getVersionNo,marker.path("versionNo").intValue()));
+        if (version==null || !hash(version.getSnapshotJson()).equals(version.getContentHash())
+                || !Objects.equals(version.getContentHash(),marker.path("contentHash").asText())
+                || !parse(version.getSnapshotJson()).equals(marker.path("release")))
+            throw IqcException.invalidState("动作来源与发布流水线不一致");
+        validatePublicationEvidence(version);
+        return convert(marker.path("release"));
+    }
+
     private PipelineRelease freeze(PipelineRelease release) {
         if(release==null) throw IqcException.invalidArgument("流水线配置不能为空");
         var nodes=new ArrayList<PipelineDefinition.Node>(); var codes=new HashSet<String>();
@@ -226,11 +249,16 @@ public class PipelineAssetService {
         for(var item:release.items()) if(!codes.contains(item.findingCode())
                 || item.appliesWhenFindingCode()!=null && !codes.contains(item.appliesWhenFindingCode()))
             throw IqcException.invalidArgument("业务项目或适用条件引用未声明的事实编码");
-        var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes),release.fusion(),release.scoring(),release.items(),release.publicationGate());
+        if(release.actionPolicy()!=null)release.actionPolicy().validateReferences(codes,
+                release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));
+        var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes),release.fusion(),release.scoring(),release.items(),release.publicationGate(),release.actionPolicy());
         runtime.validate(frozen.pipeline()); return frozen;
     }
     private void validateFrozen(PipelineRelease release) {
         runtime.validate(release.pipeline());
+        if(release.actionPolicy()!=null)release.actionPolicy().validateReferences(
+                release.pipeline().nodes().stream().map(node->node.config().path("findingDefinition").path("code").asText()).collect(java.util.stream.Collectors.toSet()),
+                release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));
         for(var node:release.pipeline().nodes()) {
             var config=node.config(); var rule=config.path("ruleSnapshot"); var current=rules.selectById(rule.path("id").asText());
             if(current==null || "DISABLED".equals(current.getStatus())) throw IqcException.invalidState("流水线依赖规则已停用");
