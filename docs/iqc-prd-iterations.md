@@ -263,3 +263,5 @@ I5补充：已编码负责人生产结果动作检查请求POST接口（iqc:acti
 I5补充：CREATE_REVIEW v1实际适配复用原BusinessItemReviewService/requestId/ResultReview，独立短事务再次核验冻结来源与已结束任务，产物提交后回执引用真实复核ID。后台扫描与领取保留运行任务的复核动作待执行；复用review:create额外原业务权限，缺授权阻塞不执行。配置预期修订冲突保留原人工流程；真实SQL/复核并发/恢复/二审未验收。
 
 I5补充：ADD_TO_EVALUATION_CANDIDATE v1复用BusinessReviewSampleService与原sample:manage权限，绑定固定复核轮次（默认1）；任务结束且指定轮次完成后创建实际候选，保留原金标标注/独立审核。前置未就绪CAS延后检查，不增加attempt/生成发送失败。候选、审核、真实SQL与并发未运行验收。
+
+I5标签动作兼容基础：源码确认原label result必须有真实RuleInspectionResult锚点，查询/复核/导出不能直接接受Pipeline Finding来源。新增FindingLabelProjection纯契约，沿原LabelFactEvaluator值类型验证并保留缺失/冲突/错误状态、真实融合政策/原始及所选事实/证据；未接存储/目录冻结/UPDATE_LABEL适配器和读取链路，不宣称标签动作完成。

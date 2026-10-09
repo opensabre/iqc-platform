@@ -127,3 +127,11 @@ ActionAdapter.ready为持有原来源锁后的本地只读前置检查，无外�
 EvaluationCandidateActionService独立短事务按原Task→Execution→Result顺序重新核验完整冻结输入/策略和创建者，再选择固定结果/轮次的真实已完成复核并加入原样本创建事务。稳定动作键作为原requestId，保持第一份候选输入和人工基准；提交后用真实sample.id作回执/产物，核验结果/会话/创建者及reviewId/revision，不修改已有标注/审核状态。新候选沿原CANDIDATE/UNLABELLED流程继续标注与独立审核；动作成功只证明候选已创建。
 
 落库前后复用现有后台actor本地新鲜度和sample:manage检查；数据库或提交确认不明返回UNKNOWN，不能自动重发/自动批准。该批未运行真实SQL/复核/候选API或调度网络，也未完成候选操作后的数据集审核验收；其他动作适配、恢复/人工核对、事实复核/二审仍待开发。
+
+## UPDATE_LABEL 原能力缺口与投影契约
+源码核验：LabelResultService仅从RuleInspectionResult生成标签；InspectionLabelResult.sourceRuleResultId及DDL V1.1.24为NOT NULL，LabelResultPayloadValidator/QueryService/ReviewService按旧规则来源校验候选与证据。不能伪造RuleInspectionResult满足非空约束，也不能将未知新schema沿历史宽容路径计为HIT。后续需最小扩展原标签表来源字段、冻结目录/绑定以及查询/复核/导出协议，不建立同义标签表；现阶段不修改存储约束或写入未被读取链路支持的标签。
+
+FindingLabelProjection先定义纯投影schema iqc-label-finding-projection-v1，绑定labelId/version/valueCode/原valueType/targetRole/findingCode。值类型沿已有LabelFactEvaluator.validValue，不引入第二套百分比/月/日期解析。KNOWN的false或0保持真实值，UNKNOWN/CONFLICT/ERROR/NOT_EVALUATED不得合成false；没有Finding为NOT_EVALUATED，类型不匹配为ERROR。真实融合政策ID/version、原始Finding/所选IDs和证据保留，不使用sourceRuleResultId占位，不重新检测或创造证据。绑定的targetRole是政策声明，不表示引擎另行确认了参与人身份。
+
+该契约是后续标签来源兼容的代码基础，尚未接UPDATE_LABEL适配器、冻结资产目录、持久化、查询/复核/导出或前端。V1.1.63之后的DDL须检查当前拥有分支与B迁移占用再确定；本批不执行迁移/测试或标签写入。
+兼容既有LabelTaxonomyService允许的Unicode值编码：valueCode限制沿现表varchar(64)而非新加ASCII规则；findingCode保留Unicode，labelId/原因引用仍按稳定引用约束。不能把新契约的编码限制扩大到超过原标签列容量。
