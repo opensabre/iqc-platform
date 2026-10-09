@@ -99,3 +99,10 @@ ActionDispatchStateService后台短事务按观察id/version/token CAS，失联�
 ActionProductionDiscovery与原dispatcher共享默认关闭的iqc.actions.enabled开关。只定位当前EID的PIPELINE结果、可执行任务状态和具有actionOwnerBound的冻结快照；最多100个轻量来源定位，逐条加载任务快照，组织授权解析在入队事务外，再由原validator锁定和重新核验当前持久来源。候选扫描不替代最终发布/输入/权限核验，不在分析事务中回调。失败延迟5分钟再次发现，已完成标记不被延期覆盖；无需写假的远端失败或动作回执。数据库扫描/延期写失败沿调度异常机制报告。
 
 检查点表示该冻结生产结果的策略已被检查，UNKNOWN/NO_MATCH不产生动作；后续人工修订应有独立来源版本，不能清空检查点重用旧结果宣称新决策。currentEID切换后的旧来源仍不支持，权限iqc:action:enqueue尚待真实资源注册，其他适配、恢复入口和发现状态UI未完成。SQL尚未执行，开关未开启，无真实结果自动入队/发送验收。
+
+## 生产结果动作检查请求与真实权限资源
+POST /api/iqc/conversation-results/{id}/actions/enqueue以iqc:action:enqueue保护，仅请求后台检查。ActionDiscoveryRequestService拒绝分析事务和未启用动作开关的请求，在获取数据库锁之前沿既有actor.capture解析当前用户稳定身份；短事务再复用生产来源validator按Task→Execution→Result锁序检查已发布冻结来源、当前EID、创建者归属及稳定userId。拥有全局或组读权限不等于能代替创建者申请动作。客户端不能指定actor/owner/grants/策略或幂等键。
+
+返回DISCOVERY_REQUESTED表示发现时间已安排，不是动作已入队/发送或远端成功；ALREADY_DISCOVERED表示该来源已检查，不清空完成检查点，也不重试任何现有动作。后台独立重新解析创建者当前pipeline:create/task:execute/action:enqueue三项授权，再走既有入队与执行链路。接口使用原审计与限流能力，无新授权模型；动作状态查询继续独立权限。
+
+组织DML V20261004_29资源/按钮900248注册真实POST，仅默认分配IQC_ADMIN、IQC_QUALITY_MANAGER；查看权限角色未因此获得动作权限。迁移和API尚未运行，开关仍默认关闭；本批只完成权限注册源码与请求编排，不表示真实后台授权已验收。已有“enqueue权限尚待注册”段落记录的是历史批次，本节为当前实现更新。

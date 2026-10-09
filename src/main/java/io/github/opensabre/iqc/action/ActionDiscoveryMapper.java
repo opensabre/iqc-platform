@@ -23,6 +23,8 @@ public interface ActionDiscoveryMapper {
     List<Source> findDue(@Param("now") LocalDateTime now);
     @Select("SELECT rule_snapshot_json FROM iqc_inspection_task WHERE id=#{id}")
     String taskSnapshot(@Param("id") String id);
+    @Select("SELECT action_discovered_at_utc IS NOT NULL FROM iqc_inspection_conversation_result WHERE id=#{id}")
+    boolean isComplete(@Param("id") String id);
     @Update("""
         UPDATE iqc_inspection_conversation_result SET action_discovered_at_utc=UTC_TIMESTAMP(3),
           action_discovery_after_utc=NULL WHERE id=#{id} AND action_discovered_at_utc IS NULL
