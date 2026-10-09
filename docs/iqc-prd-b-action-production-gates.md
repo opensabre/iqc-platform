@@ -1,4 +1,6 @@
-# 动作生产链当前缺口与接通验收门槛
+# 动作生产链缺口与接通验收门槛
+
+后续状态：B新增ActionSourceDiscovery接通后台enqueue调用与循环keyset扫描，见[发现说明](iqc-prd-b-action-source-discovery.md)。下文断点1描述6f453bc核对时基线；权限注册/人工核对/外部适配门槛仍未完成，发现代码不代表真实生产链已验收。
 
 核对基线：B6f453bc，A已提交9397dc9；A未提交ActionQueryService/ActionExecutionController只作为协作所有权记录，未集成、未作为已完成证据。
 

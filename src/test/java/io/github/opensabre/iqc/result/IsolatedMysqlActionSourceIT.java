@@ -31,15 +31,16 @@ class IsolatedMysqlActionSourceIT {
     private static InspectionTaskMapper tasks;
     private static TaskExecutionMapper executions;
     private static ConversationInspectionResultMapper results;
+    private static ActionSourceDiscoveryMapper discovery;
     private ActionProductionSourceValidator source;
     private final ObjectMapper json=new ObjectMapper();
     private final ActionProductionSourceValidator.Reference reference=new ActionProductionSourceValidator.Reference("task","execution","conversation","result","alice");
     @BeforeAll static void start() throws Exception {
         IsolatedMysqlTaskExecutionStateIT.start();context=new AnnotationConfigApplicationContext(IsolatedMysqlTaskExecutionStateIT.DatabaseConfiguration.class);
         jdbc=new JdbcTemplate(context.getBean(DataSource.class));tx=new TransactionTemplate(context.getBean(DataSourceTransactionManager.class));
-        var factory=context.getBean(SqlSessionFactory.class);factory.getConfiguration().addMapper(ConversationInspectionResultMapper.class);
+        var factory=context.getBean(SqlSessionFactory.class);factory.getConfiguration().addMapper(ConversationInspectionResultMapper.class);factory.getConfiguration().addMapper(ActionSourceDiscoveryMapper.class);
         var session=new SqlSessionTemplate(factory);tasks=session.getMapper(InspectionTaskMapper.class);executions=session.getMapper(TaskExecutionMapper.class);
-        results=session.getMapper(ConversationInspectionResultMapper.class);
+        results=session.getMapper(ConversationInspectionResultMapper.class);discovery=session.getMapper(ActionSourceDiscoveryMapper.class);
     }
     @AfterAll static void close() {if(context!=null)context.close();IsolatedMysqlTaskExecutionStateIT.close();}
     @BeforeEach void fixture() throws Exception {
@@ -97,4 +98,14 @@ class IsolatedMysqlActionSourceIT {
         jdbc.update("UPDATE iqc_inspection_conversation_result SET execution_trace_json=JSON_SET(execution_trace_json,'$.mode','EVALUATION') WHERE id='result'");
         assertThrows(RuntimeException.class,this::validate);
     }
+    @Test void discoveryUsesCurrentProductionSourceAndExclusiveKeyset() {
+        var page=discovery.findAfter("");assertEquals(1,page.size());assertEquals("result",page.getFirst().id());assertEquals("alice",page.getFirst().owner());
+        assertTrue(discovery.findAfter("result").isEmpty());
+        jdbc.update("UPDATE iqc_inspection_task SET current_execution_id='later' WHERE id='task'");assertTrue(discovery.findAfter("").isEmpty());
+    }
+    @Test void discoveryExcludesPausedAndTrialTasks() {
+        jdbc.update("UPDATE iqc_inspection_task SET pause_requested=1 WHERE id='task'");assertTrue(discovery.findAfter("").isEmpty());
+        jdbc.update("UPDATE iqc_inspection_task SET pause_requested=0,task_type='PIPELINE_TRIAL' WHERE id='task'");assertTrue(discovery.findAfter("").isEmpty());
+    }
+
 }
