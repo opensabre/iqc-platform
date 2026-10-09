@@ -33,6 +33,18 @@ public interface ActionExecutionMapper extends BaseMapper<ActionExecution> {
     int claim(@Param("id") String id,@Param("version") long version,
               @Param("token") String token,@Param("now") LocalDateTime now);
 
+    /** Local preflight failure before any attempt: never modifies a RUNNING claim. */
+    @Update("""
+        UPDATE iqc_action_execution
+        SET status=#{status},last_error_code=#{errorCode},version=version+1,
+            next_attempt_at_utc=NULL,updated_by='system',updated_time=#{now}
+        WHERE id=#{id} AND version=#{version} AND version < 9223372036854775807
+          AND status IN ('PENDING','WAITING_RETRY')
+          AND #{status} IN ('EXPIRED','BLOCKED_ADAPTER','BLOCKED_SOURCE','BLOCKED_AUTHORIZATION')
+        """)
+    int blockReady(@Param("id") String id,@Param("version") long version,@Param("status") String status,
+                   @Param("errorCode") String errorCode,@Param("now") LocalDateTime now);
+
     /** The service supplies the plan derived from frozen retry policy and adapter evidence. */
     @Update("""
         UPDATE iqc_action_execution
