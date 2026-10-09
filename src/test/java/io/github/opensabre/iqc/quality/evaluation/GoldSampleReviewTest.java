@@ -1,0 +1,116 @@
+package io.github.opensabre.iqc.quality.evaluation;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.opensabre.iqc.finding.Finding;
+import io.github.opensabre.iqc.quality.dao.QualitySampleMapper;
+import io.github.opensabre.iqc.quality.dao.QualitySampleVersionMapper;
+import io.github.opensabre.iqc.quality.model.QualitySample;
+import io.github.opensabre.iqc.quality.model.QualitySampleVersion;
+import io.github.opensabre.iqc.shared.IqcDataScope;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import java.util.List;
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class GoldSampleReviewTest {
+    private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
+    private final QualitySampleMapper samples = mock(QualitySampleMapper.class);
+    private final QualitySampleVersionMapper versions = mock(QualitySampleVersionMapper.class);
+    private final IqcDataScope scope = mock(IqcDataScope.class);
+    private final GoldSampleService service = new GoldSampleService(samples, versions, null, null, scope, json);
+    private final QualitySample sample = new QualitySample();
+    @BeforeEach
+    void pendingDraft() throws Exception {
+        sample.setId("sample"); sample.setConversationId("conversation"); sample.setStatus("CANDIDATE");
+        sample.setGoldDraftRevision(1); sample.setGoldStatus("PENDING_REVIEW");
+        sample.setCreatedBy("owner"); sample.setOwnerGroupId("group");
+        var draft = new GoldDraft(GoldDraft.SCHEMA, "sample", "conversation",
+                List.of(new GoldConversation.Message("message", "agent", "frozen", 1, null)), null,
+                List.of(new GoldFinding("FACT", Finding.ValueType.BOOLEAN, Finding.State.KNOWN, json.valueToTree(true), List.of())),
+                "annotator", "candidate", List.of(), GoldConversation.Difficulty.BASIC, null);
+        sample.setGoldDraftJson(json.writeValueAsString(draft));
+        when(samples.selectOne(any())).thenReturn(sample); when(scope.canView("owner", "group")).thenReturn(true);
+        when(scope.owner()).thenReturn("reviewer");
+    }
+    @Test
+    void independentApprovalCreatesFrozenVersionAndIdenticalRetryReturnsIt() {
+        var version = service.review("sample", 1, true, "checked");
+        assertThat(version.getDecision()).isEqualTo("APPROVED");
+        assertThat(version.getVersionNo()).isEqualTo(1); assertThat(sample.getGoldStatus()).isEqualTo("APPROVED");
+        var gold = service.read(version.getSnapshotJson(), GoldConversation.class);
+        assertThat(gold.annotatorId()).isEqualTo("annotator"); assertThat(gold.reviewerId()).isEqualTo("reviewer");
+        when(versions.selectOne(any())).thenReturn(version);
+        assertThat(service.review("sample", 1, true, "checked")).isSameAs(version);
+        assertThat(service.approvedVersionForFreeze("sample", 1)).isSameAs(version);
+        verify(versions, times(1)).insert(any(QualitySampleVersion.class));
+    }
+    @Test
+    void rejectionCannotBeChangedIntoApprovalOrAdmittedToDataset() {
+        var version = service.review("sample", 1, false, "fix annotation");
+        when(versions.selectOne(any())).thenReturn(version);
+        assertThat(service.review("sample", 1, false, "fix annotation")).isSameAs(version);
+        assertThatThrownBy(() -> service.review("sample", 1, true, "checked")).hasMessageContaining("重新标注");
+        assertThatThrownBy(() -> service.approvedVersion("sample", 1)).hasMessageContaining("已审核金标");
+        assertThat(service.version("sample", 1)).isSameAs(version);
+    }
+    @Test
+    void rejectsSelfReviewUnidentifiedActorAndMissingReason() {
+        when(scope.owner()).thenReturn("annotator");
+        assertThatThrownBy(() -> service.review("sample", 1, true, "checked")).hasMessageContaining("必须不同");
+        when(scope.owner()).thenReturn("system");
+        assertThatThrownBy(() -> service.review("sample", 1, true, "checked")).hasMessageContaining("登录用户");
+        when(scope.owner()).thenReturn("reviewer");
+        assertThatThrownBy(() -> service.review("sample", 1, true, " ")).hasMessageContaining("原因");
+        verify(versions, never()).insert(any(QualitySampleVersion.class));
+    }
+    @Test
+    void staleRevisionAndInvisibleSampleCannotBeReviewed() {
+        assertThatThrownBy(() -> service.review("sample", 0, true, "checked")).hasMessageContaining("修订已变化");
+        when(scope.canView("owner", "group")).thenReturn(false);
+        assertThatThrownBy(() -> service.review("sample", 1, true, "checked")).hasMessageContaining("无权访问");
+        verifyNoInteractions(versions);
+    }
+    @Test
+    void disabledSampleAndCorruptedApprovalCannotEnterNewDataset() {
+        var version = service.review("sample", 1, true, "checked");
+        when(versions.selectOne(any())).thenReturn(version); sample.setStatus("DISABLED");
+        assertThatThrownBy(() -> service.approvedVersion("sample", 1)).hasMessageContaining("停用样本");
+        assertThat(service.version("sample", 1)).isSameAs(version);
+        sample.setStatus("CANDIDATE"); version.setContentHash("changed");
+        assertThatThrownBy(() -> service.approvedVersion("sample", 1)).hasMessageContaining("来源或摘要");
+    }
+    private GoldSampleService.Annotation annotation(com.fasterxml.jackson.databind.JsonNode context) throws Exception {
+        var input = json.createObjectNode().put("schemaVersion", "iqc-conversation-candidate-input-v1").put("conversationId", "conversation");
+        input.putArray("segments").addObject().put("id", "message").put("speakerRole", "agent").put("content", "frozen").put("sequenceNo", 1);
+        sample.setSourceResultId("result"); sample.setContentSnapshot(input.toString());
+        sample.setExpectedJson(json.createObjectNode().put("schemaVersion", "iqc-reviewed-business-candidate-v1")
+                .put("sourceResultId", "result").put("inputHash", io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(input.toString())).toString());
+        var original = service.read(sample.getGoldDraftJson(), GoldDraft.class);
+        return new GoldSampleService.Annotation(1, original.findings(), context, List.of(), original.difficulty(), null);
+    }
+    @Test
+    void explicitJsonNullContextIsEquivalentToOmittedOptionalContext() throws Exception {
+        var request = annotation(json.nullNode());
+        service.annotate("sample", request);
+        var draft = service.read(sample.getGoldDraftJson(), GoldDraft.class);
+        assertThat(draft.businessContext().has("annotation")).isFalse();
+        assertThat(draft.messages().getFirst().content()).isEqualTo("frozen");
+        assertThat(sample.getGoldStatus()).isEqualTo("PENDING_REVIEW");
+        assertThat(sample.getGoldDraftRevision()).isEqualTo(2);
+        verifyNoInteractions(versions);
+    }
+    @Test
+    void frozenCandidateAnnotationPreservesLineageAndRejectsChangedTranscript() throws Exception {
+        var request = annotation(json.createObjectNode().put("campaign", "sale"));
+        service.annotate("sample", request);
+        var draft = service.read(sample.getGoldDraftJson(), GoldDraft.class);
+        assertThat(draft.businessContext().at("/annotation/campaign").asText()).isEqualTo("sale");
+        assertThat(draft.businessContext().at("/candidateLineage/sourceResultId").asText()).isEqualTo("result");
+        sample.setGoldDraftRevision(1); sample.setContentSnapshot(sample.getContentSnapshot().replace("frozen", "changed"));
+        assertThatThrownBy(() -> service.annotate("sample", request)).hasMessageContaining("来源摘要无效");
+        var malformed = annotation(json.valueToTree("wrong"));
+        assertThatThrownBy(() -> service.annotate("sample", malformed)).hasMessageContaining("必须是对象");
+    }
+
+}

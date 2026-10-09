@@ -17,6 +17,7 @@ public record GoldDraft(String schemaVersion, String sourceSampleId, String conv
         messages = List.copyOf(Objects.requireNonNull(messages, "messages"));
         findings = List.copyOf(Objects.requireNonNull(findings, "findings"));
         tags = tags == null ? List.of() : List.copyOf(tags);
+        businessContext = businessContext == null || businessContext.isNull() ? null : businessContext;
         GoldConversation.validateInput(messages, businessContext, findings, tags, difficulty);
         businessContext = businessContext == null ? null : businessContext.deepCopy();
     }

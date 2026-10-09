@@ -29,6 +29,7 @@ public record GoldConversation(String schemaVersion, String sourceSampleId, Stri
         messages = List.copyOf(Objects.requireNonNull(messages, "messages"));
         findings = List.copyOf(Objects.requireNonNull(findings, "findings"));
         tags = tags == null ? List.of() : List.copyOf(tags);
+        businessContext = businessContext == null || businessContext.isNull() ? null : businessContext;
         validateInput(messages, businessContext, findings, tags, difficulty);
         businessContext = businessContext == null ? null : businessContext.deepCopy();
     }
