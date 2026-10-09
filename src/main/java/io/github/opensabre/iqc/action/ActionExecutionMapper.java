@@ -10,12 +10,19 @@ import java.util.List;
 public interface ActionExecutionMapper extends BaseMapper<ActionExecution> {
     /** Discovery is advisory: only a successful conditional claim grants execution. */
     @Select("""
-        SELECT * FROM iqc_action_execution
+        SELECT id,version FROM iqc_action_execution
         WHERE status IN ('PENDING','WAITING_RETRY')
           AND ((status='PENDING' AND next_attempt_at_utc IS NULL) OR next_attempt_at_utc <= #{now})
         ORDER BY next_attempt_at_utc,id LIMIT 100
         """)
     List<ActionExecution> findDue(@Param("now") LocalDateTime now);
+
+    @Select("""
+        SELECT id,version,claim_token,claimed_at_utc FROM iqc_action_execution
+        WHERE status='RUNNING' AND claimed_at_utc <= #{cutoff}
+        ORDER BY claimed_at_utc,id LIMIT 100
+        """)
+    List<ActionExecution> findLost(@Param("cutoff") LocalDateTime cutoff);
 
     /** A claim is committed before external I/O; callers must validate the frozen source first. */
     @Update("""
