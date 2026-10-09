@@ -65,3 +65,20 @@ ActionEnqueueService是内部入口，不是开放API。调用者先在事务外
 
 源码尚未连接生产发现/接口/调度或执行worker，也未调用入队或运行SQL。REQUIRES_NEW可使记录失败与已经提交的分析结果隔离，但实际调用端必须在分析结果提交后调用且单独处理失败，不能依据这个注解宣称整条业务链已完成。BLOCKED_ADAPTER人工恢复/EXPIRED可见性、权限注册、完整尝试审计及真实并发事务验收仍待后续。
 入队在每个动作及返回前再次检查授权未超过30秒；长时间来源校验/批量写入导致证据过期时整批回滚。期限亦按当前时间逐动作检查，不沿用来源读取前的旧时间。
+
+## 领取 → 事务外执行 → 回执结算
+原Mapper的CAS已具备状态SQL但没有拥有事务的服务，本批复用这些SQL和入队的actor/bound/frozen-content校验，不建第二份队列。ActionClaimService REQUIRES_NEW/READ_COMMITTED按Task→Execution→Result→Action锁序重新核验持久生产来源和当前授权、完整冻结内容/条件、精确适配版本、尝试/期限及due时间，UUID32位随机令牌领取，返回不可变Request+version/token。旧观察返回null，配置阻塞或耗尽只更新ready记录，未执行适配器。预留两次version递增空间；尝试计数表示领取的执行尝试，不证明已经发出网络请求。
+
+ActionExecutionService以NEVER拒绝处在分析事务中的调用者，避免挂起仍持有Task/Result锁的分析事务后再领取造成死锁。通过独立bean调用领取，提交后再查本次RUNNING/version/token、当前actor scope/授权时间及适配协议，然后才调用实际adapter.execute，无数据库锁跨适配I/O。缺回执、串回执或异常一律UNKNOWN；结算失败SETTLEMENT_PENDING保留原领取，不重新调用execute。调度调用者仍必须在无令牌/用户上下文的后台解析真实组织授权，然后进入已核验actor scope；本服务不是开放发送API。
+
+ActionSettlementService REQUIRES_NEW仅锁Action，核对完整冻结Request和attempt/version/token以及回执key，用原plan和实际注册适配retrySafe/冻结retry生成下一状态，显式UTC毫秒时间且验证存储范围。失效领取返回false；RUNNING以外尤其REQUIRES_RECONCILIATION不被晚回执覆盖。实际发送的结果记录不再要求当前发送权限，否则撤权可能导致既成副作用被遗忘；来源/请求/回执证据仍须匹配。旧适配实现需保留才能结算其对应版本，缺失不是成功，未来核对流程应读取已有真实服务回执。
+
+本批服务编排未连接生产发现/定时worker，也未新增或执行运行测试/SQL/网络。权限注册、后台组织解析和失联扫描、回执持久恢复/完整尝试审计/人工核对、其他八类适配仍待接入。已有currentEID来源规则会拒绝任务切换EID后的旧记录自动执行，跨轮历史来源需要明确持久核验，不能靠放宽引用字符串检查解决。源码中的隔离/幂等/锁序不等同真实数据库和网络并发验收。
+
+## 后台分派与失联扫描
+新增ActionDispatcher复用既有ScheduledActorAccessService.resolve与IqcDataScope.asScheduledActor，逐条校验input/policy摘要、冻结生产输入归属和taskSnapshotJson内稳定ownerBound；固定要求为服务器端REQUIRED_GRANTS，不接受载荷指定授权。无用户上下文的tick先查最多100条超过claim租期的RUNNING，再查最多100条ready；组织解析在领取事务外，callback结束恢复上下文后才写后台阻塞状态。实际发送只走原ActionExecutionService。
+
+ActionDispatchStateService后台短事务按观察id/version/token CAS，失联仅REQUIRES_RECONCILIATION/UNKNOWN、不回队，晚回执原围栏仍生效。来源/预检不可用BLOCKED_SOURCE，负责人授权（含组织服务不可用）BLOCKED_AUTHORIZATION；阻塞写只允许ready，不覆盖正在运行/已完成记录。组织短暂不可用也会停止自动分派，人工核验/恢复入口仍待开发，不假装健康空结果。调度开启时数据库扫描异常沿原Spring调度错误机制报错，不用空列表代替。
+
+配置iqc.actions.enabled=true才创建调度bean，默认关闭；scan-delay-ms默认5000，claim-lease-seconds默认900且限60–86400。超时是缺确认而非远端失败证明，尚未取消远端请求，也不能以租期过了断言未发生副作用；仅隔离不重发。真实适配器的超时/幂等/保留回执必须与该租期共同验收。当前未开启配置/运行tick/迁移或网络，权限注册、生产发现/入队调用、阻塞恢复、完整尝试历史与其他实际适配未完成。
+队列发现SQL仅返回id/version，失联发现仅返回id/version/token/claimedAt；不在一轮内加载100份完整LONGTEXT快照。分派按定位逐条读取最新完整记录，先确认观察版本/ready状态再解码，领取服务继续完成最终CAS；仍未验收真实负载/内存或大型快照持久成本。

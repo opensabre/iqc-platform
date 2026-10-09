@@ -29,19 +29,10 @@ public class ActionEnqueueService {
 
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
     public List<String> enqueue(ActionProductionSourceValidator.Reference reference,ScheduledActorAccessService.Resolved actor) {
-        Instant now=Instant.now();
-        if(reference==null || actor==null || actor.userId()==null || actor.resourceCodes()==null || actor.checkedAt()==null
-                || actor.checkedAt().isBefore(now.minusSeconds(30)) || actor.checkedAt().isAfter(now.plusSeconds(5))
-                || !actor.resourceCodes().containsAll(REQUIRED_GRANTS) || !Objects.equals(reference.owner(),actor.owner())
-                || !Objects.equals(scope.owner(),actor.owner()) || scope.canViewAll()!=actor.all()
-                || !Objects.equals(scope.groupId(),actor.groupId()))
-            throw IqcException.accessDenied("动作入队需要当前负责人授权");
+        requireActor(reference,actor,scope);
         var validated=sources.validate(reference);
         if(validated.policy()==null || validated.policy().actions().isEmpty())return List.of();
-        var bound=validated.ownerBound();
-        if(bound==null || !Objects.equals(bound.userId(),actor.userId()) || !Objects.equals(bound.owner(),actor.owner())
-                || actor.all() && !bound.all() || actor.groupId()!=null && !Objects.equals(actor.groupId(),bound.groupId()))
-            throw IqcException.accessDenied("动作负责人稳定身份或冻结范围已变化");
+        requireBound(validated.ownerBound(),actor);
         try {
             String policyBody=json.writeValueAsString(validated.policy()),policyHash=SelectorAssetService.hash(policyBody);
             var saved=new ArrayList<String>();
@@ -66,7 +57,6 @@ public class ActionEnqueueService {
                 } else {
                     try {adapters.require(action);}
                     catch(IqcException | IllegalArgumentException unavailable) {
-                        // Persist independent configuration blockage; do not invalidate AI or fake an external failure receipt.
                         row.setStatus("BLOCKED_ADAPTER");row.setLastErrorCode("ADAPTER_CONFIGURATION_UNAVAILABLE");
                     }
                 }
@@ -85,11 +75,26 @@ public class ActionEnqueueService {
             throw IqcException.invalidState("冻结动作策略无法序列化");
         }
     }
-    private void requireFresh(ScheduledActorAccessService.Resolved actor) {
+    /** Shared entry checks for enqueue and claim; resource requirements are server-owned. */
+    public static void requireActor(ActionProductionSourceValidator.Reference reference,ScheduledActorAccessService.Resolved actor,IqcDataScope scope) {
+        Instant now=Instant.now();
+        if(reference==null || actor==null || actor.userId()==null || actor.resourceCodes()==null || actor.checkedAt()==null
+                || actor.checkedAt().isBefore(now.minusSeconds(30)) || actor.checkedAt().isAfter(now.plusSeconds(5))
+                || !actor.resourceCodes().containsAll(REQUIRED_GRANTS) || !Objects.equals(reference.owner(),actor.owner())
+                || !Objects.equals(scope.owner(),actor.owner()) || scope.canViewAll()!=actor.all()
+                || !Objects.equals(scope.groupId(),actor.groupId()))
+            throw IqcException.accessDenied("动作入队需要当前负责人授权");
+    }
+    public static void requireBound(ScheduledActorAccessService.CreationBound bound,ScheduledActorAccessService.Resolved actor) {
+        if(bound==null || !Objects.equals(bound.userId(),actor.userId()) || !Objects.equals(bound.owner(),actor.owner())
+                || actor.all() && !bound.all() || actor.groupId()!=null && !Objects.equals(actor.groupId(),bound.groupId()))
+            throw IqcException.accessDenied("动作负责人稳定身份或冻结范围已变化");
+    }
+    public static void requireFresh(ScheduledActorAccessService.Resolved actor) {
         if(actor.checkedAt().isBefore(Instant.now().minusSeconds(30)))
             throw IqcException.accessDenied("动作入队授权证据已过期");
     }
-    private void requireSame(ActionExecution row,ActionExecutionContract.Source source,ActionPolicy.Action action,
+    public static void requireSame(ActionExecution row,ActionExecutionContract.Source source,ActionPolicy.Action action,
                              ActionProductionSourceValidator.Validated validated,String key,String policyBody) {
         if(!Objects.equals(key,row.getId()) || !Objects.equals(key,row.getIdempotencyKey()) || !Objects.equals(source.taskId(),row.getTaskId())
                 || !Objects.equals(source.executionId(),row.getExecutionId()) || !Objects.equals(source.conversationId(),row.getConversationId())

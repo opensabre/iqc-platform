@@ -10,12 +10,19 @@ import java.util.List;
 public interface ActionExecutionMapper extends BaseMapper<ActionExecution> {
     /** Discovery is advisory: only a successful conditional claim grants execution. */
     @Select("""
-        SELECT * FROM iqc_action_execution
+        SELECT id,version FROM iqc_action_execution
         WHERE status IN ('PENDING','WAITING_RETRY')
           AND ((status='PENDING' AND next_attempt_at_utc IS NULL) OR next_attempt_at_utc <= #{now})
         ORDER BY next_attempt_at_utc,id LIMIT 100
         """)
     List<ActionExecution> findDue(@Param("now") LocalDateTime now);
+
+    @Select("""
+        SELECT id,version,claim_token,claimed_at_utc FROM iqc_action_execution
+        WHERE status='RUNNING' AND claimed_at_utc <= #{cutoff}
+        ORDER BY claimed_at_utc,id LIMIT 100
+        """)
+    List<ActionExecution> findLost(@Param("cutoff") LocalDateTime cutoff);
 
     /** A claim is committed before external I/O; callers must validate the frozen source first. */
     @Update("""
@@ -32,6 +39,18 @@ public interface ActionExecutionMapper extends BaseMapper<ActionExecution> {
         """)
     int claim(@Param("id") String id,@Param("version") long version,
               @Param("token") String token,@Param("now") LocalDateTime now);
+
+    /** Local preflight failure before any attempt: never modifies a RUNNING claim. */
+    @Update("""
+        UPDATE iqc_action_execution
+        SET status=#{status},last_error_code=#{errorCode},version=version+1,
+            next_attempt_at_utc=NULL,updated_by='system',updated_time=#{now}
+        WHERE id=#{id} AND version=#{version} AND version < 9223372036854775807
+          AND status IN ('PENDING','WAITING_RETRY')
+          AND #{status} IN ('EXPIRED','BLOCKED_ADAPTER','BLOCKED_SOURCE','BLOCKED_AUTHORIZATION')
+        """)
+    int blockReady(@Param("id") String id,@Param("version") long version,@Param("status") String status,
+                   @Param("errorCode") String errorCode,@Param("now") LocalDateTime now);
 
     /** The service supplies the plan derived from frozen retry policy and adapter evidence. */
     @Update("""
