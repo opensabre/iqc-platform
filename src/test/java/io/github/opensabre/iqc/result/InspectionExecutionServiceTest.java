@@ -71,13 +71,14 @@ class InspectionExecutionServiceTest {
         var messages = (ConversationMessageMapper) ReflectionTestUtils.getField(service, "messageMapper");
         var source = message("customer", "今天优惠");
         when(tasks.selectById(task.getId())).thenReturn(task);
+        when(tasks.selectOne(any())).thenReturn(task);
         when(messages.selectById(source.getId())).thenReturn(source);
         when(messages.selectList(any())).thenReturn(List.of(source));
         var work = taskItem("work", source.getId(), source.getConversationId(), 1); work.setExecutionId("execution");
         when(hierarchy.materializeItemRouteBatch(any(), any(), any(), org.mockito.ArgumentMatchers.anyList(), any(), any(), any(),
                 org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyList()))
                 .thenReturn(new io.github.opensabre.iqc.result.model.ConversationInspectionResult());
-        ReflectionTestUtils.invokeMethod(service, "processConversation", task, "execution", snapshot, List.of(work));
+        ReflectionTestUtils.invokeMethod(service, "processConversation", task, "execution", snapshot, List.of(work), null, null);
         var observations = org.mockito.ArgumentCaptor.forClass(List.class);
         verify(hierarchy).materializeItemRouteBatch(org.mockito.ArgumentMatchers.eq(task), org.mockito.ArgumentMatchers.eq("execution"),
                 org.mockito.ArgumentMatchers.eq(snapshot), org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.eq(plan), any(),
@@ -93,10 +94,10 @@ class InspectionExecutionServiceTest {
                 .containsExactly("inspection-message:" + task.getId() + ":" + source.getId() + ":attempt",
                         "inspection-message:" + task.getId() + ":" + source.getId() + ":success");
         work.setStatus("SUCCEEDED");
-        ReflectionTestUtils.invokeMethod(service, "processConversation", task, "execution", snapshot, List.of(work));
+        ReflectionTestUtils.invokeMethod(service, "processConversation", task, "execution", snapshot, List.of(work), null, null);
         org.mockito.Mockito.verifyNoMoreInteractions(usage);
         task.setStatus("PAUSED");
-        ReflectionTestUtils.invokeMethod(service, "processConversation", task, "execution", snapshot, List.of(work));
+        ReflectionTestUtils.invokeMethod(service, "processConversation", task, "execution", snapshot, List.of(work), null, null);
         task.setRunCount(6);
         task.setStatus("CREATED");
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.queueSystem(task.getId()))
@@ -209,14 +210,14 @@ class InspectionExecutionServiceTest {
         var plan = new io.github.opensabre.iqc.scheme.SchemeDependencyResolver.RoutePlan("iqc-item-execution-plan-v1", contexts,
                 List.of(new io.github.opensabre.iqc.scheme.SchemeDependencyResolver.ItemRoute("violation", SchemeDefinition.Route.RULE_THEN_LLM, "pre", "review"),
                         new io.github.opensabre.iqc.scheme.SchemeDependencyResolver.ItemRoute("intention", SchemeDefinition.Route.LLM_ONLY, null, "direct")));
-        when(llmProvider.evaluateConversation(org.mockito.ArgumentMatchers.anyList(), any(), any(), any(String.class)))
+        when(llmProvider.evaluateConversation(org.mockito.ArgumentMatchers.anyList(), any(), any(), org.mockito.ArgumentMatchers.isNull(), any(String.class), any()))
                 .thenReturn(new LlmQualityProvider.LlmEvaluation(true, true, "有意向"));
         var run = service.evaluateItemRoutes(task(), plan,
                 List.of(rule("local", "KEYWORD", "不存在", "all"), rule("semantic", "LLM", "意向", "all")),
                 List.of(message("customer", "想贷款")));
         assertThat(run.items()).extracting(item -> item.terminal().result().getResultStatus()).containsExactly("NOT_HIT", "HIT");
         assertThat(run.items().get(1).terminal().result().getDeduction()).isZero();
-        verify(llmProvider, times(1)).evaluateConversation(org.mockito.ArgumentMatchers.anyList(), any(), any(), any(String.class));
+        verify(llmProvider, times(1)).evaluateConversation(org.mockito.ArgumentMatchers.anyList(), any(), any(), org.mockito.ArgumentMatchers.isNull(), any(String.class), any());
     }
 
     @Test
@@ -226,7 +227,7 @@ class InspectionExecutionServiceTest {
                 .put("speakerRole", input.getSpeakerRole()).put("text", "想贷款");
         var output = objectMapper.createObjectNode().put("schemaVersion", ItemCandidateOutput.SCHEMA).put("outcome", "MATCH");
         output.putArray("quotes").add(quote);
-        when(llmProvider.evaluateCandidates(org.mockito.ArgumentMatchers.anyList(), any(), any(), any(String.class)))
+        when(llmProvider.evaluateCandidates(org.mockito.ArgumentMatchers.anyList(), any(), any(), any(String.class), any()))
                 .thenReturn(new LlmQualityProvider.LlmEvaluation(true, true, "候选", output.toString()));
         var plan = new io.github.opensabre.iqc.scheme.SchemeDependencyResolver.RoutePlan("iqc-item-execution-plan-v1",
                 List.of(new io.github.opensabre.iqc.scheme.SchemeDependencyResolver.DetectionContext("candidate", "semantic", 1, "CONVERSATION", "CANDIDATE", null),
@@ -254,7 +255,7 @@ class InspectionExecutionServiceTest {
 
         // A source quote that contains the keyword is a terminal violation, not a candidate-only hit.
         quote.put("text", "优惠");
-        when(llmProvider.evaluateCandidates(org.mockito.ArgumentMatchers.anyList(), any(), any(), any(String.class)))
+        when(llmProvider.evaluateCandidates(org.mockito.ArgumentMatchers.anyList(), any(), any(), any(String.class), any()))
                 .thenReturn(new LlmQualityProvider.LlmEvaluation(true, true, "候选", output.toString()));
         var matched = service.evaluateItemRoutes(task(), plan, frozen, List.of(input));
         var failed = service.scoreItemRoutes(definition, plan, matched, List.of(input), frozen);
@@ -263,7 +264,7 @@ class InspectionExecutionServiceTest {
 
         // Fabricated candidate text must stay pending even though the full source contains the keyword.
         quote.put("text", "不存在的优惠承诺");
-        when(llmProvider.evaluateCandidates(org.mockito.ArgumentMatchers.anyList(), any(), any(), any(String.class)))
+        when(llmProvider.evaluateCandidates(org.mockito.ArgumentMatchers.anyList(), any(), any(), any(String.class), any()))
                 .thenReturn(new LlmQualityProvider.LlmEvaluation(true, true, "候选", output.toString()));
         var invalid = service.evaluateItemRoutes(task(), plan, frozen, List.of(input));
         var pending = service.scoreItemRoutes(definition, plan, invalid, List.of(input), frozen);
@@ -282,7 +283,7 @@ class InspectionExecutionServiceTest {
         var b = objectMapper.readTree("[{\"ruleId\":\"prefilter\",\"status\":\"HIT\",\"evidence\":\"第二个候选\"}]");
         var cache = new java.util.LinkedHashMap<String, List<LlmQualityProvider.LlmEvaluation>>();
         var owners = new java.util.LinkedHashMap<String, String>();
-        when(llmProvider.evaluateConversation(org.mockito.ArgumentMatchers.anyList(), any(), any(), any(), any(String.class)))
+        when(llmProvider.evaluateConversation(org.mockito.ArgumentMatchers.anyList(), any(), any(), any(), any(String.class), any()))
                 .thenReturn(new LlmQualityProvider.LlmEvaluation(true, false, "引用，不违规"));
         var task = task();
         InspectionResult firstResult = ReflectionTestUtils.invokeMethod(service, "evaluateSingle", task, first, scoped, a,
@@ -293,8 +294,8 @@ class InspectionExecutionServiceTest {
         assertThat(firstResult.getEvidence()).isNull();
         assertThat(cache).hasSize(2);
         verify(llmProvider, times(2)).evaluateConversation(org.mockito.ArgumentMatchers.eq(List.of(first, second)),
-                org.mockito.ArgumentMatchers.eq(scoped), any(), any(), any(String.class));
-        verify(llmProvider, org.mockito.Mockito.never()).evaluateConversation(org.mockito.ArgumentMatchers.anyList(), any(), any(), any(String.class));
+                org.mockito.ArgumentMatchers.eq(scoped), any(), any(), any(String.class), any());
+        verify(llmProvider, org.mockito.Mockito.never()).evaluateConversation(org.mockito.ArgumentMatchers.anyList(), any(), any(), org.mockito.ArgumentMatchers.isNull(), any(String.class), any());
     }
     @Test
     void taskIndependentStrategyRunsLlmEvenWhenLocalChecksMissAndAgentSaysRuleOnly() throws Exception {
@@ -304,11 +305,11 @@ class InspectionExecutionServiceTest {
         snapshot.putObject("executionStrategy").put("schemaVersion", "1.0").put("mode", "INDEPENDENT");
         snapshot.putArray("rules").add(rule("local", "KEYWORD", "绝不存在", "all")).add(rule("semantic", "LLM", "识别意向", "all"));
         task.setRuleSnapshotJson(snapshot.toString());
-        when(llmProvider.evaluate(any(), any(), any(), any(String.class)))
+        when(llmProvider.evaluate(any(), any(), any(), org.mockito.ArgumentMatchers.isNull(), any(String.class), any()))
                 .thenReturn(new LlmQualityProvider.LlmEvaluation(true, true, "明确表达意向"));
         InspectionResult result = ReflectionTestUtils.invokeMethod(service, "evaluate", task, message("agent", "今天有优惠"), snapshot);
         assertThat(result.getRuleBreakdownJson()).contains("semantic", "HIT");
-        verify(llmProvider).evaluate(any(), any(), any(), any(String.class));
+        verify(llmProvider).evaluate(any(), any(), any(), org.mockito.ArgumentMatchers.isNull(), any(String.class), any());
     }
 
     @Test
@@ -353,6 +354,7 @@ class InspectionExecutionServiceTest {
     void initializeMybatisLambdaMetadata() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "iqc-execution-test"), TaskItem.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "iqc-task-test"), InspectionTask.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "iqc-execution-row-test"), TaskExecution.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "iqc-message-test"), ConversationMessage.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "iqc-result-test"), InspectionResult.class);
     }
@@ -392,9 +394,10 @@ class InspectionExecutionServiceTest {
         var snapshot = objectMapper.createArrayNode().add(rule("house", "REGEX", "没有房子", "user"));
         task.setRuleSnapshotJson(snapshot.toString());
         when(tasks.selectById(task.getId())).thenReturn(task);
+        when(tasks.selectOne(any())).thenReturn(task);
         when(messages.selectById(archived.getId())).thenReturn(archived);
 
-        ReflectionTestUtils.invokeMethod(execution, "processConversation", task, "execution-1", snapshot, List.of(item));
+        ReflectionTestUtils.invokeMethod(execution, "processConversation", task, "execution-1", snapshot, List.of(item), null, null);
 
         var captured = org.mockito.ArgumentCaptor.forClass(InspectionResult.class);
         verify(results).insert(captured.capture());
@@ -431,11 +434,12 @@ class InspectionExecutionServiceTest {
         var customer = message("customer", "我没有房子");
         var item = taskItem("item-1", customer.getId(), customer.getConversationId(), 1);
         when(tasks.selectById(task.getId())).thenReturn(task);
+        when(tasks.selectOne(any())).thenReturn(task);
         when(messages.selectById(customer.getId())).thenReturn(customer);
         when(messages.selectList(any())).thenReturn(List.of(customer));
         when(observations.selectList(any())).thenReturn(List.of());
 
-        ReflectionTestUtils.invokeMethod(execution, "processConversation", task, "execution-1", snapshot, List.of(item));
+        ReflectionTestUtils.invokeMethod(execution, "processConversation", task, "execution-1", snapshot, List.of(item), null, null);
 
         var captured = org.mockito.ArgumentCaptor.forClass(InspectionResult.class);
         verify(observations).insert(captured.capture());
@@ -460,7 +464,7 @@ class InspectionExecutionServiceTest {
     void unsupportedLlmRuleIsDiagnosticError() {
         JsonNode rule = rule("r-llm", "LLM", "识别违规承诺", "all");
         when(llmProvider.evaluate(org.mockito.ArgumentMatchers.eq("今天有优惠"), org.mockito.ArgumentMatchers.eq(rule),
-                org.mockito.ArgumentMatchers.nullable(JsonNode.class), org.mockito.ArgumentMatchers.eq("inspection-message:task-1:message-1:rule:r-llm")))
+                org.mockito.ArgumentMatchers.nullable(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.eq("inspection-message:task-1:message-1:rule:r-llm"), any()))
                 .thenReturn(new LlmQualityProvider.LlmEvaluation(false, false, "LLM 规则未配置可用适配器"));
 
         InspectionResult result = evaluate(rule, message("agent", "今天有优惠"));
@@ -499,7 +503,7 @@ class InspectionExecutionServiceTest {
                   {"labelId":"house","valueCode":"owns","ruleId":"label-rule","subjectKind":"CURRENT_PARTICIPANT",
                    "subjectRole":"customer","value":false,"evidence":[{"messageId":"m2","text":"没有房子"}]}]}
                 """;
-        when(llmProvider.evaluateConversation(any(), any(), org.mockito.ArgumentMatchers.nullable(JsonNode.class), any()))
+        when(llmProvider.evaluateConversation(any(), any(), org.mockito.ArgumentMatchers.nullable(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), any(), any()))
                 .thenReturn(new LlmQualityProvider.LlmEvaluation(true, false, "未违规", facts));
         var cache = new java.util.LinkedHashMap<String, java.util.List<LlmQualityProvider.LlmEvaluation>>();
         var owners = new java.util.LinkedHashMap<String, String>();
@@ -510,8 +514,8 @@ class InspectionExecutionServiceTest {
                 List.of(first, second), cache, owners);
 
         verify(llmProvider, times(2)).evaluateConversation(any(), org.mockito.ArgumentMatchers.eq(rule),
-                org.mockito.ArgumentMatchers.nullable(JsonNode.class), any());
-        verify(llmProvider, times(0)).evaluate(any(), any(), any(), any(String.class));
+                org.mockito.ArgumentMatchers.nullable(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), any(), any());
+        verify(llmProvider, times(0)).evaluate(any(), any(), any(), org.mockito.ArgumentMatchers.isNull(), any(String.class), any());
         assertThat(owner.getResultStatus()).isEqualTo("NOT_HIT");
         assertThat(owner.getEvidenceJson()).contains("m2", "没有房子");
         JsonNode ownerFinding = objectMapper.readTree(owner.getFindingJson()).path("ruleFindings").path("label-rule");
@@ -531,7 +535,7 @@ class InspectionExecutionServiceTest {
         snapshot.putArray("rules").add(scopedRule); task.setRuleSnapshotJson(snapshot.toString());
         var first = message("agent", "已告知风险"); first.setId("m1"); first.setSequenceNo(1);
         var second = message("customer", "我理解了"); second.setId("m2"); second.setSequenceNo(2);
-        when(llmProvider.evaluateConversation(any(), any(), org.mockito.ArgumentMatchers.nullable(JsonNode.class), any()))
+        when(llmProvider.evaluateConversation(any(), any(), org.mockito.ArgumentMatchers.nullable(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), any(), any()))
                 .thenReturn(new LlmQualityProvider.LlmEvaluation(true, true, "完整会话满足告知要求"));
         var cache = new java.util.LinkedHashMap<String, java.util.List<LlmQualityProvider.LlmEvaluation>>();
         var owners = new java.util.LinkedHashMap<String, String>();
@@ -543,15 +547,15 @@ class InspectionExecutionServiceTest {
             assertThat(result.getEvidenceJson()).isEqualTo("[]");
         }
         verify(llmProvider).evaluateConversation(org.mockito.ArgumentMatchers.eq(List.of(first, second)),
-                org.mockito.ArgumentMatchers.eq(scopedRule), org.mockito.ArgumentMatchers.nullable(JsonNode.class), any());
-        verify(llmProvider, times(0)).evaluate(any(), any(), any(), any(String.class));
+                org.mockito.ArgumentMatchers.eq(scopedRule), org.mockito.ArgumentMatchers.nullable(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), any(), any());
+        verify(llmProvider, times(0)).evaluate(any(), any(), any(), org.mockito.ArgumentMatchers.isNull(), any(String.class), any());
     }
 
     @Test
     void evenRunTieRequiresHumanReview() {
         InspectionTask task = task(); task.setRunCount(2);
         JsonNode rule = rule("r-llm", "LLM", "判断意图", "all");
-        when(llmProvider.evaluate(any(), org.mockito.ArgumentMatchers.eq(rule), org.mockito.ArgumentMatchers.nullable(JsonNode.class), any()))
+        when(llmProvider.evaluate(any(), org.mockito.ArgumentMatchers.eq(rule), org.mockito.ArgumentMatchers.nullable(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), any(), any()))
                 .thenReturn(new LlmQualityProvider.LlmEvaluation(true, true, "命中"), new LlmQualityProvider.LlmEvaluation(true, false, "未命中"));
 
         InspectionResult result = ReflectionTestUtils.invokeMethod(service, "evaluateWithRuns", task,
@@ -579,7 +583,7 @@ class InspectionExecutionServiceTest {
         task.setAgentSnapshotJson("{\"configJson\":{\"mode\":\"LLM_THEN_RULE\"}}");
         task.setLabelScopeSnapshotJson("{\"labels\":[{\"id\":\"label-a\",\"code\":\"A\",\"bindings\":[{\"ruleId\":\"rule-a\"}]}]}");
         JsonNode localRule = rule("rule-a", "KEYWORD", "优惠", "agent");
-        when(llmProvider.evaluate(any(), any(), org.mockito.ArgumentMatchers.nullable(JsonNode.class), any()))
+        when(llmProvider.evaluate(any(), any(), org.mockito.ArgumentMatchers.nullable(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), any(), any()))
                 .thenReturn(new LlmQualityProvider.LlmEvaluation(true, true, "提取到候选", "{\"candidates\":[{\"labelCode\":\"A\"}]}"));
 
         InspectionResult result = ReflectionTestUtils.invokeMethod(service, "evaluate", task,
@@ -594,7 +598,7 @@ class InspectionExecutionServiceTest {
         JsonNode keyword = rule("r-1", "KEYWORD", "优惠", "all");
         JsonNode llm = rule("r-2", "LLM", "判断语义", "all");
         when(llmProvider.evaluate(org.mockito.ArgumentMatchers.eq("今天有优惠"), org.mockito.ArgumentMatchers.eq(llm),
-                org.mockito.ArgumentMatchers.nullable(JsonNode.class), org.mockito.ArgumentMatchers.eq("inspection-message:task-1:message-1:rule:r-2")))
+                org.mockito.ArgumentMatchers.nullable(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.eq("inspection-message:task-1:message-1:rule:r-2"), any()))
                 .thenReturn(new LlmQualityProvider.LlmEvaluation(false, false, "LLM 规则未配置可用适配器"));
         JsonNode snapshot = objectMapper.createArrayNode().add(keyword).add(llm);
 
@@ -670,7 +674,7 @@ class InspectionExecutionServiceTest {
         assertThat(result.getResultStatus()).isEqualTo("NOT_HIT");
         verify(llmProvider, times(0)).evaluate(org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.eq(llm), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString());
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), any());
     }
 
     @Test
@@ -692,7 +696,7 @@ class InspectionExecutionServiceTest {
         InspectionTask task = task();
         task.setAgentSnapshotJson("{\"configJson\":{\"mode\":\"RULE_THEN_LLM\"}}");
         when(llmProvider.evaluate(org.mockito.ArgumentMatchers.eq("今天有优惠"), org.mockito.ArgumentMatchers.eq(llm),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString()))
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), any()))
                 .thenReturn(new LlmQualityProvider.LlmEvaluation(true, false, "仅为正常优惠说明"));
 
         InspectionResult result = ReflectionTestUtils.invokeMethod(service, "evaluate", task,
@@ -701,7 +705,7 @@ class InspectionExecutionServiceTest {
         assertThat(result.getResultStatus()).isEqualTo("NOT_HIT");
         verify(llmProvider).evaluate(org.mockito.ArgumentMatchers.eq("今天有优惠"), org.mockito.ArgumentMatchers.eq(llm),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.argThat(value -> value.toString().contains("r-local")),
-                org.mockito.ArgumentMatchers.anyString());
+                org.mockito.ArgumentMatchers.anyString(), any());
     }
 
     @Test
@@ -712,7 +716,7 @@ class InspectionExecutionServiceTest {
         task.setAgentSnapshotJson("{\"configJson\":{\"mode\":\"RULE_THEN_LLM\"}}");
         when(llmProvider.evaluate(org.mockito.ArgumentMatchers.eq("今天有优惠"),
                 org.mockito.ArgumentMatchers.argThat(value -> "agent:agent-1".equals(value.path("id").asText())),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString()))
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), any()))
                 .thenReturn(new LlmQualityProvider.LlmEvaluation(true, true, "确认存在违规优惠承诺"));
 
         InspectionResult result = ReflectionTestUtils.invokeMethod(service, "evaluate", task,
@@ -724,7 +728,7 @@ class InspectionExecutionServiceTest {
         verify(llmProvider).evaluate(org.mockito.ArgumentMatchers.eq("今天有优惠"),
                 org.mockito.ArgumentMatchers.argThat(value -> "agent:agent-1".equals(value.path("id").asText())),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.argThat(value -> value.toString().contains("r-local")),
-                org.mockito.ArgumentMatchers.anyString());
+                org.mockito.ArgumentMatchers.anyString(), any());
     }
 
     @Test
@@ -736,7 +740,13 @@ class InspectionExecutionServiceTest {
         TaskItemMapper items = mock(TaskItemMapper.class);
         InspectionTask task = task(); task.setStatus("QUEUED"); task.setConcurrencyLimit(2);
         task.setProcessedMessages(0); task.setFailedMessages(0); task.setRuleSnapshotJson("[]");
-        TaskExecution execution = new TaskExecution(); execution.setId("execution-1");
+        TaskExecution execution = new TaskExecution(); execution.setId("execution-1"); execution.setTaskId("task-1"); execution.setStatus("QUEUED");
+        task.setCurrentExecutionId("execution-1");
+        when(tasks.selectOne(any())).thenReturn(task);
+        when(executions.selectOne(any())).thenReturn(execution);
+        when(executions.update(isNull(), any())).thenReturn(1);
+        when(tasks.updateById(any(InspectionTask.class))).thenReturn(1);
+        when(executions.updateById(any(TaskExecution.class))).thenReturn(1);
         TaskItem first = taskItem("item-1", "message-1", "conversation-1", 1);
         TaskItem second = taskItem("item-2", "message-2", "conversation-2", 2);
         when(tasks.selectById("task-1")).thenReturn(task);
@@ -771,7 +781,13 @@ class InspectionExecutionServiceTest {
         TaskItemMapper items = mock(TaskItemMapper.class);
         InspectionTask task = task(); task.setStatus("QUEUED"); task.setConcurrencyLimit(1); task.setTotalMessages(2);
         task.setProcessedMessages(1); task.setRuleSnapshotJson("[]");
-        TaskExecution execution = new TaskExecution(); execution.setId("execution-1");
+        TaskExecution execution = new TaskExecution(); execution.setId("execution-1"); execution.setTaskId("task-1"); execution.setStatus("QUEUED");
+        task.setCurrentExecutionId("execution-1");
+        when(tasks.selectOne(any())).thenReturn(task);
+        when(executions.selectOne(any())).thenReturn(execution);
+        when(executions.update(isNull(), any())).thenReturn(1);
+        when(tasks.updateById(any(InspectionTask.class))).thenReturn(1);
+        when(executions.updateById(any(TaskExecution.class))).thenReturn(1);
         TaskItem completed = taskItem("item-1", "message-1", "conversation-1", 1); completed.setStatus("SUCCEEDED");
         TaskItem pending = taskItem("item-2", "message-2", "conversation-1", 2); pending.setStatus("PENDING");
         when(tasks.selectById("task-1")).thenReturn(task);
@@ -797,7 +813,9 @@ class InspectionExecutionServiceTest {
         TaskItemMapper items = mock(TaskItemMapper.class);
         InspectionTask queued = task(); queued.setStatus("QUEUED"); queued.setCurrentExecutionId("execution-1");
         InspectionTask running = task(); running.setStatus("RUNNING"); running.setCurrentExecutionId("execution-1");
-        TaskExecution execution = new TaskExecution(); execution.setId("execution-1"); execution.setStatus("QUEUED");
+        TaskExecution execution = new TaskExecution(); execution.setId("execution-1"); execution.setStatus("QUEUED"); execution.setTaskId("task-1");
+        when(tasks.selectOne(any())).thenReturn(queued);
+        when(executions.selectOne(any())).thenReturn(execution);
         when(tasks.selectById("task-1")).thenReturn(queued, running);
         when(executions.selectById("execution-1")).thenReturn(execution);
         when(tasks.update(isNull(), any())).thenReturn(0);
@@ -815,9 +833,11 @@ class InspectionExecutionServiceTest {
         InspectionTask paused = task(); paused.setStatus("PAUSED"); paused.setCurrentExecutionId("execution-old"); paused.setAttemptCount(1); paused.setTotalMessages(2);
         TaskItem succeeded = taskItem("done", "message-1", "conversation-1", 1); succeeded.setStatus("SUCCEEDED");
         TaskItem pending = taskItem("pending", "message-2", "conversation-1", 2); pending.setStatus("PENDING");
-        when(tasks.selectById("task-1")).thenReturn(paused); when(scope.canView(any(), any())).thenReturn(true);
+        when(tasks.selectById("task-1")).thenReturn(paused); when(tasks.selectOne(any())).thenReturn(paused); when(scope.canView(any(), any())).thenReturn(true);
         when(items.selectList(any())).thenReturn(List.of(succeeded, pending)); when(tasks.update(isNull(), any())).thenReturn(1);
         org.mockito.Mockito.doAnswer(invocation -> { TaskExecution value = invocation.getArgument(0); value.setId("execution-new"); return 1; }).when(executions).insert(any(TaskExecution.class));
+        when(items.insert(any(TaskItem.class))).thenReturn(1);
+        when(tasks.updateById(any(InspectionTask.class))).thenReturn(1);
         InspectionExecutionService resumed = new InspectionExecutionService(tasks, mock(ConversationMapper.class), mock(ConversationMessageMapper.class), mock(InspectionResultMapper.class), objectMapper,
                 executions, items, scope, llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class));
 

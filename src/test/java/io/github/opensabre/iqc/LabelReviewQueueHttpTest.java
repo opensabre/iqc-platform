@@ -44,6 +44,7 @@ import static org.mockito.Mockito.when;
         "spring.datasource.username=sa",
         "spring.datasource.password=",
         "iqc.task.scheduler-enabled=false",
+        "iqc.task.worker-enabled=false",
         "opensabre.governance.dictionary.registration-enabled=false",
         "opensabre.governance.error-catalog.enabled=false",
         "opensabre.resource-registration.enabled=false",
@@ -68,6 +69,13 @@ class LabelReviewQueueHttpTest {
     void fixture() {
         jdbc.execute("""
                 CREATE TABLE iqc_inspection_task (
+                  retry_policy_json clob, retry_policy_hash varchar(128), automatic_retry_enabled boolean,
+                  retry_not_before_utc timestamp, retry_error varchar(128), event_subscription_id varchar(128),
+                  event_subscription_revision_id varchar(128), trigger_source varchar(128), trigger_event_id varchar(128),
+                  trigger_payload_hash varchar(128), trigger_request_hash varchar(128), trigger_request_json clob,
+                  trigger_retry_not_before_utc timestamp, trigger_error varchar(128), model_budget_wait_code varchar(128),
+                  model_budget_wait_key varchar(128),
+                  periodic_schedule_id varchar(64), periodic_revision_id varchar(64), planned_at_utc timestamp,
                     id varchar(64) PRIMARY KEY, conversation_id varchar(64), name varchar(100), task_type varchar(32),
                     conversation_ids_json clob, selection_filter_json clob, concurrency_limit int, scheduled_time timestamp,
                     agent_id varchar(64), rule_set_id varchar(64), rule_ids_json clob, agent_snapshot_json clob,
@@ -83,8 +91,8 @@ class LabelReviewQueueHttpTest {
         jdbc.execute("CREATE TABLE iqc_result_review (id varchar(64) PRIMARY KEY, target_type varchar(32), label_result_id varchar(64), review_revision int, status varchar(32), request_comment varchar(100), created_by varchar(64), created_time timestamp)");
         jdbc.update("""
                 INSERT INTO iqc_inspection_task
-                    (id, name, status, created_by, owner_group_id, label_scope_snapshot_json)
-                VALUES (?, ?, 'SUCCEEDED', ?, ?, ?), (?, ?, 'SUCCEEDED', ?, ?, ?), (?, ?, 'SUCCEEDED', ?, ?, ?)
+                    (id, name, status, task_type, created_by, owner_group_id, label_scope_snapshot_json)
+                VALUES (?, ?, 'SUCCEEDED', 'BATCH', ?, ?, ?), (?, ?, 'SUCCEEDED', 'BATCH', ?, ?, ?), (?, ?, 'SUCCEEDED', 'BATCH', ?, ?, ?)
                 """,
                 "own", "本人任务", "alice", "g1", null,
                 "team", "同组任务", "bob", "g1", "{\"schemaVersion\":\"2.0\",\"labels\":[{\"id\":\"house\",\"versionNo\":2,\"name\":\"是否有房\",\"values\":[{\"valueCode\":\"owned\",\"description\":\"客户拥有房产\"}]}]}",
@@ -95,11 +103,14 @@ class LabelReviewQueueHttpTest {
         jdbc.update("INSERT INTO iqc_result_review VALUES ('r1','LABEL','l1',1,'PENDING','本人结果','other','2026-09-01 00:00:00'),('r2','LABEL','l2',1,'PENDING','同组结果','other','2026-09-02 00:00:00'),('r3','LABEL','l3',1,'PENDING','申请人不是权限依据','alice','2026-09-03 00:00:00')");
         // Extend this isolated fixture rather than introducing another application/test persistence layer.
         jdbc.execute("ALTER TABLE iqc_inspection_conversation_result ADD score_status varchar(32)");
+        jdbc.execute("ALTER TABLE iqc_inspection_conversation_result ADD execution_trace_json clob");
         jdbc.execute("ALTER TABLE iqc_inspection_conversation_result ADD final_score decimal(10,2)");
         jdbc.execute("ALTER TABLE iqc_inspection_conversation_result ADD business_item_results_json clob");
         jdbc.execute("ALTER TABLE iqc_inspection_conversation_result ADD risk_level varchar(32)");
         jdbc.execute("""
                 CREATE TABLE iqc_conversation (
+                  employee_department_id varchar(64), asr_status varchar(32), customer_level varchar(64),
+                  complaint boolean, business_fields_json clob,
                   id varchar(64) PRIMARY KEY, batch_no varchar(64), source_type varchar(32),
                   external_id varchar(128), employee_id varchar(128), employee_name varchar(128),
                   employee_group_id varchar(64), customer_external_id varchar(128), customer_name varchar(128),

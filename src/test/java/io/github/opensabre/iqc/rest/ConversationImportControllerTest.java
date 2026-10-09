@@ -89,7 +89,7 @@ class ConversationImportControllerTest {
         ConversationImportService importService = mock(ConversationImportService.class);
         UsageCounterRecorder recorder = mock(UsageCounterRecorder.class);
         Conversation conversation = new Conversation(); conversation.setId("conversation-1"); conversation.setStatus("IMPORTED");
-        when(importService.persist(any(String.class), any(String.class), any(ConversationParseResult.class), any(String.class), eq("API"), any(), any()))
+        when(importService.persistVerified(any(String.class), any(String.class), any(ConversationParseResult.class), any(String.class), eq("API"), any(), any()))
                 .thenReturn(conversation);
         ConversationImportController controller = new ConversationImportController(new TxtConversationParser(), importService, recorder, uploadProperties());
 
@@ -107,7 +107,7 @@ class ConversationImportControllerTest {
         ConversationImportService importService = mock(ConversationImportService.class);
         UsageCounterRecorder recorder = mock(UsageCounterRecorder.class);
         Conversation conversation = new Conversation(); conversation.setId("c1"); conversation.setStatus("IMPORTED");
-        when(importService.persist(any(String.class), any(String.class), any(ConversationParseResult.class),
+        when(importService.persistVerified(any(String.class), any(String.class), any(ConversationParseResult.class),
                 isNull(), eq("API"), isNull(), any(io.github.opensabre.iqc.conversation.ConversationMetadata.class))).thenReturn(conversation);
         ConversationImportController controller = new ConversationImportController(new TxtConversationParser(), importService, recorder, uploadProperties());
 
@@ -115,7 +115,7 @@ class ConversationImportControllerTest {
                 List.of(new ConversationImportController.IngestMessage("客户", "00:00:01", "我没有房子"))));
 
         var captor = org.mockito.ArgumentCaptor.forClass(ConversationParseResult.class);
-        verify(importService).persist(any(String.class), any(String.class), captor.capture(), isNull(), eq("API"), isNull(),
+        verify(importService).persistVerified(any(String.class), any(String.class), captor.capture(), isNull(), eq("API"), isNull(),
                 any(io.github.opensabre.iqc.conversation.ConversationMetadata.class));
         assertThat(captor.getValue().messages().getFirst().speakerRole()).isEqualTo("user");
     }

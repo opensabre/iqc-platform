@@ -39,6 +39,7 @@ import static org.mockito.Mockito.when;
         "spring.datasource.username=sa",
         "spring.datasource.password=",
         "iqc.task.scheduler-enabled=false",
+        "iqc.task.worker-enabled=false",
         "opensabre.governance.dictionary.registration-enabled=false",
         "opensabre.governance.error-catalog.enabled=false",
         "opensabre.resource-registration.enabled=false",

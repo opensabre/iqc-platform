@@ -5,7 +5,6 @@ import io.github.opensabre.iqc.modelprofile.dao.IqcModelProfileMapper;
 import io.github.opensabre.iqc.modelprofile.model.IqcModelProfile;
 import io.github.opensabre.iqc.result.llm.SnapshotChatModelRouter;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 
@@ -20,14 +19,12 @@ class ModelConnectionTestServiceTest {
     void reportsSuccessWithoutReturningCredentials() {
         IqcModelProfileMapper mapper = mock(IqcModelProfileMapper.class);
         SnapshotChatModelRouter router = mock(SnapshotChatModelRouter.class);
-        ChatModel model = mock(ChatModel.class);
         IqcModelProfile profile = new IqcModelProfile();
         profile.setProvider("OPENAI");
         profile.setModelName("gpt-test");
         profile.setSecretRef("env:IQC_MODEL_API_KEY");
         when(mapper.selectById("model-1")).thenReturn(profile);
-        when(router.create(any())).thenReturn(model);
-        when(model.call(any(Prompt.class))).thenReturn(mock(ChatResponse.class));
+        when(router.callProfile(any(Prompt.class), any(), any())).thenReturn(mock(ChatResponse.class));
 
         var result = new ModelConnectionTestService(mapper, router, new ObjectMapper()).test("model-1");
 
@@ -43,7 +40,7 @@ class ModelConnectionTestServiceTest {
         profile.setProvider("OPENAI");
         profile.setModelName("gpt-test");
         when(mapper.selectById("model-1")).thenReturn(profile);
-        when(router.create(any())).thenThrow(new IllegalStateException("Authorization: Bearer leaked-secret"));
+        when(router.callProfile(any(Prompt.class), any(), any())).thenThrow(new IllegalStateException("Authorization: Bearer leaked-secret"));
 
         var result = new ModelConnectionTestService(mapper, router, new ObjectMapper()).test("model-1");
 
