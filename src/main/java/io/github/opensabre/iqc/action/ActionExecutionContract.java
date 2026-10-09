@@ -1,6 +1,5 @@
 package io.github.opensabre.iqc.action;
 
-import io.github.opensabre.iqc.selector.SelectorAssetService;
 import io.github.opensabre.iqc.task.retry.AutomaticRetryPolicy;
 import java.time.Instant;
 import java.nio.charset.StandardCharsets;
@@ -20,8 +19,15 @@ public final class ActionExecutionContract {
         }
         public String idempotencyKey(Type type){
             if(type==null)throw new IllegalArgumentException("Action type required");
-            return SelectorAssetService.hash(frame("iqc-action-execution-v1")+frame(taskId)+frame(executionId)+frame(conversationId)+frame(resultId)
-                +frame(decisionReference)+frame(actionPolicyHash)+frame(actionId)+frame(owner)+frame(type.name()));
+            String framed=frame("iqc-action-execution-v1")+frame(taskId)+frame(executionId)+frame(conversationId)+frame(resultId)
+                +frame(decisionReference)+frame(actionPolicyHash)+frame(actionId)+frame(owner)+frame(type.name());
+            // This is length-framed UTF-8, not JSON; JSON canonicalization cannot hash this contract.
+            try {
+                return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                        .digest(framed.getBytes(StandardCharsets.UTF_8)));
+            } catch(java.security.NoSuchAlgorithmException unavailable) {
+                throw new IllegalStateException("SHA-256 unavailable",unavailable);
+            }
         }
     }
     public record Plan(Next next,Instant notBefore) { }
