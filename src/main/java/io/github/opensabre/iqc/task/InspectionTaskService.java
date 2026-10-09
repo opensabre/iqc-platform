@@ -49,6 +49,17 @@ public class InspectionTaskService {
     private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.selector.ConversationSelectionService> selections;
     private final io.github.opensabre.iqc.conversation.ProductionInputSnapshotService productionInputs;
     private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.pipelineasset.PipelineAssetService> pipelineSources;
+    private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.schedule.ScheduledActorAccessService> actionActors;
+
+    public InspectionTaskService(InspectionTaskMapper taskMapper,ConversationMapper conversationMapper,QualityAgentMapper agentMapper,
+            QualityRuleMapper ruleMapper,QualityRuleSetService ruleSetService,ObjectMapper objectMapper,TaskExecutionMapper executionMapper,
+            IqcDataScope dataScope,LabelResolutionService labelResolutionService,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.selector.ConversationSelectionService> selections,
+            io.github.opensabre.iqc.conversation.ProductionInputSnapshotService productionInputs,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.pipelineasset.PipelineAssetService> pipelineSources) {
+        this(taskMapper,conversationMapper,agentMapper,ruleMapper,ruleSetService,objectMapper,executionMapper,dataScope,
+                labelResolutionService,selections,productionInputs,pipelineSources,null);
+    }
 
     /** Existing direct callers retain their original constructor; Spring uses the full dependency constructor. */
     public InspectionTaskService(InspectionTaskMapper taskMapper,ConversationMapper conversationMapper,QualityAgentMapper agentMapper,
@@ -457,6 +468,10 @@ public class InspectionTaskService {
         var marker = objectMapper.valueToTree(prepared);
         ((com.fasterxml.jackson.databind.node.ObjectNode) marker).put("trial", trial);
         var root = objectMapper.createObjectNode(); root.set("pipelineSnapshot", marker);
+        if(!trial && prepared.release().actionPolicy()!=null && !prepared.release().actionPolicy().actions().isEmpty()) {
+            if(actionActors==null)throw IqcException.invalidState("当前物化器未启用动作负责人身份冻结");
+            root.set("actionOwnerBound",objectMapper.valueToTree(actionActors.getObject().capture()));
+        }
         if(periodic!=null)root.set("periodicSnapshot",objectMapper.valueToTree(periodic));
         if(trigger!=null)root.set("triggerSnapshot",objectMapper.valueToTree(trigger));
         root.set("executionStrategy", objectMapper.createObjectNode().put("schemaVersion", "iqc-pipeline-task-v1").put("mode", "PIPELINE"));

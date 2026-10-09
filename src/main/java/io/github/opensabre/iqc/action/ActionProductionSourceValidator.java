@@ -31,7 +31,8 @@ import java.util.Set;
 public class ActionProductionSourceValidator {
     public record Reference(String taskId,String executionId,String conversationId,String resultId,String owner) { }
     public record Validated(Reference reference,String ownerGroupId,String decisionReference,
-                            String inputSnapshotJson,String inputSnapshotHash) { }
+                            String inputSnapshotJson,String inputSnapshotHash,ActionPolicy policy,ActionPolicy.Context context,
+                            io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound ownerBound) { }
     private final InspectionTaskMapper tasks;
     private final TaskExecutionMapper executions;
     private final ConversationInspectionResultMapper results;
@@ -72,6 +73,14 @@ public class ActionProductionSourceValidator {
         try {
             var snapshot=json.readTree(task.getRuleSnapshotJson());
             var release=assets.publishedTaskRelease(snapshot);
+            io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound ownerBound=null;
+            if(release.actionPolicy()!=null && !release.actionPolicy().actions().isEmpty()) {
+                ownerBound=json.treeToValue(snapshot.path("actionOwnerBound"),io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound.class);
+                if(ownerBound==null || !"iqc-schedule-owner-scope-v1".equals(ownerBound.schemaVersion())
+                        || !reference.owner().equals(ownerBound.owner()) || ownerBound.userId()==null
+                        || !ownerBound.userId().matches("[A-Za-z0-9:_-]{1,64}"))
+                    throw IqcException.invalidState("动作来源缺少稳定负责人身份");
+            }
             var prepared=inputs.prepare(task,snapshot);
             if(prepared==null)throw IqcException.invalidState("动作来源缺少冻结生产输入");
             var messages=prepared.messages().get(reference.conversationId());
@@ -114,7 +123,10 @@ public class ActionProductionSourceValidator {
                     .put("scoringResultJson",result.getScoringResultJson()).put("businessItemResultsJson",result.getBusinessItemResultsJson())
                     .put("resultStatus",result.getResultStatus()).put("riskLevel",risk);
             String body=json.writeValueAsString(frozen);
-            return new Validated(reference,task.getOwnerGroupId(),result.getId(),body,PipelineAssetService.hash(body));
+            var facts=new java.util.HashMap<String,FindingFusion.Result>();fused.forEach(fact->facts.put(fact.code(),fact));
+            var context=new ActionPolicy.Context(facts,decisions,score.scoreStatus(),score.finalScore(),risk,result.getResultStatus());
+            return new Validated(reference,task.getOwnerGroupId(),result.getId(),body,PipelineAssetService.hash(body),
+                    release.actionPolicy(),context,ownerBound);
         } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException failure) {
             throw IqcException.invalidState("动作生产来源快照无效");
         }
