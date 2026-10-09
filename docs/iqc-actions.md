@@ -71,7 +71,7 @@ ActionEnqueueService是内部入口，不是开放API。调用者先在事务外
 
 ActionExecutionService以NEVER拒绝处在分析事务中的调用者，避免挂起仍持有Task/Result锁的分析事务后再领取造成死锁。通过独立bean调用领取，提交后再查本次RUNNING/version/token、当前actor scope/授权时间及适配协议，然后才调用实际adapter.execute，无数据库锁跨适配I/O。缺回执、串回执或异常一律UNKNOWN；结算失败SETTLEMENT_PENDING保留原领取，不重新调用execute。调度调用者仍必须在无令牌/用户上下文的后台解析真实组织授权，然后进入已核验actor scope；本服务不是开放发送API。
 
-ActionSettlementService REQUIRES_NEW仅锁Action，核对完整冻结Request和attempt/version/token以及回执key，用原plan和实际注册适配retrySafe/冻结retry生成下一状态，显式UTC毫秒时间且验证存储范围。失效领取返回false；RUNNING以外尤其REQUIRES_RECONCILIATION不被晚回执覆盖。实际发送的结果记录不再要求当前发送权限，否则撤权可能导致既成副作用被遗忘；来源/请求/回执证据仍须匹配。旧适配实现需保留才能结算其对应版本，缺失不是成功，未来核对流程应读取已有真实服务回执。
+ActionSettlementService REQUIRES_NEW仅锁Action，核对完整冻结Request和attempt/version/token以及回执key，用原plan和实际注册适配retrySafe/冻结retry生成下一状态，显式UTC毫秒时间且验证存储范围。失效领取返回false；RUNNING以外尤其REQUIRES_RECONCILIATION不被晚回执覆盖。实际发送的结果记录不再要求当前发送权限，否则撤权可能导致既成副作用被遗忘；来源/请求/回执证据仍须匹配。已取得并核对的真实回执按冻结版本结算；当前适配器缺失或配置失效只禁止自动重试，不改变已确认的结果。
 
 本批服务编排未连接生产发现/定时worker，也未新增或执行运行测试/SQL/网络。权限注册、后台组织解析和失联扫描、回执持久恢复/完整尝试审计/人工核对、其他八类适配仍待接入。已有currentEID来源规则会拒绝任务切换EID后的旧记录自动执行，跨轮历史来源需要明确持久核验，不能靠放宽引用字符串检查解决。源码中的隔离/幂等/锁序不等同真实数据库和网络并发验收。
 
@@ -89,3 +89,6 @@ ActionDispatchStateService后台短事务按观察id/version/token CAS，失联�
 前端结果详情复用原页面与permission composable，ActionHistoryPanel只在权限就绪且有history:view时加载，按result/权限变化和卸载废弃旧响应、清空旧记录；手动刷新，无自动轮询。加载失败明确显示错误，不以空记录当成功；类型/状态保留原始可识别值。UTC字段明确标注，不假设无时区LocalDateTime已转本地时间。
 
 组织权限DML V20261004_28资源/按钮900247注册该GET，仅沿原IQC_ADMIN/QUALITY_MANAGER/INSPECTOR/VIEWER只读角色，仍由来源数据范围限制；不授予iqc:action:enqueue/执行或全局读。迁移/API/浏览器尚未运行，不能用编译/构建替代访问控制和真实数据库验收。
+
+## 回执结算与重发准入分离
+成功、最终失败和UNKNOWN的回执无需再调用当前适配器配置校验，仍要求完整冻结请求/策略版本、receipt key及claim围栏匹配。仅CONFIRMED_RETRYABLE_FAILURE检查当前精确版本定义是否与领取声明一致且retrySafe；缺失/配置无效则保留真实失败回执并进入FAILED，不自动重发，不把已确认失败改成UNKNOWN，也不让真实成功停留在RUNNING。该批未执行真实SQL/并发回执验收。
