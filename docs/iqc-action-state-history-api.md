@@ -37,3 +37,5 @@ UI定向14项、完整28文件185项及最终14项组件验证均通过；最终
 必须先完成V1.1.65迁移再运行新后端，历史查询依赖新列。不可修改V1.1.64或旧baseline/history。合并前仍需真实新安装、支持升级、validate及重复migrate，以及原因写入故障回滚、外层事务回滚隔离和冻结输入竞争验收。
 
 本轮本地验证：9059 exit0，核对原因7项、原核对8项、历史查询6项，零失败/错误/跳过；UI14项及vue-tsc/Vite构建通过。迁移布局通过不代表实际MySQL迁移成功。前述787项全量属于e3c693b之前批次，不是本轮全量验证。独立审查及最终浏览器仍未完成，无合并批准。
+
+补充参数验收：28201 exit0，ActionReconciliationBindingTest 1项通过。直接通过真实MyBatis注解解析、ParamNameResolver、DefaultParameterHandler将完整record请求绑定到mock JDBC，验证全部冻结来源/输入/策略字段、枚举SEND_ALERT和版本；没有数据库执行，不替代真实SQL/事务验收。
