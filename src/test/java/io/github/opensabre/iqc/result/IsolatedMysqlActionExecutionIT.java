@@ -199,4 +199,57 @@ class IsolatedMysqlActionExecutionIT {
         assertThat(reader.page("foreign-action","result",null)).isEmpty();
     }
 
+    private ActionAdapter.Request reasonRequest() {
+        String hash=io.github.opensabre.iqc.selector.SelectorAssetService.hash("{}");
+        var source=new ActionExecutionContract.Source("task","eid","conversation","result","decision",hash,"alert","alice");
+        var request=new ActionAdapter.Request("action",source.idempotencyKey(Type.SEND_ALERT),source,
+                new ActionAdapter.Definition(Type.SEND_ALERT,1,false),1,"{}",hash,"{}");
+        jdbc.update("UPDATE iqc_action_execution SET idempotency_key=?,action_policy_hash=?,input_snapshot_hash=? WHERE id='action'",
+                request.idempotencyKey(),hash,hash);
+        return request;
+    }
+    private ActionAdapter.Receipt reasonReceipt(ActionAdapter.Request request) {
+        return new ActionAdapter.Receipt(request.idempotencyKey(),Outcome.CONFIRMED_SUCCESS,"proof","artifact",null);
+    }
+    @Test void reconciliationReasonAndSuccessCommitTogetherAndCannotBeRewritten() {
+        var state=context.getBean(ActionReconciliationStateService.class);var request=reasonRequest();var receipt=reasonReceipt(request);
+        assertThat(org.springframework.aop.support.AopUtils.isAopProxy(state)).isTrue();
+        assertThat(claim(TOKEN,0,NOW)).isEqualTo(1);
+        assertThat(tx.<Integer>execute(status->actions.quarantineLostClaim("action",1,TOKEN,NOW,NOW))).isEqualTo(1);
+        assertThat(state.confirm(request,2,TOKEN,receipt,"alice","  原始产物已确认  ")).isTrue();
+        assertThat(actions.selectById("action").getStatus()).isEqualTo("COMPLETE");
+        assertThat(jdbc.queryForObject("SELECT reconciliation_reason FROM iqc_action_execution_event WHERE action_execution_id='action' AND version=3",String.class)).isEqualTo("原始产物已确认");
+        assertThat(state.confirm(request,2,TOKEN,receipt,"alice","改写原因")).isFalse();
+        assertThat(jdbc.queryForObject("SELECT reconciliation_reason FROM iqc_action_execution_event WHERE action_execution_id='action' AND version=3",String.class)).isEqualTo("原始产物已确认");
+    }
+    @Test void rejectedReasonWriteRollsBackSuccessAndItsNewJournalEvent() {
+        var state=context.getBean(ActionReconciliationStateService.class);var request=reasonRequest();var receipt=reasonReceipt(request);
+        assertThat(claim(TOKEN,0,NOW)).isEqualTo(1);
+        assertThat(tx.<Integer>execute(status->actions.quarantineLostClaim("action",1,TOKEN,NOW,NOW))).isEqualTo(1);
+        jdbc.execute("CREATE TRIGGER reject_reconciliation_reason BEFORE UPDATE ON iqc_action_execution_event FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='reason rejected'");
+        try {
+            assertThatThrownBy(()->state.confirm(request,2,TOKEN,receipt,"alice","人工核对"))
+                    .isInstanceOf(org.springframework.dao.DataAccessException.class);
+            assertThat(actions.selectById("action").getStatus()).isEqualTo("REQUIRES_RECONCILIATION");
+            assertThat(actions.selectById("action").getVersion()).isEqualTo(2L);
+            assertThat(eventCount()).isEqualTo(3);
+        } finally {jdbc.execute("DROP TRIGGER reject_reconciliation_reason");}
+    }
+    @Test void changedFrozenInputCannotConfirmAndIndependentConfirmationSurvivesOuterRollback() {
+        var state=context.getBean(ActionReconciliationStateService.class);var request=reasonRequest();var receipt=reasonReceipt(request);
+        assertThat(claim(TOKEN,0,NOW)).isEqualTo(1);
+        assertThat(tx.<Integer>execute(status->actions.quarantineLostClaim("action",1,TOKEN,NOW,NOW))).isEqualTo(1);
+        jdbc.update("UPDATE iqc_action_execution SET input_snapshot_json='{\"changed\":true}' WHERE id='action'");
+        assertThat(state.confirm(request,2,TOKEN,receipt,"alice","人工核对")).isFalse();
+        jdbc.update("UPDATE iqc_action_execution SET input_snapshot_json='{}' WHERE id='action'");
+        assertThat(actions.selectById("action").getVersion()).isEqualTo(2L);assertThat(eventCount()).isEqualTo(3);
+        assertThatThrownBy(()->tx.execute(status->{
+            assertThat(state.confirm(request,2,TOKEN,receipt,"alice","独立核对")).isTrue();
+            throw new IllegalStateException("outer abort");
+        })).hasMessage("outer abort");
+        assertThat(actions.selectById("action").getStatus()).isEqualTo("COMPLETE");
+        var reader=new SqlSessionTemplate(context.getBean(SqlSessionFactory.class)).getMapper(ActionStateEventMapper.class);
+        assertThat(reader.page("action","result",null).getFirst().getReconciliationReason()).isEqualTo("独立核对");
+    }
+
 }

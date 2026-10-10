@@ -179,7 +179,7 @@ class IsolatedMysqlMigrationIT {
                 }
                 var current = Flyway.configure().dataSource(url,"root","")
                         .locations("classpath:db/migration/mysql").load();
-                assertThat(current.migrate().migrationsExecuted).isEqualTo(1);
+                assertThat(current.migrate().migrationsExecuted).isEqualTo(2);
                 current.validate(); assertThat(current.migrate().migrationsExecuted).isZero();
                 try (var db = DriverManager.getConnection(url,"root",""); var sql = db.createStatement()) {
                     try (var count = sql.executeQuery("SELECT COUNT(*) FROM iqc_action_execution_event")) {
@@ -221,6 +221,7 @@ class IsolatedMysqlMigrationIT {
     private static void assertCurrentSchema(String url) throws Exception {
         try (var connection = DriverManager.getConnection(url, "root", "")) {
             for (String[] expected : new String[][] {
+                    {"iqc_action_execution_event", "reconciliation_reason", "varchar", "YES", null},
                     {"iqc_action_execution_event", "state_json", "json", "NO", null},
                     {"iqc_action_execution_event", "recorded_at_utc", "datetime", "NO", null},
                     {"iqc_inspection_conversation_result", "action_discovered_at_utc", "datetime", "YES", null},
@@ -261,7 +262,7 @@ class IsolatedMysqlMigrationIT {
             try (var query = connection.createStatement();
                  var history = query.executeQuery("SELECT version,success FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1")) {
                 assertThat(history.next()).isTrue();
-                assertThat(history.getString(1)).isEqualTo("1.1.64");
+                assertThat(history.getString(1)).isEqualTo("1.1.65");
                 assertThat(history.getBoolean(2)).isTrue();
             }
             try (var query = connection.createStatement();

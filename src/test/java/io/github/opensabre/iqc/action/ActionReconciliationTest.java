@@ -17,6 +17,7 @@ import static org.mockito.Mockito.*;
 
 class ActionReconciliationTest {
     final ObjectMapper json=new ObjectMapper();
+    final ActionReconciliationEventMapper journal=mock(ActionReconciliationEventMapper.class);
     final ActionExecutionMapper actions=mock(ActionExecutionMapper.class);
     final ConversationInspectionResultMapper results=mock(ConversationInspectionResultMapper.class);
     final InspectionTaskMapper tasks=mock(InspectionTaskMapper.class);
@@ -29,7 +30,8 @@ class ActionReconciliationTest {
     String id;
     @BeforeEach void setup() throws Exception {
         when(adapter.definition()).thenReturn(definition);
-        service=new ActionReconciliationService(actions,new ActionAdapterRegistry(List.of(adapter)),results,tasks,actors,scope,json);
+        service=new ActionReconciliationService(actions,new ActionAdapterRegistry(List.of(adapter)),results,tasks,actors,scope,json,new ActionReconciliationStateService(actions,journal));
+        when(journal.recordReason(anyString(),anyLong(),anyLong(),anyString(),anyString(),anyString())).thenReturn(1);
         var bound=new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","user-1","alice",false,null);
         when(actors.capture()).thenReturn(bound);when(scope.owner()).thenReturn("alice");when(scope.canView("alice",null)).thenReturn(true);
         var task=new InspectionTask();task.setId("task");task.setCreatedBy("alice");task.setCurrentExecutionId("new-eid");when(tasks.selectById("task")).thenReturn(task);
@@ -52,17 +54,17 @@ class ActionReconciliationTest {
     }
     private void success() {when(adapter.reconcile(any())).thenReturn(new ActionAdapter.Receipt(id,ActionExecutionContract.Outcome.CONFIRMED_SUCCESS,"artifact","artifact",null));}
     @Test void confirmsHistoricalArtifactWithoutExecutingOrCreatingAnotherAttempt() {
-        success();when(actions.reconcileSuccess(eq(id),eq(3L),eq(row.getClaimToken()),any(),eq("artifact"),eq("artifact"),eq("alice"))).thenReturn(1);
+        success();when(actions.reconcileSuccessBound(any(),eq(3L),eq(row.getClaimToken()),any(),eq("artifact"),eq("artifact"),eq("alice"))).thenReturn(1);
         assertEquals("CONFIRMED",service.reconcile("result",id,3,"核对产物").state());verify(adapter,never()).execute(any());
         assertEquals(1,row.getAttemptCount());assertEquals("a".repeat(32),row.getClaimToken());
     }
     @Test void absentArtifactNeverSettlesOrExecutes() {
         assertEquals("UNCONFIRMED",service.reconcile("result",id,3,"核对").state());
-        verify(actions,never()).reconcileSuccess(anyString(),anyLong(),anyString(),any(),anyString(),anyString(),anyString());verify(adapter,never()).execute(any());
+        verify(actions,never()).reconcileSuccessBound(any(),anyLong(),anyString(),any(),anyString(),anyString(),anyString());verify(adapter,never()).execute(any());
     }
     @Test void unknownReceiptNeverSettles() {
         when(adapter.reconcile(any())).thenReturn(new ActionAdapter.Receipt(id,ActionExecutionContract.Outcome.UNKNOWN,null,null,"UNAVAILABLE"));
-        assertEquals("UNCONFIRMED",service.reconcile("result",id,3,"核对").state());verify(actions,never()).reconcileSuccess(anyString(),anyLong(),anyString(),any(),anyString(),anyString(),anyString());
+        assertEquals("UNCONFIRMED",service.reconcile("result",id,3,"核对").state());verify(actions,never()).reconcileSuccessBound(any(),anyLong(),anyString(),any(),anyString(),anyString(),anyString());
     }
     @Test void changedStableIdentityCannotLookup() {
         when(actors.capture()).thenReturn(new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","replacement","alice",true,null));
@@ -76,7 +78,7 @@ class ActionReconciliationTest {
     }
     @Test void foreignReceiptCannotSettle() {
         when(adapter.reconcile(any())).thenReturn(new ActionAdapter.Receipt("b".repeat(64),ActionExecutionContract.Outcome.CONFIRMED_SUCCESS,"artifact","artifact",null));
-        assertThrows(RuntimeException.class,()->service.reconcile("result",id,3,"核对"));verify(actions,never()).reconcileSuccess(anyString(),anyLong(),anyString(),any(),anyString(),anyString(),anyString());
+        assertThrows(RuntimeException.class,()->service.reconcile("result",id,3,"核对"));verify(actions,never()).reconcileSuccessBound(any(),anyLong(),anyString(),any(),anyString(),anyString(),anyString());
     }
     @Test void broaderViewerCannotConfirmAnotherOwnersAction() {
         when(scope.owner()).thenReturn("bob");assertThrows(RuntimeException.class,()->service.reconcile("result",id,3,"核对"));verify(adapter,never()).reconcile(any());

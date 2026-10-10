@@ -115,4 +115,33 @@ public interface ActionExecutionMapper extends BaseMapper<ActionExecution> {
                          @Param("now") LocalDateTime now,@Param("evidence") String evidence,
                          @Param("result") String result,@Param("actor") String actor);
 
+    /** Manual confirmation fences the complete immutable request at the exact write, not only a prior read. */
+    @Update("""
+        UPDATE iqc_action_execution SET status='COMPLETE',outcome='CONFIRMED_SUCCESS',version=version+1,
+          next_attempt_at_utc=NULL,settled_at_utc=#{now},evidence_reference=#{evidence},
+          result_reference=#{result},last_error_code=NULL,updated_by=#{actor},updated_time=#{now}
+        WHERE id=#{request.executionId} AND version=#{version} AND claim_token=#{token}
+          AND version < 9223372036854775807 AND BINARY status='REQUIRES_RECONCILIATION' AND BINARY outcome='UNKNOWN'
+          AND attempt_count > 0 AND claimed_at_utc <= #{now}
+          AND #{evidence} IS NOT NULL AND #{result} IS NOT NULL
+          AND BINARY id=BINARY #{request.executionId}
+          AND BINARY idempotency_key=BINARY #{request.idempotencyKey}
+          AND BINARY task_id=BINARY #{request.source.taskId}
+          AND BINARY execution_id=BINARY #{request.source.executionId}
+          AND BINARY conversation_id=BINARY #{request.source.conversationId}
+          AND BINARY source_result_id=BINARY #{request.source.resultId}
+          AND BINARY decision_reference=BINARY #{request.source.decisionReference}
+          AND BINARY action_policy_hash=BINARY #{request.source.actionPolicyHash}
+          AND BINARY action_id=BINARY #{request.source.actionId}
+          AND BINARY action_type=BINARY #{request.adapter.type}
+          AND BINARY owner=BINARY #{request.source.owner}
+          AND BINARY input_snapshot_json=BINARY #{request.inputSnapshotJson}
+          AND BINARY input_snapshot_hash=BINARY #{request.inputSnapshotHash}
+          AND BINARY policy_snapshot_json=BINARY #{request.policySnapshotJson}
+          AND attempt_count=#{request.attempt}
+        """)
+    int reconcileSuccessBound(@Param("request") ActionAdapter.Request request,@Param("version") long version,
+                              @Param("token") String token,@Param("now") LocalDateTime now,
+                              @Param("evidence") String evidence,@Param("result") String result,@Param("actor") String actor);
+
 }

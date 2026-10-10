@@ -23,7 +23,7 @@ public class ActionQueryService {
     /** Public state excludes claim tokens and all frozen source content. */
     public record State(String status,Integer attemptCount,String claimedAtUtc,String settledAtUtc,String nextAttemptAtUtc,
                         String outcome,String evidenceReference,String resultReference,String errorCode) { }
-    public record Event(String version,String previousVersion,State previousState,State state,String actor,LocalDateTime recordedAtUtc) { }
+    public record Event(String version,String previousVersion,State previousState,State state,String actor,LocalDateTime recordedAtUtc,String reconciliationReason) { }
     public record EventPage(List<Event> events,String nextBeforeVersion,boolean earlierHistoryUnavailable) { }
     private final ConversationInspectionResultMapper results;
     private final InspectionTaskMapper tasks;
@@ -81,7 +81,7 @@ public class ActionQueryService {
         boolean more=rows.size()>50;
         var visible=rows.stream().limit(50).map(row->new Event(row.getVersion().toString(),
                 row.getPreviousVersion()==null?null:row.getPreviousVersion().toString(),
-                state(row.getPreviousStateJson()),state(row.getStateJson()),row.getActor(),row.getRecordedAtUtc())).toList();
+                state(row.getPreviousStateJson()),state(row.getStateJson()),row.getActor(),row.getRecordedAtUtc(),row.getReconciliationReason())).toList();
         String next=more?visible.getLast().version():null;
         boolean gap=!more && (visible.isEmpty() || visible.getLast().previousVersion()!=null);
         return new EventPage(visible,next,gap);

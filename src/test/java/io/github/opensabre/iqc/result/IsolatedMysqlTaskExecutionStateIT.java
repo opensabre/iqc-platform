@@ -568,10 +568,19 @@ class IsolatedMysqlTaskExecutionStateIT {
             configuration.addMapper(io.github.opensabre.iqc.schedule.dao.TriggerAttemptEventMapper.class);
             configuration.addMapper(io.github.opensabre.iqc.action.ActionExecutionMapper.class);
             configuration.addMapper(io.github.opensabre.iqc.action.ActionStateEventMapper.class);
+            configuration.addMapper(io.github.opensabre.iqc.action.ActionReconciliationEventMapper.class);
             var factory = new MybatisSqlSessionFactoryBean();
             factory.setDataSource(source);
             factory.setConfiguration(configuration);
             return factory.getObject();
+        }
+
+        @Bean
+        io.github.opensabre.iqc.action.ActionReconciliationStateService actionReconciliationStateService(SqlSessionFactory factory) {
+            var session=new SqlSessionTemplate(factory);
+            return new io.github.opensabre.iqc.action.ActionReconciliationStateService(
+                    session.getMapper(io.github.opensabre.iqc.action.ActionExecutionMapper.class),
+                    session.getMapper(io.github.opensabre.iqc.action.ActionReconciliationEventMapper.class));
         }
 
         @Bean

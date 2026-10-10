@@ -10,8 +10,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.Objects;
 
 /** Manual proof lookup outside ledger locks; UNKNOWN never authorizes another execution. */
@@ -26,6 +24,7 @@ public class ActionReconciliationService {
     private final ScheduledActorAccessService actors;
     private final IqcDataScope scope;
     private final ObjectMapper json;
+    private final ActionReconciliationStateService state;
 
     /** The caller supplies only an observation and audit reason, never evidence or outcome. */
     @Transactional(propagation=Propagation.NEVER)
@@ -48,8 +47,7 @@ public class ActionReconciliationService {
         var current=prepare(resultId,id,version,actor);
         if(current==null || !current.request().equals(prepared.request()) || !current.token().equals(prepared.token()))
             return new Response(id,"STALE_OBSERVATION");
-        boolean recorded=actions.reconcileSuccess(id,version,prepared.token(),LocalDateTime.now(ZoneOffset.UTC),
-                receipt.evidenceReference(),receipt.resultReference(),actor.owner())==1;
+        boolean recorded=state.confirm(prepared.request(),version,prepared.token(),receipt,actor.owner(),reason);
         return new Response(id,recorded ? "CONFIRMED" : "STALE_OBSERVATION");
     }
 
