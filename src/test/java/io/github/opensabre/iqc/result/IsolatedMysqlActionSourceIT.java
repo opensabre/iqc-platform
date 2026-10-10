@@ -33,7 +33,7 @@ class IsolatedMysqlActionSourceIT {
     private static ConversationInspectionResultMapper results;
     private static ActionDiscoveryMapper discovery;
     private ActionProductionSourceValidator source;
-    private final ObjectMapper json=new ObjectMapper();
+    private final ObjectMapper json=new ObjectMapper().findAndRegisterModules();
     private final ActionProductionSourceValidator.Reference reference=new ActionProductionSourceValidator.Reference("task","execution","conversation","result","alice");
     @BeforeAll static void start() throws Exception {
         IsolatedMysqlTaskExecutionStateIT.start();context=new AnnotationConfigApplicationContext(IsolatedMysqlTaskExecutionStateIT.DatabaseConfiguration.class);
@@ -44,7 +44,8 @@ class IsolatedMysqlActionSourceIT {
     }
     @AfterAll static void close() {if(context!=null)context.close();IsolatedMysqlTaskExecutionStateIT.close();}
     @BeforeEach void fixture() throws Exception { fixture("SAVE_RESULT"); }
-    void fixture(String type) throws Exception {
+    void fixture(String type) throws Exception {fixture(type,null);}
+    void fixture(String type,java.time.LocalTime relativeTime) throws Exception {
         jdbc.update("DELETE FROM iqc_inspection_conversation_result");jdbc.update("DELETE FROM iqc_task_execution");jdbc.update("DELETE FROM iqc_inspection_task");
         var release=json.readValue("""
           {"schemaVersion":"iqc-pipeline-release-v1","pipeline":{"schemaVersion":"iqc-pipeline-v1","nodes":[
@@ -56,9 +57,10 @@ class IsolatedMysqlActionSourceIT {
           "actionPolicy":{"schemaVersion":"iqc-action-policy-v1","actions":[{"actionId":"save","type":"SAVE_RESULT","condition":{"kind":"ALWAYS"},
           "idempotency":"PRODUCTION_SOURCE_V1","failureHandling":"RECORD_ONLY","configuration":{}}]}}
           """.replace("\"type\":\"SAVE_RESULT\"", "\"type\":\""+type+"\"")
-          .replace("\"configuration\":{}", "CREATE_REVIEW".equals(type)?"\"configuration\":{\"reason\":\"automated review\"}":"\"configuration\":{}"),PipelineRelease.class);
+          .replace("\"configuration\":{}", "CREATE_REVIEW".equals(type)?"\"configuration\":{\"reason\":\"automated review\"}":
+                  "ADD_TO_EVALUATION_CANDIDATE".equals(type)?"\"configuration\":{\"sampleType\":\"FALSE_POSITIVE\",\"reviewRevision\":1}":"\"configuration\":{}"),PipelineRelease.class);
         var input=new ProductionInputSnapshotService.Input("conversation","revision",json.createObjectNode().put("businessType","frozen"),
-                List.of(new ProductionInputSnapshotService.Message("message",1,"agent","frozen text",null)));
+                List.of(new ProductionInputSnapshotService.Message("message",1,"agent","frozen text",relativeTime)));
         var body=json.valueToTree(List.of(input));var root=json.createObjectNode();root.putObject("executionStrategy").put("mode","PIPELINE");
         root.putObject("productionInputs").put("schemaVersion",ProductionInputSnapshotService.SCHEMA).put("hashAlgorithm","selector-decimal-sha256-v1")
                 .put("contentHash",SelectorAssetService.hash(body.toString())).set("conversations",body);

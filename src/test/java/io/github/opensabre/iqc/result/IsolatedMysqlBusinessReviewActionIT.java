@@ -34,7 +34,7 @@ class IsolatedMysqlBusinessReviewActionIT {
     @Configuration(proxyBeanMethods=false)
     @Import(IsolatedMysqlTaskExecutionStateIT.DatabaseConfiguration.class)
     static class Config {
-        @Bean ObjectMapper json(){return new ObjectMapper();}
+        @Bean ObjectMapper json(){return new ObjectMapper().findAndRegisterModules();}
         @Bean IqcDataScope scope(){return new IqcDataScope(mock(IqcOrganizationClient.class));}
         @Bean SqlSessionTemplate domainSession(SqlSessionFactory factory){
             for(var type:java.util.List.of(ResultReviewMapper.class,ConversationInspectionResultMapper.class,ConversationMessageMapper.class))
