@@ -127,4 +127,16 @@ class IsolatedMysqlEvaluationCandidateActionIT {
         completeReview();jdbc.execute("CREATE TRIGGER reject_candidate_action_write BEFORE INSERT ON iqc_quality_sample FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='isolated candidate rejection'");
         var receipt=execute();assertEquals(ActionExecutionContract.Outcome.UNKNOWN,receipt.outcome());assertNull(receipt.resultReference());assertEquals(0,count());
     }
+    @Test void recoveryReadsFirstCandidateAfterTranscriptAndEidChangeWithoutSendGrant() {
+        completeReview();var receipt=execute();assertEquals(ActionExecutionContract.Outcome.CONFIRMED_SUCCESS,receipt.outcome());
+        var before=jdbc.queryForMap("SELECT * FROM iqc_quality_sample");
+        jdbc.update("UPDATE iqc_conversation_message SET content='later text' WHERE id='message'");
+        jdbc.update("UPDATE iqc_inspection_task SET current_execution_id='later-execution' WHERE id='task'");
+        var confirmed=as("alice",Set.of(),()->adapter.reconcile(request));
+        assertEquals(receipt.resultReference(),confirmed.resultReference());assertEquals(before,jdbc.queryForMap("SELECT * FROM iqc_quality_sample"));
+    }
+    @Test void recoveryWithoutArtifactNeverCreatesCandidate() {
+        completeReview();assertNull(as("alice",Set.of(),()->adapter.reconcile(request)));assertEquals(0,count());
+    }
+
 }

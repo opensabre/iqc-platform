@@ -41,6 +41,37 @@ public class BusinessReviewSampleService {
     private final IqcDataScope scope;
     private final ObjectMapper json;
 
+    /** Reads the first captured candidate; later review/source edits never cause a recapture. */
+    @Transactional(readOnly = true)
+    public QualitySample lookupRequest(String resultId, int reviewRevision, String requestId,
+                                       String name, String sampleType, String tagsJson) {
+        if (requestId == null || !requestId.matches("[A-Za-z0-9_-]{16,64}") || reviewRevision < 1)
+            throw IqcException.invalidArgument("候选请求或复核修订无效");
+        String owner = scope.owner();
+        var source = results.selectById(resultId);
+        var task = source == null ? null : tasks.selectById(source.getTaskId());
+        authorize(task);
+        if (owner == null || "system".equals(owner) || !owner.equals(task.getCreatedBy()))
+            throw IqcException.accessDenied("无权核对候选来源");
+        var existing = samples.selectById("qc-" + hash(json.valueToTree(List.of(owner, requestId))).substring(0, 60));
+        if (existing == null) return null;
+        var expected = parse(existing.getExpectedJson());
+        String reviewId = expected.path("reviewId").asText();
+        var review = reviews.selectById(reviewId);
+        String label = name == null || name.isBlank() ? "会话候选-" + reviewId : name.trim();
+        String fingerprint = hash(json.valueToTree(List.of(resultId, reviewId, label, sampleType, tags(tagsJson))));
+        if (!"iqc-reviewed-business-candidate-v1".equals(expected.path("schemaVersion").asText())
+                || !resultId.equals(existing.getSourceResultId()) || !owner.equals(existing.getCreatedBy())
+                || !source.getConversationId().equals(existing.getConversationId())
+                || expected.path("reviewRevision").asInt(-1) != reviewRevision
+                || !fingerprint.equals(expected.path("requestFingerprint").asText())
+                || review == null || !"BUSINESS".equals(review.getTargetType())
+                || !resultId.equals(review.getBusinessResultId())
+                || !java.util.Objects.equals(reviewRevision, review.getReviewRevision()))
+            throw IqcException.invalidState("候选持久产物与原请求不一致");
+        return existing;
+    }
+
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public QualitySample create(String resultId, String reviewId, String requestId, String name, String sampleType, String tagsJson) {
         if (resultId == null || resultId.isBlank() || reviewId == null || reviewId.isBlank()

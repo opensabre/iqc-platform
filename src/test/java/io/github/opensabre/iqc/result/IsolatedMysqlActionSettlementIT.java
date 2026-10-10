@@ -105,4 +105,30 @@ class IsolatedMysqlActionSettlementIT {
         assertTrue(settlements.settle(request,1,TOKEN,receipt(ActionExecutionContract.Outcome.CONFIRMED_RETRYABLE_FAILURE)));
         assertEquals("FAILED",stored().getStatus());assertNull(stored().getNextAttemptAtUtc());assertEquals("receipt",stored().getEvidenceReference());
     }
+    @Test void recoverySuccessCasPreservesClaimAndFencesLateWorkerAndDuplicateOperator() {
+        assertTrue(settlements.settle(request,1,TOKEN,receipt(ActionExecutionContract.Outcome.UNKNOWN)));
+        var now=LocalDateTime.now(java.time.ZoneOffset.UTC);
+        assertEquals(0,rows.reconcileSuccess(request.executionId(),1,TOKEN,now,"receipt","result","alice"));
+        assertEquals(0,rows.reconcileSuccess(request.executionId(),2,"b".repeat(32),now,"receipt","result","alice"));
+        assertEquals(1,rows.reconcileSuccess(request.executionId(),2,TOKEN,now,"receipt","result","alice"));
+        assertEquals(0,rows.reconcileSuccess(request.executionId(),2,TOKEN,now,"receipt","result","alice"));
+        assertFalse(settlements.settle(request,1,TOKEN,receipt(ActionExecutionContract.Outcome.CONFIRMED_SUCCESS)));
+        var row=stored();assertEquals("COMPLETE",row.getStatus());assertEquals(3L,row.getVersion());
+        assertEquals(1,row.getAttemptCount());assertEquals(TOKEN,row.getClaimToken());assertEquals("alice",row.getUpdatedBy());assertNull(row.getNextAttemptAtUtc());
+    }
+
+    @Test void concurrentRecoveryOperatorsHaveExactlyOneSqlWinner() throws Exception {
+        assertTrue(settlements.settle(request,1,TOKEN,receipt(ActionExecutionContract.Outcome.UNKNOWN)));
+        var gate=new java.util.concurrent.CountDownLatch(1);
+        try(var workers=java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            java.util.concurrent.Callable<Integer> confirm=()-> {
+                assertTrue(gate.await(10,java.util.concurrent.TimeUnit.SECONDS));
+                return rows.reconcileSuccess(request.executionId(),2,TOKEN,LocalDateTime.now(java.time.ZoneOffset.UTC),"receipt","result","alice");
+            };
+            var first=workers.submit(confirm);var second=workers.submit(confirm);gate.countDown();
+            assertEquals(1,first.get(10,java.util.concurrent.TimeUnit.SECONDS)+second.get(10,java.util.concurrent.TimeUnit.SECONDS));
+        }
+        assertEquals(3L,stored().getVersion());assertEquals(1,stored().getAttemptCount());
+    }
+
 }

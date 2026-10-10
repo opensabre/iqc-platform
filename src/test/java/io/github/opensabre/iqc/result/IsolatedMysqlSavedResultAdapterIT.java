@@ -75,4 +75,12 @@ class IsolatedMysqlSavedResultAdapterIT {
     @Test void foreignExecutionCannotUseOriginalReceipt() {
         jdbc.update("UPDATE iqc_inspection_conversation_result SET execution_id='foreign' WHERE id='result'");unknown("SOURCE_RESULT_MISMATCH");
     }
+    @Test void recoveryConfirmsOnlyExistingResultWithoutModifyingIt() {
+        var before=jdbc.queryForMap("SELECT * FROM iqc_inspection_conversation_result WHERE id='result'");
+        assertEquals(ActionExecutionContract.Outcome.CONFIRMED_SUCCESS,adapter.reconcile(request).outcome());
+        assertEquals(before,jdbc.queryForMap("SELECT * FROM iqc_inspection_conversation_result WHERE id='result'"));
+        jdbc.update("DELETE FROM iqc_inspection_conversation_result WHERE id='result'");
+        assertEquals(ActionExecutionContract.Outcome.UNKNOWN,adapter.reconcile(request).outcome());
+    }
+
 }

@@ -101,4 +101,18 @@ public interface ActionExecutionMapper extends BaseMapper<ActionExecution> {
     int quarantineLostClaim(@Param("id") String id,@Param("version") long version,
                             @Param("token") String token,@Param("cutoff") LocalDateTime cutoff,
                             @Param("now") LocalDateTime now);
+    /** Only durable success can resolve UNKNOWN; neither attempts nor original claims are replaced. */
+    @Update("""
+        UPDATE iqc_action_execution SET status='COMPLETE',outcome='CONFIRMED_SUCCESS',version=version+1,
+          next_attempt_at_utc=NULL,settled_at_utc=#{now},evidence_reference=#{evidence},
+          result_reference=#{result},last_error_code=NULL,updated_by=#{actor},updated_time=#{now}
+        WHERE id=#{id} AND version=#{version} AND claim_token=#{token}
+          AND version < 9223372036854775807 AND status='REQUIRES_RECONCILIATION' AND outcome='UNKNOWN'
+          AND attempt_count > 0 AND claimed_at_utc <= #{now}
+          AND #{evidence} IS NOT NULL AND #{result} IS NOT NULL
+        """)
+    int reconcileSuccess(@Param("id") String id,@Param("version") long version,@Param("token") String token,
+                         @Param("now") LocalDateTime now,@Param("evidence") String evidence,
+                         @Param("result") String result,@Param("actor") String actor);
+
 }

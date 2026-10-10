@@ -114,4 +114,17 @@ class IsolatedMysqlBusinessReviewActionIT {
         var receipt=execute();assertEquals(ActionExecutionContract.Outcome.UNKNOWN,receipt.outcome());assertNull(receipt.resultReference());assertEquals(0,count());
         jdbc.execute("DROP TRIGGER reject_review_action_write");assertEquals(ActionExecutionContract.Outcome.CONFIRMED_SUCCESS,execute().outcome());assertEquals(1,count());
     }
+    @Test void recoveryReadsExistingReviewWithoutSendGrantOrCurrentEid() {
+        var receipt=execute();assertEquals(ActionExecutionContract.Outcome.CONFIRMED_SUCCESS,receipt.outcome());
+        var before=jdbc.queryForMap("SELECT * FROM iqc_result_review");
+        jdbc.update("UPDATE iqc_inspection_task SET current_execution_id='later-execution' WHERE id='task'");
+        var actor=new ScheduledActorAccessService.Resolved("user","alice",false,"group",Set.of(),Set.of(),Instant.now());
+        var confirmed=scope.asScheduledActor(actor,()->adapter.reconcile(request));
+        assertEquals(receipt.resultReference(),confirmed.resultReference());assertEquals(before,jdbc.queryForMap("SELECT * FROM iqc_result_review"));
+    }
+    @Test void recoveryWithoutArtifactNeverCreatesReview() {
+        var actor=new ScheduledActorAccessService.Resolved("user","alice",false,"group",Set.of(),Set.of(),Instant.now());
+        assertNull(scope.asScheduledActor(actor,()->adapter.reconcile(request)));assertEquals(0,count());
+    }
+
 }

@@ -17,7 +17,7 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class ActionQueryService {
-    public record View(String id,String actionId,String type,String status,Integer attemptCount,
+    public record View(String id,Long version,String actionId,String type,String status,Integer attemptCount,
                        LocalDateTime nextAttemptAtUtc,LocalDateTime claimedAtUtc,LocalDateTime settledAtUtc,
                        String outcome,String evidenceReference,String resultReference,String errorCode) { }
     private final ConversationInspectionResultMapper results;
@@ -40,14 +40,14 @@ public class ActionQueryService {
         if(task==null || !scope.canView(task.getCreatedBy(),task.getOwnerGroupId()))
             throw IqcException.accessDenied("无权查看动作来源结果");
         return actions.selectList(Wrappers.<ActionExecution>lambdaQuery()
-                .select(ActionExecution::getId,ActionExecution::getActionId,ActionExecution::getActionType,ActionExecution::getStatus,
+                .select(ActionExecution::getId,ActionExecution::getVersion,ActionExecution::getActionId,ActionExecution::getActionType,ActionExecution::getStatus,
                         ActionExecution::getAttemptCount,ActionExecution::getNextAttemptAtUtc,ActionExecution::getClaimedAtUtc,
                         ActionExecution::getSettledAtUtc,ActionExecution::getOutcome,ActionExecution::getEvidenceReference,
                         ActionExecution::getResultReference,ActionExecution::getLastErrorCode)
                 .eq(ActionExecution::getSourceResultId,resultId).eq(ActionExecution::getTaskId,result.getTaskId())
                 .eq(ActionExecution::getExecutionId,result.getExecutionId()).eq(ActionExecution::getConversationId,result.getConversationId())
                 .eq(ActionExecution::getOwner,task.getCreatedBy()).orderByAsc(ActionExecution::getActionId).last("LIMIT 100"))
-                .stream().map(row->new View(row.getId(),row.getActionId(),row.getActionType(),row.getStatus(),row.getAttemptCount(),
+                .stream().map(row->new View(row.getId(),row.getVersion(),row.getActionId(),row.getActionType(),row.getStatus(),row.getAttemptCount(),
                         row.getNextAttemptAtUtc(),row.getClaimedAtUtc(),row.getSettledAtUtc(),row.getOutcome(),row.getEvidenceReference(),
                         row.getResultReference(),row.getLastErrorCode())).toList();
     }

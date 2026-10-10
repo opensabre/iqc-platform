@@ -135,3 +135,13 @@ FindingLabelProjection先定义纯投影schema iqc-label-finding-projection-v1�
 
 该契约是后续标签来源兼容的代码基础，尚未接UPDATE_LABEL适配器、冻结资产目录、持久化、查询/复核/导出或前端。V1.1.63之后的DDL须检查当前拥有分支与B迁移占用再确定；本批不执行迁移/测试或标签写入。
 兼容既有LabelTaxonomyService允许的Unicode值编码：valueCode限制沿现表varchar(64)而非新加ASCII规则；findingCode保留Unicode，labelId/原因引用仍按稳定引用约束。不能把新契约的编码限制扩大到超过原标签列容量。
+
+## UNKNOWN 人工持久产物核对
+
+POST `/api/iqc/conversation-results/{id}/actions/{actionExecutionId}/reconcile` 使用独立 `iqc:action:reconcile` 资源、原审计与限流。请求只接受观察版本 `version` 和非空≤1000字 `reason`；不接受客户端回执、成功状态或产物ID。历史查询增加账本版本供条件提交，不暴露claimToken或冻结输入。组织资源沿现有注册器声明，未添加角色自动授权；管理端按钮及组织受控授权迁移仍待接入。
+
+先在数据库事务外解析当前稳定用户ID，再限定原负责人及实际结果/task/EID/conversation和冻结actionOwnerBound；全局/组查看权限不授予代替负责人核对权。核对既有历史产物不要求task.currentEID仍是原轮次，也不重新调用生产入队校验或原写入操作。动作开关关闭时仍可核对既有产物，不启用后台发送。
+
+SAVE_RESULT严格读取既有结果及冻结trace/scoring/items；CREATE_REVIEW与ADD_TO_EVALUATION_CANDIDATE复用原业务服务的稳定请求ID和内容指纹，只查第一份实际复核/候选。后续裁决、当前EID或归档变动不触发新轮次/重新采集；读不到产物或没有只读适配时继续UNKNOWN。核对不要求原发送权限，不调用execute/request/create或gold审核。
+
+成功回执按原key绑定；核对后重新读取来源和完整请求，再以版本、原claimToken、REQUIRES_RECONCILIATION/UNKNOWN执行单条CAS到COMPLETE，保留attempt与claim，保存真实产物引用及当前操作人。并发核对或迟到worker不能覆盖赢家。响应CONFIRMED/UNCONFIRMED/STALE_OBSERVATION分别表示实际确认、缺确认和观察失效，无自动重试。现有审计注解记录人工入口，不等同完整动作尝试历史；远程适配恢复、阻塞恢复、操作UI及真实登录权限验收仍待完成。

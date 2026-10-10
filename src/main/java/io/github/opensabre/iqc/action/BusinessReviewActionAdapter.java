@@ -27,7 +27,10 @@ public class BusinessReviewActionAdapter implements ActionAdapter {
                 || revision.intValue()<0 || revision.intValue()==Integer.MAX_VALUE))
             throw new IllegalArgumentException("Invalid CREATE_REVIEW expected revision");
     }
-    @Override public Receipt execute(Request request) {
+    @Override public Receipt execute(Request request) { return confirm(request,false); }
+    /** A recovery lookup never calls the owning create operation. */
+    @Override public Receipt reconcile(Request request) { return confirm(request,true); }
+    private Receipt confirm(Request request,boolean readOnly) {
         Objects.requireNonNull(request);
         if(!DEFINITION.equals(request.adapter()))throw new IllegalArgumentException("CREATE_REVIEW adapter version mismatch");
         try {
@@ -36,7 +39,8 @@ public class BusinessReviewActionAdapter implements ActionAdapter {
             if(action.type()!=DEFINITION.type() || action.effectiveAdapterVersion()!=DEFINITION.version())
                 throw new IllegalArgumentException("CREATE_REVIEW policy mismatch");
             validateConfiguration(action.configuration());
-            String id=reviews.open(request,action.configuration()); // Proxy commits before returning durable evidence.
+            String id=readOnly ? reviews.lookup(request,action.configuration()) : reviews.open(request,action.configuration());
+            if(readOnly && id==null)return null;
             return new Receipt(request.idempotencyKey(),ActionExecutionContract.Outcome.CONFIRMED_SUCCESS,id,id,null);
         } catch(Exception unconfirmed) {
             return new Receipt(request.idempotencyKey(),ActionExecutionContract.Outcome.UNKNOWN,null,null,"REVIEW_CONFIRMATION_UNAVAILABLE");

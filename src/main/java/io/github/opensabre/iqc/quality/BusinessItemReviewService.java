@@ -52,6 +52,27 @@ public class BusinessItemReviewService {
                 "ALL".equals(selected) ? null : selected, taskId, all, scope.owner(), all ? null : scope.groupId()));
     }
 
+    /** Looks up the immutable first request without opening a round or requiring the current EID. */
+    @Transactional(readOnly = true)
+    public ResultReview lookupRequest(String resultId, int expectedRevision, String requestId, String reason) {
+        if (requestId == null || !requestId.matches("[A-Za-z0-9_-]{16,64}") || expectedRevision < 0
+                || expectedRevision == Integer.MAX_VALUE)
+            throw IqcException.invalidArgument("复核请求标识或预期修订无效");
+        String owner = actor();
+        var source = results.selectById(resultId);
+        var task = source == null ? null : tasks.selectById(source.getTaskId());
+        if (task == null || !owner.equals(task.getCreatedBy()) || !scope.canView(task.getCreatedBy(), task.getOwnerGroupId()))
+            throw IqcException.accessDenied("无权核对业务复核来源");
+        String fingerprint = hash(List.of(resultId, expectedRevision, reason(reason)));
+        var existing = reviews.selectById("br-" + hash(List.of(owner, requestId)).substring(0, 60));
+        if (existing != null && (!"BUSINESS".equals(existing.getTargetType())
+                || !resultId.equals(existing.getBusinessResultId()) || !owner.equals(existing.getCreatedBy())
+                || !Objects.equals(expectedRevision + 1, existing.getReviewRevision())
+                || !fingerprint.equals(existing.getRequestFingerprint())))
+            throw IqcException.invalidState("复核持久产物与原请求不一致");
+        return existing;
+    }
+
     /** Opens the next review round; caller supplies the last observed revision and a stable retry token. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ResultReview request(String resultId, int expectedRevision, String requestId, String reason) {
