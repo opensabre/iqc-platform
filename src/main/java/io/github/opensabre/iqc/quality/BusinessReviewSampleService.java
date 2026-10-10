@@ -90,13 +90,16 @@ public class BusinessReviewSampleService {
         if (transcript.isEmpty() || transcript.size() > 10_000
                 || conversation.getMessageCount() != null && conversation.getMessageCount() != transcript.size())
             throw IqcException.invalidState("候选会话消息不完整或超过10000条");
-        String executionInputHash = io.github.opensabre.iqc.result.ReviewSampleInputValidator.validate(source.getExecutionTraceJson(), transcript, json);
+        var verifiedInput = io.github.opensabre.iqc.result.ReviewSampleInputValidator.validateInput(
+                source.getExecutionTraceJson(), transcript, task, source.getConversationId(), json);
+        String executionInputHash = verifiedInput.executionInputHash();
         var input = json.createObjectNode().put("schemaVersion", "iqc-conversation-candidate-input-v1")
                 .put("conversationId", source.getConversationId()).put("channel", conversation.getChannel())
                 .put("sourceType", conversation.getSourceType()).put("businessType", conversation.getBusinessType())
                 .put("employeeId", conversation.getEmployeeId()).put("employeeGroupId", conversation.getEmployeeGroupId())
                 .put("startedTime", conversation.getStartedTime() == null ? null : conversation.getStartedTime().toString())
                 .put("endedTime", conversation.getEndedTime() == null ? null : conversation.getEndedTime().toString());
+        if(verifiedInput.businessContext()!=null)input.set("businessContext",verifiedInput.businessContext());
         var segments = input.putArray("segments");
         for (var message : transcript) {
             if (!source.getConversationId().equals(message.getConversationId()) || message.getId() == null

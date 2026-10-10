@@ -37,6 +37,51 @@ class ReviewSampleInputValidatorTest {
         stored.getFirst().setContent("已编辑");
         assertThatThrownBy(() -> ReviewSampleInputValidator.validate(trace,stored,json)).hasMessageContaining("原执行输入一致");
     }
+    private io.github.opensabre.iqc.task.model.InspectionTask frozenTask(List<ConversationMessage> messages) {
+        var task=new io.github.opensabre.iqc.task.model.InspectionTask();task.setId("task");task.setTaskType("PIPELINE");
+        task.setStatus("SUCCEEDED");task.setConversationIdsJson("[\"conversation\"]");task.setTotalMessages(messages.size());
+        var values=messages.stream().map(m->new io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Message(
+                m.getId(),m.getSequenceNo(),m.getSpeakerRole(),m.getContent(),m.getRelativeTime())).toList();
+        var input=new io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Input("conversation","fingerprint",
+                json.createObjectNode().put("businessType","support"),values);
+        var body=json.valueToTree(List.of(input));var root=json.createObjectNode();root.putObject("executionStrategy").put("mode","PIPELINE");
+        root.putObject("productionInputs").put("schemaVersion","iqc-production-inputs-v1")
+                .put("hashAlgorithm","selector-decimal-sha256-v1").put("contentHash",PipelineAssetService.hash(body.toString())).set("conversations",body);
+        task.setRuleSnapshotJson(root.toString());return task;
+    }
+    private String frozenTrace(io.github.opensabre.iqc.task.model.InspectionTask task) throws Exception {
+        var prepared=new io.github.opensabre.iqc.conversation.ProductionInputSnapshotService(null,null,null,json).prepare(task,json.readTree(task.getRuleSnapshotJson()));
+        var evaluator=new io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator(null,json,null);
+        var input=evaluator.executionInput(prepared.messages().get("conversation"),prepared.businessContext("conversation"));
+        return json.createObjectNode().put("schemaVersion","iqc-pipeline-execution-v1").put("inputHash",PipelineAssetService.hash(input.toString())).toString();
+    }
+    @Test void verifiesPipelineExecutionWithFrozenBusinessContext() throws Exception {
+        var messages=List.of(message("m1",1,"坐席"));var task=frozenTask(messages);String trace=frozenTrace(task);
+        messages.getFirst().setRawLine("archive metadata");messages.getFirst().setLineNumber(12);messages.getFirst().setCreatedBy("importer");
+        var verified=ReviewSampleInputValidator.validateInput(trace,messages,task,"conversation",json);
+        assertThat(verified.executionInputHash()).isEqualTo(jsonReadHash(trace));
+        assertThat(verified.businessContext().path("businessType").asText()).isEqualTo("support");
+        assertThat(messages.getFirst().getSpeakerRole()).isEqualTo("坐席");
+    }
+    @Test void frozenExecutionStillRejectsEditedTranscript() throws Exception {
+        var messages=List.of(message("m1",1,"agent"));var task=frozenTask(messages);String trace=frozenTrace(task);
+        messages.getFirst().setContent("edited");
+        assertThatThrownBy(()->ReviewSampleInputValidator.validateInput(trace,messages,task,"conversation",json)).hasMessageContaining("原执行输入一致");
+    }
+    @Test void frozenContextCannotBeChangedEvenWithUpdatedEnvelopeHash() throws Exception {
+        var messages=List.of(message("m1",1,"agent"));var task=frozenTask(messages);String trace=frozenTrace(task);
+        var root=json.readTree(task.getRuleSnapshotJson());var body=root.path("productionInputs").path("conversations");
+        ((com.fasterxml.jackson.databind.node.ObjectNode)body.get(0).path("businessContext")).put("businessType","changed");
+        ((com.fasterxml.jackson.databind.node.ObjectNode)root.path("productionInputs")).put("contentHash",PipelineAssetService.hash(body.toString()));
+        task.setRuleSnapshotJson(root.toString());
+        assertThatThrownBy(()->ReviewSampleInputValidator.validateInput(trace,messages,task,"conversation",json)).hasMessageContaining("原执行输入一致");
+    }
+    @Test void frozenInputRejectsForeignConversationAndBrokenEnvelope() throws Exception {
+        var messages=List.of(message("m1",1,"agent"));var task=frozenTask(messages);String trace=frozenTrace(task);
+        assertThatThrownBy(()->ReviewSampleInputValidator.validateInput(trace,messages,task,"foreign",json)).hasMessageContaining("原执行输入一致");
+        task.setRuleSnapshotJson(task.getRuleSnapshotJson().replace("support","tampered"));
+        assertThatThrownBy(()->ReviewSampleInputValidator.validateInput(trace,messages,task,"conversation",json)).hasMessageContaining("原执行输入一致");
+    }
     private String jsonReadHash(String trace) {
         try { return json.readTree(trace).path("inputHash").asText(); } catch(Exception error) { throw new AssertionError(error); }
     }
