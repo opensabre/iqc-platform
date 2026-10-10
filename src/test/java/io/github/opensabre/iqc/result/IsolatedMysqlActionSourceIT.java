@@ -43,7 +43,8 @@ class IsolatedMysqlActionSourceIT {
         results=session.getMapper(ConversationInspectionResultMapper.class);discovery=session.getMapper(ActionDiscoveryMapper.class);
     }
     @AfterAll static void close() {if(context!=null)context.close();IsolatedMysqlTaskExecutionStateIT.close();}
-    @BeforeEach void fixture() throws Exception {
+    @BeforeEach void fixture() throws Exception { fixture("SAVE_RESULT"); }
+    void fixture(String type) throws Exception {
         jdbc.update("DELETE FROM iqc_inspection_conversation_result");jdbc.update("DELETE FROM iqc_task_execution");jdbc.update("DELETE FROM iqc_inspection_task");
         var release=json.readValue("""
           {"schemaVersion":"iqc-pipeline-release-v1","pipeline":{"schemaVersion":"iqc-pipeline-v1","nodes":[
@@ -54,12 +55,15 @@ class IsolatedMysqlActionSourceIT {
           "scoring":{"version":"iqc-score-v2","mode":"DEDUCTION","baseScore":100,"passingScore":80,"items":[{"itemCode":"risk","points":20,"veto":false}]},
           "actionPolicy":{"schemaVersion":"iqc-action-policy-v1","actions":[{"actionId":"save","type":"SAVE_RESULT","condition":{"kind":"ALWAYS"},
           "idempotency":"PRODUCTION_SOURCE_V1","failureHandling":"RECORD_ONLY","configuration":{}}]}}
-          """,PipelineRelease.class);
+          """.replace("\"type\":\"SAVE_RESULT\"", "\"type\":\""+type+"\"")
+          .replace("\"configuration\":{}", "CREATE_REVIEW".equals(type)?"\"configuration\":{\"reason\":\"automated review\"}":"\"configuration\":{}"),PipelineRelease.class);
         var input=new ProductionInputSnapshotService.Input("conversation","revision",json.createObjectNode().put("businessType","frozen"),
                 List.of(new ProductionInputSnapshotService.Message("message",1,"agent","frozen text",null)));
         var body=json.valueToTree(List.of(input));var root=json.createObjectNode();root.putObject("executionStrategy").put("mode","PIPELINE");
         root.putObject("productionInputs").put("schemaVersion",ProductionInputSnapshotService.SCHEMA).put("hashAlgorithm","selector-decimal-sha256-v1")
                 .put("contentHash",SelectorAssetService.hash(body.toString())).set("conversations",body);
+        root.putObject("pipelineSnapshot").put("pipelineId","pipeline").put("versionNo",1)
+                .put("contentHash",PipelineAssetService.hash(json.writeValueAsString(release))).set("release",json.valueToTree(release));
         root.putObject("actionOwnerBound").put("schemaVersion","iqc-schedule-owner-scope-v1").put("userId","user").put("owner","alice").put("all",false).put("groupId","group");
         jdbc.update("INSERT INTO iqc_inspection_task(id,name,task_type,status,current_execution_id,created_by,owner_group_id,rule_snapshot_json,conversation_ids_json,total_messages) VALUES ('task','isolated source','PIPELINE','RUNNING','execution','alice','group',?,'[\"conversation\"]',1)",root.toString());
         jdbc.update("INSERT INTO iqc_task_execution(id,task_id,attempt_no,status) VALUES ('execution','task',1,'RUNNING')");
