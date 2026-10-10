@@ -154,6 +154,56 @@ class IsolatedMysqlMigrationIT {
         }
     }
 
+    @Test
+    void actionJournalUpgradeDoesNotFabricateEarlierAttempts() throws Exception {
+        verifyIsolatedServer();
+        String schema = "iqc_journal_upgrade_" + Long.toHexString(System.nanoTime());
+        String url = SERVER + schema + OPTIONS;
+        try (var server = DriverManager.getConnection(SERVER + OPTIONS,"root","");
+             var ddl = server.createStatement()) {
+            ddl.execute("CREATE DATABASE " + schema + " CHARACTER SET utf8mb4");
+            try {
+                var historical = Flyway.configure().dataSource(url,"root","")
+                        .locations("classpath:db/migration/mysql").target("1.1.63").load();
+                historical.migrate(); historical.validate();
+                try (var db = DriverManager.getConnection(url,"root",""); var sql = db.createStatement()) {
+                    sql.executeUpdate("""
+                        INSERT INTO iqc_action_execution(id,idempotency_key,task_id,execution_id,conversation_id,
+                        source_result_id,decision_reference,action_policy_hash,action_id,action_type,owner,
+                        input_snapshot_json,input_snapshot_hash,policy_snapshot_json,status,version,attempt_count,
+                        claim_token,outcome,evidence_reference)
+                        VALUES ('historical',REPEAT('1',64),'task','eid','conversation','result','decision',
+                        REPEAT('2',64),'alert','SEND_ALERT','alice','{}',REPEAT('3',64),'{}','WAITING_RETRY',2,1,
+                        REPEAT('a',32),'CONFIRMED_RETRYABLE_FAILURE','old-proof')
+                        """);
+                }
+                var current = Flyway.configure().dataSource(url,"root","")
+                        .locations("classpath:db/migration/mysql").load();
+                assertThat(current.migrate().migrationsExecuted).isEqualTo(1);
+                current.validate(); assertThat(current.migrate().migrationsExecuted).isZero();
+                try (var db = DriverManager.getConnection(url,"root",""); var sql = db.createStatement()) {
+                    try (var count = sql.executeQuery("SELECT COUNT(*) FROM iqc_action_execution_event")) {
+                        assertThat(count.next()).isTrue(); assertThat(count.getInt(1)).isZero();
+                    }
+                    sql.executeUpdate("""
+                        UPDATE iqc_action_execution SET status='RUNNING',version=3,attempt_count=2,
+                        claim_token=REPEAT('b',32),outcome=NULL,evidence_reference=NULL,updated_by='system'
+                        WHERE id='historical' AND version=2
+                        """);
+                    try (var event = sql.executeQuery("""
+                        SELECT version,previous_version,JSON_UNQUOTE(JSON_EXTRACT(previous_state_json,'$.evidence_reference')),
+                        JSON_UNQUOTE(JSON_EXTRACT(state_json,'$.claim_token'))
+                        FROM iqc_action_execution_event WHERE action_execution_id='historical'
+                        """)) {
+                        assertThat(event.next()).isTrue(); assertThat(event.getLong(1)).isEqualTo(3);
+                        assertThat(event.getLong(2)).isEqualTo(2); assertThat(event.getString(3)).isEqualTo("old-proof");
+                        assertThat(event.getString(4)).isEqualTo("b".repeat(32)); assertThat(event.next()).isFalse();
+                    }
+                }
+            } finally { ddl.execute("DROP DATABASE " + schema); }
+        }
+    }
+
     /** Fail closed on the exact disposable server identity before any schema writes. */
     static void verifyIsolatedServer() throws Exception {
         String directory = System.getenv("IQC_MYSQL_VALIDATION_DIR");
@@ -171,6 +221,8 @@ class IsolatedMysqlMigrationIT {
     private static void assertCurrentSchema(String url) throws Exception {
         try (var connection = DriverManager.getConnection(url, "root", "")) {
             for (String[] expected : new String[][] {
+                    {"iqc_action_execution_event", "state_json", "json", "NO", null},
+                    {"iqc_action_execution_event", "recorded_at_utc", "datetime", "NO", null},
                     {"iqc_inspection_conversation_result", "action_discovered_at_utc", "datetime", "YES", null},
                     {"iqc_inspection_conversation_result", "action_discovery_after_utc", "datetime", "YES", null},
                     {"iqc_inspection_task", "trigger_request_json", "longtext", "YES", null},
@@ -209,7 +261,7 @@ class IsolatedMysqlMigrationIT {
             try (var query = connection.createStatement();
                  var history = query.executeQuery("SELECT version,success FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1")) {
                 assertThat(history.next()).isTrue();
-                assertThat(history.getString(1)).isEqualTo("1.1.63");
+                assertThat(history.getString(1)).isEqualTo("1.1.64");
                 assertThat(history.getBoolean(2)).isTrue();
             }
             try (var query = connection.createStatement();

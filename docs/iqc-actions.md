@@ -145,3 +145,7 @@ POST `/api/iqc/conversation-results/{id}/actions/{actionExecutionId}/reconcile` 
 SAVE_RESULT严格读取既有结果及冻结trace/scoring/items；CREATE_REVIEW与ADD_TO_EVALUATION_CANDIDATE复用原业务服务的稳定请求ID和内容指纹，只查第一份实际复核/候选。后续裁决、当前EID或归档变动不触发新轮次/重新采集；读不到产物或没有只读适配时继续UNKNOWN。核对不要求原发送权限，不调用execute/request/create或gold审核。
 
 成功回执按原key绑定；核对后重新读取来源和完整请求，再以版本、原claimToken、REQUIRES_RECONCILIATION/UNKNOWN执行单条CAS到COMPLETE，保留attempt与claim，保存真实产物引用及当前操作人。并发核对或迟到worker不能覆盖赢家。响应CONFIRMED/UNCONFIRMED/STALE_OBSERVATION分别表示实际确认、缺确认和观察失效，无自动重试。现有审计注解记录人工入口，不等同完整动作尝试历史；远程适配恢复、阻塞恢复、操作UI及真实登录权限验收仍待完成。
+
+### 2026-10-11：事务状态日志
+
+V1.1.64 增加原账本从属的 iqc_action_execution_event；INSERT 初始观察和每次递增版本的状态变更由 MySQL 触发器在同一事务记录前后状态元数据。重试覆盖当前行回执时，旧事件仍保留原 claim/outcome/evidence。日志写入失败回滚领取/结算，败者 CAS 不产生日志。旧运行行不回填，首次后续变更仅保存当时 OLD/NEW；尝试记录不是已发送证明。详细限制与实际 SQL 验收见 [状态日志说明](iqc-prd-b-action-state-journal.md)。查询 API/UI 与人工原因持久日志仍未接入，原独立审计入口保持不变。

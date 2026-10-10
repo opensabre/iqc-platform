@@ -38,7 +38,7 @@ class IsolatedMysqlActionExecutionIT {
         IsolatedMysqlTaskExecutionStateIT.close();
     }
     @BeforeEach void fixture() {
-        jdbc.update("DELETE FROM iqc_action_execution");
+        jdbc.update("DELETE FROM iqc_action_execution_event");jdbc.update("DELETE FROM iqc_action_execution");
         jdbc.update("""
             INSERT INTO iqc_action_execution(id,idempotency_key,task_id,execution_id,conversation_id,
             source_result_id,decision_reference,action_policy_hash,action_id,action_type,owner,
@@ -71,6 +71,7 @@ class IsolatedMysqlActionExecutionIT {
         var row = actions.selectById("action");
         assertThat(row.getStatus()).isEqualTo("RUNNING");
         assertThat(row.getVersion()).isEqualTo(1L); assertThat(row.getAttemptCount()).isEqualTo(1);
+        assertThat(eventCount()).isEqualTo(2); // Initial observation plus the one winning claim.
     }
     @Test void settlementRequiresCurrentVersionAndTokenAndCannotRepeat() {
         assertThat(claim(TOKEN, 0, NOW)).isEqualTo(1);
@@ -92,6 +93,11 @@ class IsolatedMysqlActionExecutionIT {
         var row = actions.selectById("action");
         assertThat(row.getAttemptCount()).isEqualTo(2); assertThat(row.getVersion()).isEqualTo(3L);
         assertThat(row.getOutcome()).isNull(); assertThat(row.getEvidenceReference()).isNull();
+        assertThat(eventCount()).isEqualTo(4);
+        assertThat(jdbc.queryForList("SELECT JSON_UNQUOTE(JSON_EXTRACT(state_json,'$.claim_token')) FROM iqc_action_execution_event WHERE action_execution_id='action' AND version IN (1,3) ORDER BY version", String.class))
+                .containsExactly(TOKEN,"b".repeat(32));
+        assertThat(jdbc.queryForObject("SELECT JSON_UNQUOTE(JSON_EXTRACT(state_json,'$.outcome')) FROM iqc_action_execution_event WHERE action_execution_id='action' AND version=2", String.class))
+                .isEqualTo("CONFIRMED_RETRYABLE_FAILURE");
     }
     @Test void unknownAndLostClaimsNeverReturnToAutomaticQueue() {
         assertThat(claim(TOKEN, 0, NOW)).isEqualTo(1);
@@ -121,11 +127,53 @@ class IsolatedMysqlActionExecutionIT {
         })).hasMessage("isolated transaction abort");
         var row = actions.selectById("action"); assertThat(row.getStatus()).isEqualTo("PENDING");
         assertThat(row.getVersion()).isZero(); assertThat(row.getAttemptCount()).isZero();
-        assertThat(row.getClaimToken()).isNull(); assertThat(claim(TOKEN, 0, NOW)).isEqualTo(1);
+        assertThat(row.getClaimToken()).isNull(); assertThat(eventCount()).isEqualTo(1);
+        assertThat(claim(TOKEN, 0, NOW)).isEqualTo(1);
     }
     @Test void databaseRejectsDuplicateStableIdempotencyKey() {
         var row = actions.selectById("action"); row.setId("duplicate");
         assertThatThrownBy(() -> actions.insert(row)).isInstanceOf(org.springframework.dao.DuplicateKeyException.class);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_action_execution", Integer.class)).isEqualTo(1);
     }
+    private int eventCount() {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM iqc_action_execution_event WHERE action_execution_id='action'", Integer.class);
+    }
+    @Test void unknownResolutionKeepsOriginalClaimAndOperatorInOrderedHistory() {
+        assertThat(claim(TOKEN,0,NOW)).isEqualTo(1);
+        assertThat(tx.<Integer>execute(status -> actions.quarantineLostClaim("action",1,TOKEN,NOW,NOW))).isEqualTo(1);
+        assertThat(tx.<Integer>execute(status -> actions.reconcileSuccess("action",2,TOKEN,NOW,"durable-proof","original-artifact","alice"))).isEqualTo(1);
+        assertThat(tx.<Integer>execute(status -> actions.reconcileSuccess("action",2,TOKEN,NOW,"durable-proof","original-artifact","alice"))).isZero();
+        assertThat(eventCount()).isEqualTo(4);
+        assertThat(jdbc.queryForList("SELECT JSON_UNQUOTE(JSON_EXTRACT(state_json,'$.status')) FROM iqc_action_execution_event WHERE action_execution_id='action' ORDER BY version", String.class))
+                .containsExactly("PENDING","RUNNING","REQUIRES_RECONCILIATION","COMPLETE");
+        assertThat(jdbc.queryForObject("SELECT actor FROM iqc_action_execution_event WHERE action_execution_id='action' AND version=3",String.class)).isEqualTo("alice");
+        assertThat(jdbc.queryForObject("SELECT JSON_UNQUOTE(JSON_EXTRACT(previous_state_json,'$.outcome')) FROM iqc_action_execution_event WHERE action_execution_id='action' AND version=3",String.class)).isEqualTo("UNKNOWN");
+    }
+    @Test void journalFailureRollsBackTheClaimBeforeDispatchCanReceiveIt() {
+        jdbc.execute("CREATE TRIGGER reject_action_journal BEFORE INSERT ON iqc_action_execution_event FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='journal write rejected'");
+        try {
+            assertThatThrownBy(() -> claim(TOKEN,0,NOW)).isInstanceOf(org.springframework.dao.DataAccessException.class);
+            assertThat(actions.selectById("action").getStatus()).isEqualTo("PENDING");
+            assertThat(actions.selectById("action").getAttemptCount()).isZero();
+            assertThat(eventCount()).isEqualTo(1);
+        } finally { jdbc.execute("DROP TRIGGER reject_action_journal"); }
+    }
+    @Test void changingStateWithoutNextVersionIsRejectedButSnapshotTamperingDoesNotInventAnAttempt() {
+        assertThatThrownBy(() -> jdbc.update("UPDATE iqc_action_execution SET status='COMPLETE' WHERE id='action'"))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+        jdbc.update("UPDATE iqc_action_execution SET input_snapshot_json='changed' WHERE id='action'");
+        assertThat(actions.selectById("action").getStatus()).isEqualTo("PENDING");
+        assertThat(eventCount()).isEqualTo(1);
+    }
+
+    @Test void prerequisiteDeferralAndAuthorizationBlockAreJournaledWithoutInventingAnAttempt() {
+        assertThat(tx.<Integer>execute(status -> actions.deferPrerequisite("action",0,NOW,NOW.plusMinutes(1)))).isEqualTo(1);
+        assertThat(tx.<Integer>execute(status -> actions.blockReady("action",1,"BLOCKED_AUTHORIZATION","AUTHORIZATION_MISSING",NOW))).isEqualTo(1);
+        assertThat(eventCount()).isEqualTo(3);
+        assertThat(jdbc.queryForList("SELECT JSON_EXTRACT(state_json,'$.attempt_count') FROM iqc_action_execution_event WHERE action_execution_id='action' ORDER BY version",String.class))
+                .containsExactly("0","0","0");
+        assertThat(jdbc.queryForObject("SELECT JSON_UNQUOTE(JSON_EXTRACT(state_json,'$.status')) FROM iqc_action_execution_event WHERE action_execution_id='action' AND version=1",String.class)).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT JSON_UNQUOTE(JSON_EXTRACT(state_json,'$.last_error_code')) FROM iqc_action_execution_event WHERE action_execution_id='action' AND version=2",String.class)).isEqualTo("AUTHORIZATION_MISSING");
+    }
+
 }

@@ -56,7 +56,7 @@ class IsolatedMysqlActionWorkflowIT {
     }
     @AfterAll static void close() {if(context!=null)context.close();IsolatedMysqlTaskExecutionStateIT.close();}
     @BeforeEach void fixture() throws Exception {
-        jdbc.update("DELETE FROM iqc_action_execution");
+        jdbc.update("DELETE FROM iqc_action_execution_event");jdbc.update("DELETE FROM iqc_action_execution");
         var json=new ObjectMapper();
         var action=new ActionPolicy.Action("save",ActionExecutionContract.Type.SAVE_RESULT,
                 new ActionPolicy.Condition(ActionPolicy.Kind.ALWAYS,null,null,List.of()),ActionPolicy.Idempotency.PRODUCTION_SOURCE_V1,

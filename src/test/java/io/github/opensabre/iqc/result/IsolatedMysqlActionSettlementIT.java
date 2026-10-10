@@ -51,7 +51,7 @@ class IsolatedMysqlActionSettlementIT {
         if(context!=null)context.close();IsolatedMysqlTaskExecutionStateIT.close();
     }
     @BeforeEach void fixture() throws Exception {
-        jdbc.execute("DROP TRIGGER IF EXISTS reject_action_settlement");jdbc.update("DELETE FROM iqc_action_execution");
+        jdbc.execute("DROP TRIGGER IF EXISTS reject_action_settlement");jdbc.update("DELETE FROM iqc_action_execution_event");jdbc.update("DELETE FROM iqc_action_execution");
         var json=new ObjectMapper();
         var action=new ActionPolicy.Action("save",ActionExecutionContract.Type.SAVE_RESULT,
                 new ActionPolicy.Condition(ActionPolicy.Kind.ALWAYS,null,null,List.of()),ActionPolicy.Idempotency.PRODUCTION_SOURCE_V1,
