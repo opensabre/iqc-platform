@@ -25,7 +25,12 @@ public class ActionExecutionController {
     public record ReconciliationRequest(long version,String reason) { }
     @GetMapping
     @ResourcePermission(code="iqc:action:history:view",name="查看结果动作记录",type="iqc",description="查看授权会话结果的动作状态，不返回冻结输入或策略配置")
-    public List<ActionQueryService.View> history(@PathVariable String id){return queries.history(id);}
+    public List<ActionQueryService.View> history(@PathVariable String id,
+            @org.springframework.web.bind.annotation.RequestParam(required=false) String actionExecutionId,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue="false") boolean includeHistory,
+            @org.springframework.web.bind.annotation.RequestParam(required=false) String beforeVersion) {
+        return queries.history(id,actionExecutionId,includeHistory,beforeVersion);
+    }
     @PostMapping("/enqueue")
     @ResourcePermission(code="iqc:action:enqueue",name="请求生产结果动作检查",type="iqc",description="安排负责人生产结果的后台动作检查，不直接发送或重试动作")
     @Audit(operationType=OperationType.UPDATE,description="请求生产结果动作检查",module="IQC_ACTION")

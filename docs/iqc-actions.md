@@ -149,3 +149,7 @@ SAVE_RESULT严格读取既有结果及冻结trace/scoring/items；CREATE_REVIEW�
 ### 2026-10-11：事务状态日志
 
 V1.1.64 增加原账本从属的 iqc_action_execution_event；INSERT 初始观察和每次递增版本的状态变更由 MySQL 触发器在同一事务记录前后状态元数据。重试覆盖当前行回执时，旧事件仍保留原 claim/outcome/evidence。日志写入失败回滚领取/结算，败者 CAS 不产生日志。旧运行行不回填，首次后续变更仅保存当时 OLD/NEW；尝试记录不是已发送证明。详细限制与实际 SQL 验收见 [状态日志说明](iqc-prd-b-action-state-journal.md)。查询 API/UI 与人工原因持久日志仍未接入，原独立审计入口保持不变。
+
+### 2026-10-11：读取事务状态历史
+
+原动作记录 GET 新增可选 `actionExecutionId/includeHistory/beforeVersion` 参数，复用原 `iqc:action:history:view`；单动作最多50条及字符串版本游标。按原结果/task/EID/conversation/owner重新授权，SQL白名单不选claim token或冻结内容。明确升级前历史缺口，不重建已覆盖的过程。默认摘要读取不查询日志。协议及实际验收见 [状态历史接口](iqc-action-state-history-api.md)；未新增资源/角色/权限迁移。

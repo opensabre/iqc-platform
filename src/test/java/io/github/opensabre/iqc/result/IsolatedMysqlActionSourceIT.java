@@ -139,4 +139,32 @@ class IsolatedMysqlActionSourceIT {
         jdbc.update("UPDATE iqc_inspection_task SET pause_requested=0,task_type='PIPELINE_TRIAL' WHERE id='task'");assertTrue(discovery.findDue(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)).isEmpty());
     }
 
+    @Test void historyJournalRequiresActualOwningResultTaskExecutionConversationAndOwner() {
+        var session=new SqlSessionTemplate(context.getBean(SqlSessionFactory.class));
+        var actions=session.getMapper(io.github.opensabre.iqc.action.ActionExecutionMapper.class);
+        var events=session.getMapper(io.github.opensabre.iqc.action.ActionStateEventMapper.class);
+        var scope=mock(io.github.opensabre.iqc.shared.IqcDataScope.class);
+        when(scope.canView("alice","group")).thenReturn(true);
+        var query=new io.github.opensabre.iqc.action.ActionQueryService(results,tasks,actions,scope,events,json);
+        jdbc.update("DELETE FROM iqc_action_execution_event");jdbc.update("DELETE FROM iqc_action_execution");
+        String id="a".repeat(64);
+        jdbc.update("""
+            INSERT INTO iqc_action_execution(id,idempotency_key,task_id,execution_id,conversation_id,
+            source_result_id,decision_reference,action_policy_hash,action_id,action_type,owner,
+            input_snapshot_json,input_snapshot_hash,policy_snapshot_json,status)
+            VALUES (?,?,'task','execution','conversation','result','result',?,'save','SAVE_RESULT','alice','{}',?,'{}','PENDING')
+            """,id,id,"b".repeat(64),"c".repeat(64));
+        assertEquals(1,tx.execute(status->query.history("result",id,true,null)).getFirst().history().events().size());
+        // Each forged reference must be rejected by the actual authorized ledger query, not a mock answer.
+        for(String[] forged:new String[][]{{"task_id","foreign-task"},{"execution_id","foreign-eid"},{"conversation_id","foreign-conversation"},{"owner","mallory"},{"source_result_id","foreign-result"}}) {
+            String original=switch(forged[0]) {case "task_id"->"task";case "execution_id"->"execution";case "conversation_id"->"conversation";case "owner"->"alice";default->"result";};
+            // Identifiers below are fixed test-owned columns, never request interpolation.
+            jdbc.update("UPDATE iqc_action_execution SET "+forged[0]+"=? WHERE id=?",forged[1],id);
+            try {assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->tx.execute(status->query.history("result",id,true,null)));}
+            finally {jdbc.update("UPDATE iqc_action_execution SET "+forged[0]+"=? WHERE id=?",original,id);}
+        }
+        when(scope.canView("alice","group")).thenReturn(false);
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->tx.execute(status->query.history("result",id,true,null)));
+    }
+
 }

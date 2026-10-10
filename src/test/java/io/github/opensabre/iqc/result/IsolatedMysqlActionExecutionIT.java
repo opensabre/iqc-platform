@@ -176,4 +176,27 @@ class IsolatedMysqlActionExecutionIT {
         assertThat(jdbc.queryForObject("SELECT JSON_UNQUOTE(JSON_EXTRACT(state_json,'$.last_error_code')) FROM iqc_action_execution_event WHERE action_execution_id='action' AND version=2",String.class)).isEqualTo("AUTHORIZATION_MISSING");
     }
 
+    @Test void journalReaderSelectsOnlyWhitelistFieldsAndPaginatesByExactVersion() throws Exception {
+        var reader=new SqlSessionTemplate(context.getBean(SqlSessionFactory.class)).getMapper(ActionStateEventMapper.class);
+        // Future or malformed extra payload keys must not silently become public response fields.
+        for(long version=10;version<70;version++)jdbc.update("""
+            INSERT INTO iqc_action_execution_event(action_execution_id,version,previous_version,source_result_id,state_json,recorded_at_utc)
+            VALUES ('action',?,?,'result',JSON_OBJECT('status','COMPLETE','attempt_count',2,'claim_token',?,
+            'input_snapshot_json','private input','unexpected_field','private future data','outcome',NULL,
+            'evidence_reference','null'),UTC_TIMESTAMP(3))
+            """,version,version-1,TOKEN);
+        var first=reader.page("action","result",null);
+        assertThat(first).hasSize(51);assertThat(first.getFirst().getVersion()).isEqualTo(69L);
+        var json=new com.fasterxml.jackson.databind.ObjectMapper();
+        for(var event:first) {
+            assertThat(event.getStateJson()).doesNotContain(TOKEN,"claim_token","private input","unexpected_field");
+            var state=json.readTree(event.getStateJson());assertThat(state.get("outcome").isNull()).isTrue();
+            assertThat(state.get("evidenceReference").asText()).isEqualTo("null");
+        }
+        var second=reader.page("action","result",20L);
+        assertThat(second).extracting(ActionStateEventProjection::getVersion).containsExactly(19L,18L,17L,16L,15L,14L,13L,12L,11L,10L,0L);
+        assertThat(reader.page("action","foreign-result",null)).isEmpty();
+        assertThat(reader.page("foreign-action","result",null)).isEmpty();
+    }
+
 }
