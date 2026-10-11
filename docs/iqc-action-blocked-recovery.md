@@ -29,3 +29,13 @@ ActionRecoveryService要求已解析新鲜负责人及iqc:action:recover，沿�
 状态CAS成功后在同REQUIRES_NEW事务附加同版本原因，非1或异常抛出。服务不调用execute，不清除原回执/次数；实际回滚须真实MySQL验收。尚无调用该服务的公开入口、资源注册/受控授权或管理端恢复表单，不能宣称可用恢复功能已完成。
 
 29770 exit0，幂等/共享冻结校验/恢复编排18项及参数绑定1项，共19项零失败错误跳过。恢复原因规范化、不发送、缺权限/旧观察/UNKNOWN拒绝、原因写入失败抛出通过。只是mock编排，不证明真实事务回滚；API、权限注册/受控授权、UI及真实SQL验收尚待完成。
+
+## 恢复请求入口（正在验证）
+
+POST `/api/iqc/conversation-results/{resultId}/actions/{actionId}/recover`只接受version和非空≤1000字符reason，返回RECOVERED或NOT_RECOVERED；NOT_RECOVERED不承诺具体失败类型，不自动重试。原Audit/限流独立scene和iqc:action:recover资源声明，后台开关未启用时拒绝。受控角色授权迁移与UI尚未接入。
+
+ActionRecoveryRequestService为NEVER，当前稳定身份capture和固定工作流grant projection都在事务外。应用层resolveCurrent复用组织账户/稳定ID/新鲜grant投影，原后台resolve继续requireBackground。asCurrentActor在进入事务前核对当前owner/all/group，保留SecurityContext/UserContext不改，callback期间本地范围读避免groupId组织网络在锁内发生，finally清理同步范围。既有后台路径没有放宽。真实组织HTTP、角色登录、事务与迁移验收仍待完成。
+
+同步原会话候选91a3680/18fd4e0：领取和恢复在ready返回后重取最终UTC毫秒时间并重检冻结期限；恢复入口和SQL为领取、结算保留三个版本增量，观察版本必须<=Long.MAX_VALUE-3。共享范围方法保留A587f54b的requireScheduledBound，当前用户授权入口保留真实认证，不模拟后台。
+
+同步后的定向回归78740 exit0：当前授权9、当前/后台范围5、普通范围4、入队/领取/恢复28、参数绑定1，共47项零失败错误跳过。期限测试使用可控时钟覆盖期限前、恰好到期、跨期；版本测试覆盖MAX-3至MAX。它们不证明真实SQL条件、服务代理回滚或HTTP资源授权；既有独立815项不属于本提交的完整回归。

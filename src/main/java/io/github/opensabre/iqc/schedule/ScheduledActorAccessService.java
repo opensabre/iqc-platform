@@ -39,6 +39,17 @@ public class ScheduledActorAccessService {
         if(requiredResources==null || requiredResources.isEmpty())throw IqcException.invalidState("后台工作流缺少固定授权要求");
         requireBackground();
         if(tokens.currentClaims()!=null)throw IqcException.invalidState("周期后台不能继承用户令牌");
+        return project(bound,requiredResources);
+    }
+    /** Authenticated workflow projection; never clears authentication or borrows the background-only entry. */
+    public Resolved resolveCurrent(CreationBound bound,Set<String> requiredResources) {
+        if(bound==null || !java.util.Objects.equals(bound.owner(),scope.owner()) || bound.all()!=scope.canViewAll()
+                || !java.util.Objects.equals(bound.groupId(),scope.groupId()))
+            throw IqcException.accessDenied("当前负责人范围已变化");
+        if(requiredResources==null || requiredResources.isEmpty())throw IqcException.invalidState("当前工作流缺少固定授权要求");
+        return project(bound,requiredResources);
+    }
+    private Resolved project(CreationBound bound,Set<String> requiredResources) {
         if(bound==null || !"iqc-schedule-owner-scope-v1".equals(bound.schemaVersion()) || bound.userId()==null
                 || !bound.userId().matches("[A-Za-z0-9:_-]{1,64}") || bound.owner()==null || bound.owner().isBlank()
                 || "system".equals(bound.owner()))throw IqcException.invalidState("周期负责人范围证据无效");

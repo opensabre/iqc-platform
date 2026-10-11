@@ -73,11 +73,18 @@ public class ActionClaimService {
                 executions.deferPrerequisite(id,expectedVersion,utc,utc.plusMinutes(1));
                 return null;
             }
+            // Readiness may wait on storage. Fence the deadline again at the actual claim boundary.
+            Instant claimAt=Instant.now().truncatedTo(ChronoUnit.MILLIS);
+            LocalDateTime claimUtc=LocalDateTime.ofInstant(claimAt,ZoneOffset.UTC);
+            ActionEnqueueService.requireFresh(actor);
+            if(prepared.exhausted(row,claimAt)) {
+                executions.blockReady(id,expectedVersion,"EXPIRED","ACTION_ATTEMPTS_OR_DEADLINE_EXHAUSTED",claimUtc);
+                return null;
+            }
             String token=UUID.randomUUID().toString().replace("-","");
             var request=new ActionAdapter.Request(id,row.getIdempotencyKey(),source,binding.definition(),row.getAttemptCount()+1,
                     row.getInputSnapshotJson(),row.getInputSnapshotHash(),policyBody);
-            ActionEnqueueService.requireFresh(actor);
-            if(executions.claim(id,expectedVersion,token,utc)!=1)return null;
+            if(executions.claim(id,expectedVersion,token,claimUtc)!=1)return null;
             return new Claim(request,expectedVersion+1,token);
         } catch(com.fasterxml.jackson.core.JsonProcessingException failure) {
             throw IqcException.invalidState("动作领取策略无法序列化");

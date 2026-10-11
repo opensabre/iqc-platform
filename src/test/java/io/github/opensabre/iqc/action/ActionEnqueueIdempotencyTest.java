@@ -178,4 +178,85 @@ class ActionEnqueueIdempotencyTest {
         verify(rows,never()).recoverBlocked(anyString(),anyLong(),anyString(),any());verifyNoInteractions(stateEvents);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs={500,1000,2000})
+    void claimMustRecheckDeadlineAfterAdapterReadiness(long elapsedMillis) {
+        json.findAndRegisterModules();
+        var start=Instant.parse("2026-10-11T00:00:00Z");
+        var clock=new AtomicReference<Instant>(start);
+        var original=action("save",ActionPolicy.Kind.ALWAYS);
+        var retry=new io.github.opensabre.iqc.task.retry.AutomaticRetryPolicy(
+                "iqc-automatic-retry-v1",2,1,1,1,start.plusSeconds(1));
+        policy=new ActionPolicy(ActionPolicy.SCHEMA,List.of(new ActionPolicy.Action(original.actionId(),original.type(),
+                original.condition(),original.idempotency(),retry,original.failureHandling(),original.configuration())));
+        source("user");
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(new com.baomidou.mybatisplus.core.MybatisConfiguration(),"deadline-review"),ActionExecution.class);
+        var adapter=mock(ActionAdapter.class);
+        when(adapter.requiredResources()).thenReturn(Set.of());
+        when(adapter.ready(any(),any())).thenAnswer(call->{clock.set(start.plusMillis(elapsedMillis));return true;});
+        when(adapters.require(any())).thenReturn(new ActionAdapterRegistry.Binding(
+                new ActionAdapter.Definition(ActionExecutionContract.Type.SAVE_RESULT,1,true),adapter));
+        when(rows.selectById(anyString())).thenAnswer(call->saved.get());
+        when(rows.selectOne(any())).thenAnswer(call->saved.get());
+        when(rows.claim(anyString(),anyLong(),anyString(),any())).thenReturn(1);
+        try(var time=mockStatic(Instant.class,CALLS_REAL_METHODS)) {
+            time.when(Instant::now).thenAnswer(call->clock.get());
+            service.enqueue(reference,actor());
+            var claims=new ActionClaimService(rows,sources,adapters,scope,json);
+            var claim=claims.claim(saved.get().getId(),0,actor());
+            var completedAt=java.time.LocalDateTime.ofInstant(clock.get(),java.time.ZoneOffset.UTC);
+            if(elapsedMillis>=1000) {
+                assertNull(claim,"Deadline crossed during ready must prevent claim");
+                verify(rows,never()).claim(anyString(),anyLong(),anyString(),any());
+                verify(rows).blockReady(saved.get().getId(),0,"EXPIRED","ACTION_ATTEMPTS_OR_DEADLINE_EXHAUSTED",completedAt);
+            } else {
+                assertNotNull(claim,"Readiness before deadline must still permit claim");
+                verify(rows).claim(eq(saved.get().getId()),eq(0L),anyString(),eq(completedAt));
+                verify(rows,never()).blockReady(anyString(),anyLong(),anyString(),anyString(),any());
+            }
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs={500,1000,2000})
+    void recoveryRechecksDeadlineAfterReadiness(long elapsedMillis) {
+        json.findAndRegisterModules();
+        var start=Instant.parse("2026-10-11T00:00:00Z");var clock=new AtomicReference<Instant>(start);
+        var original=action("save",ActionPolicy.Kind.ALWAYS);
+        policy=new ActionPolicy(ActionPolicy.SCHEMA,List.of(new ActionPolicy.Action(original.actionId(),original.type(),
+                original.condition(),original.idempotency(),new io.github.opensabre.iqc.task.retry.AutomaticRetryPolicy(
+                "iqc-automatic-retry-v1",2,1,1,1,start.plusSeconds(1)),original.failureHandling(),original.configuration())));
+        source("user");
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(new com.baomidou.mybatisplus.core.MybatisConfiguration(),"recovery-deadline"),ActionExecution.class);
+        try(var time=mockStatic(Instant.class,CALLS_REAL_METHODS)) {
+            time.when(Instant::now).thenAnswer(call->clock.get());
+            var recovery=recoveryFixture();var row=saved.get();var owner=recoveryActor();
+            var adapter=adapters.require(policy.actions().getFirst()).adapter();
+            when(adapter.ready(any(),any())).thenAnswer(call->{clock.set(start.plusMillis(elapsedMillis));return true;});
+            boolean recovered=recovery.recover("result",row.getId(),0,owner,"期限边界");
+            assertEquals(elapsedMillis<1000,recovered);
+            if(recovered)verify(rows).recoverBlocked(row.getId(),0,"alice",java.time.LocalDateTime.ofInstant(clock.get(),java.time.ZoneOffset.UTC));
+            else {verify(rows,never()).recoverBlocked(anyString(),anyLong(),anyString(),any());verifyNoInteractions(stateEvents);}
+            verify(adapter,never()).execute(any());
+        }
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs={9223372036854775804L,9223372036854775805L,9223372036854775806L,9223372036854775807L})
+    void recoveryReservesVersionSpaceForClaimAndSettlement(long observedVersion) {
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(new com.baomidou.mybatisplus.core.MybatisConfiguration(),"recovery-version"),ActionExecution.class);
+        var recovery=recoveryFixture();var row=saved.get();row.setVersion(observedVersion);
+        clearInvocations(rows,stateEvents,sources);
+        if(observedVersion>Long.MAX_VALUE-3) {
+            assertThrows(IqcException.class,()->recovery.recover("result",row.getId(),observedVersion,recoveryActor(),"版本边界"));
+            verifyNoInteractions(rows,stateEvents,sources);
+        } else {
+            assertTrue(recovery.recover("result",row.getId(),observedVersion,recoveryActor(),"版本边界"));
+            verify(stateEvents).recordRecoveryReason(row.getId(),observedVersion+1,observedVersion,"result","alice","版本边界");
+            assertTrue(observedVersion+1<=Long.MAX_VALUE-2);
+        }
+    }
+
 }

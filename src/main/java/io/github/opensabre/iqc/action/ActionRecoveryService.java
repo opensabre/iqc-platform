@@ -32,7 +32,7 @@ public class ActionRecoveryService {
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
     public boolean recover(String resultId,String id,long version,ScheduledActorAccessService.Resolved actor,String reason) {
         if(resultId==null || !resultId.matches("[A-Za-z0-9][A-Za-z0-9:_./@+-]{0,63}")
-                || id==null || !id.matches("[a-f0-9]{64}") || version<0 || version==Long.MAX_VALUE
+                || id==null || !id.matches("[a-f0-9]{64}") || version<0 || version>Long.MAX_VALUE-3
                 || reason==null || reason.isBlank() || reason.trim().length()>1000)
             throw IqcException.invalidArgument("动作恢复标识、版本或原因无效");
         if(actor==null || actor.resourceCodes()==null || !actor.resourceCodes().contains(RESOURCE))
@@ -60,8 +60,10 @@ public class ActionRecoveryService {
             }
             if(prepared.action().type()==ActionExecutionContract.Type.CREATE_REVIEW && "RUNNING".equals(validated.taskStatus()))return false;
             if(!binding.adapter().ready(prepared.action(),validated))return false;
+            var recoveryAt=Instant.now().truncatedTo(ChronoUnit.MILLIS);
             ActionEnqueueService.requireFresh(actor);
-            if(actions.recoverBlocked(id,version,actor.owner(),LocalDateTime.ofInstant(now,ZoneOffset.UTC))!=1)return false;
+            if(prepared.exhausted(row,recoveryAt))return false;
+            if(actions.recoverBlocked(id,version,actor.owner(),LocalDateTime.ofInstant(recoveryAt,ZoneOffset.UTC))!=1)return false;
             if(events.recordRecoveryReason(id,version+1,version,resultId,actor.owner(),reason.trim())!=1)
                 throw IqcException.invalidState("动作恢复原因未能与状态同时保存");
             return true;

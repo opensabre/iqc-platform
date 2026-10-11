@@ -59,4 +59,20 @@ class ScheduledActorScopeTest {
                     .hasMessageContaining("invalid or nested");
         cleared();
     }
+    @Test void currentScopePreservesAuthenticatedContextAndCleansUpAfterFailure() {
+        var original=java.util.Map.of(context.KEY_USERNAME,"owner",context.KEY_USER_ID,"user-owner");context.setContext(original);
+        var authentication=new org.springframework.security.authentication.TestingAuthenticationToken("owner","none","ROLE_INSPECTOR");
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        var failure=new IllegalStateException("callback failed");
+        assertThatThrownBy(()->scope.asCurrentActor(actor("owner",false,null,Instant.now()),()->{
+            assertThat(SecurityContextHolder.getContext().getAuthentication()).isSameAs(authentication);
+            assertThat(context.getContext()).containsAllEntriesOf(original);
+            assertThatThrownBy(()->scope.asCurrentActor(actor("owner",false,null,Instant.now()),()->null)).hasMessageContaining("范围无效");
+            throw failure;
+        })).isSameAs(failure);
+        assertThat(context.getContext()).containsAllEntriesOf(original);
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isSameAs(authentication);
+        assertThat(scope.asCurrentActor(actor("owner",false,null,Instant.now()),()->"clean")).isEqualTo("clean");
+    }
+
 }

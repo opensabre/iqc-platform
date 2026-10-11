@@ -19,7 +19,8 @@ import static org.mockito.Mockito.*;
 class ScheduledActorAccessServiceTest {
     private final IqcOrganizationClient organization = mock(IqcOrganizationClient.class);
     private final InternalTokenUserContext tokens = mock(InternalTokenUserContext.class);
-    private final ScheduledActorAccessService service = new ScheduledActorAccessService(organization, mock(IqcDataScope.class), tokens);
+    private final IqcDataScope scope=mock(IqcDataScope.class);
+    private final ScheduledActorAccessService service = new ScheduledActorAccessService(organization, scope, tokens);
     @SuppressWarnings("unchecked")
     private final Result<IqcOrganizationClient.SchedulerAccess> response = mock(Result.class);
     private final Set<String> required = Set.of("iqc:pipeline:task:create", "iqc:task:execute", "iqc:schedule:publish");
@@ -88,4 +89,18 @@ class ScheduledActorAccessServiceTest {
         assertThatThrownBy(() -> service.resolve(bound(false, "group"))).hasMessageContaining("无用户上下文");
         verifyNoInteractions(organization);
     }
+    @Test void currentResolutionKeepsAuthenticationAndRequiresOriginalWorkflowGrants() {
+        var authentication=new TestingAuthenticationToken("owner","none");SecurityContextHolder.getContext().setAuthentication(authentication);
+        when(scope.owner()).thenReturn("owner");when(scope.groupId()).thenReturn("group");
+        var resolved=service.resolveCurrent(bound(false,"group"),required);
+        assertThat(resolved.userId()).isEqualTo("user");assertThat(SecurityContextHolder.getContext().getAuthentication()).isSameAs(authentication);
+        projection("user","owner",true,"group",Set.of("ADMIN"),Set.of(),Instant.now());
+        assertThatThrownBy(()->service.resolveCurrent(bound(false,"group"),required)).hasMessageContaining("已失去");
+    }
+    @Test void mismatchedCurrentOwnerRejectsBeforeOrganizationLookup() {
+        when(scope.owner()).thenReturn("other");
+        assertThatThrownBy(()->service.resolveCurrent(bound(false,"group"),required)).hasMessageContaining("范围已变化");
+        verifyNoInteractions(organization);
+    }
+
 }

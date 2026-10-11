@@ -150,7 +150,7 @@ public interface ActionExecutionMapper extends BaseMapper<ActionExecution> {
         SET status=CASE WHEN attempt_count=0 THEN 'PENDING' ELSE 'WAITING_RETRY' END,
             next_attempt_at_utc=CASE WHEN attempt_count=0 THEN NULL ELSE #{now} END,
             last_error_code=NULL,version=version+1,updated_by=#{actor},updated_time=#{now}
-        WHERE BINARY id=BINARY #{id} AND version=#{version} AND version < 9223372036854775807
+        WHERE BINARY id=BINARY #{id} AND version=#{version} AND version <= 9223372036854775804
           AND BINARY owner=BINARY #{actor}
           AND BINARY status IN ('BLOCKED_SOURCE','BLOCKED_AUTHORIZATION','BLOCKED_ADAPTER')
           AND ((attempt_count=0 AND outcome IS NULL AND claim_token IS NULL AND claimed_at_utc IS NULL)
