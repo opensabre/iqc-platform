@@ -23,7 +23,7 @@ public class ActionQueryService {
     /** Public state excludes claim tokens and all frozen source content. */
     public record State(String status,Integer attemptCount,String claimedAtUtc,String settledAtUtc,String nextAttemptAtUtc,
                         String outcome,String evidenceReference,String resultReference,String errorCode) { }
-    public record Event(String version,String previousVersion,State previousState,State state,String actor,LocalDateTime recordedAtUtc,String reconciliationReason) { }
+    public record Event(String version,String previousVersion,State previousState,State state,String actor,LocalDateTime recordedAtUtc,String reconciliationReason,String recoveryReason) { }
     public record EventPage(List<Event> events,String nextBeforeVersion,boolean earlierHistoryUnavailable) { }
     public record Attempt(String id,String observedVersion,String actor,String reason,String state,
                           LocalDateTime startedAtUtc,LocalDateTime finishedAtUtc,String confirmedVersion) { }
@@ -117,7 +117,7 @@ public class ActionQueryService {
         boolean more=rows.size()>50;
         var visible=rows.stream().limit(50).map(row->new Event(row.getVersion().toString(),
                 row.getPreviousVersion()==null?null:row.getPreviousVersion().toString(),
-                state(row.getPreviousStateJson()),state(row.getStateJson()),row.getActor(),row.getRecordedAtUtc(),row.getReconciliationReason())).toList();
+                state(row.getPreviousStateJson()),state(row.getStateJson()),row.getActor(),row.getRecordedAtUtc(),row.getReconciliationReason(),row.getRecoveryReason())).toList();
         String next=more?visible.getLast().version():null;
         boolean gap=!more && (visible.isEmpty() || visible.getLast().previousVersion()!=null);
         return new EventPage(visible,next,gap);

@@ -348,4 +348,20 @@ class IsolatedMysqlActionExecutionIT {
         assertThat(tx.<Integer>execute(status->actions.recoverBlocked("action",9,"alice",NOW.plusMinutes(3)))).isZero();
     }
 
+    @Test void recoveryReasonAttachesOnlyToTheExactTransitionAndCannotBeRewritten() {
+        var events=new SqlSessionTemplate(context.getBean(SqlSessionFactory.class)).getMapper(ActionStateEventMapper.class);
+        assertThat(tx.<Integer>execute(status->actions.blockReady("action",0,"BLOCKED_ADAPTER","ADAPTER_CONFIGURATION_UNAVAILABLE",NOW))).isEqualTo(1);
+        assertThat(tx.<Integer>execute(status->events.recordRecoveryReason("action",1,0,"result","system","not a recovery"))).isZero();
+        tx.execute(status->{
+            assertThat(actions.recoverBlocked("action",1,"alice",NOW)).isEqualTo(1);
+            assertThat(events.recordRecoveryReason("action",2,1,"result","Alice","错误身份")).isZero();
+            assertThat(events.recordRecoveryReason("action",2,1,"other-result","alice","错误来源")).isZero();
+            assertThat(events.recordRecoveryReason("action",2,1,"result","alice","恢复原因")).isEqualTo(1);
+            assertThat(events.recordRecoveryReason("action",2,1,"result","alice","覆盖原因")).isZero();
+            return null;
+        });
+        assertThat(events.page("action","result",null).getFirst().getRecoveryReason()).isEqualTo("恢复原因");
+        assertThat(events.page("action","result",null).getFirst().getReconciliationReason()).isNull();
+    }
+
 }

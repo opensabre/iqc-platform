@@ -12,5 +12,6 @@ public class ActionStateEventProjection {
     private String previousStateJson;
     private String actor;
     private String reconciliationReason;
+    private String recoveryReason;
     private LocalDateTime recordedAtUtc;
 }
