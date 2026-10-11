@@ -19,6 +19,7 @@ class LabelResultQueryServiceTest {
     private final io.github.opensabre.iqc.result.dao.InspectionEvidenceMapper evidenceMapper = mock(io.github.opensabre.iqc.result.dao.InspectionEvidenceMapper.class);
     private final io.github.opensabre.iqc.result.dao.RuleInspectionResultMapper ruleMapper = mock(io.github.opensabre.iqc.result.dao.RuleInspectionResultMapper.class);
     private final LabelResultReviewService labelReviews = mock(LabelResultReviewService.class);
+    private final io.github.opensabre.iqc.shared.IqcDataScope scope = mock(io.github.opensabre.iqc.shared.IqcDataScope.class);
     private final LabelResultQueryService service = new LabelResultQueryService(
             mock(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class),
             mock(io.github.opensabre.iqc.result.dao.ConversationInspectionResultMapper.class),
@@ -27,7 +28,7 @@ class LabelResultQueryServiceTest {
             mock(io.github.opensabre.iqc.label.dao.LabelGroupMapper.class),
             mock(io.github.opensabre.iqc.label.dao.LabelCategoryMapper.class),
             mock(io.github.opensabre.iqc.conversation.dao.ConversationMapper.class), evidenceMapper,
-            new ObjectMapper(), mock(io.github.opensabre.iqc.shared.IqcDataScope.class), ruleMapper, labelReviews);
+            new ObjectMapper(), scope, ruleMapper, labelReviews);
 
     @org.junit.jupiter.api.BeforeEach
     void initializeLambdaMetadata() {
@@ -36,6 +37,16 @@ class LabelResultQueryServiceTest {
                 ConversationInspectionResult.class, InspectionLabelResult.class))
             com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
                     new org.apache.ibatis.builder.MapperBuilderAssistant(new com.baomidou.mybatisplus.core.MybatisConfiguration(), type.getName()), type);
+    }
+
+    @Test void dashboardRejectsUnviewableTaskBeforeReadingConversationResults() {
+        var tasks=(io.github.opensabre.iqc.task.dao.InspectionTaskMapper) ReflectionTestUtils.getField(service,"taskMapper");
+        var conversations=(io.github.opensabre.iqc.result.dao.ConversationInspectionResultMapper) ReflectionTestUtils.getField(service,"conversationResultMapper");
+        var task=new InspectionTask(); task.setId("hidden"); task.setCreatedBy("other");
+        when(tasks.selectBatchIds(List.of("hidden"))).thenReturn(List.of(task));
+        assertThatThrownBy(()->service.summaryByTasks(List.of("hidden"),null,null))
+                .isInstanceOf(io.github.opensabre.iqc.governance.IqcException.class).hasMessage("无权汇总该任务标签");
+        verifyNoInteractions(conversations);
     }
 
     @Test void collectsEveryCandidateSourceWithoutUsingLegacyAnchor() {
@@ -294,6 +305,7 @@ class LabelResultQueryServiceTest {
 
     @Test
     void dashboardSummaryUsesFrozenJointNamesAndRejectsInvalidCoverageRows() {
+        when(scope.canView(null, null)).thenReturn(true); // These legacy fixture tasks have no owner/group fields.
         var taskMapper = (io.github.opensabre.iqc.task.dao.InspectionTaskMapper) ReflectionTestUtils.getField(service, "taskMapper");
         var conversationMapper = (io.github.opensabre.iqc.result.dao.ConversationInspectionResultMapper)
                 ReflectionTestUtils.getField(service, "conversationResultMapper");
@@ -376,6 +388,7 @@ class LabelResultQueryServiceTest {
 
     @Test
     void legacyAndMixedDashboardSummaryUseCurrentDirectoryOnlyForLegacyLabels() {
+        when(scope.canView(null, null)).thenReturn(true); // These legacy fixture tasks have no owner/group fields.
         var taskMapper = (io.github.opensabre.iqc.task.dao.InspectionTaskMapper) ReflectionTestUtils.getField(service, "taskMapper");
         var conversationMapper = (io.github.opensabre.iqc.result.dao.ConversationInspectionResultMapper)
                 ReflectionTestUtils.getField(service, "conversationResultMapper");
@@ -425,6 +438,7 @@ class LabelResultQueryServiceTest {
 
     @Test
     void dashboardCountsTheSameConversationInSeparateTasksAsSeparateEvaluations() {
+        when(scope.canView(null, null)).thenReturn(true); // These legacy fixture tasks have no owner/group fields.
         var taskMapper = (io.github.opensabre.iqc.task.dao.InspectionTaskMapper) ReflectionTestUtils.getField(service, "taskMapper");
         var conversationMapper = (io.github.opensabre.iqc.result.dao.ConversationInspectionResultMapper)
                 ReflectionTestUtils.getField(service, "conversationResultMapper");
