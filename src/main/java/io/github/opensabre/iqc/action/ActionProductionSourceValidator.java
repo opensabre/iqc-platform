@@ -137,7 +137,7 @@ public class ActionProductionSourceValidator {
                     || trace.items().stream().anyMatch(item->item.status()==InspectionScoring.ItemStatus.ERROR);
             if(!json.valueToTree(fused).equals(json.valueToTree(trace.fusion()))
                     || !json.valueToTree(score).equals(json.valueToTree(trace.scoring()))
-                    || !json.valueToTree(score).equals(json.readTree(result.getScoringResultJson()))
+                    || !json.valueToTree(score).equals(json.valueToTree(json.readValue(result.getScoringResultJson(),InspectionScoring.Result.class)))
                     || !json.valueToTree(trace.items()).equals(json.readTree(result.getBusinessItemResultsJson()))
                     || !Objects.equals(score.scoreStatus().name(),result.getScoreStatus())
                     || !Objects.equals(failed?"ERROR":score.conclusion().name(),result.getResultStatus())

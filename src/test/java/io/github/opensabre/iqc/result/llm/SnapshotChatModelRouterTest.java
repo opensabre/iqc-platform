@@ -27,7 +27,11 @@ class SnapshotChatModelRouterTest {
         when(pinned.call(any(Prompt.class))).thenReturn(expected);
         var router = spy(new SnapshotChatModelRouter(defaultModel, new ObjectMapper(), mock(SecretReferenceResolver.class)));
         doReturn(pinned).when(router).create(any());
-        var snapshot = new ObjectMapper().readTree("{\"configJson\":{\"schemaVersion\":\"3.0\",\"assetSnapshots\":{\"primaryModel\":{\"id\":\"p\"}}}}");
+        var snapshot = new ObjectMapper().readTree("""
+                {"configJson":{"schemaVersion":"3.0","assetSnapshots":{"primaryModel":{
+                  "id":"p","versionNo":1,"provider":"OPENAI","endpoint":"https://models.example.invalid/v1","modelName":"primary"
+                }}}}
+                """);
         assertThat(router.call(mock(Prompt.class), snapshot)).isSameAs(expected);
         verifyNoInteractions(defaultModel);
     }
@@ -39,7 +43,10 @@ class SnapshotChatModelRouterTest {
         SnapshotChatModelRouter router=spy(new SnapshotChatModelRouter(defaultModel,new ObjectMapper(),mock(SecretReferenceResolver.class)));
         doReturn(primary,fallback).when(router).create(any());
         var snapshot=new ObjectMapper().readTree("""
-          {"configJson":{"schemaVersion":"2.0","assetSnapshots":{"primaryModel":{"id":"p"},"fallbackModels":[{"id":"f"}]}}}
+          {"configJson":{"schemaVersion":"2.0","assetSnapshots":{
+            "primaryModel":{"id":"p","versionNo":1,"provider":"OPENAI","endpoint":"https://models.example.invalid/v1","modelName":"primary"},
+            "fallbackModels":[{"id":"f","versionNo":1,"provider":"OPENAI","endpoint":"https://models.example.invalid/v1","modelName":"fallback"}]
+          }}}
           """);
         assertThat(router.call(mock(Prompt.class),snapshot)).isSameAs(expected);
         verify(primary).call(any(Prompt.class));

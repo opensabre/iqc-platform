@@ -289,8 +289,18 @@ public class GatewayCallService {
 
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.REPEATABLE_READ)
     public void markToolsStarted(Handle handle,Context context){
-        var call=lock(handle);assertExecutionActive(context);
+        if(context==null)throw new GatewayAdmissionException("CALL_CONTEXT_INVALID");
         var source=context.execution();
+        // Serialize irreversible tool admission with budget pause and execution transitions.
+        // Follow Task -> Execution -> Call ordering; these short locks end before tool I/O begins.
+        if(source!=null){
+            taskRows.selectOne(Wrappers.<io.github.opensabre.iqc.task.model.InspectionTask>lambdaQuery()
+                .eq(io.github.opensabre.iqc.task.model.InspectionTask::getId,source.taskId()).last("FOR UPDATE"));
+            executionRows.selectOne(Wrappers.<io.github.opensabre.iqc.task.model.TaskExecution>lambdaQuery()
+                .eq(io.github.opensabre.iqc.task.model.TaskExecution::getId,source.executionId())
+                .eq(io.github.opensabre.iqc.task.model.TaskExecution::getTaskId,source.taskId()).last("FOR UPDATE"));
+        }
+        var call=lock(handle);assertExecutionActive(context);
         if(!"CONFIRMED".equals(call.getStatus()) || !Objects.equals(call.getLogicalRecordId(),context.logicalRecordId())
                 || !Objects.equals(call.getRuleId(),context.ruleId()) || !Objects.equals(call.getTaskId(),source==null?null:source.taskId())
                 || !Objects.equals(call.getExecutionId(),source==null?null:source.executionId()))

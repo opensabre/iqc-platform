@@ -32,6 +32,18 @@ public class IqcDataScope {
         scheduledActor.set(actor);userContext.setContext(context);
         try{return callback.get();}finally{scheduledActor.remove();if(original.isEmpty())userContext.clear();else userContext.setContext(original);}
     }
+    /** Current-user synchronous scope; all organization comparisons occur before entering the callback transaction. */
+    public <T> T asCurrentActor(io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved actor,java.util.function.Supplier<T> callback) {
+        var now=java.time.Instant.now();
+        if(scheduledActor.get()!=null || actor==null || actor.checkedAt()==null || actor.userId()==null
+                || actor.roles()==null || actor.resourceCodes()==null || "system".equals(owner())
+                || !java.util.Objects.equals(owner(),actor.owner()) || canViewAll()!=actor.all()
+                || !java.util.Objects.equals(groupId(),actor.groupId())
+                || actor.checkedAt().isBefore(now.minusSeconds(30)) || actor.checkedAt().isAfter(now.plusSeconds(5)))
+            throw io.github.opensabre.iqc.governance.IqcException.accessDenied("当前负责人授权范围无效");
+        scheduledActor.set(actor);
+        try {return callback.get();} finally {scheduledActor.remove();}
+    }
     /** Local side-effect preflight using the existing scheduled actor, without network calls under locks. */
     public void requireScheduledResources(Set<String> resources) {
         var actor=scheduledActor.get();var now=java.time.Instant.now();

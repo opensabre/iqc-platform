@@ -32,8 +32,12 @@ public class ActionEnqueueService {
     public List<String> enqueue(ActionProductionSourceValidator.Reference reference,ScheduledActorAccessService.Resolved actor) {
         requireActor(reference,actor,scope);
         var validated=sources.validate(reference);
-        if(validated.policy()==null || validated.policy().actions().isEmpty())return List.of();
         requireBound(validated.ownerBound(),actor);
+        if(validated.policy()==null || validated.policy().actions().isEmpty()) {
+            requireFresh(actor);
+            discovery.complete(reference.resultId());
+            return List.of();
+        }
         try {
             String policyBody=json.writeValueAsString(validated.policy()),policyHash=SelectorAssetService.hash(policyBody);
             var saved=new ArrayList<String>();

@@ -49,7 +49,7 @@ public class GoldSampleService {
             throw IqcException.invalidState("来源输入损坏，不能生成金标");
         }
         var context = input.context().deepCopy();
-        if (request.businessContext() != null) {
+        if (request.businessContext() != null && !request.businessContext().isNull()) {
             if (!request.businessContext().isObject()) throw IqcException.invalidArgument("标注业务上下文必须是对象");
             context.set("annotation", request.businessContext().deepCopy());
         }

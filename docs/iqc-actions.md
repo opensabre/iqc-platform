@@ -205,3 +205,23 @@ ActionConditionEditor支持全部原Kind及任意合法嵌套/NOT，16层100节�
 已有retry表单/校验复用；前端保存校验动作ID唯一/版本/配置尺寸、全部条件结构/状态/标量、复核轮次整数边界与候选字段界限，UPDATE_LABEL目标仍走共用绑定检查。新增表单和验证不会确认执行或回执，真实条件行为/浏览器/接口/SQL及所有PRD策略验收仍待后续。
 
 新增组合组/子条件以缺少明确编码的Finding状态条件起步，保存前须明确选择；不把ANY的新子条件默认为ALWAYS而意外扩大触发范围。显式创建动作的初始ALWAYS保留可见“每份生产结果”含义。空/非法轮次呈现空值，不能看似默认0/1却保存NULL。
+## UNKNOWN 人工持久产物核对
+
+POST `/api/iqc/conversation-results/{id}/actions/{actionExecutionId}/reconcile` 使用独立 `iqc:action:reconcile` 资源、原审计与限流。请求只接受观察版本 `version` 和非空≤1000字 `reason`；不接受客户端回执、成功状态或产物ID。历史查询增加账本版本供条件提交，不暴露claimToken或冻结输入。组织资源沿现有注册器声明，未添加角色自动授权；管理端按钮及组织受控授权迁移仍待接入。
+
+先在数据库事务外解析当前稳定用户ID，再限定原负责人及实际结果/task/EID/conversation和冻结actionOwnerBound；全局/组查看权限不授予代替负责人核对权。核对既有历史产物不要求task.currentEID仍是原轮次，也不重新调用生产入队校验或原写入操作。动作开关关闭时仍可核对既有产物，不启用后台发送。
+
+SAVE_RESULT严格读取既有结果及冻结trace/scoring/items；CREATE_REVIEW与ADD_TO_EVALUATION_CANDIDATE复用原业务服务的稳定请求ID和内容指纹，只查第一份实际复核/候选。后续裁决、当前EID或归档变动不触发新轮次/重新采集；读不到产物或没有只读适配时继续UNKNOWN。核对不要求原发送权限，不调用execute/request/create或gold审核。
+
+成功回执按原key绑定；核对后重新读取来源和完整请求，再以版本、原claimToken、REQUIRES_RECONCILIATION/UNKNOWN执行单条CAS到COMPLETE，保留attempt与claim，保存真实产物引用及当前操作人。并发核对或迟到worker不能覆盖赢家。响应CONFIRMED/UNCONFIRMED/STALE_OBSERVATION分别表示实际确认、缺确认和观察失效，无自动重试。现有审计注解记录人工入口，不等同完整动作尝试历史；远程适配恢复、阻塞恢复、操作UI及真实登录权限验收仍待完成。
+
+### 2026-10-11：事务状态日志
+
+V1.1.64 增加原账本从属的 iqc_action_execution_event；INSERT 初始观察和每次递增版本的状态变更由 MySQL 触发器在同一事务记录前后状态元数据。重试覆盖当前行回执时，旧事件仍保留原 claim/outcome/evidence。日志写入失败回滚领取/结算，败者 CAS 不产生日志。旧运行行不回填，首次后续变更仅保存当时 OLD/NEW；尝试记录不是已发送证明。详细限制与实际 SQL 验收见 [状态日志说明](iqc-prd-b-action-state-journal.md)。查询 API/UI 与人工原因持久日志仍未接入，原独立审计入口保持不变。
+
+### 2026-10-11：读取事务状态历史
+
+原动作记录 GET 新增可选 `actionExecutionId/includeHistory/beforeVersion` 参数，复用原 `iqc:action:history:view`；单动作最多50条及字符串版本游标。按原结果/task/EID/conversation/owner重新授权，SQL白名单不选claim token或冻结内容。明确升级前历史缺口，不重建已覆盖的过程。默认摘要读取不查询日志。协议及实际验收见 [状态历史接口](iqc-action-state-history-api.md)；未新增资源/角色/权限迁移。
+
+## A/B 集成范围（2026-10-11）
+B 分支 669636b 的恢复入口、不可变状态事件、人工核对记录及期限/版本围栏已与 A 的 Finding 标签写入及历史来源证明合并。迁移 64–67 与标签 68 同时保留，部署需按序迁移；本次不执行数据库迁移。B 的独立测试记录只证明其注明的范围，不代表合并后全量验证。UPDATE_LABEL 尚未实现 reconcile，UNKNOWN 标签动作仍返回不可确认，不能据此自动重发。恢复 UI/权限需另行集成，生产来源锁序、真实用户授权及完整 PRD 验收仍待完成。

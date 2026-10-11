@@ -1,0 +1,49 @@
+# 人工核对尝试的持久记录契约（待实现）
+
+当前成功状态事件保存原因，UNCONFIRMED、STALE_OBSERVATION和核对异常没有可靠的本地尝试记录。原框架异步Audit不能保证持久提交；原状态事件主键(action_execution_id, version)只允许一次状态变更，不能容纳同版本多个只读核对请求。不得通过增加账本版本或生成假状态事件填补此缺口。
+
+复用原核对服务、授权、动作账本和历史读取权限。拟增加从属尝试记录，不增加另一执行队列：每次授权后的人工请求有服务器生成attemptId，绑定动作、来源结果、观察版本、稳定操作人、规范化原因和UTC开始时间。调用适配器之前，先以独立短事务持久保存STARTED；保存失败时不调用适配器。授权失败不创建可由目标动作历史读出的记录，避免泄露未授权目标。
+
+终态为CONFIRMED、UNCONFIRMED、STALE_OBSERVATION或LOOKUP_FAILED。终态只从STARTED以CAS写入一次；不复制claim token、冻结原文、任意异常消息或客户端指定产物。CONFIRMED只能由真实产物核对成功且原账本CAS成功产生，并与成功状态/事件原因在同一事务完成。并发输家为STALE_OBSERVATION，不能记录为成功。异常只保存受控错误码，原异常仍返回调用方。
+
+进程在开始记录后失联、适配器完成但终态保存失败等场景保留STARTED，界面应称“核对结果尚未持久确认”，不能推断远端失败、未执行或允许重发。没有状态变更的尝试终态保存失败也不能向客户端返回已经持久完成的观察。
+
+分页必须独立于账本版本，因为同一版本可有多个尝试。沿原history资源按服务器生成序列或受控复合游标读取，不改现有状态版本游标语义；来源/owner数据范围仍须校验。展示STARTED、终态、原因和时间为普通文本，不把尝试和状态历史伪装成同一种记录。
+
+实施验收：真实数据库证明开始记录失败不触发适配器、多个相同观察分别留痕、成功原子提交、事件/尝试写入任一失败全部回滚、并发仅一个CONFIRMED、进程失联保留STARTED，以及越权不可写不可读。迁移需新安装、升级、validate和重复migrate；单位编排测试不替代事务验收。本文件明确待实现，不能据此声称完整尝试审计已完成。
+
+## 实现进度：存储边界
+
+V1.1.66和ActionReconciliationAttemptMapper/Service已建立从属记录、唯一随机请求ID、稳定用户ID及规范化原因。STARTED保存采用INSERT SELECT限定原账本动作/result/owner；未确认、旧观察、异常终态采用独立短事务CAS。CONFIRMED入口要求已有事务且SQL核对同版本成功事件和原因。所有写入失败抛出异常，开始失败不能返回可用尝试。
+
+当前仍未接入ActionReconciliationService、成功事务或历史查询/UI，无法声称请求已实际留痕。稳定身份与数据范围授权依然由调用者在开始前完成；mapper局部owner条件不替代原权限核验。后续接入必须覆盖初次观察失效、适配器异常以及最终成功事务，保留原异常而不存任意异常原文。新增迁移尚未在真实MySQL应用，约束与事务效力待SQL验收。
+
+本批定向单位测试82275 exit0，6项零失败/错误/跳过；迁移布局检查通过。迁移IT已更新1.1.66目标和新列断言，尚未执行。未接入入口、读取及UI，真实事务/迁移和独立审查均待完成。
+
+## 入口集成（正在验证）
+
+原人工核对入口现已在授权后调用start，所有STALE_OBSERVATION/UNCONFIRMED响应先保存对应终态。适配器或核对验证异常尝试保存LOOKUP_FAILED；若该写入也失败，原异常继续抛出并附加记录异常，数据库STARTED仍明确未完成。成功状态短事务新增confirmed调用，尝试终态失败会抛出并要求整个状态事务回滚。事务有效性仍须真实MySQL证明；只读历史API/UI读取尝试记录尚未实现。
+
+开始记录之前还验证冻结输入摘要及其中原负责人稳定身份，含旧观察路径；越权或替换用户ID不创建目标动作尝试。prepare再次复用该授权检查，慢核对后继续核验来源。成功事务要求attempt动作/result/version/actor/规范化原因与当前请求完全匹配。SQL夹具已使用真实attempt service开始记录，并清理从属测试记录；最终事务验收尚未运行。
+
+最终本地单位21630 exit0，四组共29项零失败/错误/跳过，含开始失败、身份拒绝、无变更终态、双重异常保留、成功尝试写入失败及参数绑定。仅证明本地编排；SQL夹具虽已编译，未运行，不证明事务回滚或STARTED提交。读API/UI和真实SQL/独立审查仍待完成。
+
+## 读取集成（正在验证）
+
+原history GET新增可选尝试投影，50+1独立开始时间/请求ID游标，状态版本仍按原语义。默认不查尝试，权限沿原动作来源范围。UI仍待接入；SQL真实执行与完整迁移验收仍待外部能力恢复。
+
+## 待执行的真实SQL验收
+
+IsolatedMysqlActionExecutionIT补充四项：attempt终态写入触发器故障回滚账本及新事件、独立STARTED提交不受外层回滚影响且不能无事件确认、同版本多个观察分别终结且不能覆盖终态、同毫秒53条实际分页及稳定身份白名单。数据范围、二进制大小写匹配、LONG最大版本和独立事务代理均在真实MySQL夹具验证；这些用例尚未执行，不是通过证据。
+
+权限恢复后只使用已验证的隔离服务器（端口34307、datadir与IQC_MYSQL_VALIDATION_DIR一致）；先确认旧服务是否仍live，不因观察超时重启。执行命令：
+
+```sh
+IQC_MYSQL_VALIDATION_DIR=/private/tmp/iqc-mysql-validation.FVGdkd mvn -o -q \
+  -DargLine=-javaagent:/Users/zhoutaoo/.m2/repository/net/bytebuddy/byte-buddy-agent/1.18.10/byte-buddy-agent-1.18.10.jar \
+  -Dtest=IsolatedMysqlActionExecutionIT test
+```
+
+此命令会修改该隔离测试库，不能连接共享/生产库；运行前需恢复当前受阻的沙箱审批能力。完整迁移新安装/升级/validate/重复migrate仍须另行执行IsolatedMysqlMigrationIT，不能只用action IT证明迁移验收。
+
+本轮87074 exit0，新SQL用例testCompile通过，五组相关单位37项零失败/错误/跳过。新SQL用例未执行，不称其通过；只记录编译和单位回归结果。

@@ -47,7 +47,10 @@ public class EvaluationCandidateActionAdapter implements ActionAdapter {
                 .eq(ResultReview::getBusinessResultId,source.reference().resultId())
                 .eq(ResultReview::getReviewRevision,revision).eq(ResultReview::getStatus,"COMPLETED"))>0;
     }
-    @Override public Receipt execute(Request request) {
+    @Override public Receipt execute(Request request) { return confirm(request,false); }
+    /** A recovery lookup never calls the owning create operation. */
+    @Override public Receipt reconcile(Request request) { return confirm(request,true); }
+    private Receipt confirm(Request request,boolean readOnly) {
         Objects.requireNonNull(request);
         if(!DEFINITION.equals(request.adapter()))throw new IllegalArgumentException("Candidate adapter version mismatch");
         try {
@@ -56,7 +59,8 @@ public class EvaluationCandidateActionAdapter implements ActionAdapter {
             if(action.type()!=DEFINITION.type() || action.effectiveAdapterVersion()!=DEFINITION.version())
                 throw new IllegalArgumentException("Candidate policy mismatch");
             validateConfiguration(action.configuration());
-            String id=candidates.create(request,action.configuration());
+            String id=readOnly ? candidates.lookup(request,action.configuration()) : candidates.create(request,action.configuration());
+            if(readOnly && id==null)return null;
             return new Receipt(request.idempotencyKey(),ActionExecutionContract.Outcome.CONFIRMED_SUCCESS,id,id,null);
         } catch(Exception unconfirmed) {
             return new Receipt(request.idempotencyKey(),ActionExecutionContract.Outcome.UNKNOWN,null,null,"CANDIDATE_CONFIRMATION_UNAVAILABLE");

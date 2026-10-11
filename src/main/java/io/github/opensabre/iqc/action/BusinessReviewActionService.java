@@ -20,6 +20,14 @@ public class BusinessReviewActionService {
     private final BusinessItemReviewService reviews;
     private final IqcDataScope scope;
     private final ObjectMapper json;
+    /** Recovery reads committed owning artifacts, with no send grants, source refresh or writes. */
+    @Transactional(readOnly=true,propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
+    public String lookup(ActionAdapter.Request request,JsonNode configuration) {
+        if(!Objects.equals(scope.owner(),request.source().owner()))
+            throw IqcException.accessDenied("动作核对负责人不一致");
+        var artifact=reviews.lookupRequest(request.source().resultId(), configuration.path("expectedRevision").asInt(0), request.idempotencyKey(), configuration.path("reason").asText());
+        return artifact==null ? null : artifact.getId();
+    }
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
     public String open(ActionAdapter.Request request,JsonNode configuration) {
         scope.requireScheduledResources(Set.of("iqc:review:create"));

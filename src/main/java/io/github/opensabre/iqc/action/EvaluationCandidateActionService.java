@@ -24,6 +24,14 @@ public class EvaluationCandidateActionService {
     private final ResultReviewMapper reviews;
     private final IqcDataScope scope;
     private final ObjectMapper json;
+    /** Recovery reads committed owning artifacts, with no send grants, source refresh or writes. */
+    @Transactional(readOnly=true,propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
+    public String lookup(ActionAdapter.Request request,JsonNode configuration) {
+        if(!Objects.equals(scope.owner(),request.source().owner()))
+            throw IqcException.accessDenied("动作核对负责人不一致");
+        var artifact=samples.lookupRequest(request.source().resultId(), configuration.path("reviewRevision").asInt(1), request.idempotencyKey(), configuration.has("name") ? configuration.get("name").asText() : null, configuration.path("sampleType").asText(), configuration.has("tags") ? configuration.get("tags").toString() : "[]");
+        return artifact==null ? null : artifact.getId();
+    }
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
     public String create(ActionAdapter.Request request,JsonNode configuration) {
         scope.requireScheduledResources(Set.of("iqc:sample:manage"));

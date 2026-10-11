@@ -45,10 +45,12 @@ class SchemeExecutionGuardTest {
     @BeforeEach
     void setup() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "scheme-execution-guard"), InspectionTask.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "scheme-execution-row"), TaskExecution.class);
         task = new InspectionTask(); task.setId("t1"); task.setCurrentExecutionId("e1");
         task.setRuleSnapshotJson("{\"schemeSnapshot\":{\"frozen\":true}}");
         task.setTotalMessages(4); task.setProcessedMessages(1);
         when(tasks.selectById("t1")).thenReturn(task);
+        when(tasks.selectOne(any())).thenReturn(task);
         when(scope.canView(any(), any())).thenReturn(true);
         doThrow(IqcException.invalidState("规则或模型已停用")).when(guard).validateTaskDependencies(any());
     }
@@ -114,7 +116,12 @@ class SchemeExecutionGuardTest {
     @Test
     void assetDisabledWhileWaitingFailsOwnedAttemptBeforeCallingModelOrProcessingMessages() {
         task.setStatus("QUEUED");
-        var execution = new TaskExecution(); execution.setId("e1"); execution.setStatus("QUEUED");
+        var execution = new TaskExecution(); execution.setId("e1"); execution.setStatus("QUEUED"); execution.setTaskId("t1");
+        when(tasks.selectOne(any())).thenReturn(task);
+        when(executions.selectOne(any())).thenReturn(execution);
+        when(executions.update(isNull(), any())).thenReturn(1);
+        when(tasks.updateById(any(InspectionTask.class))).thenReturn(1);
+        when(executions.updateById(any(TaskExecution.class))).thenReturn(1);
         when(executions.selectById("e1")).thenReturn(execution);
         when(tasks.update(isNull(), any())).thenReturn(1);
         String frozen = task.getRuleSnapshotJson();

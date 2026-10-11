@@ -18,7 +18,10 @@ public class SavedResultActionAdapter implements ActionAdapter {
         if(configuration==null || !configuration.isObject() || !configuration.isEmpty())
             throw new IllegalArgumentException("SAVE_RESULT configuration must be an empty object");
     }
-    @Override public Receipt execute(Request request) {
+    @Override public Receipt execute(Request request) { return confirm(request); }
+    /** Recovery shares the original read-only proof without executing an action. */
+    @Override public Receipt reconcile(Request request) { return confirm(request); }
+    private Receipt confirm(Request request) {
         Objects.requireNonNull(request);
         if(!DEFINITION.equals(request.adapter()))throw new IllegalArgumentException("SAVE_RESULT adapter version mismatch");
         try {

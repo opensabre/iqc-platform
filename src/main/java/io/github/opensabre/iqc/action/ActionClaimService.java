@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.opensabre.iqc.governance.IqcException;
 import io.github.opensabre.iqc.schedule.ScheduledActorAccessService;
-import io.github.opensabre.iqc.selector.SelectorAssetService;
 import io.github.opensabre.iqc.shared.IqcDataScope;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -49,18 +48,9 @@ public class ActionClaimService {
         if(row.getNextAttemptAtUtc()!=null && row.getNextAttemptAtUtc().isAfter(utc)
                 || "WAITING_RETRY".equals(row.getStatus()) && row.getNextAttemptAtUtc()==null)return null;
         try {
-            if(validated.policy()==null)throw IqcException.invalidState("动作领取缺少原生产策略");
-            var action=validated.policy().actions().stream().filter(value->Objects.equals(value.actionId(),row.getActionId())).findFirst().orElse(null);
-            if(action==null)throw IqcException.invalidState("动作领取缺少冻结动作");
-            String policyBody=json.writeValueAsString(validated.policy());
-            var source=new ActionExecutionContract.Source(reference.taskId(),reference.executionId(),reference.conversationId(),
-                    reference.resultId(),validated.decisionReference(),SelectorAssetService.hash(policyBody),action.actionId(),reference.owner());
-            ActionEnqueueService.requireSame(row,source,action,validated,source.idempotencyKey(action.type()),policyBody);
-            if(ActionPolicy.evaluate(action.condition(),validated.context())!=ActionPolicy.Match.MATCH)
-                throw IqcException.invalidState("动作领取条件不再成立");
-            if(row.getAttemptCount()==null || row.getAttemptCount()<0)throw IqcException.invalidState("动作尝试计数无效");
-            int maximum=action.retry()==null?1:action.retry().maximumAttempts();
-            if(row.getAttemptCount()>=maximum || action.retry()!=null && action.retry().effectiveUntil()!=null && !now.isBefore(action.retry().effectiveUntil())) {
+            var prepared=ActionFrozenPolicy.validate(row,reference,validated,json);
+            var action=prepared.action();var source=prepared.source();String policyBody=prepared.policyBody();
+            if(prepared.exhausted(row,now)) {
                 ActionEnqueueService.requireFresh(actor);
                 executions.blockReady(id,expectedVersion,"EXPIRED","ACTION_ATTEMPTS_OR_DEADLINE_EXHAUSTED",utc);
                 return null;
@@ -83,11 +73,18 @@ public class ActionClaimService {
                 executions.deferPrerequisite(id,expectedVersion,utc,utc.plusMinutes(1));
                 return null;
             }
+            // Readiness may wait on storage. Fence the deadline again at the actual claim boundary.
+            Instant claimAt=Instant.now().truncatedTo(ChronoUnit.MILLIS);
+            LocalDateTime claimUtc=LocalDateTime.ofInstant(claimAt,ZoneOffset.UTC);
+            ActionEnqueueService.requireFresh(actor);
+            if(prepared.exhausted(row,claimAt)) {
+                executions.blockReady(id,expectedVersion,"EXPIRED","ACTION_ATTEMPTS_OR_DEADLINE_EXHAUSTED",claimUtc);
+                return null;
+            }
             String token=UUID.randomUUID().toString().replace("-","");
             var request=new ActionAdapter.Request(id,row.getIdempotencyKey(),source,binding.definition(),row.getAttemptCount()+1,
                     row.getInputSnapshotJson(),row.getInputSnapshotHash(),policyBody);
-            ActionEnqueueService.requireFresh(actor);
-            if(executions.claim(id,expectedVersion,token,utc)!=1)return null;
+            if(executions.claim(id,expectedVersion,token,claimUtc)!=1)return null;
             return new Claim(request,expectedVersion+1,token);
         } catch(com.fasterxml.jackson.core.JsonProcessingException failure) {
             throw IqcException.invalidState("动作领取策略无法序列化");

@@ -59,6 +59,9 @@ public interface ActionAdapter {
     /** Called after claim commit, outside a database transaction. Ambiguous exceptions mean UNKNOWN. */
     Receipt execute(Request request);
 
+    /** Read existing durable evidence only; null means unavailable, never permission to resend. */
+    default Receipt reconcile(Request request) { return null; }
+
     private static void reference(String value,int maximum) {
         if(value==null || value.length()>maximum || !value.matches("[A-Za-z0-9][A-Za-z0-9:_./@+-]*"))
             throw new IllegalArgumentException("Invalid action adapter reference");

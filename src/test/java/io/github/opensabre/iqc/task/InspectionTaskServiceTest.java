@@ -73,10 +73,15 @@ class InspectionTaskServiceTest {
         TaskItem successItem = item("message-1", "SUCCEEDED");
         TaskItem failedItem = item("message-2", "FAILED");
         when(taskMapper.selectById("task-1")).thenReturn(task);
+        when(taskMapper.selectOne(any())).thenReturn(task);
         when(dataScope.canView(null, null)).thenReturn(true);
         when(taskItemMapper.selectList(any())).thenReturn(List.of(successItem, failedItem));
         when(messageMapper.selectList(any())).thenReturn(List.of(successMessage, failedMessage));
         when(taskMapper.update(any(), any())).thenReturn(1);
+
+        when(executionMapper.insert(any(TaskExecution.class))).thenReturn(1);
+        when(taskItemMapper.insert(any(TaskItem.class))).thenReturn(1);
+        when(taskMapper.updateById(any(InspectionTask.class))).thenReturn(1);
 
         InspectionTask queued = executionService.queue("task-1");
 
@@ -100,10 +105,15 @@ class InspectionTaskServiceTest {
                 .mapToObj(index -> message("message-" + index, index))
                 .toList();
         when(taskMapper.selectById("task-1")).thenReturn(task);
+        when(taskMapper.selectOne(any())).thenReturn(task);
         when(dataScope.canView(null, null)).thenReturn(true);
         when(taskItemMapper.selectList(any())).thenReturn(failedItems);
         when(messageMapper.selectList(any())).thenReturn(failedMessages);
         when(taskMapper.update(any(), any())).thenReturn(1);
+
+        when(executionMapper.insert(any(TaskExecution.class))).thenReturn(1);
+        when(taskItemMapper.insert(any(TaskItem.class))).thenReturn(1);
+        when(taskMapper.updateById(any(InspectionTask.class))).thenReturn(1);
 
         InspectionTask queued = executionService.queue("task-1");
 
@@ -119,6 +129,7 @@ class InspectionTaskServiceTest {
         TaskExecution execution = new TaskExecution();
         execution.setId("execution-1"); execution.setStatus("RUNNING");
         when(taskMapper.selectById("task-1")).thenReturn(task);
+        when(taskMapper.selectOne(any())).thenReturn(task);
         when(dataScope.canView(null, null)).thenReturn(true);
         when(taskMapper.update(any(), any())).thenReturn(1);
         when(executionMapper.selectById("execution-1")).thenReturn(execution);
@@ -313,6 +324,7 @@ class InspectionTaskServiceTest {
     void deletingTerminalTaskKeepsTheTaskRecord() {
         InspectionTask task = task("SUCCEEDED");
         when(taskMapper.selectById("task-1")).thenReturn(task);
+        when(taskMapper.selectOne(any())).thenReturn(task);
         when(dataScope.canView(null, null)).thenReturn(true);
         when(taskMapper.update(any(), any())).thenReturn(1);
 
@@ -326,6 +338,7 @@ class InspectionTaskServiceTest {
     void listsExecutionAttemptsOnlyAfterTaskDataScopeAuthorization() {
         InspectionTask task = task("task-1"); task.setCurrentExecutionId("run-2");
         when(taskMapper.selectById("task-1")).thenReturn(task);
+        when(taskMapper.selectOne(any())).thenReturn(task);
         when(dataScope.canView(null, null)).thenReturn(true);
         TaskExecution execution = new TaskExecution(); execution.setId("run-2"); execution.setTaskId("task-1");
         execution.setAttemptNo(2); execution.setStatus("SUCCEEDED");

@@ -18,7 +18,7 @@ public final class FindingFusion {
         public Result {
             rawFindings = List.copyOf(rawFindings); selectedIds = List.copyOf(selectedIds);
             rejectedIds = List.copyOf(rejectedIds); evidence = List.copyOf(evidence);
-            value = value == null ? null : value.deepCopy();
+            value = value == null || value.isNull() ? null : value.deepCopy();
         }
         @Override public JsonNode value() { return value == null ? null : value.deepCopy(); }
     }
