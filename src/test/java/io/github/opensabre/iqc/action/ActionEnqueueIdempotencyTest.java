@@ -143,4 +143,39 @@ class ActionEnqueueIdempotencyTest {
         assertEquals("PENDING",row.getStatus());assertEquals(0L,row.getVersion());
     }
 
+    private final ActionStateEventMapper stateEvents=mock(ActionStateEventMapper.class);
+    private ActionRecoveryService recoveryFixture() {
+        service.enqueue(reference,actor());var row=saved.get();row.setStatus("BLOCKED_ADAPTER");
+        when(rows.selectById(row.getId())).thenReturn(row);when(rows.selectOne(any())).thenReturn(row);
+        var binding=adapters.require(policy.actions().getFirst());when(binding.adapter().ready(any(),any())).thenReturn(true);
+        when(rows.recoverBlocked(anyString(),anyLong(),anyString(),any())).thenReturn(1);
+        when(stateEvents.recordRecoveryReason(anyString(),anyLong(),anyLong(),anyString(),anyString(),anyString())).thenReturn(1);
+        return new ActionRecoveryService(rows,sources,adapters,stateEvents,scope,json);
+    }
+    private ScheduledActorAccessService.Resolved recoveryActor() {
+        var grants=new java.util.HashSet<>(ActionEnqueueService.REQUIRED_GRANTS);grants.add(ActionRecoveryService.RESOURCE);
+        return new ScheduledActorAccessService.Resolved("user","alice",false,"group",Set.of(),grants,Instant.now());
+    }
+    @Test void recoveryRecordsNormalizedReasonWithoutExecutingTheAdapter() {
+        var recovery=recoveryFixture();var row=saved.get();
+        assertTrue(recovery.recover("result",row.getId(),0,recoveryActor()," 恢复原因 "));
+        verify(stateEvents).recordRecoveryReason(row.getId(),1,0,"result","alice","恢复原因");
+        verify(adapters.require(policy.actions().getFirst()).adapter(),never()).execute(any());
+    }
+    @Test void recoveryReasonFailureEscapesInsteadOfReportingSuccessfulRecovery() {
+        var recovery=recoveryFixture();when(stateEvents.recordRecoveryReason(anyString(),anyLong(),anyLong(),anyString(),anyString(),anyString())).thenReturn(0);
+        assertThrows(IqcException.class,()->recovery.recover("result",saved.get().getId(),0,recoveryActor(),"恢复原因"));
+    }
+    @Test void recoveryRejectsUnknownEvenWhenItWasIncorrectlyMarkedBlocked() {
+        var recovery=recoveryFixture();saved.get().setAttemptCount(1);saved.get().setOutcome("UNKNOWN");
+        assertFalse(recovery.recover("result",saved.get().getId(),0,recoveryActor(),"恢复原因"));
+        verify(rows,never()).recoverBlocked(anyString(),anyLong(),anyString(),any());verifyNoInteractions(stateEvents);
+    }
+    @Test void recoveryCannotUseAnOrdinaryEnqueueGrantOrStaleObservation() {
+        var recovery=recoveryFixture();
+        assertThrows(IqcException.class,()->recovery.recover("result",saved.get().getId(),0,actor(),"恢复原因"));
+        assertFalse(recovery.recover("result",saved.get().getId(),1,recoveryActor(),"恢复原因"));
+        verify(rows,never()).recoverBlocked(anyString(),anyLong(),anyString(),any());verifyNoInteractions(stateEvents);
+    }
+
 }
