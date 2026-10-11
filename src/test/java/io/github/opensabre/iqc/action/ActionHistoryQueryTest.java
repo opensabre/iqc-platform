@@ -23,8 +23,9 @@ class ActionHistoryQueryTest {
     private final ActionExecutionMapper actions=mock(ActionExecutionMapper.class);
     private final IqcDataScope scope=mock(IqcDataScope.class);
     private final ActionStateEventMapper events=mock(ActionStateEventMapper.class);
+    private final ActionReconciliationAttemptMapper observations=mock(ActionReconciliationAttemptMapper.class);
     private final ObjectMapper json=new ObjectMapper();
-    private final ActionQueryService query=new ActionQueryService(results,tasks,actions,scope,events,json);
+    private final ActionQueryService query=new ActionQueryService(observations,results,tasks,actions,scope,events,json);
     private final String id="a".repeat(64);
     @BeforeEach void setup() {
         for(var type:List.of(ActionExecution.class,ConversationInspectionResult.class,InspectionTask.class))
@@ -42,17 +43,17 @@ class ActionHistoryQueryTest {
         if(previous!=null)row.setPreviousStateJson("{\"status\":\"WAITING_RETRY\",\"attemptCount\":1}");return row;
     }
     @Test void ordinaryHistoryDoesNotReadTheJournal() {
-        assertThat(query.history("result").getFirst().history()).isNull();verifyNoInteractions(events);
+        assertThat(query.history("result").getFirst().history()).isNull();verifyNoInteractions(events,observations);
     }
     @Test void deniedResultNeverReadsActionsOrJournal() {
         when(scope.canView("alice","group")).thenReturn(false);
         assertThatThrownBy(()->query.history("result",id,true,null)).isInstanceOf(RuntimeException.class);
-        verifyNoInteractions(actions,events);
+        verifyNoInteractions(actions,events,observations);
     }
     @Test void foreignActionCannotReachItsJournal() {
         when(actions.selectList(any())).thenReturn(List.of());
         assertThatThrownBy(()->query.history("result",id,true,null)).isInstanceOf(RuntimeException.class);
-        verifyNoInteractions(events);
+        verifyNoInteractions(events,observations);
     }
     @Test void invalidAndOverflowingCursorsFailBeforeDatabaseAccess() {
         for(String cursor:List.of("0","-1","1.2","001","9223372036854775808"))
@@ -69,6 +70,31 @@ class ActionHistoryQueryTest {
         assertThat(page.events()).hasSize(50);assertThat(page.events().getFirst().version()).isEqualTo(Long.toString(high));
         assertThat(page.nextBeforeVersion()).isEqualTo(Long.toString(high-49));assertThat(page.earlierHistoryUnavailable()).isFalse();
         assertThat(json.writeValueAsString(page)).contains("\"version\":\"9223372036854775806\"").doesNotContain("claimToken","claim_token","snapshot");
+    }
+    @Test void observationsHaveIndependentBoundedCompositeCursorsAndStringVersions() throws Exception {
+        var time=java.time.LocalDateTime.of(2026,10,11,0,0);
+        var rows=new ArrayList<ActionReconciliationAttemptProjection>();
+        for(int i=51;i>0;i--) {
+            var row=new ActionReconciliationAttemptProjection();row.setId(String.format("%032x",i));
+            row.setObservedVersion(Long.MAX_VALUE);row.setStartedAtUtc(time);row.setState("STARTED");row.setReason("<b>核对</b>");rows.add(row);
+        }
+        when(observations.page(id,"result",null,null)).thenReturn(rows);
+        var page=query.history("result",id,false,null,true,null).getFirst().attempts();
+        assertThat(page.attempts()).hasSize(50);
+        assertThat(page.nextBeforeAttempt()).isEqualTo("2026-10-11T00:00:00.000~"+String.format("%032x",2));
+        assertThat(page.attempts().getFirst().observedVersion()).isEqualTo(Long.toString(Long.MAX_VALUE));
+        assertThat(json.writeValueAsString(page.attempts().getFirst().observedVersion())).contains("9223372036854775807");
+        query.history("result",id,false,null,true,page.nextBeforeAttempt());
+        verify(observations).page(id,"result",time,String.format("%032x",2));verifyNoInteractions(events);
+    }
+    @Test void invalidObservationCursorsAndDeniedSourcesNeverReadObservations() {
+        for(String cursor:List.of("bad","2026-02-30T00:00:00.000~"+"a".repeat(32),"2026-10-11T00:00:00.000~"+"A".repeat(32)))
+            assertThatThrownBy(()->query.history("result",id,false,null,true,cursor)).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(()->query.history("result",null,false,null,true,null)).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(()->query.history("result",id,false,null,false,"bad")).isInstanceOf(RuntimeException.class);
+        when(scope.canView("alice","group")).thenReturn(false);
+        assertThatThrownBy(()->query.history("result",id,false,null,true,null)).isInstanceOf(RuntimeException.class);
+        verifyNoInteractions(observations);
     }
     @Test void endOfHistoryDistinguishesInitialObservationFromAnUpgradeGap() {
         when(events.page(id,"result",null)).thenReturn(List.of(event(3,2L)));

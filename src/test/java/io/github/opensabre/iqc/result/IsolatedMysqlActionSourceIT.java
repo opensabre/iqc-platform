@@ -145,7 +145,7 @@ class IsolatedMysqlActionSourceIT {
         var events=session.getMapper(io.github.opensabre.iqc.action.ActionStateEventMapper.class);
         var scope=mock(io.github.opensabre.iqc.shared.IqcDataScope.class);
         when(scope.canView("alice","group")).thenReturn(true);
-        var query=new io.github.opensabre.iqc.action.ActionQueryService(results,tasks,actions,scope,events,json);
+        var query=new io.github.opensabre.iqc.action.ActionQueryService(session.getMapper(io.github.opensabre.iqc.action.ActionReconciliationAttemptMapper.class),results,tasks,actions,scope,events,json);
         jdbc.update("DELETE FROM iqc_action_execution_event");jdbc.update("DELETE FROM iqc_action_execution");
         String id="a".repeat(64);
         jdbc.update("""

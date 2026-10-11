@@ -28,8 +28,10 @@ public class ActionExecutionController {
     public List<ActionQueryService.View> history(@PathVariable String id,
             @org.springframework.web.bind.annotation.RequestParam(required=false) String actionExecutionId,
             @org.springframework.web.bind.annotation.RequestParam(defaultValue="false") boolean includeHistory,
-            @org.springframework.web.bind.annotation.RequestParam(required=false) String beforeVersion) {
-        return queries.history(id,actionExecutionId,includeHistory,beforeVersion);
+            @org.springframework.web.bind.annotation.RequestParam(required=false) String beforeVersion,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue="false") boolean includeAttempts,
+            @org.springframework.web.bind.annotation.RequestParam(required=false) String beforeAttempt) {
+        return queries.history(id,actionExecutionId,includeHistory,beforeVersion,includeAttempts,beforeAttempt);
     }
     @PostMapping("/enqueue")
     @ResourcePermission(code="iqc:action:enqueue",name="请求生产结果动作检查",type="iqc",description="安排负责人生产结果的后台动作检查，不直接发送或重试动作")

@@ -4,6 +4,8 @@ import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Update;
+import org.apache.ibatis.annotations.Select;
+import java.util.List;
 import java.time.LocalDateTime;
 
 /** From-ledger observations with one-way terminal CAS; never schedules action execution. */
@@ -20,6 +22,18 @@ public interface ActionReconciliationAttemptMapper {
     int start(@Param("id") String id,@Param("actionId") String actionId,@Param("resultId") String resultId,
               @Param("version") long version,@Param("actor") String actor,@Param("userId") String userId,
               @Param("reason") String reason,@Param("now") LocalDateTime now);
+
+    /** Composite keyset keeps repeated observations of one ledger version independently pageable. */
+    @Select("""
+        SELECT id,observed_version,actor,reason,state,started_at_utc,finished_at_utc,confirmed_version
+        FROM iqc_action_reconciliation_attempt
+        WHERE BINARY action_execution_id=BINARY #{actionId} AND BINARY source_result_id=BINARY #{resultId}
+          AND (#{beforeTime} IS NULL OR started_at_utc<#{beforeTime}
+            OR (started_at_utc=#{beforeTime} AND BINARY id<BINARY #{beforeId}))
+        ORDER BY started_at_utc DESC,id DESC LIMIT 51
+        """)
+    List<ActionReconciliationAttemptProjection> page(@Param("actionId") String actionId,@Param("resultId") String resultId,
+            @Param("beforeTime") LocalDateTime beforeTime,@Param("beforeId") String beforeId);
 
     @Update("""
         UPDATE iqc_action_reconciliation_attempt SET state=#{state},finished_at_utc=#{now},confirmed_version=#{confirmedVersion}

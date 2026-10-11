@@ -41,3 +41,15 @@ UI定向14项、完整28文件185项及最终14项组件验证均通过；最终
 补充参数验收：28201 exit0，ActionReconciliationBindingTest 1项通过。直接通过真实MyBatis注解解析、ParamNameResolver、DefaultParameterHandler将完整record请求绑定到mock JDBC，验证全部冻结来源/输入/策略字段、枚举SEND_ALERT和版本；没有数据库执行，不替代真实SQL/事务验收。
 
 核对入口开始依赖V1.1.66尝试记录；部署新后端前需完成该迁移。CONFIRMED/UNCONFIRMED/STALE_OBSERVATION原响应形状保持，新增持久记录不代表历史GET已返回尝试列表。尝试读取与管理端展示尚待接入。详细契约及待验收项见iqc-action-reconciliation-attempt-contract.md。
+
+## 核对尝试读取（待真实SQL验收）
+
+同一GET支持`actionExecutionId=<动作>&includeAttempts=true`，沿原history权限与结果/task/EID/conversation/owner完整过滤。返回新增可空`attempts`页对象：`attempts`数组和`nextBeforeAttempt`，默认不查询从属尝试表。可同时启用状态历史，但两个分页独立。
+
+每次观察公开id、字符串observedVersion、actor、reason、state、startedAtUtc、finishedAtUtc、字符串可空confirmedVersion。不公开稳定用户ID、claim token或冻结内容。STARTED表示该次核对结果尚未持久确认，不表示未发送或可重试；同一账本版本可以出现多次观察。没有旧请求回填，空列表不能证明历史从未核对。
+
+按开始UTC时间和请求ID降序，每页50+1。继续请求把返回的`nextBeforeAttempt`原样放到`beforeAttempt`；格式为毫秒时间`2026-10-11T00:00:00.000~`加32位小写十六进制请求ID，同毫秒通过ID严格小于分界，避免漏掉同版本或同时间观察。游标须合法日历时间、年份1000–9999，且指定动作/启用尝试读取。非法游标在查询前拒绝。此分页读取当前已提交终态，不保证跨页固定快照。
+
+管理端尝试展示尚未接入；SQL白名单、实际分页和权限归属须真实MySQL验收，mock查询测试不替代此验收。
+
+本轮70937 exit0，历史查询8项零失败/错误/跳过，含独立同毫秒ID游标、50条上界、精确版本字符串、非法日期/游标/越权来源不读取尝试。首轮因隔离SQL夹具旧构造器遗漏依赖编译失败，已修正并最终通过；SQL夹具仅编译，未运行真实MySQL。

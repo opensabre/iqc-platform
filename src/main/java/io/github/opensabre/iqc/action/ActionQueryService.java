@@ -19,12 +19,18 @@ import java.util.List;
 public class ActionQueryService {
     public record View(String id,Long version,String actionId,String type,String status,Integer attemptCount,
                        LocalDateTime nextAttemptAtUtc,LocalDateTime claimedAtUtc,LocalDateTime settledAtUtc,
-                       String outcome,String evidenceReference,String resultReference,String errorCode,EventPage history) { }
+                       String outcome,String evidenceReference,String resultReference,String errorCode,EventPage history,AttemptPage attempts) { }
     /** Public state excludes claim tokens and all frozen source content. */
     public record State(String status,Integer attemptCount,String claimedAtUtc,String settledAtUtc,String nextAttemptAtUtc,
                         String outcome,String evidenceReference,String resultReference,String errorCode) { }
     public record Event(String version,String previousVersion,State previousState,State state,String actor,LocalDateTime recordedAtUtc,String reconciliationReason) { }
     public record EventPage(List<Event> events,String nextBeforeVersion,boolean earlierHistoryUnavailable) { }
+    public record Attempt(String id,String observedVersion,String actor,String reason,String state,
+                          LocalDateTime startedAtUtc,LocalDateTime finishedAtUtc,String confirmedVersion) { }
+    public record AttemptPage(List<Attempt> attempts,String nextBeforeAttempt) { }
+    private static final java.time.format.DateTimeFormatter ATTEMPT_TIME=java.time.format.DateTimeFormatter
+            .ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSS").withResolverStyle(java.time.format.ResolverStyle.STRICT);
+    private final ActionReconciliationAttemptMapper observations;
     private final ConversationInspectionResultMapper results;
     private final InspectionTaskMapper tasks;
     private final ActionExecutionMapper actions;
@@ -38,6 +44,27 @@ public class ActionQueryService {
     /** Optional single-action journal page reuses exactly the original result/history authorization. */
     @Transactional(readOnly=true)
     public List<View> history(String resultId,String actionId,boolean includeHistory,String beforeVersion) {
+        return history(resultId,actionId,includeHistory,beforeVersion,false,null);
+    }
+
+    /** State versions and manual observation cursors are deliberately independent. */
+    @Transactional(readOnly=true)
+    public List<View> history(String resultId,String actionId,boolean includeHistory,String beforeVersion,
+                              boolean includeAttempts,String beforeAttempt) {
+        LocalDateTime beforeTime=null;String beforeId=null;
+        if(includeAttempts && actionId==null || beforeAttempt!=null && !includeAttempts)
+            throw IqcException.invalidArgument("核对尝试分页必须指定动作并启用读取");
+        if(beforeAttempt!=null) {
+            try {
+                if(!beforeAttempt.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}~[a-f0-9]{32}"))
+                    throw new IllegalArgumentException();
+                beforeTime=LocalDateTime.parse(beforeAttempt.substring(0,23),ATTEMPT_TIME);
+                if(beforeTime.getYear()<1000)throw new IllegalArgumentException();
+                beforeId=beforeAttempt.substring(24);
+            } catch(java.time.DateTimeException | IllegalArgumentException failure) {
+                throw IqcException.invalidArgument("核对尝试游标无效");
+            }
+        }
         if(actionId!=null && !actionId.matches("[a-f0-9]{64}"))
             throw IqcException.invalidArgument("动作记录标识无效");
         if(includeHistory && actionId==null || beforeVersion!=null && !includeHistory)
@@ -72,9 +99,18 @@ public class ActionQueryService {
                 .orderByAsc(ActionExecution::getActionId).last("LIMIT 100"));
         if(actionId!=null && rows.isEmpty())throw IqcException.notFound("动作记录不存在或不属于该结果");
         EventPage page=includeHistory?eventPage(actionId,resultId,before):null;
+        AttemptPage attemptPage=includeAttempts?attemptPage(actionId,resultId,beforeTime,beforeId):null;
         return rows.stream().map(row->new View(row.getId(),row.getVersion(),row.getActionId(),row.getActionType(),row.getStatus(),row.getAttemptCount(),
                         row.getNextAttemptAtUtc(),row.getClaimedAtUtc(),row.getSettledAtUtc(),row.getOutcome(),row.getEvidenceReference(),
-                        row.getResultReference(),row.getLastErrorCode(),page)).toList();
+                        row.getResultReference(),row.getLastErrorCode(),page,attemptPage)).toList();
+    }
+    private AttemptPage attemptPage(String actionId,String resultId,LocalDateTime beforeTime,String beforeId) {
+        var rows=observations.page(actionId,resultId,beforeTime,beforeId);
+        var visible=rows.stream().limit(50).map(row->new Attempt(row.getId(),row.getObservedVersion().toString(),
+                row.getActor(),row.getReason(),row.getState(),row.getStartedAtUtc(),row.getFinishedAtUtc(),
+                row.getConfirmedVersion()==null?null:row.getConfirmedVersion().toString())).toList();
+        String cursor=rows.size()>50?visible.getLast().startedAtUtc().format(ATTEMPT_TIME)+"~"+visible.getLast().id():null;
+        return new AttemptPage(visible,cursor);
     }
     private EventPage eventPage(String actionId,String resultId,Long before) {
         var rows=events.page(actionId,resultId,before);
