@@ -569,6 +569,7 @@ class IsolatedMysqlTaskExecutionStateIT {
             configuration.addMapper(io.github.opensabre.iqc.action.ActionExecutionMapper.class);
             configuration.addMapper(io.github.opensabre.iqc.action.ActionStateEventMapper.class);
             configuration.addMapper(io.github.opensabre.iqc.action.ActionReconciliationEventMapper.class);
+            configuration.addMapper(io.github.opensabre.iqc.action.ActionReconciliationAttemptMapper.class);
             var factory = new MybatisSqlSessionFactoryBean();
             factory.setDataSource(source);
             factory.setConfiguration(configuration);
@@ -576,11 +577,17 @@ class IsolatedMysqlTaskExecutionStateIT {
         }
 
         @Bean
-        io.github.opensabre.iqc.action.ActionReconciliationStateService actionReconciliationStateService(SqlSessionFactory factory) {
+        io.github.opensabre.iqc.action.ActionReconciliationStateService actionReconciliationStateService(SqlSessionFactory factory,io.github.opensabre.iqc.action.ActionReconciliationAttemptService attempts) {
             var session=new SqlSessionTemplate(factory);
             return new io.github.opensabre.iqc.action.ActionReconciliationStateService(
                     session.getMapper(io.github.opensabre.iqc.action.ActionExecutionMapper.class),
-                    session.getMapper(io.github.opensabre.iqc.action.ActionReconciliationEventMapper.class));
+                    session.getMapper(io.github.opensabre.iqc.action.ActionReconciliationEventMapper.class),attempts);
+        }
+
+        @Bean
+        io.github.opensabre.iqc.action.ActionReconciliationAttemptService actionReconciliationAttemptService(SqlSessionFactory factory) {
+            return new io.github.opensabre.iqc.action.ActionReconciliationAttemptService(new SqlSessionTemplate(factory)
+                    .getMapper(io.github.opensabre.iqc.action.ActionReconciliationAttemptMapper.class));
         }
 
         @Bean

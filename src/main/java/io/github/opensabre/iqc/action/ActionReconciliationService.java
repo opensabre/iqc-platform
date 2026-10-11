@@ -25,6 +25,7 @@ public class ActionReconciliationService {
     private final IqcDataScope scope;
     private final ObjectMapper json;
     private final ActionReconciliationStateService state;
+    private final ActionReconciliationAttemptService attempts;
 
     /** The caller supplies only an observation and audit reason, never evidence or outcome. */
     @Transactional(propagation=Propagation.NEVER)
@@ -35,25 +36,38 @@ public class ActionReconciliationService {
             throw IqcException.invalidArgument("动作核对标识、版本或原因无效");
         // Stable identity is resolved before any owning-service database transaction.
         var actor=actors.capture();
-        var prepared=prepare(resultId,id,version,actor);
-        if(prepared==null)return new Response(id,"STALE_OBSERVATION");
-        var receipt=prepared.adapter().reconcile(prepared.request());
-        if(receipt==null)return new Response(id,"UNCONFIRMED");
-        // Even an inconclusive receipt must belong to the original frozen request.
-        receipt.requireRequest(prepared.request());
-        if(receipt.outcome()==ActionExecutionContract.Outcome.UNKNOWN)
-            return new Response(id,"UNCONFIRMED");
-        if(receipt.outcome()!=ActionExecutionContract.Outcome.CONFIRMED_SUCCESS)
-            throw IqcException.invalidState("动作核对仅接受真实成功产物");
-        // A changed source/owner or ledger observation cannot be overwritten by a slow lookup.
-        var current=prepare(resultId,id,version,actor);
-        if(current==null || !current.request().equals(prepared.request()) || !current.token().equals(prepared.token()))
-            return new Response(id,"STALE_OBSERVATION");
-        boolean recorded=state.confirm(prepared.request(),version,prepared.token(),receipt,actor.owner(),reason);
-        return new Response(id,recorded ? "CONFIRMED" : "STALE_OBSERVATION");
+        authorize(resultId,id,actor);
+        var attempt=attempts.start(id,resultId,version,actor.owner(),actor.userId(),reason);
+        try {
+            var prepared=prepare(resultId,id,version,actor);
+            if(prepared==null)return finish(attempt,"STALE_OBSERVATION");
+            var receipt=prepared.adapter().reconcile(prepared.request());
+            if(receipt==null)return finish(attempt,"UNCONFIRMED");
+            // Even an inconclusive receipt must belong to the original frozen request.
+            receipt.requireRequest(prepared.request());
+            if(receipt.outcome()==ActionExecutionContract.Outcome.UNKNOWN)return finish(attempt,"UNCONFIRMED");
+            if(receipt.outcome()!=ActionExecutionContract.Outcome.CONFIRMED_SUCCESS)
+                throw IqcException.invalidState("动作核对仅接受真实成功产物");
+            var current=prepare(resultId,id,version,actor);
+            if(current==null || !current.request().equals(prepared.request()) || !current.token().equals(prepared.token()))
+                return finish(attempt,"STALE_OBSERVATION");
+            boolean recorded=state.confirm(prepared.request(),version,prepared.token(),receipt,actor.owner(),reason,attempt);
+            return recorded ? new Response(id,"CONFIRMED") : finish(attempt,"STALE_OBSERVATION");
+        } catch(RuntimeException failure) {
+            // Never replace the original failure or persist arbitrary exception text.
+            // A failed terminal write leaves STARTED as an explicitly unresolved observation.
+            try { attempts.finish(attempt,ActionReconciliationAttemptService.Outcome.LOOKUP_FAILED); }
+            catch(RuntimeException recordingFailure) { failure.addSuppressed(recordingFailure); }
+            throw failure;
+        }
     }
 
-    private Prepared prepare(String resultId,String id,long version,ScheduledActorAccessService.CreationBound actor) {
+    private Response finish(ActionReconciliationAttemptService.Attempt attempt,String outcome) {
+        attempts.finish(attempt,ActionReconciliationAttemptService.Outcome.valueOf(outcome));
+        return new Response(attempt.actionId(),outcome);
+    }
+
+    private ActionExecution authorize(String resultId,String id,ScheduledActorAccessService.CreationBound actor) {
         var row=actions.selectById(id);
         if(row==null || !Objects.equals(resultId,row.getSourceResultId()))throw IqcException.notFound("结果动作不存在");
         var result=results.selectById(resultId);
@@ -64,6 +78,24 @@ public class ActionReconciliationService {
                 || !Objects.equals(row.getOwner(),task.getCreatedBy()) || !Objects.equals(actor.owner(),row.getOwner())
                 || !Objects.equals(scope.owner(),row.getOwner()) || !scope.canView(task.getCreatedBy(),task.getOwnerGroupId()))
             throw IqcException.accessDenied("无权核对动作来源");
+        try {
+            if(row.getInputSnapshotJson()==null || !Objects.equals(row.getInputSnapshotHash(),
+                    io.github.opensabre.iqc.selector.SelectorAssetService.hash(row.getInputSnapshotJson())))
+                throw IqcException.invalidState("动作冻结身份摘要损坏");
+            var input=json.readTree(row.getInputSnapshotJson());
+            var taskSnapshot=json.readTree(input.path("taskSnapshotJson").asText());
+            var bound=json.treeToValue(taskSnapshot.path("actionOwnerBound"),ScheduledActorAccessService.CreationBound.class);
+            if(bound==null || !"iqc-schedule-owner-scope-v1".equals(bound.schemaVersion())
+                    || !Objects.equals(actor.userId(),bound.userId()) || !Objects.equals(actor.owner(),bound.owner()))
+                throw IqcException.accessDenied("动作负责人稳定身份已变化");
+        } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException failure) {
+            throw IqcException.invalidState("动作冻结身份损坏");
+        }
+        return row;
+    }
+
+    private Prepared prepare(String resultId,String id,long version,ScheduledActorAccessService.CreationBound actor) {
+        var row=authorize(resultId,id,actor);
         if(!Objects.equals(row.getVersion(),version) || !"REQUIRES_RECONCILIATION".equals(row.getStatus())
                 || !"UNKNOWN".equals(row.getOutcome()))return null;
         if(row.getClaimToken()==null || !row.getClaimToken().matches("[a-f0-9]{32}")
@@ -85,11 +117,6 @@ public class ActionReconciliationService {
                     || !row.getConversationId().equals(input.path("conversationId").asText())
                     || !row.getSourceResultId().equals(input.path("resultId").asText())
                     || !row.getOwner().equals(input.path("owner").asText()))throw IqcException.invalidState("动作冻结来源不一致");
-            var taskSnapshot=json.readTree(input.path("taskSnapshotJson").asText());
-            var bound=json.treeToValue(taskSnapshot.path("actionOwnerBound"),ScheduledActorAccessService.CreationBound.class);
-            if(bound==null || !"iqc-schedule-owner-scope-v1".equals(bound.schemaVersion())
-                    || !Objects.equals(actor.userId(),bound.userId()) || !Objects.equals(actor.owner(),bound.owner()))
-                throw IqcException.accessDenied("动作负责人稳定身份已变化");
             return new Prepared(request,binding.adapter(),row.getClaimToken());
         } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException failure) {
             throw IqcException.invalidState("动作冻结核对证据损坏");
