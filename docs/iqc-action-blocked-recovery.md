@@ -41,3 +41,5 @@ ActionRecoveryRequestService为NEVER，当前稳定身份capture和固定工作�
 同步后的定向回归78740 exit0：当前授权9、当前/后台范围5、普通范围4、入队/领取/恢复28、参数绑定1，共47项零失败错误跳过。期限测试使用可控时钟覆盖期限前、恰好到期、跨期；版本测试覆盖MAX-3至MAX。它们不证明真实SQL条件、服务代理回滚或HTTP资源授权；既有独立815项不属于本提交的完整回归。
 
 本地随机端口授权运行31028 terminal exit0，IqcPlatformApplicationTest6项通过：原4项及新增恢复OpenAPI/匿名401、事务代理/REQUIRES_NEW/READ_COMMITTED/runtime rollback属性/独立资源注解。默认沙箱首次1353因监听端口被拒而context启动失败，获准重跑后通过。这仍不证明带资源的实际用户授权正反例或数据库已执行SQL回滚。
+
+隔离MySQL62243 terminal exit0，已严格核验原34307端口及数据目录。Flyway从原1.1.64实际应用65/66/67到测试库iqc_worker_state_validation；IsolatedMysqlActionExecutionIT21项零失败错误跳过，覆盖实际账本CAS/事务、原因写一次及回滚、attempt持久终态与分页等既有用例。此为升级及mapper层证据，不替代新库完整迁移、重复执行、受控权限DML或ActionRecoveryService代理事务验收。
