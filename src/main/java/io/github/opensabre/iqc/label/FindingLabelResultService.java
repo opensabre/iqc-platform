@@ -59,15 +59,13 @@ public class FindingLabelResultService {
                     || !Objects.equals(request.inputSnapshotJson(),claimed.getInputSnapshotJson())
                     || !Objects.equals(request.policySnapshotJson(),policyBody))
                 throw IqcException.invalidState("标签动作领取或冻结请求已失效");
-            var target=FindingLabelActionConfiguration.parse(action.configuration());
             var task=tasks.selectById(source.taskId()); // Source validator already holds the Task lock.
             FindingLabelTaskDirectory.expected(task,json);
             var root=json.readTree(task.getRuleSnapshotJson());
             var release=json.treeToValue(root.path("pipelineSnapshot").path("release"),PipelineRelease.class);
             var policy=release.labelPolicy();
             if(policy==null)throw IqcException.invalidState("标签动作缺少冻结标签政策");
-            var binding=policy.bindings().stream().filter(value->target.labelId().equals(value.labelId())
-                    && target.valueCode().equals(value.valueCode())).findFirst().orElseThrow();
+            var binding=FindingLabelActionConfiguration.requireBinding(policy,action.configuration());
             var projection=FindingLabelProjection.project(policy.projectionBinding(binding),validated.context().findings().get(binding.findingCode()));
             String body=json.writeValueAsString(projection);
             if(body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>4*1024*1024)

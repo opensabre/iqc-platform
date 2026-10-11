@@ -34,12 +34,18 @@ public final class PipelineRuntime implements AutoCloseable {
         executor.allowCoreThreadTimeOut(true);
     }
     public void validate(PipelineDefinition definition) {
+        validateDefinition(definition,true);
+    }
+    /** Historical snapshots retain graph/contract checks without requiring today's engine registry. */
+    public void validateStructure(PipelineDefinition definition) { validateDefinition(definition,false); }
+    private void validateDefinition(PipelineDefinition definition,boolean requireCurrentEngines) {
         if(!PipelineDefinition.SCHEMA.equals(definition.schemaVersion()) || definition.nodes().isEmpty() || definition.nodes().size()>200)
             throw new IllegalArgumentException("Unsupported pipeline schema or node count");
         var preceding=new HashSet<String>();
         var indexed=new HashMap<String,PipelineDefinition.Node>();
         for(var node:definition.nodes()) {
-            if(node.nodeId()==null || node.nodeId().isBlank() || node.version()==null || node.version().isBlank() || !adapters.containsKey(node.type()))
+            if(node.nodeId()==null || node.nodeId().isBlank() || node.version()==null || node.version().isBlank() || node.type()==null || node.type().isBlank()
+                    || requireCurrentEngines && !adapters.containsKey(node.type()))
                 throw new IllegalArgumentException("Missing node identity, version or engine");
             if(node.timeoutMs()<1 || node.timeoutMs()>300000 || node.retries()<0 || node.retries()>3 || node.onError()==null)
                 throw new IllegalArgumentException("Invalid node execution bounds");

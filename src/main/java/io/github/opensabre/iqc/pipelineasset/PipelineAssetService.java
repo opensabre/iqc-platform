@@ -173,25 +173,31 @@ public class PipelineAssetService {
                 || !version.getContentHash().equals(gate.path("releaseHash").asText()))
             throw IqcException.invalidState("流水线发布证据协议或来源不一致");
     }
-    public void validateTask(JsonNode snapshot) {
+    public void validateTask(JsonNode snapshot) { validateTask(snapshot,true); }
+    private void validateTask(JsonNode snapshot,boolean requireExecutionAvailability) {
         if(!isPipeline(snapshot)) return;
         if(!TASK_SCHEMA.equals(snapshot.path("executionStrategy").path("schemaVersion").asText())
                 || snapshot.has("schemeSnapshot")) throw IqcException.invalidState("流水线任务协议无效");
         var marker=snapshot.path("pipelineSnapshot");
-        var asset=assets.selectById(marker.path("pipelineId").asText()); // worker checks availability, not current user scope
-        if(asset==null) throw IqcException.invalidState("流水线资产不存在"); requireActive(asset);
+        if(requireExecutionAvailability) {
+            var asset=assets.selectById(marker.path("pipelineId").asText()); // worker checks availability, not current user scope
+            if(asset==null) throw IqcException.invalidState("流水线资产不存在"); requireActive(asset);
+        }
         JsonNode releaseNode=marker.path("release");
         if(!hash(releaseNode.toString()).equals(marker.path("contentHash").asText())) throw IqcException.invalidState("任务流水线摘要不一致");
-        validateFrozen(convert(releaseNode));
+        validateFrozen(convert(releaseNode),requireExecutionAvailability);
     }
     public static boolean isPipeline(JsonNode snapshot) { return snapshot!=null && snapshot.has("pipelineSnapshot"); }
     public PipelineRelease taskRelease(JsonNode snapshot) { validateTask(snapshot); return convert(snapshot.path("pipelineSnapshot").path("release")); }
 
     /** Worker validation of an actual published production snapshot, without a thread user scope. */
-    public PipelineRelease publishedTaskRelease(JsonNode snapshot) {
+    public PipelineRelease publishedTaskRelease(JsonNode snapshot) { return publishedTaskRelease(snapshot,true); }
+    /** Immutable production publication proof; current availability gates execution, not historical audit. */
+    public PipelineRelease historicalPublishedTaskRelease(JsonNode snapshot) { return publishedTaskRelease(snapshot,false); }
+    private PipelineRelease publishedTaskRelease(JsonNode snapshot,boolean requireExecutionAvailability) {
         if (!isPipeline(snapshot) || snapshot.has("evaluationSnapshot"))
             throw IqcException.invalidState("动作来源必须是已发布生产流水线");
-        validateTask(snapshot);
+        validateTask(snapshot,requireExecutionAvailability);
         var marker=snapshot.path("pipelineSnapshot");
         if (!"PIPELINE".equals(snapshot.path("executionStrategy").path("mode").asText())
                 || !marker.path("trial").isBoolean() || marker.path("trial").booleanValue()
@@ -269,6 +275,7 @@ public class PipelineAssetService {
             labelPolicy=labelPolicies.getObject().freeze(release.labelPolicy());
             labelPolicy.validateFindingTypes(labelFindingTypes(new PipelineDefinition(release.pipeline().schemaVersion(),nodes)));
         }
+        io.github.opensabre.iqc.label.FindingLabelActionConfiguration.validateDeclaredActions(release.actionPolicy(),labelPolicy);
         var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes),release.fusion(),release.scoring(),release.items(),release.publicationGate(),release.actionPolicy(),labelPolicy);
         runtime.validate(frozen.pipeline()); return frozen;
     }
@@ -282,8 +289,9 @@ public class PipelineAssetService {
         }
         return types;
     }
-    private void validateFrozen(PipelineRelease release) {
-        runtime.validate(release.pipeline());
+    private void validateFrozen(PipelineRelease release) { validateFrozen(release,true); }
+    private void validateFrozen(PipelineRelease release,boolean requireExecutionAvailability) {
+        if(requireExecutionAvailability)runtime.validate(release.pipeline());else runtime.validateStructure(release.pipeline());
         if(release.labelPolicy()!=null) {
             release.labelPolicy().validateFrozen();
             release.labelPolicy().validateFindingTypes(labelFindingTypes(release.pipeline()));
@@ -293,6 +301,7 @@ public class PipelineAssetService {
         if(release.actionPolicy()!=null)release.actionPolicy().validateReferences(
                 release.pipeline().nodes().stream().map(node->node.config().path("findingDefinition").path("code").asText()).collect(java.util.stream.Collectors.toSet()),
                 release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));
+        if(!requireExecutionAvailability)return;
         for(var node:release.pipeline().nodes()) {
             var config=node.config(); var rule=config.path("ruleSnapshot"); var current=rules.selectById(rule.path("id").asText());
             if(current==null || "DISABLED".equals(current.getStatus())) throw IqcException.invalidState("流水线依赖规则已停用");

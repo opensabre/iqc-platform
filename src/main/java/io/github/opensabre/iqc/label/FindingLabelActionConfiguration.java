@@ -19,4 +19,20 @@ public final class FindingLabelActionConfiguration {
                 || valueCode.codePoints().anyMatch(Character::isISOControl))throw new IllegalArgumentException("Invalid label action reference");
         return new Target(labelId,valueCode);
     }
+    public static FindingLabelPolicy.Binding requireBinding(FindingLabelPolicy policy,JsonNode configuration) {
+        var target=parse(configuration);
+        if(policy==null)throw new IllegalArgumentException("UPDATE_LABEL requires a frozen label policy");
+        var binding=policy.bindings().stream().filter(value->target.labelId().equals(value.labelId())
+                && target.valueCode().equals(value.valueCode())).findFirst()
+                .orElseThrow(()->new IllegalArgumentException("UPDATE_LABEL target is absent from label policy"));
+        policy.projectionBinding(binding);
+        return binding;
+    }
+    /** New releases must not publish an executable v1 action without a declared frozen target. */
+    public static void validateDeclaredActions(io.github.opensabre.iqc.action.ActionPolicy actions,FindingLabelPolicy labels) {
+        if(actions==null)return;
+        for(var action:actions.actions())if(action.type()==io.github.opensabre.iqc.action.ActionExecutionContract.Type.UPDATE_LABEL
+                && action.effectiveAdapterVersion()==1)requireBinding(labels,action.configuration());
+    }
+
 }

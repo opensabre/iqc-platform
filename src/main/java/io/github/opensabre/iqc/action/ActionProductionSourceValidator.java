@@ -69,7 +69,7 @@ public class ActionProductionSourceValidator {
                 || !Objects.equals(result.getConversationId(),reference.conversationId())
                 || !"PIPELINE".equals(result.getAggregationMode()))
             throw IqcException.invalidState("动作生产结果归属不一致");
-        return validateFacts(reference,task,result);
+        return validateFacts(reference,task,result,false);
     }
 
     /** Historical artifact proof: does not claim, lock, send, or require the task's current execution. */
@@ -86,7 +86,7 @@ public class ActionProductionSourceValidator {
                 || !Objects.equals(result.getConversationId(),reference.conversationId())
                 || !"PIPELINE".equals(result.getAggregationMode()))
             throw IqcException.invalidState("历史产物生产任务、执行或结果归属不一致");
-        return validateFacts(reference,task,result);
+        return validateFacts(reference,task,result,true);
     }
 
     private void requireReference(Reference reference) {
@@ -99,10 +99,10 @@ public class ActionProductionSourceValidator {
             throw IqcException.invalidArgument("动作生产负责人无效");
     }
 
-    private Validated validateFacts(Reference reference,InspectionTask task,ConversationInspectionResult result) {
+    private Validated validateFacts(Reference reference,InspectionTask task,ConversationInspectionResult result,boolean historical) {
         try {
             var snapshot=json.readTree(task.getRuleSnapshotJson());
-            var release=assets.publishedTaskRelease(snapshot);
+            var release=historical?assets.historicalPublishedTaskRelease(snapshot):assets.publishedTaskRelease(snapshot);
             io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound ownerBound=null;
             if(release.actionPolicy()!=null && !release.actionPolicy().actions().isEmpty()) {
                 ownerBound=json.treeToValue(snapshot.path("actionOwnerBound"),io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound.class);

@@ -97,9 +97,7 @@ public class FindingLabelReadService {
             if(!Objects.equals(row.getSourceInputHash(),validated.inputSnapshotHash()))
                 throw IqcException.invalidState("Finding标签冻结生产输入摘要不一致");
             var release=prepared.release();
-            var target=FindingLabelActionConfiguration.parse(declared.configuration());
-            var binding=release.labelPolicy().bindings().stream().filter(value->value.labelId().equals(target.labelId())
-                    && value.valueCode().equals(target.valueCode())).findFirst().orElseThrow();
+            var binding=FindingLabelActionConfiguration.requireBinding(release.labelPolicy(),declared.configuration());
             var expected=FindingLabelProjection.project(release.labelPolicy().projectionBinding(binding),validated.context().findings().get(binding.findingCode()));
             var persisted=json.readValue(row.getValueJson(),FindingLabelProjection.Projection.class);
             String id="fl-"+SelectorAssetService.hash(json.writeValueAsString(List.of(result.getId(),binding.labelId(),binding.valueCode()))).substring(0,60);
