@@ -68,9 +68,9 @@ public class LabelResultReviewService {
         if (taskIds.isEmpty()) return;
         var frozenByTask = new HashMap<String, JsonNode>();
         for (InspectionTask task : tasks.selectBatchIds(taskIds)) {
-            if (task.getLabelScopeSnapshotJson() == null) continue;
             try {
-                JsonNode frozen = mapper.readTree(task.getLabelScopeSnapshotJson());
+                JsonNode frozen=FindingLabelTaskDirectory.expected(task,mapper);
+                if(frozen==null && task.getLabelScopeSnapshotJson()!=null)frozen=mapper.readTree(task.getLabelScopeSnapshotJson());
                 if (frozen != null && "2.0".equals(frozen.path("schemaVersion").asText())
                         && frozen.path("labels").isArray()) frozenByTask.put(task.getId(), frozen);
             } catch (com.fasterxml.jackson.core.JsonProcessingException ignored) {
@@ -320,7 +320,8 @@ public class LabelResultReviewService {
                 || !Objects.equals(conversation.getId(), label.getConversationResultId()))
             throw IqcException.invalidState("标签结果与任务会话归属不一致");
         try {
-            JsonNode frozen = mapper.readTree(task.getLabelScopeSnapshotJson());
+            JsonNode frozen=FindingLabelTaskDirectory.expected(task,mapper);
+            if(frozen==null && task.getLabelScopeSnapshotJson()!=null)frozen=mapper.readTree(task.getLabelScopeSnapshotJson());
             if (frozen == null || !"2.0".equals(frozen.path("schemaVersion").asText()))
                 throw IqcException.invalidArgument("旧标签结果暂不支持值复核");
             JsonNode definition = null;

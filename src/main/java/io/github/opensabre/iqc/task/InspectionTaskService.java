@@ -525,6 +525,10 @@ public class InspectionTaskService {
                     if(body.getBytes(StandardCharsets.UTF_8).length>8*1024*1024) throw IqcException.invalidArgument("Selector冻结证据超过8MiB，请缩小选数");
                     task.setSelectionFilterJson(body);
                 }
+                if(prepared.release().labelPolicy()!=null) {
+                    prepared.release().labelPolicy().validateFrozen();
+                    task.setLabelScopeSnapshotJson(prepared.release().labelPolicy().directory().toString());
+                }
                 task.setRuleSnapshotJson(root.toString()); task.setRuleIdsJson(writeSnapshot(ruleIds)); task.setRunCount(1);
             };
             boolean noData=(periodic!=null || trigger!=null) && (conversationIds==null || conversationIds.isEmpty());

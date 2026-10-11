@@ -12,6 +12,7 @@ import io.github.opensabre.iqc.result.dao.InspectionEvidenceMapper;
 import io.github.opensabre.iqc.conversation.dao.ConversationMapper;
 import io.github.opensabre.iqc.label.dao.LabelCategoryMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import io.github.opensabre.iqc.result.model.ConversationInspectionResult;
 import io.github.opensabre.iqc.shared.IqcDataScope;
 import io.github.opensabre.iqc.task.dao.InspectionTaskMapper;
@@ -246,7 +247,8 @@ public class LabelResultQueryService {
 
     /** New joint results must use their frozen label identity, never mutable directory names or silent deduplication. */
     private SnapshotCatalog snapshotLabels(InspectionTask task) {
-        String json = task.getLabelScopeSnapshotJson();
+        JsonNode pipelineDirectory=FindingLabelTaskDirectory.expected(task,objectMapper);
+        String json = pipelineDirectory==null?task.getLabelScopeSnapshotJson():pipelineDirectory.toString();
         boolean joint = hasJointLabels(task);
         if (json == null || json.isBlank()) {
             if (joint) throw IqcException.invalidState("联合任务缺少冻结标签快照");
@@ -271,7 +273,7 @@ public class LabelResultQueryService {
                 int version = node.path("versionNo").asInt(0);
                 if (strict && (id.isBlank() || version < 1)) throw IqcException.invalidState("联合任务标签身份无效");
                 Map<String, String> valueTypes = new java.util.HashMap<>();
-                if (strict && (!List.of("user", "customer", "agent").contains(node.path("targetRole").asText())
+                if (strict && (!(pipelineDirectory==null?List.of("user", "customer", "agent"):List.of("user", "customer", "agent", "all")).contains(node.path("targetRole").asText())
                         || !node.path("values").isArray() || node.path("values").isEmpty()))
                     throw IqcException.invalidState("联合任务冻结标签值定义无效");
                 for (var definition : node.path("values")) {

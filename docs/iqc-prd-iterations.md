@@ -271,3 +271,5 @@ I5标签读取围栏：状态与证据读取复用原PayloadValidator拒绝显�
 I5标签冻结：PipelineRelease可选labelPolicy引用明确标签版本和Finding绑定，发布复用原LabelResolutionService冻结目录/权限，历史读取校验冻结定义不回查可变目录；旧构造/null快照兼容。UI保留并只读展示，标签持久化/UPDATE_LABEL/完整读取链路仍未完成。
 
 I5标签来源：A V1.1.68扩展原标签结果表与实体支持规则/Finding互斥来源，原唯一键保留；查询/复核共享结构及投影摘要校验。部署实体前需迁移。SQL与实际写入/读取/复核/导出及UPDATE_LABEL未完成。
+
+I5标签目录任务连接：流水线物化把冻结目录保存到原labelScopeSnapshotJson，查询与复核共享Task发布摘要/目录一致性读取；此前只有发布目录的任务可用经过核验的目录，没有labelPolicy的历史任务保持原路径。标签结果生产/完整读取/复核导出及真实任务创建验收待接入。
