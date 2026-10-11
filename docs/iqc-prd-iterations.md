@@ -269,3 +269,5 @@ I5标签动作兼容基础：源码确认原label result必须有真实RuleInspe
 I5标签读取围栏：状态与证据读取复用原PayloadValidator拒绝显式未支持schema，不将Finding新协议计为旧HIT；未标记schema的历史值保持原路径。UPDATE_LABEL存储与完整读取/复核/导出仍待接入。目录冻结已发现原LabelResolutionService.resolveVersions可复用，后续需核验原规则依赖与Finding映射的边界。
 
 I5标签冻结：PipelineRelease可选labelPolicy引用明确标签版本和Finding绑定，发布复用原LabelResolutionService冻结目录/权限，历史读取校验冻结定义不回查可变目录；旧构造/null快照兼容。UI保留并只读展示，标签持久化/UPDATE_LABEL/完整读取链路仍未完成。
+
+I5标签来源：A V1.1.68扩展原标签结果表与实体支持规则/Finding互斥来源，原唯一键保留；查询/复核共享结构及投影摘要校验。部署实体前需迁移。SQL与实际写入/读取/复核/导出及UPDATE_LABEL未完成。

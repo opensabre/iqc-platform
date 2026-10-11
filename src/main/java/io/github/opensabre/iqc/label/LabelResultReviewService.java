@@ -315,6 +315,7 @@ public class LabelResultReviewService {
 
     /** Validates a supplied canonical row against its immutable task snapshot without additional identity reads. */
     private Context frozenContext(InspectionTask task, ConversationInspectionResult conversation, InspectionLabelResult label) {
+        if(label!=null)LabelResultSourceValidator.validate(label,mapper);
         if (task == null || conversation == null || label == null || !Objects.equals(task.getId(), conversation.getTaskId())
                 || !Objects.equals(conversation.getId(), label.getConversationResultId()))
             throw IqcException.invalidState("标签结果与任务会话归属不一致");

@@ -66,6 +66,7 @@ public class LabelResultQueryService {
                         .in(InspectionLabelResult::getConversationResultId, byId.keySet())
                         .orderByAsc(InspectionLabelResult::getCreatedTime));
         if (results.isEmpty()) return List.of();
+        results.forEach(result -> LabelResultSourceValidator.validate(result,objectMapper));
         Map<String, LabelResultReviewService.ReviewOverlay> reviewed = labelReviews.effectiveForTask(task, byId, results);
         // Joint results are self-contained: mutable directory availability must not gate frozen reads.
         Map<String, InsightLabel> labels = snapshotLabels.strict() ? Map.of() : labelMapper.selectBatchIds(results.stream()

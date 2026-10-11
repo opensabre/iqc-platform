@@ -146,3 +146,11 @@ FindingLabelFreezeService把原2.0目录（标签/群组/类别名称、值类�
 
 旧PipelineRelease的5/6/7参数构造和null字段不序列化保持兼容，PipelineAssetService保留原14参数构造，Spring完整构造显式注入标签freeze provider；无标签政策无需新provider。UI编辑器深拷贝保留并只读展示labelPolicy，不在节点/评分保存时丢弃。此批只连接冻结和校验，尚未写标签表/UPDATE_LABEL适配器、完整查询/复核/导出和标签配置UI，不表示标签动作完成；SQL/真实API/浏览器未运行。
 冻结与历史校验同时核对Finding定义的值类型与原label valueType兼容（数值型范围/整数仍由实际投影值校验），拒绝同code混合类型；目录版本须可表示为int，防止截断匹配。原标签targetRole=all在Finding投影中保留为整会话政策声明，不被误认为识别了特定参与人，不要求伪造旧规则主体事实。
+
+## 原标签结果的双来源存储边界
+核对B当前迁移已占64–67，A领取V1.1.68。最小扩展原iqc_inspection_label_result及InspectionLabelResult：source_rule_result_id允许NULL，新增source_finding_code/source_action_execution_id/source_input_hash/source_projection_hash和动作来源索引，不建立平行标签结果表。CHECK要求旧generation来源仍有真实规则锚点且四个新字段全NULL，PIPELINE_FINDING则规则锚点NULL且四个字段齐全。原唯一键(result,label,valueCode)保留，不能以多个动作制造同义标签行。
+
+共享LabelResultSourceValidator只校验存储形状/实际valueJSON摘要/投影record及label/version/valueCode/Finding身份，查询/复核沿原入口复用。旧来源混入新字段拒绝；Finding来源的动作ID/输入和投影摘要必须为SHA256形状，不信任混合或伪造规则锚点。该本地结构校验不证明实际动作/输入/生产轨迹存在，后续生产持久化和查询须核对原结果/执行/冻结政策以及真实动作记录。
+
+新字段会出现在MyBatis默认查询，因此部署该实体前必须完成V1.1.68，不能只部署代码。SQL未执行，CHECK与MySQL实际兼容/约束并发验收未完成。新Finding协议仍被旧状态/证据围栏拒绝，尚未生产写入，也未接完整查询/复核/导出与UPDATE_LABEL；此批不能宣称新标签可用。
+Finding来源还要求原value_json非NULL；JSON字面量null也显式拒绝，不以空投影参与统计。value_json复用此前V1.1.29的MEDIUMTEXT，无重复扩列。发布前须把B的64–67及后续必要迁移一起集成后按序执行68，避免先应用68导致较低版本迁移需补跑。

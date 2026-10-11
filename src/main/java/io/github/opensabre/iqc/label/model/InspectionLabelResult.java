@@ -7,10 +7,12 @@ import lombok.EqualsAndHashCode;
 
 import java.math.BigDecimal;
 
-/** Insight projection derived from a canonical rule result without re-running detection. */
+/** Insight projection derived from a canonical inspection result without re-running detection. */
 @Data @TableName("iqc_inspection_label_result") @EqualsAndHashCode(callSuper = true)
 public class InspectionLabelResult extends BasePo {
     private String conversationResultId; private String labelId; private Integer labelVersionNo;
     private String valueCode; private String valueJson; private BigDecimal confidence;
     private String sourceRuleResultId; private String generationSource;
+    private String sourceFindingCode; private String sourceActionExecutionId;
+    private String sourceInputHash; private String sourceProjectionHash;
 }
