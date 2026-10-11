@@ -42,3 +42,7 @@ IQC_MYSQL_VALIDATION_DIR=/private/tmp/iqc-mysql-validation.lmgLZv mvn -o -q -Dte
 测试使用 IT 命名，普通 `mvn test` 不会自动连接本地专用 MySQL。共 8 项真实数据库测试，本批没有对当前 A 基线执行后端全量测试，不能沿用上批较旧基线的 704 项结论。
 
 本次验收后通过专属 socket 正常关闭临时 MySQL；mysqladmin 与服务器进程均退出 0，server.log 确认 Shutdown complete。数据目录和日志保留供复核，未接触共享数据库。
+
+## A/B 合并 Finding 标签迁移68验收
+
+95782 terminal exit0，IsolatedMysqlMigrationIT两项零失败错误跳过，日志 /private/tmp/iqc-b-ab-mysql-label-upgrade.log。复用原端口34307/datadir严格核验，随机库finally清理；67升级68仅应用1份迁移，validate69份及再次migrate0通过。既有RULE行source_rule_result_id与value_json保留；新PIPELINE_FINDING行无规则锚点可落库，混用假规则来源、缺source_input_hash、旧RULE去掉来源均被真实CHECK拒绝。原63动作journal升级到68再次验证无伪造历史、后续事件正确，执行数按pending列表匹配。没有改历史迁移；此结果不包含全新库专项、所有历史版本升级、Finding实际生产服务写入及核对或完整PRD验收。

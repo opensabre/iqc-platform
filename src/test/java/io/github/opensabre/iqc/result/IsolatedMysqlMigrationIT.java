@@ -179,7 +179,8 @@ class IsolatedMysqlMigrationIT {
                 }
                 var current = Flyway.configure().dataSource(url,"root","")
                         .locations("classpath:db/migration/mysql").load();
-                assertThat(current.migrate().migrationsExecuted).isEqualTo(4);
+                int pending = current.info().pending().length;
+                assertThat(current.migrate().migrationsExecuted).isEqualTo(pending);
                 current.validate(); assertThat(current.migrate().migrationsExecuted).isZero();
                 try (var db = DriverManager.getConnection(url,"root",""); var sql = db.createStatement()) {
                     try (var count = sql.executeQuery("SELECT COUNT(*) FROM iqc_action_execution_event")) {
@@ -201,6 +202,40 @@ class IsolatedMysqlMigrationIT {
                     }
                 }
             } finally { ddl.execute("DROP DATABASE " + schema); }
+        }
+    }
+
+    @Test
+    void findingLabelUpgradePreservesRuleRowsAndEnforcesDistinctProvenance() throws Exception {
+        verifyIsolatedServer();
+        String schema="iqc_finding_upgrade_"+Long.toHexString(System.nanoTime());
+        String url=SERVER+schema+OPTIONS;
+        try (var server=DriverManager.getConnection(SERVER+OPTIONS,"root",""); var ddl=server.createStatement()) {
+            ddl.execute("CREATE DATABASE "+schema+" CHARACTER SET utf8mb4");
+            try {
+                var old=Flyway.configure().dataSource(url,"root","")
+                        .locations("classpath:db/migration/mysql").target("1.1.67").load();
+                old.migrate(); old.validate();
+                try (var db=DriverManager.getConnection(url,"root",""); var sql=db.createStatement()) {
+                    sql.executeUpdate("INSERT INTO iqc_inspection_label_result(id,conversation_result_id,label_id,label_version_no,value_code,value_json,source_rule_result_id) VALUES ('legacy','result','label',1,'old','{}','rule')");
+                }
+                var current=Flyway.configure().dataSource(url,"root","").locations("classpath:db/migration/mysql").load();
+                assertThat(current.migrate().migrationsExecuted).isEqualTo(1);
+                current.validate(); assertThat(current.migrate().migrationsExecuted).isZero();
+                try (var db=DriverManager.getConnection(url,"root",""); var sql=db.createStatement()) {
+                    try (var row=sql.executeQuery("SELECT source_rule_result_id,source_action_execution_id,value_json FROM iqc_inspection_label_result WHERE id='legacy'")) {
+                        assertThat(row.next()).isTrue(); assertThat(row.getString(1)).isEqualTo("rule");
+                        assertThat(row.getString(2)).isNull(); assertThat(row.getString(3)).isEqualTo("{}");
+                    }
+                    sql.executeUpdate("INSERT INTO iqc_inspection_label_result(id,conversation_result_id,label_id,label_version_no,value_code,value_json,generation_source,source_finding_code,source_action_execution_id,source_input_hash,source_projection_hash) VALUES ('finding','result','label',1,'new','{}','PIPELINE_FINDING','finding-code','action',REPEAT('a',64),REPEAT('b',64))");
+                    org.assertj.core.api.Assertions.assertThatThrownBy(()->sql.executeUpdate("UPDATE iqc_inspection_label_result SET source_rule_result_id='fake-rule' WHERE id='finding'"))
+                            .isInstanceOf(java.sql.SQLException.class);
+                    org.assertj.core.api.Assertions.assertThatThrownBy(()->sql.executeUpdate("UPDATE iqc_inspection_label_result SET source_input_hash=NULL WHERE id='finding'"))
+                            .isInstanceOf(java.sql.SQLException.class);
+                    org.assertj.core.api.Assertions.assertThatThrownBy(()->sql.executeUpdate("UPDATE iqc_inspection_label_result SET source_rule_result_id=NULL WHERE id='legacy'"))
+                            .isInstanceOf(java.sql.SQLException.class);
+                }
+            } finally { ddl.execute("DROP DATABASE "+schema); }
         }
     }
 
@@ -267,7 +302,7 @@ class IsolatedMysqlMigrationIT {
             try (var query = connection.createStatement();
                  var history = query.executeQuery("SELECT version,success FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1")) {
                 assertThat(history.next()).isTrue();
-                assertThat(history.getString(1)).isEqualTo("1.1.67");
+                assertThat(history.getString(1)).isEqualTo("1.1.68");
                 assertThat(history.getBoolean(2)).isTrue();
             }
             try (var query = connection.createStatement();
