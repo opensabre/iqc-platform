@@ -14,3 +14,5 @@ PRD 第12节要求 CREATE_RISK_EVENT，第24节要求风险中心；它们仍属
 本节记录新增模型的能力缺口和取舍，不代表功能已交付，不缩减 PRD 的其余八类动作、离线音频或其它迭代。
 
 A 已领取 V1.1.69 并编码 iqc_risk_event/原 BasePo+BaseMapper 模型：来源动作唯一键，原结果与输入摘要引用，独立处理状态及版本。LOW/MEDIUM/HIGH/CRITICAL 沿生产风险语义，NONE 不造事件。模型没有复制 Finding/任务正文，也没有替代 ActionExecution。服务/实际适配器/页面及处理审计仍待，不执行迁移、不注册虚假可执行适配器。
+
+RiskEventConfiguration 已定义实际 v1 配置为 category/title/description 三个文本字段，分别限制稳定编码64、标题128、描述1000；不接受 riskLevel、Finding 值、证据、owner 或来源ID等自填字段。文本保留普通换行/制表，拒绝其它控制字符，必填非空；此配置校验尚未注册可执行适配器，不表示风险事件已创建。后续实际生产来源 UNKNOWN/NONE 不伪造确定风险。
