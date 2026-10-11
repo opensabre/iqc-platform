@@ -30,6 +30,48 @@ public class FindingLabelResultService {
     private final IqcDataScope scope;
     private final ObjectMapper json;
 
+    /** Confirms only a committed original artifact; never refreshes a claim or writes a label. */
+    @Transactional(readOnly=true,propagation=Propagation.REQUIRES_NEW,isolation=Isolation.REPEATABLE_READ)
+    public String lookup(ActionAdapter.Request request) {
+        Objects.requireNonNull(request);
+        if(!DEFINITION.equals(request.adapter()) || !Objects.equals(scope.owner(),request.source().owner()))
+            throw IqcException.accessDenied("标签核对协议或负责人不一致");
+        var source=request.source();
+        var validated=sources.validateHistorical(new ActionProductionSourceValidator.Reference(source.taskId(),source.executionId(),
+                source.conversationId(),source.resultId(),source.owner()));
+        if(validated.policy()==null)throw IqcException.invalidState("标签核对缺少冻结动作政策");
+        try {
+            var action=validated.policy().actions().stream().filter(value->source.actionId().equals(value.actionId())).findFirst().orElseThrow();
+            var origin=actions.selectById(request.executionId());
+            String policyBody=json.writeValueAsString(validated.policy());
+            if(origin==null || action.type()!=DEFINITION.type() || action.effectiveAdapterVersion()!=DEFINITION.version()
+                    || ActionPolicy.evaluate(action.condition(),validated.context())!=ActionPolicy.Match.MATCH
+                    || !Objects.equals(origin.getAttemptCount(),request.attempt())
+                    || origin.getClaimToken()==null || !origin.getClaimToken().matches("[a-f0-9]{32}")
+                    || origin.getClaimedAtUtc()==null
+                    || !Objects.equals(request.policySnapshotJson(),policyBody)
+                    || !Objects.equals(request.inputSnapshotJson(),validated.inputSnapshotJson())
+                    || !Objects.equals(request.inputSnapshotHash(),validated.inputSnapshotHash()))
+                throw IqcException.invalidState("标签核对请求与实际生产来源不一致");
+            ActionEnqueueService.requireSame(origin,source,action,validated,request.idempotencyKey(),policyBody);
+            var task=tasks.selectById(source.taskId());
+            if(task==null || FindingLabelTaskDirectory.expected(task,json)==null)
+                throw IqcException.invalidState("标签核对缺少冻结目录");
+            var release=json.treeToValue(json.readTree(task.getRuleSnapshotJson()).path("pipelineSnapshot").path("release"),PipelineRelease.class);
+            var policy=release.labelPolicy();
+            var binding=FindingLabelActionConfiguration.requireBinding(policy,action.configuration());
+            var row=find(source.resultId(),binding.labelId(),binding.valueCode());
+            if(row==null)return null;
+            String body=json.writeValueAsString(FindingLabelProjection.project(policy.projectionBinding(binding),
+                    validated.context().findings().get(binding.findingCode())));
+            String id="fl-"+SelectorAssetService.hash(json.writeValueAsString(List.of(source.resultId(),binding.labelId(),binding.valueCode()))).substring(0,60);
+            requireArtifact(row,id,body,request,validated);
+            return row.getId();
+        } catch(com.fasterxml.jackson.core.JsonProcessingException | java.util.NoSuchElementException failure) {
+            throw IqcException.invalidState("标签核对冻结政策或产物损坏");
+        }
+    }
+
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
     public String write(ActionAdapter.Request request) {
         Objects.requireNonNull(request);
@@ -113,6 +155,7 @@ public class FindingLabelResultService {
         var oldSource=new ActionExecutionContract.Source(request.source().taskId(),request.source().executionId(),request.source().conversationId(),
                 request.source().resultId(),validated.decisionReference(),request.source().actionPolicyHash(),declared.actionId(),request.source().owner());
         if(declared.type()!=DEFINITION.type() || declared.effectiveAdapterVersion()!=DEFINITION.version()
+                || ActionPolicy.evaluate(declared.condition(),validated.context())!=ActionPolicy.Match.MATCH
                 || !FindingLabelActionConfiguration.parse(declared.configuration()).equals(FindingLabelActionConfiguration.parse(
                     validated.policy().actions().stream().filter(value->request.source().actionId().equals(value.actionId())).findFirst().orElseThrow().configuration())))
             throw IqcException.invalidState("标签原始动作绑定不一致");

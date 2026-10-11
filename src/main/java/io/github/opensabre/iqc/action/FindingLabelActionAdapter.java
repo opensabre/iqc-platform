@@ -34,6 +34,10 @@ public class FindingLabelActionAdapter implements ActionAdapter {
             return false;
         }
     }
+    @Override public Receipt reconcile(Request request) {
+        String id=labels.lookup(request);
+        return id==null ? null : new Receipt(request.idempotencyKey(),ActionExecutionContract.Outcome.CONFIRMED_SUCCESS,id,id,null);
+    }
     @Override public Receipt execute(Request request) {
         Objects.requireNonNull(request);
         if(!definition().equals(request.adapter()))throw new IllegalArgumentException("UPDATE_LABEL adapter version mismatch");
