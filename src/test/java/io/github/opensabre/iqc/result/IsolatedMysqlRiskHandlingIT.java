@@ -45,6 +45,7 @@ class IsolatedMysqlRiskHandlingIT {
         @Bean RiskHandlingEventMapper history(SqlSessionFactory factory){return new SqlSessionTemplate(factory).getMapper(RiskHandlingEventMapper.class);}
         @Bean RiskEventQueryService queries(){return mock(RiskEventQueryService.class);}
         @Bean IqcDataScope scope(){var scope=mock(IqcDataScope.class);when(scope.owner()).thenReturn("alice");return scope;}
+        @Bean RiskHandlingHistoryService historyService(RiskEventQueryService queries,RiskHandlingEventMapper history){return new RiskHandlingHistoryService(queries,history);}
         @Bean RiskHandlingService handling(RiskEventQueryService queries,RiskEventMapper events,RiskHandlingEventMapper history,IqcDataScope scope){return new RiskHandlingService(queries,events,history,scope);}
     }
     @BeforeAll static void start() throws Exception {
@@ -105,4 +106,41 @@ class IsolatedMysqlRiskHandlingIT {
             assertEquals(a?"first":"second",context.getBean(RiskHandlingEventMapper.class).page(id,null).getFirst().reason());
         }finally{pool.shutdownNow();assertTrue(pool.awaitTermination(5,TimeUnit.SECONDS));}
     }
+    /** Seed actual immutable rows without depending on the handling loop under test. */
+    private void seedHistory(int first,int last,int currentVersion){
+        var mapper=context.getBean(RiskHandlingEventMapper.class);
+        var now=java.time.LocalDateTime.of(2026,10,11,0,0);
+        for(int version=first;version<=last;version++){
+            String previous=version%2==1?"OPEN":"RESOLVED",next=version%2==1?"RESOLVED":"OPEN";
+            assertEquals(1,mapper.append(id,version,previous,next,"evidence "+version,"alice",now.plusSeconds(version)));
+        }
+        String currentStatus=currentVersion%2==1?"RESOLVED":"OPEN";
+        jdbc.update("UPDATE iqc_risk_event SET version=?,status=? WHERE id=?",currentVersion,currentStatus,id);
+        when(queries.list("result")).thenReturn(List.of(new RiskEventQueryService.View(id,"result","action","quality","Title","Description","HIGH",currentStatus,Integer.toString(currentVersion))));
+    }
+    @Test void historyPaginatesRealSqlWithoutLosingVersionsOrChangingState(){
+        seedHistory(1,55,55);
+        var reader=context.getBean(RiskHandlingHistoryService.class);
+        var first=reader.page("result",id,null);assertEquals(50,first.events().size());assertEquals("55",first.events().getFirst().version());
+        assertEquals("6",first.nextBeforeVersion());
+        var second=reader.page("result",id,first.nextBeforeVersion());assertEquals(5,second.events().size());
+        assertEquals("5",second.events().getFirst().version());assertEquals("1",second.events().getLast().version());assertNull(second.nextBeforeVersion());
+        assertTrue(reader.page("result",id,"1").events().isEmpty());assertState("RESOLVED",55,55);
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->reader.page("result",id,"57"));
+    }
+    @Test void lastHistoryPageRejectsMissingOriginInsteadOfShowingCompleteHistory(){
+        seedHistory(2,55,55);
+        var reader=context.getBean(RiskHandlingHistoryService.class);
+        assertEquals("6",reader.page("result",id,null).nextBeforeVersion());
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->reader.page("result",id,"6"));
+        assertState("RESOLVED",55,54);
+    }
+    @Test void historyRejectsMissingCurrentRecordAndEmptyInteriorCursor(){
+        seedHistory(2,54,55);
+        var reader=context.getBean(RiskHandlingHistoryService.class);
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->reader.page("result",id,null));
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->reader.page("result",id,"2"));
+        assertState("RESOLVED",55,53);
+    }
+
 }
