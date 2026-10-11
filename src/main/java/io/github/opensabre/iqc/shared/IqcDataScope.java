@@ -40,6 +40,12 @@ public class IqcDataScope {
                 || actor.resourceCodes()==null || !actor.resourceCodes().containsAll(resources))
             throw io.github.opensabre.iqc.governance.IqcException.accessDenied("后台业务操作缺少当前授权证据");
     }
+    /** Reuses the owner-bound checks against the existing private scheduled projection. */
+    public void requireScheduledBound(io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound bound) {
+        var actor=scheduledActor.get();
+        if(actor==null)throw io.github.opensabre.iqc.governance.IqcException.accessDenied("后台操作缺少当前负责人上下文");
+        io.github.opensabre.iqc.action.ActionEnqueueService.requireBound(bound,actor);
+    }
     public String owner() {
         var actor=scheduledActor.get();if(actor!=null)return actor.owner();
         String username = userContext.getUsername();
