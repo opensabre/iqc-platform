@@ -189,3 +189,10 @@ FindingLabelSource只在通过共享证明后返回Finding编码、真实ActionE
 FindingLabelActionAdapter已注册精确UPDATE_LABEL v1（本地稳定产物可幂等，retrySafe=true），配置仍只labelId/valueCode。ready只读取已验证输入中的冻结labelPolicy并核对绑定；旧缺绑定政策返回false，沿原前置延后机制不增加attempt、不写标签。execute通过Spring代理提交原标签服务事务后引用实际标签ID作为确认成功回执；异常/提交未确认为UNKNOWN，不自动重发，不假称远端失败。复用生产入队三项权限和原负责人bound，不要求修改目录的label:manage；不扩大授权、不做网络调用。
 新freeze检查可执行v1绑定，历史版本不借今日目录修补；v2等未提供版本继续原精确registry unavailable。历史发布验证仍核对真实版本、生产标记、摘要与发布证据，并使用原PipelineRuntime.validateStructure保持图/节点/条件/输出Schema/降级结构校验；当前engine registry和今日资产/规则/Finding目录/agent可用性仅用于执行分支。历史融合仍根据冻结事实/融合/决策政策重建，不调用当前引擎。
 后台iqc.actions.enabled默认关闭不变；启用前须集成B迁移/期限与恢复等必要修复并按序应用V68。未运行测试、SQL、Spring实际执行/回执/历史停用读取/并发或浏览器验收，配置UI与真实功能验收继续。
+
+## 标签绑定配置UI复用说明
+现有PublishedAssetReference只支持RULE/FINDING/AGENT；原labels API仅当前树/详情，无历史版本表，不能制造LABEL历史版本选择器。原LabelTreeSelector可选择已发布目录但不能表达Finding/值版本绑定，因此新增FindingLabelPolicyEditor仅组合原树/详情及既有PipelineReleaseEditor，用当前已发布版本和值定义添加绑定，不建平行目录/API。已有未修改绑定及directory原样保留，修改绑定后目录由保存端重新冻结，客户端不伪造名称/角色/类型授权。动作编辑继续复用原ActionPolicy契约，绑定移除不自动删除已有动作。
+
+FindingLabelPolicyEditor组合原getLabelTree/getLabelDetail和LabelTreeSelector；只用原label:view查询，具体标签叶子选择，核对返回身份、当前发布状态/版本和值定义。绑定最多100，同标签版本不混用，同值不重复；Finding由用户明确选择，不默认猜第一项。异步目录/详情使用generation，关闭/禁用/切换流水线初始数据（父级key重挂载）失效旧请求，失败不写半份政策。
+未修改绑定和directory保留原始深拷贝；绑定编辑后去掉客户端directory，由后端重新冻结。读取历史名称使用已冻结目录/local展示缓存，绝不把客户端名称/类型/角色传作授权依据。PipelineReleaseEditor.release做绑定身份/版本/唯一和UPDATE_LABEL v1目标交叉校验；已有其他动作/条件/重试字段原样保留。
+可从每个绑定添加实际UPDATE_LABEL v1动作（ALWAYS、固定来源幂等、无自动重试、仅记录），重复同值动作不重复添加；最多100，支持显式移除动作。移除绑定不暗删动作，保存时要求解决失效目标。此批仅完成标签选择/映射和默认打标动作创建，通用动作条件/重试/配置编辑后续继续，不以默认ALWAYS代替PRD完整动作策略要求。无新API/DDL/框架修改，无浏览器或真实目录/保存执行验收。
