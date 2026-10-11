@@ -28,3 +28,5 @@ CREATE_RISK_EVENT v1 实际 RiskEventActionAdapter 已注册原精确版本 regi
 处置审计能力缺口：Framework AuditAspect发布治理事件，DefaultAuditEventHandler调用sysadmin.saveAuditLog且失败只warn，不能与IQC状态事务原子提交。保留原Audit，A领取V1.1.70新增风险专属版本事件，仅保存状态前后/原因/操作人/实际UTC，不复制来源结果或治理审计模型。事件写入失败须撤销处置CAS，版本唯一，不可改删；真实SQL/服务事务验收待。框架源代码不修改。
 
 RiskHandlingService 已编码独立事务处置：原历史查询证明/数据范围先于事件锁，观察版本字符串精确解析、MAX拒绝；OPEN可进入处置/解决/排除，处置中可解决/排除，终态仅显式重开OPEN。CAS成功同事务append原因/实际操作人/UTC，零行或异常回滚，竞争败者无日志。不改机器结果/冻结事件元数据。公开权限与入口尚未接入，真实SQL并发回滚验收待。
+
+风险处置POST /api/iqc/conversation-results/{id}/risk-events/{riskEventId}/handle接入原risk:handle资源/治理Audit/独立限流，请求version字符串/status/reason，响应HANDLED或STALE_OBSERVATION，不返回或更新机器结果。旧观察不自动重试；状态成功及原因由真实服务代理事务统一提交，权限迁移及实际HTTP/SQL验收待。
