@@ -6,7 +6,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
 /** Reuses the owning notification service; no alternate notification persistence or channel. */
-@FeignClient(name="${iqc.notification.service-id:base-sysadmin}")
+@FeignClient(name="${iqc.notification.service-id:base-sysadmin}", configuration=IqcNotificationFeignConfiguration.class)
 public interface IqcNotificationClient {
     @PostMapping("/internal/iqc/notifications/{requestId}")
     Result<Status> send(@PathVariable("requestId") String requestId,@RequestBody Send send);
