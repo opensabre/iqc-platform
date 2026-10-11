@@ -129,4 +129,18 @@ class ActionEnqueueIdempotencyTest {
         when(rows.insert(any(ActionExecution.class))).thenReturn(0);
         assertThrows(IqcException.class,()->service.enqueue(reference,actor()));
     }
+    @Test void sharedFrozenValidationRejectsChangedInputBeforeClaimOrRecovery() throws Exception {
+        service.enqueue(reference,actor());var row=saved.get();
+        assertEquals("save",ActionFrozenPolicy.validate(row,reference,sources.validate(reference),json).action().actionId());
+        row.setInputSnapshotJson("{\"different\":true}");
+        assertThrows(IqcException.class,()->ActionFrozenPolicy.validate(row,reference,sources.validate(reference),json));
+    }
+    @Test void sharedAttemptLimitDoesNotResetOrModifyTheOriginalLedger() throws Exception {
+        service.enqueue(reference,actor());var row=saved.get();
+        var prepared=ActionFrozenPolicy.validate(row,reference,sources.validate(reference),json);
+        assertFalse(prepared.exhausted(row,Instant.now()));row.setAttemptCount(1);
+        assertTrue(prepared.exhausted(row,Instant.now()));assertEquals(1,row.getAttemptCount());
+        assertEquals("PENDING",row.getStatus());assertEquals(0L,row.getVersion());
+    }
+
 }
