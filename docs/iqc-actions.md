@@ -196,3 +196,12 @@ FindingLabelActionAdapter已注册精确UPDATE_LABEL v1（本地稳定产物可�
 FindingLabelPolicyEditor组合原getLabelTree/getLabelDetail和LabelTreeSelector；只用原label:view查询，具体标签叶子选择，核对返回身份、当前发布状态/版本和值定义。绑定最多100，同标签版本不混用，同值不重复；Finding由用户明确选择，不默认猜第一项。异步目录/详情使用generation，关闭/禁用/切换流水线初始数据（父级key重挂载）失效旧请求，失败不写半份政策。
 未修改绑定和directory保留原始深拷贝；绑定编辑后去掉客户端directory，由后端重新冻结。读取历史名称使用已冻结目录/local展示缓存，绝不把客户端名称/类型/角色传作授权依据。PipelineReleaseEditor.release做绑定身份/版本/唯一和UPDATE_LABEL v1目标交叉校验；已有其他动作/条件/重试字段原样保留。
 可从每个绑定添加实际UPDATE_LABEL v1动作（ALWAYS、固定来源幂等、无自动重试、仅记录），重复同值动作不重复添加；最多100，支持显式移除动作。移除绑定不暗删动作，保存时要求解决失效目标。此批仅完成标签选择/映射和默认打标动作创建，通用动作条件/重试/配置编辑后续继续，不以默认ALWAYS代替PRD完整动作策略要求。无新API/DDL/框架修改，无浏览器或真实目录/保存执行验收。
+
+## 通用动作策略编辑复用边界
+SelectorConditionEditor是选数字段/operator/junction，不表达Finding融合三态与NOT/评分/业务项条件；不能直接映射。新增ActionConditionEditor仅用于既有ActionPolicy.Condition，组合UI沿原递归表单习惯，保留所有条件种类/16层100节点边界。ActionPolicyEditor复用AutomaticRetryPolicyEditor和validateAutomaticRetry、已有冻结标签绑定，先为四个真实v1适配器提供业务字段表单。其它类型/版本及暂未执行的升级复核失败策略保留只读，显式删除可改新草稿，不能改成latest或提供模拟成功。无新业务API/执行模型。
+
+ActionPolicyEditor现接入原PipelineReleaseEditor：新增实际SAVE_RESULT/UPDATE_LABEL/CREATE_REVIEW/ADD_TO_EVALUATION_CANDIDATE v1，业务表单分别为冻结目标、复核原因/预期轮次、评测候选类型/来源复核轮次/名称/标签。候选保持原金标标注/独立审核，不直接批准。创建版本固定v1、固定原来源幂等、RECORD_ONLY；不把暂未实现的ESCALATE_REVIEW作为可执行选项，已有此失败策略及其他type/version只读保留，显式删除授权仅在本地草稿。
+ActionConditionEditor支持全部原Kind及任意合法嵌套/NOT，16层100节点；组类型切换保留已有子条件，取反多子项要求用户明确删除，不悄悄裁剪。Finding/质检项需明确选择编码；缺选项保留原引用显示“未加载”，最终后台校验声明。不执行条件，不把未知当否。标量JSON解析失败以不可保存的对象状态保留文本/提示，不降级为字符串，false/0保持；不接受JS无法精确表达的整数，无脚本/表达式入口。
+已有retry表单/校验复用；前端保存校验动作ID唯一/版本/配置尺寸、全部条件结构/状态/标量、复核轮次整数边界与候选字段界限，UPDATE_LABEL目标仍走共用绑定检查。新增表单和验证不会确认执行或回执，真实条件行为/浏览器/接口/SQL及所有PRD策略验收仍待后续。
+
+新增组合组/子条件以缺少明确编码的Finding状态条件起步，保存前须明确选择；不把ANY的新子条件默认为ALWAYS而意外扩大触发范围。显式创建动作的初始ALWAYS保留可见“每份生产结果”含义。空/非法轮次呈现空值，不能看似默认0/1却保存NULL。
