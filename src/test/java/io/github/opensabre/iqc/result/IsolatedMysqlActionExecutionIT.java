@@ -324,4 +324,28 @@ class IsolatedMysqlActionExecutionIT {
         assertThat(first.getFirst().getObservedVersion()).isEqualTo(Long.MAX_VALUE);
     }
 
+    @Test void blockedRecoveryPreservesReceiptsAndCannotRequeueUnknownOrOverwriteAVersion() {
+        assertThat(tx.<Integer>execute(status->actions.blockReady("action",0,"BLOCKED_ADAPTER","ADAPTER_CONFIGURATION_UNAVAILABLE",NOW))).isEqualTo(1);
+        assertThat(tx.<Integer>execute(status->actions.recoverBlocked("action",1,"Alice",NOW))).isZero();
+        assertThat(tx.<Integer>execute(status->actions.recoverBlocked("action",0,"alice",NOW))).isZero();
+        assertThat(tx.<Integer>execute(status->actions.recoverBlocked("action",1,"alice",NOW))).isEqualTo(1);
+        assertThat(actions.selectById("action").getStatus()).isEqualTo("PENDING");
+        assertThat(actions.selectById("action").getAttemptCount()).isZero();
+        assertThat(tx.<Integer>execute(status->actions.recoverBlocked("action",1,"alice",NOW))).isZero();
+        assertThat(claim(TOKEN,2,NOW)).isEqualTo(1);
+        assertThat(settle(3,TOKEN,Next.WAITING_RETRY,Outcome.CONFIRMED_RETRYABLE_FAILURE,NOW.plusMinutes(1))).isEqualTo(1);
+        assertThat(tx.<Integer>execute(status->actions.blockReady("action",4,"BLOCKED_AUTHORIZATION","ACTION_OPERATION_GRANT_MISSING",NOW))).isEqualTo(1);
+        assertThat(tx.<Integer>execute(status->actions.recoverBlocked("action",5,"alice",NOW.plusMinutes(2)))).isEqualTo(1);
+        var recovered=actions.selectById("action");
+        assertThat(recovered.getStatus()).isEqualTo("WAITING_RETRY");assertThat(recovered.getAttemptCount()).isEqualTo(1);
+        assertThat(recovered.getClaimToken()).isEqualTo(TOKEN);assertThat(recovered.getOutcome()).isEqualTo("CONFIRMED_RETRYABLE_FAILURE");
+        assertThat(recovered.getEvidenceReference()).isEqualTo("adapter-evidence");assertThat(recovered.getResultReference()).isEqualTo("external-result");
+        assertThat(claim(TOKEN,6,NOW.plusMinutes(2))).isEqualTo(1);
+        assertThat(tx.<Integer>execute(status->actions.quarantineLostClaim("action",7,TOKEN,NOW.plusMinutes(2),NOW.plusMinutes(2)))).isEqualTo(1);
+        assertThat(tx.<Integer>execute(status->actions.recoverBlocked("action",8,"alice",NOW.plusMinutes(3)))).isZero();
+        // Even an incorrectly classified BLOCKED row cannot convert UNKNOWN into retry permission.
+        jdbc.update("UPDATE iqc_action_execution SET status='BLOCKED_SOURCE',version=version+1 WHERE id='action'");
+        assertThat(tx.<Integer>execute(status->actions.recoverBlocked("action",9,"alice",NOW.plusMinutes(3)))).isZero();
+    }
+
 }

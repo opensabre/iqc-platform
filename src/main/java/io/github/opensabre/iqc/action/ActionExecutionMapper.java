@@ -144,4 +144,20 @@ public interface ActionExecutionMapper extends BaseMapper<ActionExecution> {
                               @Param("token") String token,@Param("now") LocalDateTime now,
                               @Param("evidence") String evidence,@Param("result") String result,@Param("actor") String actor);
 
+    /** Local recovery fence only. The caller must first validate frozen source, actor, adapter and remaining policy. */
+    @Update("""
+        UPDATE iqc_action_execution
+        SET status=CASE WHEN attempt_count=0 THEN 'PENDING' ELSE 'WAITING_RETRY' END,
+            next_attempt_at_utc=CASE WHEN attempt_count=0 THEN NULL ELSE #{now} END,
+            last_error_code=NULL,version=version+1,updated_by=#{actor},updated_time=#{now}
+        WHERE BINARY id=BINARY #{id} AND version=#{version} AND version < 9223372036854775807
+          AND BINARY owner=BINARY #{actor}
+          AND BINARY status IN ('BLOCKED_SOURCE','BLOCKED_AUTHORIZATION','BLOCKED_ADAPTER')
+          AND ((attempt_count=0 AND outcome IS NULL AND claim_token IS NULL AND claimed_at_utc IS NULL)
+            OR (attempt_count>0 AND BINARY outcome='CONFIRMED_RETRYABLE_FAILURE'
+              AND claim_token IS NOT NULL AND claimed_at_utc IS NOT NULL AND settled_at_utc IS NOT NULL))
+        """)
+    int recoverBlocked(@Param("id") String id,@Param("version") long version,
+                       @Param("actor") String actor,@Param("now") LocalDateTime now);
+
 }
