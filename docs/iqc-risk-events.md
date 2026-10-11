@@ -30,3 +30,7 @@ CREATE_RISK_EVENT v1 实际 RiskEventActionAdapter 已注册原精确版本 regi
 RiskHandlingService 已编码独立事务处置：原历史查询证明/数据范围先于事件锁，观察版本字符串精确解析、MAX拒绝；OPEN可进入处置/解决/排除，处置中可解决/排除，终态仅显式重开OPEN。CAS成功同事务append原因/实际操作人/UTC，零行或异常回滚，竞争败者无日志。不改机器结果/冻结事件元数据。公开权限与入口尚未接入，真实SQL并发回滚验收待。
 
 风险处置POST /api/iqc/conversation-results/{id}/risk-events/{riskEventId}/handle接入原risk:handle资源/治理Audit/独立限流，请求version字符串/status/reason，响应HANDLED或STALE_OBSERVATION，不返回或更新机器结果。旧观察不自动重试；状态成功及原因由真实服务代理事务统一提交，权限迁移及实际HTTP/SQL验收待。
+
+风险处置历史GET /api/iqc/conversation-results/{id}/risk-events/{riskEventId}/history使用risk:history:view，复用实际事件查询生产证明与原结果scope；单页50+1/version字符串游标，REPEATABLE_READ。核对当前版本/状态与首事件、倒序连续版本/前后状态链，缺失或损坏不伪造空历史。只返回真实状态/原因/actor/UTC；权限/历史页面与实际SQL验收待。
+
+历史分页额外验证首条版本与游标实际边界一致、末页必须连续回到版本1/初始OPEN，空页不能掩盖未到起点的缺失记录；超出实际当前版本的游标拒绝。该批首次编译通过后加强，最终编译/实际SQL验收仍待。
