@@ -220,7 +220,9 @@ class IsolatedMysqlMigrationIT {
                     sql.executeUpdate("INSERT INTO iqc_inspection_label_result(id,conversation_result_id,label_id,label_version_no,value_code,value_json,source_rule_result_id) VALUES ('legacy','result','label',1,'old','{}','rule')");
                 }
                 var current=Flyway.configure().dataSource(url,"root","").locations("classpath:db/migration/mysql").load();
-                assertThat(current.migrate().migrationsExecuted).isEqualTo(1);
+                int pending=current.info().pending().length;
+                assertThat(pending).isPositive();
+                assertThat(current.migrate().migrationsExecuted).isEqualTo(pending);
                 current.validate(); assertThat(current.migrate().migrationsExecuted).isZero();
                 try (var db=DriverManager.getConnection(url,"root",""); var sql=db.createStatement()) {
                     try (var row=sql.executeQuery("SELECT source_rule_result_id,source_action_execution_id,value_json FROM iqc_inspection_label_result WHERE id='legacy'")) {
@@ -302,7 +304,7 @@ class IsolatedMysqlMigrationIT {
             try (var query = connection.createStatement();
                  var history = query.executeQuery("SELECT version,success FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1")) {
                 assertThat(history.next()).isTrue();
-                assertThat(history.getString(1)).isEqualTo("1.1.68");
+                assertThat(history.getString(1)).isEqualTo("1.1.70");
                 assertThat(history.getBoolean(2)).isTrue();
             }
             try (var query = connection.createStatement();
