@@ -58,12 +58,13 @@ public class LabelResultQueryService {
         this(taskMapper,conversationResultMapper,labelResultMapper,labelMapper,groupMapper,categoryMapper,conversationMapper,
                 evidenceMapper,objectMapper,dataScope,ruleResultMapper,labelReviews,null);
     }
-    private FindingLabelProjection.Projection findingProjection(InspectionTask task,ConversationInspectionResult result,InspectionLabelResult row) {
-        LabelResultSourceValidator.validate(row,objectMapper);
-        if(!LabelResultSourceValidator.FINDING.equals(row.getGenerationSource()))return null;
+    private Map<String,FindingLabelProjection.Projection> findingProjections(Map<String,InspectionTask> tasks,
+            Map<String,ConversationInspectionResult> results,List<InspectionLabelResult> rows) {
+        rows.forEach(row->LabelResultSourceValidator.validate(row,objectMapper));
+        if(rows.stream().noneMatch(row->LabelResultSourceValidator.FINDING.equals(row.getGenerationSource())))return Map.of();
         var reader=findingReads==null?null:findingReads.getIfAvailable();
         if(reader==null)throw IqcException.invalidState("Finding标签读取服务不可用");
-        return reader.read(task,result,row);
+        return reader.readBatch(tasks,results,rows);
     }
     private String findingEvidence(FindingLabelProjection.Projection projection) {
         try{return objectMapper.writeValueAsString(projection.evidence());}
@@ -88,7 +89,7 @@ public class LabelResultQueryService {
                         .in(InspectionLabelResult::getConversationResultId, byId.keySet())
                         .orderByAsc(InspectionLabelResult::getCreatedTime));
         if (results.isEmpty()) return List.of();
-        results.forEach(result -> LabelResultSourceValidator.validate(result,objectMapper));
+        var findings=findingProjections(Map.of(task.getId(),task),byId,results);
         Map<String, LabelResultReviewService.ReviewOverlay> reviewed = labelReviews.effectiveForTask(task, byId, results);
         // Joint results are self-contained: mutable directory availability must not gate frozen reads.
         Map<String, InsightLabel> labels = snapshotLabels.strict() ? Map.of() : labelMapper.selectBatchIds(results.stream()
@@ -115,14 +116,16 @@ public class LabelResultQueryService {
                     snapshotLabels.strict() ? snapshot.categoryName() : snapshot != null && snapshot.categoryName() != null ? snapshot.categoryName() : category == null ? null : category.getName(),
                     snapshotLabels.strict() ? snapshot.groupName() : snapshot != null && snapshot.groupName() != null ? snapshot.groupName() : group == null ? null : group.getName(),
                     snapshot != null ? snapshot.name() : label == null ? null : label.getName()).filter(Objects::nonNull).toList());
-            var finding=findingProjection(task,conversation,result);
+            var finding=findings.get(result.getId());
             String status = finding==null?resultStatus(result.getValueJson(), snapshotLabels.strict(), snapshot, result.getValueCode()):finding.status().name();
             String evidenceJson = finding==null?evidenceJson(result):findingEvidence(finding);
             return new LabelResultView(result.getId(), conversation.getConversationId(), fileNames.get(conversation.getConversationId()), result.getLabelId(),
                     snapshot != null ? snapshot.name() : label == null ? result.getLabelId() : label.getName(),
                     snapshot != null ? snapshot.code() : label == null ? null : label.getCode(), path, result.getLabelVersionNo(), result.getValueCode(),
                     result.getValueJson(), result.getConfidence(), result.getGenerationSource(),
-                    result.getSourceRuleResultId(), evidenceJson, status, reviewed.get(result.getId()));
+                    result.getSourceRuleResultId(), evidenceJson, status, reviewed.get(result.getId()),finding==null?null:
+                        new FindingLabelSource(result.getSourceFindingCode(),result.getSourceActionExecutionId(),conversation.getExecutionId(),
+                                result.getSourceInputHash(),result.getSourceProjectionHash()));
         }).collect(Collectors.toMap(value -> value.conversationId() + ":" + value.labelId() + ":" + Objects.toString(value.valueCode(), ""),
                 Function.identity(), (first, ignored) -> {
                     if (snapshotLabels.strict()) throw IqcException.invalidState("标签结果重复，不能确认联合试跑覆盖");
@@ -404,8 +407,10 @@ public class LabelResultQueryService {
         var seenJointResults = new java.util.HashSet<LabelResultKey>();
         List<InspectionLabelResult> results = new java.util.ArrayList<>();
         List<String> statuses = new java.util.ArrayList<>();
-        for (InspectionLabelResult result : labelResultMapper.selectList(Wrappers.<InspectionLabelResult>lambdaQuery()
-                .in(InspectionLabelResult::getConversationResultId, byId.keySet()))) {
+        var rows=labelResultMapper.selectList(Wrappers.<InspectionLabelResult>lambdaQuery()
+                .in(InspectionLabelResult::getConversationResultId, byId.keySet()));
+        var findings=findingProjections(tasks,byId,rows);
+        for (InspectionLabelResult result : rows) {
             ConversationInspectionResult conversation = byId.get(result.getConversationResultId());
             SnapshotCatalog snapshot = snapshots.get(conversation.getTaskId());
             if (snapshot != null && snapshot.strict()) {
@@ -414,7 +419,7 @@ public class LabelResultQueryService {
                         result.getLabelId(), result.getValueCode());
                 if (!seenJointResults.add(key)) throw IqcException.invalidState("标签结果重复，不能确认联合试跑覆盖");
             }
-            var finding=findingProjection(tasks.get(conversation.getTaskId()),conversation,result);
+            var finding=findings.get(result.getId());
             String status = finding!=null?finding.status().name():resultStatus(result.getValueJson(), snapshot != null && snapshot.strict(),
                     snapshot == null ? null : snapshot.values().get(result.getLabelId() + ":" + result.getLabelVersionNo()),
                     result.getValueCode());
@@ -473,7 +478,13 @@ public class LabelResultQueryService {
     public record LabelResultView(String id, String conversationId, String sourceFileName, String labelId, String labelName,
                                   String labelCode, String labelPath, Integer labelVersionNo, String valueCode, String valueJson,
                                   BigDecimal confidence, String generationSource, String sourceRuleResultId, String evidenceJson, String status,
-                                  LabelResultReviewService.ReviewOverlay reviewOverlay) {
+                                  LabelResultReviewService.ReviewOverlay reviewOverlay,FindingLabelSource findingSource) {
+        public LabelResultView(String id,String conversationId,String sourceFileName,String labelId,String labelName,
+                String labelCode,String labelPath,Integer labelVersionNo,String valueCode,String valueJson,BigDecimal confidence,
+                String generationSource,String sourceRuleResultId,String evidenceJson,String status,LabelResultReviewService.ReviewOverlay reviewOverlay) {
+            this(id,conversationId,sourceFileName,labelId,labelName,labelCode,labelPath,labelVersionNo,valueCode,valueJson,
+                    confidence,generationSource,sourceRuleResultId,evidenceJson,status,reviewOverlay,null);
+        }
         /** Older callers construct machine-only test/export rows without a human overlay. */
         public LabelResultView(String id, String conversationId, String sourceFileName, String labelId, String labelName,
                                String labelCode, String labelPath, Integer labelVersionNo, String valueCode, String valueJson,
@@ -482,6 +493,7 @@ public class LabelResultQueryService {
                     valueJson, confidence, generationSource, sourceRuleResultId, evidenceJson, status, null);
         }
     }
+    public record FindingLabelSource(String findingCode,String actionExecutionId,String executionId,String inputHash,String projectionHash) { }
     public record LabelInsightSummary(long conversationCount, long detectedConversationCount, BigDecimal detectionRate,
                                       Map<String, Long> labelDistribution, Map<String, Long> groupDistribution,
                                       long coverageValueCount, Map<String, Long> coverageStatusCounts, ReviewSummary reviewed) {

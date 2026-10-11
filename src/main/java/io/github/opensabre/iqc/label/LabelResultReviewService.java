@@ -206,11 +206,19 @@ public class LabelResultReviewService {
                 groups.computeIfAbsent(row.getLabelResultId(), ignored -> new ArrayList<>()).add(row);
             }
         }
+        var findingRows=values.stream().filter(value->groups.containsKey(value.getId())
+                && LabelResultSourceValidator.FINDING.equals(value.getGenerationSource())).toList();
+        java.util.Map<String,FindingLabelProjection.Projection> findingProjections=java.util.Map.of();
+        if(!findingRows.isEmpty()) {
+            var reader=findingReads==null?null:findingReads.getIfAvailable();
+            if(reader==null)throw IqcException.invalidState("Finding标签读取服务不可用");
+            findingProjections=reader.readBatch(java.util.Map.of(task.getId(),task),conversationsById,findingRows);
+        }
         var overlays = new HashMap<String, ReviewOverlay>();
         var expectedConversationByMessage = new HashMap<String, String>();
         for (var entry : groups.entrySet()) {
             InspectionLabelResult value = byId.get(entry.getKey());
-            Context context = frozenContext(task, conversationsById.get(value.getConversationResultId()), value);
+            Context context = frozenContext(task, conversationsById.get(value.getConversationResultId()), value,findingProjections.get(value.getId()));
             List<ResultReview> rounds = entry.getValue().stream()
                     .sorted(Comparator.comparing(ResultReview::getReviewRevision,
                             Comparator.nullsFirst(Comparator.naturalOrder()))).toList();
@@ -322,10 +330,23 @@ public class LabelResultReviewService {
 
     /** Validates a supplied canonical row against its immutable task snapshot without additional identity reads. */
     private Context frozenContext(InspectionTask task, ConversationInspectionResult conversation, InspectionLabelResult label) {
+        return frozenContext(task,conversation,label,null);
+    }
+    private Context frozenContext(InspectionTask task,ConversationInspectionResult conversation,InspectionLabelResult label,
+            FindingLabelProjection.Projection verifiedFinding) {
         if(label!=null)LabelResultSourceValidator.validate(label,mapper);
         if (task == null || conversation == null || label == null || !Objects.equals(task.getId(), conversation.getTaskId())
                 || !Objects.equals(conversation.getId(), label.getConversationResultId()))
             throw IqcException.invalidState("标签结果与任务会话归属不一致");
+        if(LabelResultSourceValidator.FINDING.equals(label.getGenerationSource())) {
+            var projection=verifiedFinding;
+            if(projection==null) {
+                var reader=findingReads==null?null:findingReads.getIfAvailable();
+                if(reader==null)throw IqcException.invalidState("Finding标签读取服务不可用");
+                projection=reader.read(task,conversation,label);
+            }
+            return new Context(task,conversation,label,mapper.valueToTree(projection),projection.binding().valueType());
+        }
         try {
             JsonNode frozen=FindingLabelTaskDirectory.expected(task,mapper);
             if(frozen==null && task.getLabelScopeSnapshotJson()!=null)frozen=mapper.readTree(task.getLabelScopeSnapshotJson());
@@ -353,15 +374,6 @@ public class LabelResultReviewService {
                     valueType = entry.path("valueType").asText();
                 }
             if (valueType == null) throw IqcException.invalidState("标签值不属于冻结定义");
-            if(LabelResultSourceValidator.FINDING.equals(label.getGenerationSource())) {
-                var reader=findingReads==null?null:findingReads.getIfAvailable();
-                if(reader==null)throw IqcException.invalidState("Finding标签读取服务不可用");
-                var projection=reader.read(task,conversation,label);
-                if(!valueType.equals(projection.binding().valueType())
-                        || !definition.path("targetRole").asText().equals(projection.binding().targetRole()))
-                    throw IqcException.invalidState("Finding标签与冻结值类型或角色不一致");
-                return new Context(task,conversation,label,mapper.valueToTree(projection),valueType);
-            }
             JsonNode payload = mapper.readTree(label.getValueJson());
             if (payload == null || !label.getValueCode().equals(payload.path("valueCode").asText()))
                 throw IqcException.invalidState("标签原始结果无效");

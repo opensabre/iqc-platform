@@ -23,7 +23,7 @@ public class LabelInsightExportService {
     private static final int DETAIL_CHUNK_BYTES = 24_000;
     private static final com.fasterxml.jackson.databind.ObjectMapper JSON = new com.fasterxml.jackson.databind.ObjectMapper();
     private static final List<String> HEADERS = List.of("任务ID", "文件", "会话ID", "标签路径", "标签名称", "标签编码", "标签版本", "标签值编码", "机器结果状态", "置信度", "机器证据", "生成来源", "来源规则结果ID（兼容锚点）", "AI生成", "机器值与候选JSON",
-            "最新复核状态", "最新复核轮次", "生效人工复核ID", "生效人工轮次", "人工有效状态", "人工有效值JSON", "人工证据消息ID JSON");
+            "最新复核状态", "最新复核轮次", "生效人工复核ID", "生效人工轮次", "人工有效状态", "人工有效值JSON", "人工证据消息ID JSON", "来源Finding编码", "来源动作执行ID", "来源任务执行轮次", "冻结输入SHA256", "标签投影SHA256");
     private final LabelResultQueryService queryService;
 
     public byte[] exportTask(String taskId) {
@@ -50,7 +50,10 @@ public class LabelInsightExportService {
                         overlay.effectiveRevision() == null ? "" : overlay.effectiveRevision().toString(), safe(overlay.effectiveStatus()),
                         overlay.effectiveValue() == null ? "" : overlay.effectiveValue().toString(),
                         JSON.valueToTree(overlay.evidenceMessageIds()).toString());
-                writeResult(row, java.util.stream.Stream.concat(machine.stream(), human.stream()).toList(), details, detailRowIndex);
+                var source=value.findingSource();
+                var provenance=source==null?List.of("","","","",""):List.of(safe(source.findingCode()),safe(source.actionExecutionId()),
+                        safe(source.executionId()),safe(source.inputHash()),safe(source.projectionHash()));
+                writeResult(row, java.util.stream.Stream.of(machine,human,provenance).flatMap(List::stream).toList(), details, detailRowIndex);
             }
             workbook.write(output);
             return output.toByteArray();
