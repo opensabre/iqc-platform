@@ -49,3 +49,5 @@ ActionRecoveryRequestService为NEVER，当前稳定身份capture和固定工作�
 扩展恢复代理验收85600 exit0，10项零失败错误跳过：并发同版本一个赢家、实际领取/结算历史回执在恢复成功及原因失败回滚两路径保持、MAX-3真实恢复/领取/结算达MAX，以及MAX-2/MAX-1/MAX服务与SQL拒绝。并发来源校验使用屏障替身，真实竞争位于Action行锁；不证明生产Task/Execution/Result锁序。真实SQL版本围栏已验证。
 
 修正人工授权的组织调用：resolveCurrent走原组织权限投影的严格当前用户入口currentActionAccess，后台resolve继续走service-only schedulerAccess，不清认证或修改framework。旧CurrentUserService仅网关JWT、ResourceService.query缓存资源，不足以证明新鲜账号/范围的一致快照，故最小扩原组织controller入口复用同Access服务。应用unit40562授权9项及更新后真实签名HTTP36145九项通过；后者组织/状态为替身，不证明真实Feign调用或组织数据库授权。组织端controller身份7项3559通过，实际令牌签发/验签另验收。
+
+实际网络补验：CurrentActionAccessFeignTest 使用生产 IqcOrganizationClient、SpringMvcContract 和原 FeignInternalTokenInterceptor 请求本机随机端口，真实签发及验签确认 current/user 路径、用户身份、hop2、父令牌链及出站敏感头清理。Surefire 1 项零失败、错误及跳过（日志 /private/tmp/iqc-b-current-access-feign-test.log）。响应与 decoder 为测试夹具，未覆盖组织 MVC Filter 或组织数据库，不替代跨服务全链路验收。
