@@ -16,7 +16,7 @@ public final class FindingLabelProjection {
         public Binding {
             reference(labelId,64);code(valueCode,64);code(findingCode,128);
             if(labelVersion<1 || !Set.of("FIXED","BOOLEAN","PERCENTAGE","DURATION_MONTHS","MONTH","DATE").contains(Objects.toString(valueType,""))
-                    || !Set.of("user","customer","agent").contains(Objects.toString(targetRole,"")))
+                    || !Set.of("user","customer","agent","all").contains(Objects.toString(targetRole,"")))
                 throw new IllegalArgumentException("Invalid finding label binding");
         }
     }

@@ -138,3 +138,11 @@ FindingLabelProjection先定义纯投影schema iqc-label-finding-projection-v1�
 
 ## 标签新协议的读取围栏
 原LabelResultService历史值JSON不含schemaVersion；原LabelResultQueryService将非V2载荷一概作为历史HIT，会把未来Finding投影或其他显式未支持协议误计为命中。最小扩展既有LabelResultPayloadValidator.requireReadableSchema，结果状态与证据读取都复用：显式schema必须为已支持iqc-label-result-v2，否则（包括null/非文本marker）拒绝读取；历史未声明schema的值保留旧读取。尚未接入的iqc-label-finding-projection-v1不会走旧HIT或旧规则证据查询路径。该围栏不能替代新协议实际查询/复核/导出实现，UPDATE_LABEL仍未完成；未运行数据库/接口/测试。
+
+## 流水线 Finding 标签目录冻结
+复用LabelResolutionService.resolveVersions和原权限/发布版本检查，而非增加标签版本主表。PipelineRelease可选labelPolicy（iqc-finding-label-policy-v1）声明1–100个labelId/version/valueCode/findingCode绑定；同一标签值不得重复映射、同一标签不得混用版本，Finding须已在本流水线声明。发布/试跑freeze总是从当前可见已发布的明确标签版本重取原目录，忽略客户端提供的directory作为授权依据；标签版本已变化就拒绝冻结。
+
+FindingLabelFreezeService把原2.0目录（标签/群组/类别名称、值类型/角色及原绑定元数据）嵌入既有流水线发布快照，≤1MiB且防御复制。FindingLabelPolicy.validateFrozen在任务/历史发布读取时只校验冻结目录完整覆盖、绑定和值定义，不访问可变目录；projectionBinding从目录取type/targetRole供纯投影，不信任请求自填类型。原目录的规则绑定只是目录来源元数据，未宣称检测运行了这些规则或造RuleInspectionResult。
+
+旧PipelineRelease的5/6/7参数构造和null字段不序列化保持兼容，PipelineAssetService保留原14参数构造，Spring完整构造显式注入标签freeze provider；无标签政策无需新provider。UI编辑器深拷贝保留并只读展示labelPolicy，不在节点/评分保存时丢弃。此批只连接冻结和校验，尚未写标签表/UPDATE_LABEL适配器、完整查询/复核/导出和标签配置UI，不表示标签动作完成；SQL/真实API/浏览器未运行。
+冻结与历史校验同时核对Finding定义的值类型与原label valueType兼容（数值型范围/整数仍由实际投影值校验），拒绝同code混合类型；目录版本须可表示为int，防止截断匹配。原标签targetRole=all在Finding投影中保留为整会话政策声明，不被误认为识别了特定参与人，不要求伪造旧规则主体事实。

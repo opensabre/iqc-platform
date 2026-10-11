@@ -31,7 +31,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
 @Service
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_=@org.springframework.beans.factory.annotation.Autowired)
 public class PipelineAssetService {
     public static final String TASK_SCHEMA = "iqc-pipeline-task-v1";
     public record Prepared(String pipelineId, Integer versionNo, Integer draftRevision,
@@ -50,6 +50,17 @@ public class PipelineAssetService {
     private final InspectionTaskMapper tasks;
     private final ConversationInspectionResultMapper results;
     private final org.springframework.beans.factory.ObjectProvider<PipelinePublicationGateService> publicationGates;
+
+    private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.label.FindingLabelFreezeService> labelPolicies;
+    public PipelineAssetService(PipelineAssetMapper assets,PipelineAssetVersionMapper versions,QualityRuleMapper rules,
+            QualityRuleVersionMapper ruleVersions,QualityAgentMapper agents,QualityAgentVersionMapper agentVersions,
+            AgentAssetReferenceValidator agentAssets,FindingCatalogService findings,ObjectMapper json,IqcDataScope scope,
+            PipelineRuntime runtime,InspectionTaskMapper tasks,ConversationInspectionResultMapper results,
+            org.springframework.beans.factory.ObjectProvider<PipelinePublicationGateService> publicationGates) {
+        this.assets=assets;this.versions=versions;this.rules=rules;this.ruleVersions=ruleVersions;this.agents=agents;
+        this.agentVersions=agentVersions;this.agentAssets=agentAssets;this.findings=findings;this.json=json;this.scope=scope;
+        this.runtime=runtime;this.tasks=tasks;this.results=results;this.publicationGates=publicationGates;this.labelPolicies=null;
+    }
 
     public IqcPage<PipelineAsset> page(long current, long size) {
         if (current < 1 || size < 1 || size > 100) throw IqcException.invalidArgument("无效流水线分页");
@@ -251,11 +262,34 @@ public class PipelineAssetService {
             throw IqcException.invalidArgument("业务项目或适用条件引用未声明的事实编码");
         if(release.actionPolicy()!=null)release.actionPolicy().validateReferences(codes,
                 release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));
-        var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes),release.fusion(),release.scoring(),release.items(),release.publicationGate(),release.actionPolicy());
+        io.github.opensabre.iqc.label.FindingLabelPolicy labelPolicy=null;
+        if(release.labelPolicy()!=null) {
+            release.labelPolicy().validateReferences(codes);
+            if(labelPolicies==null)throw IqcException.invalidState("标签目录冻结服务未配置");
+            labelPolicy=labelPolicies.getObject().freeze(release.labelPolicy());
+            labelPolicy.validateFindingTypes(labelFindingTypes(new PipelineDefinition(release.pipeline().schemaVersion(),nodes)));
+        }
+        var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes),release.fusion(),release.scoring(),release.items(),release.publicationGate(),release.actionPolicy(),labelPolicy);
         runtime.validate(frozen.pipeline()); return frozen;
+    }
+    private static Map<String,Finding.ValueType> labelFindingTypes(PipelineDefinition pipeline) {
+        var types=new HashMap<String,Finding.ValueType>();
+        for(var node:pipeline.nodes()) {
+            var definition=node.config().path("findingDefinition");
+            var type=Finding.ValueType.valueOf(definition.path("valueType").asText());
+            var previous=types.putIfAbsent(definition.path("code").asText(),type);
+            if(previous!=null && previous!=type)throw IqcException.invalidState("同一事实编码的冻结类型不一致");
+        }
+        return types;
     }
     private void validateFrozen(PipelineRelease release) {
         runtime.validate(release.pipeline());
+        if(release.labelPolicy()!=null) {
+            release.labelPolicy().validateFrozen();
+            release.labelPolicy().validateFindingTypes(labelFindingTypes(release.pipeline()));
+            release.labelPolicy().validateReferences(release.pipeline().nodes().stream()
+                    .map(node->node.config().path("findingDefinition").path("code").asText()).collect(java.util.stream.Collectors.toSet()));
+        }
         if(release.actionPolicy()!=null)release.actionPolicy().validateReferences(
                 release.pipeline().nodes().stream().map(node->node.config().path("findingDefinition").path("code").asText()).collect(java.util.stream.Collectors.toSet()),
                 release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));

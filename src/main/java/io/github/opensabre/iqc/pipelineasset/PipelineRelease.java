@@ -14,15 +14,22 @@ public record PipelineRelease(String schemaVersion, PipelineDefinition pipeline,
                               @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
                               PublicationGatePolicy publicationGate,
                               @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-                              io.github.opensabre.iqc.action.ActionPolicy actionPolicy) {
+                              io.github.opensabre.iqc.action.ActionPolicy actionPolicy,
+                              @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                              io.github.opensabre.iqc.label.FindingLabelPolicy labelPolicy) {
     public static final String SCHEMA = "iqc-pipeline-release-v1";
     public PipelineRelease(String schemaVersion,PipelineDefinition pipeline,FusionPolicy fusion,
+                           InspectionScoring.Policy scoring,List<ItemMapping> items,PublicationGatePolicy publicationGate,
+                           io.github.opensabre.iqc.action.ActionPolicy actionPolicy) {
+        this(schemaVersion,pipeline,fusion,scoring,items,publicationGate,actionPolicy,null);
+    }
+    public PipelineRelease(String schemaVersion,PipelineDefinition pipeline,FusionPolicy fusion,
                            InspectionScoring.Policy scoring,List<ItemMapping> items,PublicationGatePolicy publicationGate) {
-        this(schemaVersion,pipeline,fusion,scoring,items,publicationGate,null);
+        this(schemaVersion,pipeline,fusion,scoring,items,publicationGate,null,null);
     }
     public PipelineRelease(String schemaVersion,PipelineDefinition pipeline,FusionPolicy fusion,
                            InspectionScoring.Policy scoring,List<ItemMapping> items) {
-        this(schemaVersion,pipeline,fusion,scoring,items,null,null);
+        this(schemaVersion,pipeline,fusion,scoring,items,null,null,null);
     }
     public record ItemMapping(String itemCode, String findingCode, SchemeDefinition.HitMeaning hitMeaning,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
