@@ -47,3 +47,9 @@ ActionRecoveryRequestService为NEVER，当前稳定身份capture和固定工作�
 恢复服务代理事务验收：编译87772 exit0；隔离MySQL23195 exit0，IsolatedMysqlActionRecoveryIT3项零失败错误跳过。使用真实服务Spring代理与账本/原因SQL：原因零行导致状态及新事件回滚；实际原因写入后异常同样整体回滚；外层事务回滚不撤销REQUIRES_NEW恢复提交，重复旧观察拒绝。来源/适配器为替身，仅证明恢复事务边界，不证明生产来源锁序或业务副作用。Flyway实际validate68份迁移且本轮migrate0（版本67），并非A的V68已整合。并发/正尝试回执/版本极值SQL仍待扩展。
 
 扩展恢复代理验收85600 exit0，10项零失败错误跳过：并发同版本一个赢家、实际领取/结算历史回执在恢复成功及原因失败回滚两路径保持、MAX-3真实恢复/领取/结算达MAX，以及MAX-2/MAX-1/MAX服务与SQL拒绝。并发来源校验使用屏障替身，真实竞争位于Action行锁；不证明生产Task/Execution/Result锁序。真实SQL版本围栏已验证。
+
+修正人工授权的组织调用：resolveCurrent走原组织权限投影的严格当前用户入口currentActionAccess，后台resolve继续走service-only schedulerAccess，不清认证或修改framework。旧CurrentUserService仅网关JWT、ResourceService.query缓存资源，不足以证明新鲜账号/范围的一致快照，故最小扩原组织controller入口复用同Access服务。应用unit40562授权9项及更新后真实签名HTTP36145九项通过；后者组织/状态为替身，不证明真实Feign调用或组织数据库授权。组织端controller身份7项3559通过，实际令牌签发/验签另验收。
+
+实际网络补验：CurrentActionAccessFeignTest 使用生产 IqcOrganizationClient、SpringMvcContract 和原 FeignInternalTokenInterceptor 请求本机随机端口，真实签发及验签确认 current/user 路径、用户身份、hop2、父令牌链及出站敏感头清理。Surefire 1 项零失败、错误及跳过（日志 /private/tmp/iqc-b-current-access-feign-test.log）。响应与 decoder 为测试夹具，未覆盖组织 MVC Filter 或组织数据库，不替代跨服务全链路验收。
+
+A 集成状态：标签核对后端4b37a9c/UI92cab3c、恢复/日志后端b6a6381及管理端5dbd8e8已本地提交；组织当前用户入口已集成edae027。以上历史段落保留当轮证据，整合后完整网络恢复、实际角色与生产来源锁序验收仍待；部署顺序见 deployment.md。
