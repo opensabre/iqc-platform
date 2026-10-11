@@ -39,7 +39,7 @@ public class ScheduledActorAccessService {
         if(requiredResources==null || requiredResources.isEmpty())throw IqcException.invalidState("后台工作流缺少固定授权要求");
         requireBackground();
         if(tokens.currentClaims()!=null)throw IqcException.invalidState("周期后台不能继承用户令牌");
-        return project(bound,requiredResources);
+        return project(bound,requiredResources,false);
     }
     /** Authenticated workflow projection; never clears authentication or borrows the background-only entry. */
     public Resolved resolveCurrent(CreationBound bound,Set<String> requiredResources) {
@@ -47,13 +47,13 @@ public class ScheduledActorAccessService {
                 || !java.util.Objects.equals(bound.groupId(),scope.groupId()))
             throw IqcException.accessDenied("当前负责人范围已变化");
         if(requiredResources==null || requiredResources.isEmpty())throw IqcException.invalidState("当前工作流缺少固定授权要求");
-        return project(bound,requiredResources);
+        return project(bound,requiredResources,true);
     }
-    private Resolved project(CreationBound bound,Set<String> requiredResources) {
+    private Resolved project(CreationBound bound,Set<String> requiredResources,boolean currentUser) {
         if(bound==null || !"iqc-schedule-owner-scope-v1".equals(bound.schemaVersion()) || bound.userId()==null
                 || !bound.userId().matches("[A-Za-z0-9:_-]{1,64}") || bound.owner()==null || bound.owner().isBlank()
                 || "system".equals(bound.owner()))throw IqcException.invalidState("周期负责人范围证据无效");
-        var response=organization.schedulerAccess(bound.userId());var current=response==null?null:response.getData();
+        var response=currentUser?organization.currentActionAccess(bound.userId()):organization.schedulerAccess(bound.userId());var current=response==null?null:response.getData();
         Instant now=Instant.now();
         if(current==null || !"iqc-scheduler-access-v1".equals(current.schemaVersion()) || !bound.userId().equals(current.userId())
                 || !current.accountValid() || !bound.owner().equals(current.username()) || current.roles()==null || current.resourceCodes()==null

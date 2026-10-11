@@ -90,9 +90,11 @@ class ScheduledActorAccessServiceTest {
         verifyNoInteractions(organization);
     }
     @Test void currentResolutionKeepsAuthenticationAndRequiresOriginalWorkflowGrants() {
+        when(organization.currentActionAccess("user")).thenReturn(response);
         var authentication=new TestingAuthenticationToken("owner","none");SecurityContextHolder.getContext().setAuthentication(authentication);
         when(scope.owner()).thenReturn("owner");when(scope.groupId()).thenReturn("group");
         var resolved=service.resolveCurrent(bound(false,"group"),required);
+        verify(organization,never()).schedulerAccess(anyString());
         assertThat(resolved.userId()).isEqualTo("user");assertThat(SecurityContextHolder.getContext().getAuthentication()).isSameAs(authentication);
         projection("user","owner",true,"group",Set.of("ADMIN"),Set.of(),Instant.now());
         assertThatThrownBy(()->service.resolveCurrent(bound(false,"group"),required)).hasMessageContaining("已失去");

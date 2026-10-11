@@ -47,3 +47,5 @@ ActionRecoveryRequestService为NEVER，当前稳定身份capture和固定工作�
 恢复服务代理事务验收：编译87772 exit0；隔离MySQL23195 exit0，IsolatedMysqlActionRecoveryIT3项零失败错误跳过。使用真实服务Spring代理与账本/原因SQL：原因零行导致状态及新事件回滚；实际原因写入后异常同样整体回滚；外层事务回滚不撤销REQUIRES_NEW恢复提交，重复旧观察拒绝。来源/适配器为替身，仅证明恢复事务边界，不证明生产来源锁序或业务副作用。Flyway实际validate68份迁移且本轮migrate0（版本67），并非A的V68已整合。并发/正尝试回执/版本极值SQL仍待扩展。
 
 扩展恢复代理验收85600 exit0，10项零失败错误跳过：并发同版本一个赢家、实际领取/结算历史回执在恢复成功及原因失败回滚两路径保持、MAX-3真实恢复/领取/结算达MAX，以及MAX-2/MAX-1/MAX服务与SQL拒绝。并发来源校验使用屏障替身，真实竞争位于Action行锁；不证明生产Task/Execution/Result锁序。真实SQL版本围栏已验证。
+
+修正人工授权的组织调用：resolveCurrent走原组织权限投影的严格当前用户入口currentActionAccess，后台resolve继续走service-only schedulerAccess，不清认证或修改framework。旧CurrentUserService仅网关JWT、ResourceService.query缓存资源，不足以证明新鲜账号/范围的一致快照，故最小扩原组织controller入口复用同Access服务。应用unit40562授权9项及更新后真实签名HTTP36145九项通过；后者组织/状态为替身，不证明真实Feign调用或组织数据库授权。组织端controller身份7项3559通过，实际令牌签发/验签另验收。

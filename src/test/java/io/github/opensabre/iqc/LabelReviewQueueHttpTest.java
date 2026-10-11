@@ -64,6 +64,9 @@ class LabelReviewQueueHttpTest {
     @Autowired private ObjectMapper mapper;
     @MockitoBean private IqcOrganizationClient organization;
     @MockitoBean private GovernanceRateLimiter rateLimiter;
+    @MockitoBean private io.github.opensabre.iqc.action.ActionRecoveryService recoveryState;
+    @Autowired private io.github.opensabre.iqc.action.ActionRecoveryRequestService recoveryRequests;
+
 
     @BeforeAll
     void fixture() {
@@ -277,6 +280,53 @@ class LabelReviewQueueHttpTest {
         assertThat(error.path("code").asText()).isEqualTo("IQC-1005");
         assertThat(error.has("data")).isFalse();
         assertThat(error.has("versions")).isFalse();
+    }
+
+
+    private HttpResponse<String> recoverRequest(String identity) throws Exception {
+        var request=HttpRequest.newBuilder(URI.create("http://localhost:"+port+"/api/iqc/conversation-results/c1/actions/"+"a".repeat(64)+"/recover"))
+            .header("Content-Type","application/json")
+            .POST(HttpRequest.BodyPublishers.ofString("{\"version\":1,\"reason\":\"当前负责人恢复\"}"));
+        if(identity!=null)request.header(InternalTokenConstants.HEADER,identity);
+        return HttpClient.newHttpClient().send(request.build(),HttpResponse.BodyHandlers.ofString());
+    }
+    @Test void signedRecoveryRequiresFreshServerGrantsBeforeStateEntry() throws Exception {
+        org.springframework.test.util.ReflectionTestUtils.setField(recoveryRequests,"enabled",true);
+        try {
+            var grants=new java.util.HashSet<>(io.github.opensabre.iqc.action.ActionEnqueueService.REQUIRED_GRANTS);
+            grants.add(io.github.opensabre.iqc.action.ActionRecoveryService.RESOURCE);
+            assertThat(recoverRequest(null).statusCode()).isEqualTo(401);
+            assertThat(recoverRequest(token("alice",List.of())+"tampered").statusCode()).isEqualTo(401);
+            for(String missing:java.util.Set.copyOf(grants)){
+                var partial=new java.util.HashSet<>(grants);partial.remove(missing);
+                when(organization.currentActionAccess("a")).thenReturn(Result.success(new IqcOrganizationClient.SchedulerAccess(
+                    "iqc-scheduler-access-v1","a","alice",true,"g1",java.util.Set.of(),partial,java.time.Instant.now())));
+                var denied=recoverRequest(token("alice",List.of()));
+                assertThat(denied.statusCode()).isEqualTo(200);
+                assertThat(mapper.readTree(denied.body()).path("code").asText()).isEqualTo("IQC-1005");
+                org.mockito.Mockito.verifyNoInteractions(recoveryState);
+            }
+            when(organization.currentActionAccess("a")).thenReturn(Result.success(new IqcOrganizationClient.SchedulerAccess(
+                "iqc-scheduler-access-v1","a","alice",true,"g1",java.util.Set.of(),grants,java.time.Instant.now())));
+            when(recoveryState.recover(org.mockito.ArgumentMatchers.eq("c1"),org.mockito.ArgumentMatchers.eq("a".repeat(64)),org.mockito.ArgumentMatchers.eq(1L),any(),org.mockito.ArgumentMatchers.eq("当前负责人恢复"))).thenAnswer(call->{
+                var actor=(io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved)call.getArgument(3);
+                assertThat(actor.userId()).isEqualTo("a");assertThat(actor.owner()).isEqualTo("alice");
+                assertThat(org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication()).isNotNull();
+                return true;
+            });
+            assertThat(data(recoverRequest(token("alice",List.of()))).path("state").asText()).isEqualTo("RECOVERED");
+        }finally{org.springframework.test.util.ReflectionTestUtils.setField(recoveryRequests,"enabled",false);}
+    }
+    @Test void invalidCurrentAccountCannotReachRecoveryTransaction() throws Exception {
+        org.springframework.test.util.ReflectionTestUtils.setField(recoveryRequests,"enabled",true);
+        try{
+            when(organization.currentActionAccess("a")).thenReturn(Result.success(new IqcOrganizationClient.SchedulerAccess(
+                "iqc-scheduler-access-v1","a","alice",false,"g1",java.util.Set.of(),java.util.Set.of(),java.time.Instant.now())));
+            var denied=recoverRequest(token("alice",List.of()));
+            assertThat(denied.statusCode()).isEqualTo(200);
+            assertThat(mapper.readTree(denied.body()).path("code").asText()).isEqualTo("IQC-1005");
+            org.mockito.Mockito.verifyNoInteractions(recoveryState);
+        }finally{org.springframework.test.util.ReflectionTestUtils.setField(recoveryRequests,"enabled",false);}
     }
 
     private HttpResponse<String> get(String token, String query) throws Exception {
