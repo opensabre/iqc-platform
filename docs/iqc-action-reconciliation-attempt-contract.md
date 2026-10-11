@@ -31,3 +31,19 @@ V1.1.66和ActionReconciliationAttemptMapper/Service已建立从属记录、唯�
 ## 读取集成（正在验证）
 
 原history GET新增可选尝试投影，50+1独立开始时间/请求ID游标，状态版本仍按原语义。默认不查尝试，权限沿原动作来源范围。UI仍待接入；SQL真实执行与完整迁移验收仍待外部能力恢复。
+
+## 待执行的真实SQL验收
+
+IsolatedMysqlActionExecutionIT补充四项：attempt终态写入触发器故障回滚账本及新事件、独立STARTED提交不受外层回滚影响且不能无事件确认、同版本多个观察分别终结且不能覆盖终态、同毫秒53条实际分页及稳定身份白名单。数据范围、二进制大小写匹配、LONG最大版本和独立事务代理均在真实MySQL夹具验证；这些用例尚未执行，不是通过证据。
+
+权限恢复后只使用已验证的隔离服务器（端口34307、datadir与IQC_MYSQL_VALIDATION_DIR一致）；先确认旧服务是否仍live，不因观察超时重启。执行命令：
+
+```sh
+IQC_MYSQL_VALIDATION_DIR=/private/tmp/iqc-mysql-validation.FVGdkd mvn -o -q \
+  -DargLine=-javaagent:/Users/zhoutaoo/.m2/repository/net/bytebuddy/byte-buddy-agent/1.18.10/byte-buddy-agent-1.18.10.jar \
+  -Dtest=IsolatedMysqlActionExecutionIT test
+```
+
+此命令会修改该隔离测试库，不能连接共享/生产库；运行前需恢复当前受阻的沙箱审批能力。完整迁移新安装/升级/validate/重复migrate仍须另行执行IsolatedMysqlMigrationIT，不能只用action IT证明迁移验收。
+
+本轮87074 exit0，新SQL用例testCompile通过，五组相关单位37项零失败/错误/跳过。新SQL用例未执行，不称其通过；只记录编译和单位回归结果。

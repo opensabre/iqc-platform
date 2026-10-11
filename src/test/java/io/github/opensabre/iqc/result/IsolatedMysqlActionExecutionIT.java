@@ -255,4 +255,73 @@ class IsolatedMysqlActionExecutionIT {
         assertThat(reader.page("action","result",null).getFirst().getReconciliationReason()).isEqualTo("独立核对");
     }
 
+    @Test void rejectedAttemptConfirmationRollsBackLedgerAndEventButPreservesStartedObservation() {
+        var state=context.getBean(ActionReconciliationStateService.class);var request=reasonRequest();
+        assertThat(claim(TOKEN,0,NOW)).isEqualTo(1);
+        assertThat(tx.<Integer>execute(status->actions.quarantineLostClaim("action",1,TOKEN,NOW,NOW))).isEqualTo(1);
+        var attempt=reasonAttempt("核对原因");
+        jdbc.execute("CREATE TRIGGER reject_reconciliation_attempt BEFORE UPDATE ON iqc_action_reconciliation_attempt FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='attempt rejected'");
+        try {
+            assertThatThrownBy(()->state.confirm(request,2,TOKEN,reasonReceipt(request),"alice","核对原因",attempt))
+                    .isInstanceOf(org.springframework.dao.DataAccessException.class);
+            assertThat(actions.selectById("action").getStatus()).isEqualTo("REQUIRES_RECONCILIATION");
+            assertThat(actions.selectById("action").getVersion()).isEqualTo(2L);
+            assertThat(eventCount()).isEqualTo(3);
+            assertThat(jdbc.queryForObject("SELECT state FROM iqc_action_reconciliation_attempt WHERE id=?",String.class,attempt.id())).isEqualTo("STARTED");
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_action_execution_event WHERE reconciliation_reason IS NOT NULL",Integer.class)).isZero();
+        } finally {jdbc.execute("DROP TRIGGER reject_reconciliation_attempt");}
+    }
+
+    @Test void startedObservationsCommitIndependentlyAndCannotInventConfirmationWithoutAnEvent() {
+        var attempts=context.getBean(ActionReconciliationAttemptService.class);
+        assertThat(org.springframework.aop.support.AopUtils.isAopProxy(attempts)).isTrue();
+        var saved=new java.util.concurrent.atomic.AtomicReference<ActionReconciliationAttemptService.Attempt>();
+        assertThatThrownBy(()->tx.execute(status->{
+            saved.set(attempts.start("action","result",1,"alice","user-1","  核对  "));
+            throw new IllegalStateException("outer abort");
+        })).hasMessage("outer abort");
+        var attempt=saved.get();
+        assertThat(jdbc.queryForObject("SELECT state FROM iqc_action_reconciliation_attempt WHERE id=?",String.class,attempt.id())).isEqualTo("STARTED");
+        assertThat(jdbc.queryForObject("SELECT reason FROM iqc_action_reconciliation_attempt WHERE id=?",String.class,attempt.id())).isEqualTo("核对");
+        assertThatThrownBy(()->attempts.confirmed(attempt)).isInstanceOf(org.springframework.transaction.IllegalTransactionStateException.class);
+        assertThatThrownBy(()->tx.execute(status->{attempts.confirmed(attempt);return null;})).isInstanceOf(RuntimeException.class);
+        assertThat(jdbc.queryForObject("SELECT state FROM iqc_action_reconciliation_attempt WHERE id=?",String.class,attempt.id())).isEqualTo("STARTED");
+    }
+
+    @Test void repeatedReadOnlyObservationsHaveSeparateImmutableTerminalsWithoutChangingLedgerVersion() {
+        var attempts=context.getBean(ActionReconciliationAttemptService.class);
+        long original=actions.selectById("action").getVersion();int eventsBefore=eventCount();
+        var first=attempts.start("action","result",1,"alice","user-1","第一次");
+        var second=attempts.start("action","result",1,"alice","user-1","第二次");
+        assertThat(first.id()).isNotEqualTo(second.id());
+        attempts.finish(first,ActionReconciliationAttemptService.Outcome.UNCONFIRMED);
+        attempts.finish(second,ActionReconciliationAttemptService.Outcome.STALE_OBSERVATION);
+        assertThatThrownBy(()->attempts.finish(first,ActionReconciliationAttemptService.Outcome.LOOKUP_FAILED)).isInstanceOf(RuntimeException.class);
+        assertThat(jdbc.queryForObject("SELECT state FROM iqc_action_reconciliation_attempt WHERE id=?",String.class,first.id())).isEqualTo("UNCONFIRMED");
+        assertThat(jdbc.queryForObject("SELECT state FROM iqc_action_reconciliation_attempt WHERE id=?",String.class,second.id())).isEqualTo("STALE_OBSERVATION");
+        assertThat(actions.selectById("action").getVersion()).isEqualTo(original);assertThat(eventCount()).isEqualTo(eventsBefore);
+        assertThatThrownBy(()->attempts.start("action","other-result",1,"alice","user-1","错误来源")).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(()->attempts.start("action","result",1,"Alice","user-1","不同身份大小写")).isInstanceOf(RuntimeException.class);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_action_reconciliation_attempt",Integer.class)).isEqualTo(2);
+    }
+
+    @Test void actualObservationProjectionPaginatesSameMillisecondAndExcludesStableIdentity() throws Exception {
+        var mapper=new SqlSessionTemplate(context.getBean(SqlSessionFactory.class)).getMapper(ActionReconciliationAttemptMapper.class);
+        for(int i=1;i<=53;i++) {
+            assertThat(mapper.start(String.format("%032x",i),"action","result",Long.MAX_VALUE,"alice","secret-stable-user","reason",NOW)).isEqualTo(1);
+        }
+        var first=mapper.page("action","result",null,null);
+        assertThat(first).hasSize(51);assertThat(first.getFirst().getId()).isEqualTo(String.format("%032x",53));
+        var boundary=first.get(49);
+        var second=mapper.page("action","result",boundary.getStartedAtUtc(),boundary.getId());
+        assertThat(second).hasSize(3);
+        assertThat(second.stream().map(ActionReconciliationAttemptProjection::getId).toList())
+                .containsExactly(String.format("%032x",3),String.format("%032x",2),String.format("%032x",1));
+        assertThat(mapper.page("action","other-result",null,null)).isEmpty();
+        assertThat(mapper.page("Action","result",null,null)).isEmpty();
+        var json=new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
+        assertThat(json.writeValueAsString(first)).doesNotContain("secret-stable-user","actorUserId","actor_user_id","claimToken","snapshot");
+        assertThat(first.getFirst().getObservedVersion()).isEqualTo(Long.MAX_VALUE);
+    }
+
 }
