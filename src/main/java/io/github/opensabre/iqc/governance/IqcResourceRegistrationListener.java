@@ -49,14 +49,6 @@ public class IqcResourceRegistrationListener {
                 .handlerClass(io.github.opensabre.iqc.action.ActionEnqueueService.class.getName())
                 .handlerMethod("enqueue").declaredPermission(true).build());
         }
-        if (resources.stream().noneMatch(value -> "iqc:risk:create".equals(value.getCode()))) {
-            resources.add(io.github.opensabre.boot.entity.RestMappingInfo.builder()
-                .url("/internal/iqc/risk-events/create").method("BACKGROUND")
-                .code("iqc:risk:create").name("创建生产风险事件").type("iqc")
-                .description("后台按负责人当前授权保存真实生产风险事件，不提供人工伪造风险接口")
-                .handlerClass(io.github.opensabre.iqc.risk.RiskEventActionService.class.getName())
-                .handlerMethod("create").declaredPermission(true).build());
-        }
         ResourceMappingSnapshot snapshot = ResourceMappingSnapshot.builder()
                 .application(application)
                 .version(OpensabreVersion.getVersion())

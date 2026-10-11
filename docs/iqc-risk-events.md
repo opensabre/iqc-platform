@@ -34,3 +34,5 @@ RiskHandlingService 已编码独立事务处置：原历史查询证明/数据�
 风险处置历史GET /api/iqc/conversation-results/{id}/risk-events/{riskEventId}/history使用risk:history:view，复用实际事件查询生产证明与原结果scope；单页50+1/version字符串游标，REPEATABLE_READ。核对当前版本/状态与首事件、倒序连续版本/前后状态链，缺失或损坏不伪造空历史。只返回真实状态/原因/actor/UTC；权限/历史页面与实际SQL验收待。
 
 历史分页额外验证首条版本与游标实际边界一致、末页必须连续回到版本1/初始OPEN，空页不能掩盖未到起点的缺失记录；超出实际当前版本的游标拒绝。该批首次编译通过后加强，最终编译/实际SQL验收仍待。
+
+更正风险create注册方式：移除应用自动快照声明，后台固定grant代码不变；组织V20261011_08将原03资源来源改MANUAL并保留ID/角色关系。原ResourceRegistrationService对present mapping强设ANNOTATION，故不得只改迁移不移除声明。MANUAL能力引用不冒充HTTP handler，旧HTTP快照也不应将其STALE；实际快照和权限撤销验收待。
