@@ -61,7 +61,7 @@ class IsolatedMysqlActionRecoveryIT {
         jdbc.update("DELETE FROM iqc_action_reconciliation_attempt");jdbc.update("DELETE FROM iqc_action_execution_event");jdbc.update("DELETE FROM iqc_action_execution");
         when(scope.owner()).thenReturn("alice");when(scope.groupId()).thenReturn("group");
         var action=new ActionPolicy.Action("save",ActionExecutionContract.Type.SAVE_RESULT,
-            new ActionPolicy.Condition(ActionPolicy.Kind.ALWAYS,null,null,List.of()),ActionPolicy.Idempotency.PRODUCTION_SOURCE_V1,null,
+            new ActionPolicy.Condition(ActionPolicy.Kind.ALWAYS,null,null,List.of()),ActionPolicy.Idempotency.PRODUCTION_SOURCE_V1,new io.github.opensabre.iqc.task.retry.AutomaticRetryPolicy("iqc-automatic-retry-v1",2,1,1,1,null),
             ActionPolicy.FailureHandling.RECORD_ONLY,json.createObjectNode());
         var policy=new ActionPolicy(ActionPolicy.SCHEMA,List.of(action));
         var bound=new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","user","alice",false,"group");
@@ -97,4 +97,76 @@ class IsolatedMysqlActionRecoveryIT {
         assertThat(realEvents.page(id,"result",null).getFirst().getActor()).isEqualTo("alice");
         assertThat(recover()).isFalse();verify(adapter,never()).execute(any());
     }
+    @Test void competingProxyTransactionsGrantExactlyOneRecovery() throws Exception {
+        var validated=sources.validate(reference);
+        var ready=new java.util.concurrent.CountDownLatch(2);
+        when(sources.validate(reference)).thenAnswer(call->{
+            ready.countDown();if(!ready.await(10,java.util.concurrent.TimeUnit.SECONDS))throw new IllegalStateException("recovery barrier timeout");
+            return validated;
+        });
+        try(var workers=java.util.concurrent.Executors.newFixedThreadPool(2)){
+            var first=workers.submit(this::recover);var second=workers.submit(this::recover);
+            assertThat(List.of(first.get(15,java.util.concurrent.TimeUnit.SECONDS),second.get(15,java.util.concurrent.TimeUnit.SECONDS)))
+                .containsExactlyInAnyOrder(true,false);
+        }
+        assertThat(rows.selectById(id).getVersion()).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_action_execution_event WHERE action_execution_id=? AND version=2",Integer.class,id)).isEqualTo(1);
+        assertThat(realEvents.page(id,"result",null).getFirst().getRecoveryReason()).isEqualTo("恢复原因");
+        verify(adapter,never()).execute(any());
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void priorConfirmedRetryReceiptSurvivesRecoveryOrReasonFailure(boolean failReason){
+        assertThat(recover()).isTrue();
+        var settled=java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).minusSeconds(5).withNano(0);
+        String token="b".repeat(32);
+        assertThat(tx.<Integer>execute(status->rows.claim(id,2,token,settled.minusSeconds(1)))).isEqualTo(1);
+        assertThat(tx.<Integer>execute(status->rows.settle(id,3,token,ActionExecutionContract.Next.WAITING_RETRY,
+            ActionExecutionContract.Outcome.CONFIRMED_RETRYABLE_FAILURE,settled.plusSeconds(1),settled,"original-evidence","original-result","ORIGINAL_FAILURE"))).isEqualTo(1);
+        assertThat(tx.<Integer>execute(status->rows.blockReady(id,4,"BLOCKED_ADAPTER","ADAPTER_CONFIGURATION_UNAVAILABLE",settled.plusSeconds(2)))).isEqualTo(1);
+        var before=rows.selectById(id);
+        if(failReason){
+            doReturn(0).when(events).recordRecoveryReason(anyString(),anyLong(),anyLong(),anyString(),anyString(),anyString());
+            assertThatThrownBy(()->recovery.recover("result",id,5,actor(),"保留回执")).isInstanceOf(RuntimeException.class);
+        }else assertThat(recovery.recover("result",id,5,actor(),"保留回执")).isTrue();
+        var after=rows.selectById(id);
+        assertThat(after.getStatus()).isEqualTo(failReason?"BLOCKED_ADAPTER":"WAITING_RETRY");
+        assertThat(after.getVersion()).isEqualTo(failReason?5L:6L);
+        assertThat(after.getClaimToken()).isEqualTo(before.getClaimToken());
+        assertThat(after.getClaimedAtUtc()).isEqualTo(before.getClaimedAtUtc());
+        assertThat(after.getSettledAtUtc()).isEqualTo(before.getSettledAtUtc());
+        assertThat(after.getAttemptCount()).isEqualTo(before.getAttemptCount());
+        assertThat(after.getOutcome()).isEqualTo(before.getOutcome());
+        assertThat(after.getEvidenceReference()).isEqualTo(before.getEvidenceReference());
+        assertThat(after.getResultReference()).isEqualTo(before.getResultReference());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_action_execution_event WHERE action_execution_id=? AND version=6",Integer.class,id)).isEqualTo(failReason?0:1);
+        verify(adapter,never()).execute(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs={9223372036854775804L,9223372036854775805L,9223372036854775806L,9223372036854775807L})
+    void actualSqlReservesRecoveryClaimAndSettlementVersionBudget(long version){
+        var original=rows.selectById(id);
+        jdbc.update("DELETE FROM iqc_action_execution_event WHERE action_execution_id=?",id);
+        jdbc.update("DELETE FROM iqc_action_execution WHERE id=?",id);
+        original.setVersion(version);assertThat(tx.<Integer>execute(status->rows.insert(original))).isEqualTo(1);
+        var now=java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).withNano(0);
+        if(version>Long.MAX_VALUE-3){
+            assertThatThrownBy(()->recovery.recover("result",id,version,actor(),"版本围栏")).isInstanceOf(RuntimeException.class);
+            assertThat(tx.<Integer>execute(status->rows.recoverBlocked(id,version,"alice",now))).isZero();
+            assertThat(rows.selectById(id).getVersion()).isEqualTo(version);
+            assertThat(realEvents.page(id,"result",null)).hasSize(1);
+        }else{
+            assertThat(recovery.recover("result",id,version,actor(),"版本围栏")).isTrue();
+            String token="c".repeat(32);
+            assertThat(tx.<Integer>execute(status->rows.claim(id,version+1,token,now))).isEqualTo(1);
+            assertThat(tx.<Integer>execute(status->rows.settle(id,version+2,token,ActionExecutionContract.Next.COMPLETE,
+                ActionExecutionContract.Outcome.CONFIRMED_SUCCESS,null,now,"final-evidence","final-result",null))).isEqualTo(1);
+            assertThat(rows.selectById(id).getVersion()).isEqualTo(Long.MAX_VALUE);
+            assertThat(rows.selectById(id).getStatus()).isEqualTo("COMPLETE");
+            assertThat(realEvents.page(id,"result",null)).hasSize(4);
+        }
+        verify(adapter,never()).execute(any());
+    }
+
 }
