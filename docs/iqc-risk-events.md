@@ -18,3 +18,5 @@ A 已领取 V1.1.69 并编码 iqc_risk_event/原 BasePo+BaseMapper 模型：来�
 RiskEventConfiguration 已定义实际 v1 配置为 category/title/description 三个文本字段，分别限制稳定编码64、标题128、描述1000；不接受 riskLevel、Finding 值、证据、owner 或来源ID等自填字段。文本保留普通换行/制表，拒绝其它控制字符，必填非空；此配置校验尚未注册可执行适配器，不表示风险事件已创建。后续实际生产来源 UNKNOWN/NONE 不伪造确定风险。
 
 RiskEventActionService 已编码实际原表写入与历史只读产物核对。创建REQUIRES_NEW/READ_COMMITTED按原生产来源锁序再Action，检查当前固定risk:create及三项生产grant/ownerBound/claim/完整冻结输入政策/条件；写前写后期限与授权再验，失败回滚。原动作唯一事件逐字段幂等且不重置人工处置状态。lookup REPEATABLE_READ无发送grant/锁/重写，历史生产证明与实际领取不可缺失。适配器注册、资源授权及风险中心尚待，不启用动作开关。
+
+CREATE_RISK_EVENT v1 实际 RiskEventActionAdapter 已注册原精确版本 registry，requiredResources固定iqc:risk:create；配置复用RiskEventConfiguration，ready只接受实际LOW/MEDIUM/HIGH/CRITICAL，不把UNKNOWN/NONE伪造成已确认风险。execute调用原服务代理提交再返回真实事件ID；任何无法确认异常返回UNKNOWN，reconcile只读持久产物。权限未迁移前操作仍被原授权围栏拒绝；DDL69和风险中心尚未真实验收。动作默认开关不启用。
