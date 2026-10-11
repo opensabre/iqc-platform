@@ -20,3 +20,5 @@ RiskEventConfiguration 已定义实际 v1 配置为 category/title/description �
 RiskEventActionService 已编码实际原表写入与历史只读产物核对。创建REQUIRES_NEW/READ_COMMITTED按原生产来源锁序再Action，检查当前固定risk:create及三项生产grant/ownerBound/claim/完整冻结输入政策/条件；写前写后期限与授权再验，失败回滚。原动作唯一事件逐字段幂等且不重置人工处置状态。lookup REPEATABLE_READ无发送grant/锁/重写，历史生产证明与实际领取不可缺失。适配器注册、资源授权及风险中心尚待，不启用动作开关。
 
 CREATE_RISK_EVENT v1 实际 RiskEventActionAdapter 已注册原精确版本 registry，requiredResources固定iqc:risk:create；配置复用RiskEventConfiguration，ready只接受实际LOW/MEDIUM/HIGH/CRITICAL，不把UNKNOWN/NONE伪造成已确认风险。execute调用原服务代理提交再返回真实事件ID；任何无法确认异常返回UNKNOWN，reconcile只读持久产物。权限未迁移前操作仍被原授权围栏拒绝；DDL69和风险中心尚未真实验收。动作默认开关不启用。
+
+结果风险列表复用原 ConversationInspectionResult/Task ownerGroup 数据范围，不开放第二套授权范围；新增只读原结果风险接口用于详情/中心组合。返回事件元数据前须验证实际历史生产来源、原风险动作完整冻结输入/政策/领取、配置与已保存事件一致，不直接信任一条孤立事件行。输出不包含claim token或完整冻结正文。
