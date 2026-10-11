@@ -265,3 +265,23 @@ I5补充：CREATE_REVIEW v1实际适配复用原BusinessItemReviewService/reques
 I5补充：ADD_TO_EVALUATION_CANDIDATE v1复用BusinessReviewSampleService与原sample:manage权限，绑定固定复核轮次（默认1）；任务结束且指定轮次完成后创建实际候选，保留原金标标注/独立审核。前置未就绪CAS延后检查，不增加attempt/生成发送失败。候选、审核、真实SQL与并发未运行验收。
 
 I5标签动作兼容基础：源码确认原label result必须有真实RuleInspectionResult锚点，查询/复核/导出不能直接接受Pipeline Finding来源。新增FindingLabelProjection纯契约，沿原LabelFactEvaluator值类型验证并保留缺失/冲突/错误状态、真实融合政策/原始及所选事实/证据；未接存储/目录冻结/UPDATE_LABEL适配器和读取链路，不宣称标签动作完成。
+
+I5标签读取围栏：状态与证据读取复用原PayloadValidator拒绝显式未支持schema，不将Finding新协议计为旧HIT；未标记schema的历史值保持原路径。UPDATE_LABEL存储与完整读取/复核/导出仍待接入。目录冻结已发现原LabelResolutionService.resolveVersions可复用，后续需核验原规则依赖与Finding映射的边界。
+
+I5标签冻结：PipelineRelease可选labelPolicy引用明确标签版本和Finding绑定，发布复用原LabelResolutionService冻结目录/权限，历史读取校验冻结定义不回查可变目录；旧构造/null快照兼容。UI保留并只读展示，标签持久化/UPDATE_LABEL/完整读取链路仍未完成。
+
+I5标签来源：A V1.1.68扩展原标签结果表与实体支持规则/Finding互斥来源，原唯一键保留；查询/复核共享结构及投影摘要校验。部署实体前需迁移。SQL与实际写入/读取/复核/导出及UPDATE_LABEL未完成。
+
+I5标签目录任务连接：流水线物化把冻结目录保存到原labelScopeSnapshotJson，查询与复核共享Task发布摘要/目录一致性读取；此前只有发布目录的任务可用经过核验的目录，没有labelPolicy的历史任务保持原路径。标签结果生产/完整读取/复核导出及真实任务创建验收待接入。
+
+I5标签本地写入：FindingLabelResultService复用原结果表/唯一键，从真实生产来源派生冻结绑定投影，核验实际RUNNING领取/稳定输入/负责人创建范围，并在提交前重检权限与期限。同一标签的历史产物仅内容及原动作来源一致时复用，不覆盖规则结果；未注册UPDATE_LABEL适配器，完整读取/复核/导出须先完成。尚未运行SQL或真实写入验收。
+
+I5标签读取：复用原来源validateFacts新增不加写锁的历史证明，保留发送当前EID围栏；Finding标签查询/汇总/复核共享真实发布、生产输入、融合与原动作领取证明。XLSX沿同查询保留完整投影/证据与长文本分片，UI支持五态和原始事实/各型证据、政策角色、原人工复核值类型。动作来源展示与配置编辑/适配器及SQL、浏览器、真实生产写入仍待完成。
+
+I5标签批量读取/来源展示：本次调用按Result复用生产证明，查询/汇总/复核覆盖保留逐标签原动作/绑定核验，投影比较原JSON树。已验证标签返回Finding/原动作/原执行轮次及输入投影摘要；XLSX追加来源列，旧列与旧构造保持。无全局缓存，性能和真实接口/迁移验收、UPDATE_LABEL适配与政策编辑待完成。
+
+I5 UPDATE_LABEL v1：注册实际原标签写入适配器，冻结绑定ready检查与新freeze交叉校验，代理事务提交后真实标签ID回执；提交未确认UNKNOWN不重发。历史来源证明复用原发布验证/图结构校验，跳过今日可执行状态/引擎注册，发送检查保持。默认动作关闭，迁移/期限与恢复集成、政策编辑与SQL/真实执行验收待完成。
+
+I5标签配置页面：组合原标签树/详情和选择器按当前发布版本添加具体值绑定，明确选择Finding、身份/版本/唯一及动作目标验证，generation防旧请求覆盖。可添加默认ALWAYS UPDATE_LABEL v1并显式移除动作，原其他策略字段保留；通用条件/重试/动作编辑、真实浏览器/目录/API/运行验收仍待完成。
+
+I5通用策略配置：结构化表单支持四个真实v1适配、全部三态条件种类和16层/100节点树，复用原重试表单/校验，绑定/复核/候选业务字段界限。其它类型/版本及未实现升级复核失败政策原样只读保留；新增动作固定RECORD_ONLY，不伪造执行。真实浏览器/策略/运行验收和其余五类适配/升级处理待完成。

@@ -136,6 +136,75 @@ FindingLabelProjection先定义纯投影schema iqc-label-finding-projection-v1�
 该契约是后续标签来源兼容的代码基础，尚未接UPDATE_LABEL适配器、冻结资产目录、持久化、查询/复核/导出或前端。V1.1.63之后的DDL须检查当前拥有分支与B迁移占用再确定；本批不执行迁移/测试或标签写入。
 兼容既有LabelTaxonomyService允许的Unicode值编码：valueCode限制沿现表varchar(64)而非新加ASCII规则；findingCode保留Unicode，labelId/原因引用仍按稳定引用约束。不能把新契约的编码限制扩大到超过原标签列容量。
 
+## 标签新协议的读取围栏
+原LabelResultService历史值JSON不含schemaVersion；原LabelResultQueryService将非V2载荷一概作为历史HIT，会把未来Finding投影或其他显式未支持协议误计为命中。最小扩展既有LabelResultPayloadValidator.requireReadableSchema，结果状态与证据读取都复用：显式schema必须为已支持iqc-label-result-v2，否则（包括null/非文本marker）拒绝读取；历史未声明schema的值保留旧读取。尚未接入的iqc-label-finding-projection-v1不会走旧HIT或旧规则证据查询路径。该围栏不能替代新协议实际查询/复核/导出实现，UPDATE_LABEL仍未完成；未运行数据库/接口/测试。
+
+## 流水线 Finding 标签目录冻结
+复用LabelResolutionService.resolveVersions和原权限/发布版本检查，而非增加标签版本主表。PipelineRelease可选labelPolicy（iqc-finding-label-policy-v1）声明1–100个labelId/version/valueCode/findingCode绑定；同一标签值不得重复映射、同一标签不得混用版本，Finding须已在本流水线声明。发布/试跑freeze总是从当前可见已发布的明确标签版本重取原目录，忽略客户端提供的directory作为授权依据；标签版本已变化就拒绝冻结。
+
+FindingLabelFreezeService把原2.0目录（标签/群组/类别名称、值类型/角色及原绑定元数据）嵌入既有流水线发布快照，≤1MiB且防御复制。FindingLabelPolicy.validateFrozen在任务/历史发布读取时只校验冻结目录完整覆盖、绑定和值定义，不访问可变目录；projectionBinding从目录取type/targetRole供纯投影，不信任请求自填类型。原目录的规则绑定只是目录来源元数据，未宣称检测运行了这些规则或造RuleInspectionResult。
+
+旧PipelineRelease的5/6/7参数构造和null字段不序列化保持兼容，PipelineAssetService保留原14参数构造，Spring完整构造显式注入标签freeze provider；无标签政策无需新provider。UI编辑器深拷贝保留并只读展示labelPolicy，不在节点/评分保存时丢弃。此批只连接冻结和校验，尚未写标签表/UPDATE_LABEL适配器、完整查询/复核/导出和标签配置UI，不表示标签动作完成；SQL/真实API/浏览器未运行。
+冻结与历史校验同时核对Finding定义的值类型与原label valueType兼容（数值型范围/整数仍由实际投影值校验），拒绝同code混合类型；目录版本须可表示为int，防止截断匹配。原标签targetRole=all在Finding投影中保留为整会话政策声明，不被误认为识别了特定参与人，不要求伪造旧规则主体事实。
+
+## 原标签结果的双来源存储边界
+核对B当前迁移已占64–67，A领取V1.1.68。最小扩展原iqc_inspection_label_result及InspectionLabelResult：source_rule_result_id允许NULL，新增source_finding_code/source_action_execution_id/source_input_hash/source_projection_hash和动作来源索引，不建立平行标签结果表。CHECK要求旧generation来源仍有真实规则锚点且四个新字段全NULL，PIPELINE_FINDING则规则锚点NULL且四个字段齐全。原唯一键(result,label,valueCode)保留，不能以多个动作制造同义标签行。
+
+共享LabelResultSourceValidator只校验存储形状/实际valueJSON摘要/投影record及label/version/valueCode/Finding身份，查询/复核沿原入口复用。旧来源混入新字段拒绝；Finding来源的动作ID/输入和投影摘要必须为SHA256形状，不信任混合或伪造规则锚点。该本地结构校验不证明实际动作/输入/生产轨迹存在，后续生产持久化和查询须核对原结果/执行/冻结政策以及真实动作记录。
+
+新字段会出现在MyBatis默认查询，因此部署该实体前必须完成V1.1.68，不能只部署代码。SQL未执行，CHECK与MySQL实际兼容/约束并发验收未完成。新Finding协议仍被旧状态/证据围栏拒绝，尚未生产写入，也未接完整查询/复核/导出与UPDATE_LABEL；此批不能宣称新标签可用。
+Finding来源还要求原value_json非NULL；JSON字面量null也显式拒绝，不以空投影参与统计。value_json复用此前V1.1.29的MEDIUMTEXT，无重复扩列。发布前须把B的64–67及后续必要迁移一起集成后按序执行68，避免先应用68导致较低版本迁移需补跑。
+
+## 任务标签目录与发布目录的一致性
+流水线任务物化沿既有InspectionTask.labelScopeSnapshotJson保存发布labelPolicy的目录，直接复用原字段，不重取目录、不触发旧Rule标签生成；InspectionExecutionService的生产流水线分支调用materializePipeline后返回，与旧hierarchical materialize内LabelResultService分支独立。此处保存目录不是标签动作成功或分析阶段写标签。
+
+FindingLabelTaskDirectory.expected沿原Task.ruleSnapshotJson读取PipelineRelease，验证发布contentHash与冻结labelPolicy，若已有labelScope字段须与发布directory结构一致；无该字段的先前任务可直接用经摘要校验的发布目录。没有labelPolicy的历史任务保留原路径，不借可变目录补历史名称。查询的SnapshotCatalog与复核上下文/待办名称显示共享该读取；Finding政策的all角色保留整会话意义，不扩大旧联合V2角色协议。
+
+该只读一致性校验不是发布版本/实际动作/生产输入的完整来源证明，后续Finding标签生产与查询须继续核对持久来源。新协议的标签行仍由旧读取围栏拒绝，UPDATE_LABEL/实际投影写入/完整读取与复核导出尚未完成。SQL、实际任务创建/查询/浏览器未运行；不把编译当作发布摘要/历史显示验收。
+
+## Finding 标签实际本地写入服务
+原LabelResultService只接规则产物与标签快照，无法验证动作领取/生产事实来源。新增标签模块FindingLabelResultService作为该原表的Finding来源物化入口，复用ActionProductionSourceValidator、原唯一键、纯投影和SourceValidator，不建第二份结果模型；目前未注册UPDATE_LABEL adapter，避免在完整新读取未接入时自动产生不可读标签。
+
+服务只供事务外Action runner后续调用，内部REQUIRES_NEW/READ_COMMITTED按Task→Execution→Result→Action锁序核验当前生产来源、创建者、稳定ownerBound、RUNNING/attempt/token及完整冻结请求；动作类型与版本固定UPDATE_LABEL v1。IqcDataScope最小扩展requireScheduledBound复用原私有scheduledActor和ActionEnqueueService.requireBound，不复制用户/授权模型。原生产任务执行权限沿REQUIRED_GRANTS复用，不把结果物化混同修改标签目录的manage权限。
+
+配置仅labelId/valueCode，不能提交值、角色或证据。从真实发布目录选绑定，再从已核验的融合事实生成投影，缺事实保留NOT_EVALUATED，不重跑检测；≤4MiB不截断，置信度未测不伪造。原(result,label,valueCode)唯一键和稳定fl-产物ID复用已有输出，一致才返回；不覆盖机器/人工历史。已有等价产物还须核对原动作实际领取、冻结输入/政策/同绑定，保留第一份sourceActionId。来源不同、旧Rule产物或内容冲突拒绝。
+
+本地写入前后重检当前投影权限/策略期限/次数，失败抛错由服务事务回滚；持锁期间不访问组织网络或外部API。仅在代理事务成功返回后，后续adapter才能以实际标签ID生成回执；本服务代码不提供模拟成功。未运行SQL/服务代理/并发/API验收，v68必须与B相关迁移集成后再部署；当前无自动标签写入链路，完整查询/复核/导出和adapter仍未完成。
+
+## Finding标签历史读取与复核
+现有发送来源校验要求当前EID/可发送状态且加写锁，不能作为历史标签GET入口。沿原ActionProductionSourceValidator复用同一validateFacts，增加validateHistorical：只读原Task/TaskExecution/Result归属，不检查当前EID或当前暂停/取消状态；发布版本、准入证据、冻结生产输入、生产模式、融合/评分/业务项/风险投影仍完整校验，不访问今日标签目录、不执行节点。原validate的锁顺序/当前EID/状态围栏保持原语义。
+FindingLabelReadService在调用方已授权数据库快照中核验原动作真实领取、固定UPDATE_LABEL v1、触发MATCH、稳定键与冻结政策/输入；核对标签投影等于实际融合事实和发布绑定，稳定产物ID/来源输入摘要一致。读取不依赖当前动作成功结算，允许本地产物已提交而回执尚未结算/UNKNOWN的真实历史记录，不把UNKNOWN解释为失败或重新发送。
+查询列表/汇总及人工复核上下文共享读取证明。summaryByTasks追加原Task数据范围检查并采用同一REPEATABLE_READ快照；机器值/人工覆盖及评分保持独立。XLSX沿原查询自动获得完整Finding投影/证据，原长文本Base64分片机制保持。Finding证据返回真实类型/引用/details，不制造RuleResult锚点。API专门动作来源字段及配置UI仍待补充。
+前端识别新协议五态（含NOT_EVALUATED）、false/0、原始Finding来源节点与各型证据；只有有真实消息引用的会话/规则引文显示定位。角色注明政策绑定，不假称实际主体已识别。人工复核从新binding读取原标签值类型；旧联合试跑覆盖协议不接受Finding生产来源/NOT_EVALUATED。显式未知schema不回落兼容HIT。未注册UPDATE_LABEL、未运行SQL/接口/浏览器/服务代理/并发验收，仍不宣称可部署自动打标已验收。
+
+## 标签读取批量证明与来源展示
+FindingLabelReadService.readBatch在本次调用局部按canonical Result ID复用生产来源/发布目录/政策解析；每标签仍校验自己的原动作领取、绑定、稳定键、输入与完整实际JSON投影。按Result分组顺序处理，只保留当前一个完整生产证明，避免N个Result各留整Task输入副本；没有全局/跨用户缓存，没有把调用方提供的projection当作公开校验凭据。投影比较使用原JSON树，拒绝与规范投影不同的额外字段。查询列表/跨任务汇总使用批量证明；复核覆盖仅对实际存在复核的Finding行批量校验一次每Result，私有上下文沿已核验投影读取值类型，避免每标签再解码完整Task目录。单值复核仍走完整来源核验。
+FindingLabelSource只在通过共享证明后返回Finding编码、真实ActionExecution ID、原TaskExecution ID、冻结输入/投影摘要；不暴露claimToken、运行授权或完整动作输入。原LabelResultView 15/16参数构造保留，旧来源findingSource为NULL。XLSX在原机器/人工列后附加5个来源列，不挪动原列，原长文本分片/公式安全保持。UI支持来源轮次/动作/摘要查看，机器值与人工覆盖保持独立。
+本批不注册UPDATE_LABEL适配器，不运行SQL/真实查询/浏览器或并发验收。批量证明按Result减少重复，不代表跨会话Task输入解析及整系统性能目标已验收；V68迁移与后续适配/冻结政策编辑仍待集成。
+
+## UPDATE_LABEL v1执行接入与历史可用性边界
+缺口：新读写服务已接原标签表，但无实际adapter；配置只作形状检查，发布未核对动作引用的冻结标签绑定。新增适配复用原ActionAdapterRegistry/claim/runner/settlement及FindingLabelResultService事务，不建立新执行账本。新草稿freeze校验UPDATE_LABEL v1的labelId/valueCode属于本次已冻结labelPolicy；历史未配置标签政策的旧动作不追补目录、不直接写入。
+另核对publishedTaskRelease→validateTask→validateFrozen会检查今日资产/规则/引擎依赖可用性，误阻断已有标签历史。沿原发布验证增加只读历史入口，保持真实版本/发布摘要/准入证据/标签与事实政策校验，共享生产融合重建；历史不要求今日资产/规则/引擎可发送。执行入口继续原当前可用性检查。本批完成后仍需SQL/真实事务/运行验收及配置UI，不宣称已部署。
+
+FindingLabelActionAdapter已注册精确UPDATE_LABEL v1（本地稳定产物可幂等，retrySafe=true），配置仍只labelId/valueCode。ready只读取已验证输入中的冻结labelPolicy并核对绑定；旧缺绑定政策返回false，沿原前置延后机制不增加attempt、不写标签。execute通过Spring代理提交原标签服务事务后引用实际标签ID作为确认成功回执；异常/提交未确认为UNKNOWN，不自动重发，不假称远端失败。复用生产入队三项权限和原负责人bound，不要求修改目录的label:manage；不扩大授权、不做网络调用。
+新freeze检查可执行v1绑定，历史版本不借今日目录修补；v2等未提供版本继续原精确registry unavailable。历史发布验证仍核对真实版本、生产标记、摘要与发布证据，并使用原PipelineRuntime.validateStructure保持图/节点/条件/输出Schema/降级结构校验；当前engine registry和今日资产/规则/Finding目录/agent可用性仅用于执行分支。历史融合仍根据冻结事实/融合/决策政策重建，不调用当前引擎。
+后台iqc.actions.enabled默认关闭不变；启用前须集成B迁移/期限与恢复等必要修复并按序应用V68。未运行测试、SQL、Spring实际执行/回执/历史停用读取/并发或浏览器验收，配置UI与真实功能验收继续。
+
+## 标签绑定配置UI复用说明
+现有PublishedAssetReference只支持RULE/FINDING/AGENT；原labels API仅当前树/详情，无历史版本表，不能制造LABEL历史版本选择器。原LabelTreeSelector可选择已发布目录但不能表达Finding/值版本绑定，因此新增FindingLabelPolicyEditor仅组合原树/详情及既有PipelineReleaseEditor，用当前已发布版本和值定义添加绑定，不建平行目录/API。已有未修改绑定及directory原样保留，修改绑定后目录由保存端重新冻结，客户端不伪造名称/角色/类型授权。动作编辑继续复用原ActionPolicy契约，绑定移除不自动删除已有动作。
+
+FindingLabelPolicyEditor组合原getLabelTree/getLabelDetail和LabelTreeSelector；只用原label:view查询，具体标签叶子选择，核对返回身份、当前发布状态/版本和值定义。绑定最多100，同标签版本不混用，同值不重复；Finding由用户明确选择，不默认猜第一项。异步目录/详情使用generation，关闭/禁用/切换流水线初始数据（父级key重挂载）失效旧请求，失败不写半份政策。
+未修改绑定和directory保留原始深拷贝；绑定编辑后去掉客户端directory，由后端重新冻结。读取历史名称使用已冻结目录/local展示缓存，绝不把客户端名称/类型/角色传作授权依据。PipelineReleaseEditor.release做绑定身份/版本/唯一和UPDATE_LABEL v1目标交叉校验；已有其他动作/条件/重试字段原样保留。
+可从每个绑定添加实际UPDATE_LABEL v1动作（ALWAYS、固定来源幂等、无自动重试、仅记录），重复同值动作不重复添加；最多100，支持显式移除动作。移除绑定不暗删动作，保存时要求解决失效目标。此批仅完成标签选择/映射和默认打标动作创建，通用动作条件/重试/配置编辑后续继续，不以默认ALWAYS代替PRD完整动作策略要求。无新API/DDL/框架修改，无浏览器或真实目录/保存执行验收。
+
+## 通用动作策略编辑复用边界
+SelectorConditionEditor是选数字段/operator/junction，不表达Finding融合三态与NOT/评分/业务项条件；不能直接映射。新增ActionConditionEditor仅用于既有ActionPolicy.Condition，组合UI沿原递归表单习惯，保留所有条件种类/16层100节点边界。ActionPolicyEditor复用AutomaticRetryPolicyEditor和validateAutomaticRetry、已有冻结标签绑定，先为四个真实v1适配器提供业务字段表单。其它类型/版本及暂未执行的升级复核失败策略保留只读，显式删除可改新草稿，不能改成latest或提供模拟成功。无新业务API/执行模型。
+
+ActionPolicyEditor现接入原PipelineReleaseEditor：新增实际SAVE_RESULT/UPDATE_LABEL/CREATE_REVIEW/ADD_TO_EVALUATION_CANDIDATE v1，业务表单分别为冻结目标、复核原因/预期轮次、评测候选类型/来源复核轮次/名称/标签。候选保持原金标标注/独立审核，不直接批准。创建版本固定v1、固定原来源幂等、RECORD_ONLY；不把暂未实现的ESCALATE_REVIEW作为可执行选项，已有此失败策略及其他type/version只读保留，显式删除授权仅在本地草稿。
+ActionConditionEditor支持全部原Kind及任意合法嵌套/NOT，16层100节点；组类型切换保留已有子条件，取反多子项要求用户明确删除，不悄悄裁剪。Finding/质检项需明确选择编码；缺选项保留原引用显示“未加载”，最终后台校验声明。不执行条件，不把未知当否。标量JSON解析失败以不可保存的对象状态保留文本/提示，不降级为字符串，false/0保持；不接受JS无法精确表达的整数，无脚本/表达式入口。
+已有retry表单/校验复用；前端保存校验动作ID唯一/版本/配置尺寸、全部条件结构/状态/标量、复核轮次整数边界与候选字段界限，UPDATE_LABEL目标仍走共用绑定检查。新增表单和验证不会确认执行或回执，真实条件行为/浏览器/接口/SQL及所有PRD策略验收仍待后续。
+
+新增组合组/子条件以缺少明确编码的Finding状态条件起步，保存前须明确选择；不把ANY的新子条件默认为ALWAYS而意外扩大触发范围。显式创建动作的初始ALWAYS保留可见“每份生产结果”含义。空/非法轮次呈现空值，不能看似默认0/1却保存NULL。
 ## UNKNOWN 人工持久产物核对
 
 POST `/api/iqc/conversation-results/{id}/actions/{actionExecutionId}/reconcile` 使用独立 `iqc:action:reconcile` 资源、原审计与限流。请求只接受观察版本 `version` 和非空≤1000字 `reason`；不接受客户端回执、成功状态或产物ID。历史查询增加账本版本供条件提交，不暴露claimToken或冻结输入。组织资源沿现有注册器声明，未添加角色自动授权；管理端按钮及组织受控授权迁移仍待接入。
@@ -153,3 +222,9 @@ V1.1.64 增加原账本从属的 iqc_action_execution_event；INSERT 初始观�
 ### 2026-10-11：读取事务状态历史
 
 原动作记录 GET 新增可选 `actionExecutionId/includeHistory/beforeVersion` 参数，复用原 `iqc:action:history:view`；单动作最多50条及字符串版本游标。按原结果/task/EID/conversation/owner重新授权，SQL白名单不选claim token或冻结内容。明确升级前历史缺口，不重建已覆盖的过程。默认摘要读取不查询日志。协议及实际验收见 [状态历史接口](iqc-action-state-history-api.md)；未新增资源/角色/权限迁移。
+
+## A/B 集成范围（2026-10-11）
+B 分支 669636b 的恢复入口、不可变状态事件、人工核对记录及期限/版本围栏已与 A 的 Finding 标签写入及历史来源证明合并。迁移 64–67 与标签 68 同时保留，部署需按序迁移；本次不执行数据库迁移。B 的独立测试记录只证明其注明的范围，不代表合并后全量验证。UPDATE_LABEL 尚未实现 reconcile，UNKNOWN 标签动作仍返回不可确认，不能据此自动重发。恢复 UI/权限需另行集成，生产来源锁序、真实用户授权及完整 PRD 验收仍待完成。
+
+## 标签 UNKNOWN 产物核对的复用边界
+原 FindingLabelResultService 已拥有原表唯一键、冻结绑定投影与实际动作来源校验；仅新增该服务的只读 lookup 和原适配器 reconcile，不新增表/API/产物模型。lookup 使用历史生产来源证明，不要求今天任务仍可发送，也不使用发送权限或领取锁。缺失产物返回未确认，冲突或损坏拒绝确认；只读核对不触发重写、发送或自动重试。
