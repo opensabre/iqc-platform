@@ -38,9 +38,11 @@ public class ActionReconciliationService {
         var prepared=prepare(resultId,id,version,actor);
         if(prepared==null)return new Response(id,"STALE_OBSERVATION");
         var receipt=prepared.adapter().reconcile(prepared.request());
-        if(receipt==null || receipt.outcome()==ActionExecutionContract.Outcome.UNKNOWN)
-            return new Response(id,"UNCONFIRMED");
+        if(receipt==null)return new Response(id,"UNCONFIRMED");
+        // Even an inconclusive receipt must belong to the original frozen request.
         receipt.requireRequest(prepared.request());
+        if(receipt.outcome()==ActionExecutionContract.Outcome.UNKNOWN)
+            return new Response(id,"UNCONFIRMED");
         if(receipt.outcome()!=ActionExecutionContract.Outcome.CONFIRMED_SUCCESS)
             throw IqcException.invalidState("动作核对仅接受真实成功产物");
         // A changed source/owner or ledger observation cannot be overwritten by a slow lookup.

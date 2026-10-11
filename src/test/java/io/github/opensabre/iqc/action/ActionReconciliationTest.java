@@ -66,6 +66,12 @@ class ActionReconciliationTest {
         when(adapter.reconcile(any())).thenReturn(new ActionAdapter.Receipt(id,ActionExecutionContract.Outcome.UNKNOWN,null,null,"UNAVAILABLE"));
         assertEquals("UNCONFIRMED",service.reconcile("result",id,3,"核对").state());verify(actions,never()).reconcileSuccessBound(any(),anyLong(),anyString(),any(),anyString(),anyString(),anyString());
     }
+    @Test void foreignUnknownReceiptCannotBeAcceptedAsAnObservation() {
+        when(adapter.reconcile(any())).thenReturn(new ActionAdapter.Receipt("b".repeat(64),ActionExecutionContract.Outcome.UNKNOWN,null,null,"UNAVAILABLE"));
+        assertThrows(RuntimeException.class,()->service.reconcile("result",id,3,"核对"));
+        verify(actions,never()).reconcileSuccessBound(any(),anyLong(),anyString(),any(),anyString(),anyString(),anyString());
+        verifyNoInteractions(journal);verify(adapter,never()).execute(any());
+    }
     @Test void changedStableIdentityCannotLookup() {
         when(actors.capture()).thenReturn(new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","replacement","alice",true,null));
         assertThrows(RuntimeException.class,()->service.reconcile("result",id,3,"核对"));verify(adapter,never()).reconcile(any());
