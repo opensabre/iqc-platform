@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
 
 /** Read model for business label hits generated from canonical inspection results. */
 @Service
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
 public class LabelResultQueryService {
     private final InspectionTaskMapper taskMapper;
     private final ConversationInspectionResultMapper conversationResultMapper;
@@ -48,6 +48,27 @@ public class LabelResultQueryService {
     private final IqcDataScope dataScope;
     private final io.github.opensabre.iqc.result.dao.RuleInspectionResultMapper ruleResultMapper;
     private final LabelResultReviewService labelReviews;
+
+    private final org.springframework.beans.factory.ObjectProvider<FindingLabelReadService> findingReads;
+    public LabelResultQueryService(InspectionTaskMapper taskMapper,ConversationInspectionResultMapper conversationResultMapper,
+            InspectionLabelResultMapper labelResultMapper,InsightLabelMapper labelMapper,LabelGroupMapper groupMapper,
+            LabelCategoryMapper categoryMapper,ConversationMapper conversationMapper,InspectionEvidenceMapper evidenceMapper,
+            ObjectMapper objectMapper,IqcDataScope dataScope,io.github.opensabre.iqc.result.dao.RuleInspectionResultMapper ruleResultMapper,
+            LabelResultReviewService labelReviews) {
+        this(taskMapper,conversationResultMapper,labelResultMapper,labelMapper,groupMapper,categoryMapper,conversationMapper,
+                evidenceMapper,objectMapper,dataScope,ruleResultMapper,labelReviews,null);
+    }
+    private FindingLabelProjection.Projection findingProjection(InspectionTask task,ConversationInspectionResult result,InspectionLabelResult row) {
+        LabelResultSourceValidator.validate(row,objectMapper);
+        if(!LabelResultSourceValidator.FINDING.equals(row.getGenerationSource()))return null;
+        var reader=findingReads==null?null:findingReads.getIfAvailable();
+        if(reader==null)throw IqcException.invalidState("Finding标签读取服务不可用");
+        return reader.read(task,result,row);
+    }
+    private String findingEvidence(FindingLabelProjection.Projection projection) {
+        try{return objectMapper.writeValueAsString(projection.evidence());}
+        catch(com.fasterxml.jackson.core.JsonProcessingException failure){throw IqcException.invalidState("Finding标签证据无法序列化");}
+    }
 
     /** Machine and human columns are read from one database snapshot; the machine contract is never overwritten. */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -94,8 +115,9 @@ public class LabelResultQueryService {
                     snapshotLabels.strict() ? snapshot.categoryName() : snapshot != null && snapshot.categoryName() != null ? snapshot.categoryName() : category == null ? null : category.getName(),
                     snapshotLabels.strict() ? snapshot.groupName() : snapshot != null && snapshot.groupName() != null ? snapshot.groupName() : group == null ? null : group.getName(),
                     snapshot != null ? snapshot.name() : label == null ? null : label.getName()).filter(Objects::nonNull).toList());
-            String status = resultStatus(result.getValueJson(), snapshotLabels.strict(), snapshot, result.getValueCode());
-            String evidenceJson = evidenceJson(result);
+            var finding=findingProjection(task,conversation,result);
+            String status = finding==null?resultStatus(result.getValueJson(), snapshotLabels.strict(), snapshot, result.getValueCode()):finding.status().name();
+            String evidenceJson = finding==null?evidenceJson(result):findingEvidence(finding);
             return new LabelResultView(result.getId(), conversation.getConversationId(), fileNames.get(conversation.getConversationId()), result.getLabelId(),
                     snapshot != null ? snapshot.name() : label == null ? result.getLabelId() : label.getName(),
                     snapshot != null ? snapshot.code() : label == null ? null : label.getCode(), path, result.getLabelVersionNo(), result.getValueCode(),
@@ -364,9 +386,12 @@ public class LabelResultQueryService {
         return new ReviewSummary(corrected, pending, detected, rate, coverage.valueCount(), coverage.statusCounts());
     }
 
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public LabelInsightSummary summaryByTasks(List<String> taskIds, java.util.Date from, java.util.Date to) {
         if (taskIds == null || taskIds.isEmpty()) return new LabelInsightSummary(0, 0, BigDecimal.ZERO, Map.of(), Map.of());
-        Map<String, SnapshotCatalog> snapshots = taskMapper.selectBatchIds(taskIds).stream()
+        Map<String,InspectionTask> tasks=taskMapper.selectBatchIds(taskIds).stream().collect(Collectors.toMap(InspectionTask::getId,Function.identity()));
+        for(var task:tasks.values())if(!dataScope.canView(task.getCreatedBy(),task.getOwnerGroupId()))throw IqcException.accessDenied("无权汇总该任务标签");
+        Map<String, SnapshotCatalog> snapshots = tasks.values().stream()
                 .collect(Collectors.toMap(InspectionTask::getId, task -> snapshotLabels(task)));
         if (snapshots.size() != taskIds.stream().distinct().count())
             throw IqcException.invalidState("标签汇总中的任务不存在，无法核对冻结快照");
@@ -389,7 +414,8 @@ public class LabelResultQueryService {
                         result.getLabelId(), result.getValueCode());
                 if (!seenJointResults.add(key)) throw IqcException.invalidState("标签结果重复，不能确认联合试跑覆盖");
             }
-            String status = resultStatus(result.getValueJson(), snapshot != null && snapshot.strict(),
+            var finding=findingProjection(tasks.get(conversation.getTaskId()),conversation,result);
+            String status = finding!=null?finding.status().name():resultStatus(result.getValueJson(), snapshot != null && snapshot.strict(),
                     snapshot == null ? null : snapshot.values().get(result.getLabelId() + ":" + result.getLabelVersionNo()),
                     result.getValueCode());
             statuses.add(status);

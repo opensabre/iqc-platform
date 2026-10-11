@@ -170,3 +170,9 @@ FindingLabelTaskDirectory.expected沿原Task.ruleSnapshotJson读取PipelineRelea
 配置仅labelId/valueCode，不能提交值、角色或证据。从真实发布目录选绑定，再从已核验的融合事实生成投影，缺事实保留NOT_EVALUATED，不重跑检测；≤4MiB不截断，置信度未测不伪造。原(result,label,valueCode)唯一键和稳定fl-产物ID复用已有输出，一致才返回；不覆盖机器/人工历史。已有等价产物还须核对原动作实际领取、冻结输入/政策/同绑定，保留第一份sourceActionId。来源不同、旧Rule产物或内容冲突拒绝。
 
 本地写入前后重检当前投影权限/策略期限/次数，失败抛错由服务事务回滚；持锁期间不访问组织网络或外部API。仅在代理事务成功返回后，后续adapter才能以实际标签ID生成回执；本服务代码不提供模拟成功。未运行SQL/服务代理/并发/API验收，v68必须与B相关迁移集成后再部署；当前无自动标签写入链路，完整查询/复核/导出和adapter仍未完成。
+
+## Finding标签历史读取与复核
+现有发送来源校验要求当前EID/可发送状态且加写锁，不能作为历史标签GET入口。沿原ActionProductionSourceValidator复用同一validateFacts，增加validateHistorical：只读原Task/TaskExecution/Result归属，不检查当前EID或当前暂停/取消状态；发布版本、准入证据、冻结生产输入、生产模式、融合/评分/业务项/风险投影仍完整校验，不访问今日标签目录、不执行节点。原validate的锁顺序/当前EID/状态围栏保持原语义。
+FindingLabelReadService在调用方已授权数据库快照中核验原动作真实领取、固定UPDATE_LABEL v1、触发MATCH、稳定键与冻结政策/输入；核对标签投影等于实际融合事实和发布绑定，稳定产物ID/来源输入摘要一致。读取不依赖当前动作成功结算，允许本地产物已提交而回执尚未结算/UNKNOWN的真实历史记录，不把UNKNOWN解释为失败或重新发送。
+查询列表/汇总及人工复核上下文共享读取证明。summaryByTasks追加原Task数据范围检查并采用同一REPEATABLE_READ快照；机器值/人工覆盖及评分保持独立。XLSX沿原查询自动获得完整Finding投影/证据，原长文本Base64分片机制保持。Finding证据返回真实类型/引用/details，不制造RuleResult锚点。API专门动作来源字段及配置UI仍待补充。
+前端识别新协议五态（含NOT_EVALUATED）、false/0、原始Finding来源节点与各型证据；只有有真实消息引用的会话/规则引文显示定位。角色注明政策绑定，不假称实际主体已识别。人工复核从新binding读取原标签值类型；旧联合试跑覆盖协议不接受Finding生产来源/NOT_EVALUATED。显式未知schema不回落兼容HIT。未注册UPDATE_LABEL、未运行SQL/接口/浏览器/服务代理/并发验收，仍不宣称可部署自动打标已验收。

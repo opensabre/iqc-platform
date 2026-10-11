@@ -31,7 +31,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /** Human label-value rounds reuse the review ledger without changing generated values or scores. */
-@Service @RequiredArgsConstructor
+@Service @RequiredArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
 public class LabelResultReviewService {
     private final ResultReviewMapper reviews;
     private final InspectionLabelResultMapper labels;
@@ -40,6 +40,13 @@ public class LabelResultReviewService {
     private final ConversationMessageMapper messages;
     private final IqcDataScope scope;
     private final ObjectMapper mapper;
+
+    private final org.springframework.beans.factory.ObjectProvider<FindingLabelReadService> findingReads;
+    public LabelResultReviewService(ResultReviewMapper reviews,InspectionLabelResultMapper labels,
+            ConversationInspectionResultMapper conversations,InspectionTaskMapper tasks,ConversationMessageMapper messages,
+            IqcDataScope scope,ObjectMapper mapper) {
+        this(reviews,labels,conversations,tasks,messages,scope,mapper,null);
+    }
 
     /** Lists label review rounds with task ownership applied in SQL before pagination. */
     @Transactional(readOnly = true)
@@ -346,6 +353,15 @@ public class LabelResultReviewService {
                     valueType = entry.path("valueType").asText();
                 }
             if (valueType == null) throw IqcException.invalidState("标签值不属于冻结定义");
+            if(LabelResultSourceValidator.FINDING.equals(label.getGenerationSource())) {
+                var reader=findingReads==null?null:findingReads.getIfAvailable();
+                if(reader==null)throw IqcException.invalidState("Finding标签读取服务不可用");
+                var projection=reader.read(task,conversation,label);
+                if(!valueType.equals(projection.binding().valueType())
+                        || !definition.path("targetRole").asText().equals(projection.binding().targetRole()))
+                    throw IqcException.invalidState("Finding标签与冻结值类型或角色不一致");
+                return new Context(task,conversation,label,mapper.valueToTree(projection),valueType);
+            }
             JsonNode payload = mapper.readTree(label.getValueJson());
             if (payload == null || !label.getValueCode().equals(payload.path("valueCode").asText()))
                 throw IqcException.invalidState("标签原始结果无效");

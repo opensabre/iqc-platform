@@ -47,13 +47,7 @@ public class ActionProductionSourceValidator {
 
     @Transactional(propagation=Propagation.MANDATORY)
     public Validated validate(Reference reference) {
-        if(reference==null)throw IqcException.invalidArgument("动作生产来源不能为空");
-        for(var id:new String[]{reference.taskId(),reference.executionId(),reference.conversationId(),reference.resultId()})
-            if(id==null || !id.matches("[A-Za-z0-9][A-Za-z0-9:_./@+-]{0,63}"))
-                throw IqcException.invalidArgument("动作生产来源标识无效");
-        if(reference.owner()==null || reference.owner().isBlank() || reference.owner().length()>128
-                || reference.owner().codePoints().anyMatch(Character::isISOControl))
-            throw IqcException.invalidArgument("动作生产负责人无效");
+        requireReference(reference);
         // Same task/execution lock order as task control and gateway tool exposure.
         var task=tasks.selectOne(Wrappers.<InspectionTask>lambdaQuery()
                 .eq(InspectionTask::getId,reference.taskId()).last("FOR UPDATE"));
@@ -75,6 +69,37 @@ public class ActionProductionSourceValidator {
                 || !Objects.equals(result.getConversationId(),reference.conversationId())
                 || !"PIPELINE".equals(result.getAggregationMode()))
             throw IqcException.invalidState("动作生产结果归属不一致");
+        return validateFacts(reference,task,result);
+    }
+
+    /** Historical artifact proof: does not claim, lock, send, or require the task's current execution. */
+    @Transactional(propagation=Propagation.MANDATORY,readOnly=true)
+    public Validated validateHistorical(Reference reference) {
+        requireReference(reference);
+        var task=tasks.selectById(reference.taskId());
+        var execution=executions.selectById(reference.executionId());
+        var result=results.selectById(reference.resultId());
+        if(task==null || !"PIPELINE".equals(task.getTaskType()) || !Objects.equals(task.getCreatedBy(),reference.owner())
+                || execution==null || !Objects.equals(execution.getTaskId(),reference.taskId())
+                || result==null || !Objects.equals(result.getTaskId(),reference.taskId())
+                || !Objects.equals(result.getExecutionId(),reference.executionId())
+                || !Objects.equals(result.getConversationId(),reference.conversationId())
+                || !"PIPELINE".equals(result.getAggregationMode()))
+            throw IqcException.invalidState("历史产物生产任务、执行或结果归属不一致");
+        return validateFacts(reference,task,result);
+    }
+
+    private void requireReference(Reference reference) {
+        if(reference==null)throw IqcException.invalidArgument("动作生产来源不能为空");
+        for(var id:new String[]{reference.taskId(),reference.executionId(),reference.conversationId(),reference.resultId()})
+            if(id==null || !id.matches("[A-Za-z0-9][A-Za-z0-9:_./@+-]{0,63}"))
+                throw IqcException.invalidArgument("动作生产来源标识无效");
+        if(reference.owner()==null || reference.owner().isBlank() || reference.owner().length()>128
+                || reference.owner().codePoints().anyMatch(Character::isISOControl))
+            throw IqcException.invalidArgument("动作生产负责人无效");
+    }
+
+    private Validated validateFacts(Reference reference,InspectionTask task,ConversationInspectionResult result) {
         try {
             var snapshot=json.readTree(task.getRuleSnapshotJson());
             var release=assets.publishedTaskRelease(snapshot);
