@@ -26,3 +26,5 @@ CREATE_RISK_EVENT v1 实际 RiskEventActionAdapter 已注册原精确版本 regi
 风险创建权限复用已有 ResourceRegistrationListener 的 BACKGROUND 声明模式，固定代码risk:create、内部能力引用/internal/iqc/risk-events/create、实际RiskEventActionService.create handler；该引用不是HTTP入口。原注册快照保留资源ACTIVE，角色授权另由组织迁移控制，默认不自动授角色。
 
 处置审计能力缺口：Framework AuditAspect发布治理事件，DefaultAuditEventHandler调用sysadmin.saveAuditLog且失败只warn，不能与IQC状态事务原子提交。保留原Audit，A领取V1.1.70新增风险专属版本事件，仅保存状态前后/原因/操作人/实际UTC，不复制来源结果或治理审计模型。事件写入失败须撤销处置CAS，版本唯一，不可改删；真实SQL/服务事务验收待。框架源代码不修改。
+
+RiskHandlingService 已编码独立事务处置：原历史查询证明/数据范围先于事件锁，观察版本字符串精确解析、MAX拒绝；OPEN可进入处置/解决/排除，处置中可解决/排除，终态仅显式重开OPEN。CAS成功同事务append原因/实际操作人/UTC，零行或异常回滚，竞争败者无日志。不改机器结果/冻结事件元数据。公开权限与入口尚未接入，真实SQL并发回滚验收待。
