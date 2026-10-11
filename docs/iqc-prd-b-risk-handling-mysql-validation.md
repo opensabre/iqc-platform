@@ -15,3 +15,9 @@
 新增真实历史服务/SQL验证55条版本记录的50+5分页、缺失起始记录拒绝、缺失当前记录及空内部页拒绝。首次六项执行中，两项暴露 CAST(version AS CHAR) AS version 的同名字符串别名被 ORDER BY 使用，9排在55前，正确的一致性围栏拒绝了合法记录。修复仅将排序限定为原表 BIGINT 列，客户端版本字符串不变。
 
 修复后同组六项一次执行全部通过，零失败/错误/跳过，包含原事务原子性、回滚和并发单赢家。日志 `/private/tmp/iqc-b-risk-handling-history-mysql-fixed.log`。历史授权View仍是替身，结果不替代真实来源证明、HTTP权限与浏览器验收。
+
+## 风险中心 SQL 范围与分页（2026-10-12）
+
+追加原 Task/Result/风险表的真实SQL JOIN、本人/同组/全局范围、大小写身份与组边界、来源负责人不一致排除、状态/风险筛选，以及真实RiskCenterQueryService的25条20+5稳定游标页。每result每页复用一次来源View查询，缺失View拒绝。首次因两场景任务数据共存失败，修正BeforeEach仅清理本次随机库任务行，保留不可变历史和正式SQL。
+
+修正后八项一次执行通过，零失败/错误/跳过；日志 `/private/tmp/iqc-b-risk-center-mysql-isolated-tests.log`。中心SQL范围真实，但身份/来源View仍替身，不证明完整组织授权、生产来源或HTTP/浏览器验收。

@@ -2,7 +2,7 @@
 
 ## 当前证据（2026-10-12）
 
-原 PRD 第15节要求统一会话的 ASR/附件信息，Segment 的 speaker/text/startMs/endMs/confidence/sequence，以及音频与转写按时间戳双向定位。第13节要求复核音频时间轴，第18节要求原始音频敏感权限，第25节要求访问审计。实时语音排除不改变这些离线要求。
+原 PRD 第15节要求统一会话的 ASR/附件信息，Segment 的 speaker/text/startMs/endMs/confidence/sequence，以及音频与转写按时间戳双向定位。第13节要求复核音频时间轴，第19节要求原始音频敏感权限，非功能需求要求音频/会话访问审计。实时语音排除不改变这些离线要求。
 
 现有 `conversation/model/Conversation.java` 已有 asrStatus、归属、业务字段和原始来源指纹；`ConversationMessage.java` 已有顺序、角色、正文和 LocalTime。`ConversationApiIngestService` 复用原导入、原指纹与计次，当前不接收音频引用或毫秒区间。`ProductionInputSnapshotService.Message` 冻结 id/sequence/role/content/relativeTime，尚未冻结音频对齐元数据。LocalTime 不能独立表达大于24小时的相对时长，也不能从单个起点推断真实 endMs。
 

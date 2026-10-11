@@ -46,6 +46,7 @@ class IsolatedMysqlRiskHandlingIT {
         @Bean RiskEventQueryService queries(){return mock(RiskEventQueryService.class);}
         @Bean IqcDataScope scope(){var scope=mock(IqcDataScope.class);when(scope.owner()).thenReturn("alice");return scope;}
         @Bean RiskHandlingHistoryService historyService(RiskEventQueryService queries,RiskHandlingEventMapper history){return new RiskHandlingHistoryService(queries,history);}
+        @Bean RiskCenterQueryService centerService(RiskEventMapper events,RiskEventQueryService queries,IqcDataScope scope){return new RiskCenterQueryService(events,queries,scope);}
         @Bean RiskHandlingService handling(RiskEventQueryService queries,RiskEventMapper events,RiskHandlingEventMapper history,IqcDataScope scope){return new RiskHandlingService(queries,events,history,scope);}
     }
     @BeforeAll static void start() throws Exception {
@@ -64,7 +65,10 @@ class IsolatedMysqlRiskHandlingIT {
     }
     @BeforeEach void fixture(){
         jdbc=new JdbcTemplate(context.getBean(DataSource.class));service=context.getBean(RiskHandlingService.class);
+        // Center JOINs only this scenario's tasks; leave immutable histories untouched in the private schema.
+        jdbc.update("DELETE FROM iqc_inspection_task");
         queries=context.getBean(RiskEventQueryService.class);reset(queries);
+        var scope=context.getBean(IqcDataScope.class);reset(scope);when(scope.owner()).thenReturn("alice");
         String key=UUID.randomUUID().toString().replace("-","")+UUID.randomUUID().toString().replace("-","");
         id="risk-"+key.substring(0,59);
         jdbc.update("INSERT INTO iqc_risk_event(id,source_action_execution_id,source_result_id,source_input_hash,category,title,description,risk_level,status,version,created_by) VALUES (?,?,?,?,'quality','Title','Description','HIGH','OPEN',0,'alice')",id,key,"result", "a".repeat(64));
@@ -141,6 +145,42 @@ class IsolatedMysqlRiskHandlingIT {
         assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->reader.page("result",id,null));
         assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->reader.page("result",id,"2"));
         assertState("RESOLVED",55,53);
+    }
+
+    private List<RiskEventQueryService.View> centerRows(String owner,String group,int count){
+        String token=UUID.randomUUID().toString().replace("-","");String task="task-"+token,result="result-"+token;
+        jdbc.update("INSERT INTO iqc_inspection_task(id,name,status,created_by,owner_group_id) VALUES (?,'Center fixture','SUCCEEDED',?,?)",task,owner,group);
+        jdbc.update("INSERT INTO iqc_inspection_conversation_result(id,task_id,execution_id,conversation_id,result_status,reason,created_by) VALUES (?,?,?,?,'QUALIFIED','fixture',?)",result,task,"execution-"+token,"conversation-"+token,owner);
+        var views=new ArrayList<RiskEventQueryService.View>();
+        for(int index=0;index<count;index++){
+            String key=UUID.randomUUID().toString().replace("-","")+UUID.randomUUID().toString().replace("-","");String eventId="risk-"+key.substring(0,59);
+            jdbc.update("INSERT INTO iqc_risk_event(id,source_action_execution_id,source_result_id,source_input_hash,category,title,description,risk_level,status,version,created_by) VALUES (?,?,?,?,'quality','Title','Description','HIGH','OPEN',0,?)",eventId,key,result,"a".repeat(64),owner);
+            views.add(new RiskEventQueryService.View(eventId,result,key,"quality","Title","Description","HIGH","OPEN","0"));
+        }
+        when(queries.list(result)).thenReturn(views);return views;
+    }
+    @Test void centerSqlHonorsBinaryOwnerGroupAndSourceOwnerJoin(){
+        var own=centerRows("alice","other-group",1).getFirst();var peer=centerRows("bob","team",1).getFirst();
+        var outside=centerRows("mallory","outside",1).getFirst();var caseOwner=centerRows("Alice","outside",1).getFirst();
+        var caseGroup=centerRows("carol","TEAM",1).getFirst();
+        var mapper=context.getBean(RiskEventMapper.class);
+        assertEquals(Set.of(own.id()),mapper.center(false,"alice",null,null,null,null).stream().map(RiskEventMapper.Reference::id).collect(java.util.stream.Collectors.toSet()));
+        assertEquals(Set.of(own.id(),peer.id()),mapper.center(false,"alice","team",null,null,null).stream().map(RiskEventMapper.Reference::id).collect(java.util.stream.Collectors.toSet()));
+        assertEquals(Set.of(own.id(),peer.id(),outside.id(),caseOwner.id(),caseGroup.id()),mapper.center(true,"alice",null,null,null,null).stream().map(RiskEventMapper.Reference::id).collect(java.util.stream.Collectors.toSet()));
+        jdbc.update("UPDATE iqc_risk_event SET created_by='Mallory' WHERE id=?",outside.id());
+        assertFalse(mapper.center(true,"alice",null,null,null,null).stream().anyMatch(row->row.id().equals(outside.id())));
+        assertTrue(mapper.center(false,"alice","team",null,"RESOLVED",null).isEmpty());
+        assertTrue(mapper.center(false,"alice","team",null,null,"LOW").isEmpty());
+    }
+    @Test void centerRealSqlPaginatesAndVerifiesEachResultOncePerPage(){
+        var views=centerRows("alice","team",25);var expected=views.stream().map(RiskEventQueryService.View::id).sorted().toList();
+        var reader=context.getBean(RiskCenterQueryService.class);
+        var first=reader.page(null,"OPEN","HIGH");assertEquals(expected.subList(0,20),first.events().stream().map(RiskEventQueryService.View::id).toList());
+        assertEquals(expected.get(19),first.nextAfterId());
+        var second=reader.page(first.nextAfterId(),"OPEN","HIGH");assertEquals(expected.subList(20,25),second.events().stream().map(RiskEventQueryService.View::id).toList());assertNull(second.nextAfterId());
+        verify(queries,times(2)).list(views.getFirst().sourceResultId());
+        when(queries.list(views.getFirst().sourceResultId())).thenReturn(List.of());
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->reader.page(null,"OPEN","HIGH"));
     }
 
 }
