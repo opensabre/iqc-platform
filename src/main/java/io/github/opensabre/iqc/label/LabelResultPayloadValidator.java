@@ -10,6 +10,14 @@ import java.util.Set;
 public final class LabelResultPayloadValidator {
     private LabelResultPayloadValidator() { }
 
+    /** Legacy values have no schema marker; an explicit unknown protocol must never become a legacy hit. */
+    public static void requireReadableSchema(JsonNode payload) {
+        if(payload!=null && payload.has("schemaVersion")
+                && (!payload.path("schemaVersion").isTextual()
+                    || !"iqc-label-result-v2".equals(payload.path("schemaVersion").asText())))
+            throw IqcException.invalidState("标签结果声明了尚未支持的协议，不能按旧命中结果读取");
+    }
+
     /** Validates a generated result; publication additionally supplies frozen type/role and rejects ERROR. */
     public static void validate(JsonNode payload, String expectedType, String expectedRole, boolean allowError) {
         if (payload == null || !payload.isObject()

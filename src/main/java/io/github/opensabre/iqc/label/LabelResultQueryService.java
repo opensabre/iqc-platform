@@ -118,6 +118,7 @@ public class LabelResultQueryService {
         }
         try {
             var payload = objectMapper.readTree(json);
+            LabelResultPayloadValidator.requireReadableSchema(payload);
             if (payload == null || !"iqc-label-result-v2".equals(payload.path("schemaVersion").asText())) {
                 if (strict) throw IqcException.invalidState("联合任务标签结果协议无效");
                 return "HIT";
@@ -183,6 +184,7 @@ public class LabelResultQueryService {
         try {
             var payload = result.getValueJson() == null || result.getValueJson().isBlank()
                     ? objectMapper.createObjectNode() : objectMapper.readTree(result.getValueJson());
+            LabelResultPayloadValidator.requireReadableSchema(payload);
             var sources = new java.util.LinkedHashSet<String>();
             boolean coverage = "iqc-label-result-v2".equals(payload.path("schemaVersion").asText());
             var expectedQuotes = new java.util.LinkedHashSet<EvidenceQuote>();

@@ -135,3 +135,6 @@ FindingLabelProjection先定义纯投影schema iqc-label-finding-projection-v1�
 
 该契约是后续标签来源兼容的代码基础，尚未接UPDATE_LABEL适配器、冻结资产目录、持久化、查询/复核/导出或前端。V1.1.63之后的DDL须检查当前拥有分支与B迁移占用再确定；本批不执行迁移/测试或标签写入。
 兼容既有LabelTaxonomyService允许的Unicode值编码：valueCode限制沿现表varchar(64)而非新加ASCII规则；findingCode保留Unicode，labelId/原因引用仍按稳定引用约束。不能把新契约的编码限制扩大到超过原标签列容量。
+
+## 标签新协议的读取围栏
+原LabelResultService历史值JSON不含schemaVersion；原LabelResultQueryService将非V2载荷一概作为历史HIT，会把未来Finding投影或其他显式未支持协议误计为命中。最小扩展既有LabelResultPayloadValidator.requireReadableSchema，结果状态与证据读取都复用：显式schema必须为已支持iqc-label-result-v2，否则（包括null/非文本marker）拒绝读取；历史未声明schema的值保留旧读取。尚未接入的iqc-label-finding-projection-v1不会走旧HIT或旧规则证据查询路径。该围栏不能替代新协议实际查询/复核/导出实现，UPDATE_LABEL仍未完成；未运行数据库/接口/测试。
