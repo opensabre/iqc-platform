@@ -100,6 +100,7 @@ public class ConversationImportService {
             message.setSequenceNo(draft.sequence());
             message.setSpeakerRole(ConversationSpeakerRole.canonical(draft.speakerRole()));
             message.setRelativeTime(draft.relativeTime());
+            message.setStartMs(draft.startMs());message.setEndMs(draft.endMs());message.setConfidence(draft.confidence());
             message.setContent(draft.content());
             message.setRawLine(draft.rawLine());
             message.setLineNumber(draft.lineNumber());
@@ -118,6 +119,8 @@ public class ConversationImportService {
             var row=stored.get(i);var expected=parsed.messages().get(i);
             if(!java.util.Objects.equals(row.getSequenceNo(),expected.sequence())
                     || !java.util.Objects.equals(ConversationSpeakerRole.canonical(row.getSpeakerRole()),ConversationSpeakerRole.canonical(expected.speakerRole()))
+                    || !java.util.Objects.equals(row.getStartMs(),expected.startMs()) || !java.util.Objects.equals(row.getEndMs(),expected.endMs())
+                    || (row.getConfidence()==null?expected.confidence()!=null:expected.confidence()==null || row.getConfidence().compareTo(expected.confidence())!=0)
                     || !java.util.Objects.equals(row.getRelativeTime(),expected.relativeTime()) || !java.util.Objects.equals(row.getContent(),expected.content()))
                 throw new ConversationReplayConflictException("重复外部身份的实际正文与请求不一致");
         }

@@ -48,15 +48,25 @@ public class ConversationApiIngestService {
             int contentBytes=bytes(item.content());
             if(contentBytes>65535)throw IqcException.invalidArgument("单条消息 content 超过65535 UTF-8字节");
             total+=contentBytes+bytes(item.role())+bytes(item.time());requireBudget(total);
+            try{TranscriptAlignment.validate(item.startMs(),item.endMs(),item.confidence());}
+            catch(IllegalArgumentException invalid){throw IqcException.invalidArgument("第 "+(index+1)+" 条消息的转写时间区间或置信度无效");}
             LocalTime time;
             try{time=item.time()==null || item.time().isBlank()?LocalTime.MIDNIGHT.plusSeconds(index):LocalTime.parse(item.time());}
             catch(RuntimeException exception){throw IqcException.invalidArgument("第 "+(index+1)+" 条消息 time 格式应为 HH:mm:ss");}
             canonical.append('|').append(item.role()).append('|').append(time).append('|').append(item.content());
-            messages.add(new ConversationMessageDraft(index+1,ConversationSpeakerRole.canonical(item.role()),time,item.content().trim(),item.content(),index+1));
+            messages.add(new ConversationMessageDraft(index+1,ConversationSpeakerRole.canonical(item.role()),time,item.content().trim(),item.content(),index+1,item.startMs(),item.endMs(),item.confidence()));
         }
         if(metadata!=null)canonical.append('|').append(metadata.fingerprintPart());
         byte[] canonicalBytes=canonical.toString().getBytes(StandardCharsets.UTF_8);requireBudget(canonicalBytes.length);
-        return new Prepared(metadata,new ConversationParseResult(messages,List.of(),0),fingerprint(canonicalBytes));
+        String identity=fingerprint(canonicalBytes);
+        if(messages.stream().anyMatch(message->message.startMs()!=null || message.confidence()!=null)) {
+            // Versioned, length-delimited payload leaves every legacy fingerprint unchanged.
+            StringBuilder aligned=new StringBuilder("iqc-offline-segments-v1:").append(identity);
+            for(var message:messages)aligned.append('|').append(message.startMs()).append(':').append(message.endMs()).append(':')
+                    .append(message.confidence()==null?"null":message.confidence().stripTrailingZeros().toPlainString());
+            identity=fingerprint(aligned.toString().getBytes(StandardCharsets.UTF_8));
+        }
+        return new Prepared(metadata,new ConversationParseResult(messages,List.of(),0),identity);
     }
     public Conversation ingest(ApiConversationInput request,String batchOverride) {
         var prepared=prepare(request,batchOverride);String fingerprint=prepared.fingerprint(),usageRecordId="conversation-ingest:"+fingerprint;

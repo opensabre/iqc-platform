@@ -185,7 +185,7 @@ public class ConversationImportController {
 
     private Map<String, Object> ingestOne(ConversationIngestRequest request, String batchNoOverride) {
         ApiConversationInput input=request==null?null:new ApiConversationInput(request.externalId(),request.batchNo(),request.title(),request.metadata(),
-                request.messages()==null?null:request.messages().stream().map(item->item==null?null:new ApiConversationInput.Message(item.time(),item.role(),item.content())).toList());
+                request.messages()==null?null:request.messages().stream().map(item->item==null?null:new ApiConversationInput.Message(item.time(),item.role(),item.content(),item.startMs(),item.endMs(),item.confidence())).toList());
         // Existing direct controller callers retain their constructor; managed calls share the injected service.
         var service=apiIngestService==null?new ConversationApiIngestService(importService,usageCounterRecorder):apiIngestService;
         var conversation=service.ingest(input,batchNoOverride);
@@ -290,7 +290,9 @@ public class ConversationImportController {
 
     public record ConversationIngestBatchRequest(String batchNo, List<ConversationIngestRequest> conversations) { }
 
-    public record IngestMessage(String role, String time, String content) { }
+    public record IngestMessage(String role,String time,String content,@com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.conversation.ExactMillisecondsDeserializer.class) Long startMs,@com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.conversation.ExactMillisecondsDeserializer.class) Long endMs,java.math.BigDecimal confidence) {
+        public IngestMessage(String role,String time,String content){this(role,time,content,null,null,null);}
+    }
 
     private void recordOutcome(String objectId, UsageOutcome outcome) {
         usageCounterRecorder.record(new UsageRecord(
