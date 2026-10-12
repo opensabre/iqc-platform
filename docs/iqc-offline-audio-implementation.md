@@ -49,3 +49,5 @@ V1.1.71 在原消息表增加可选 start_ms/end_ms/confidence，不推断缺失
 IQC Compose仅提供日志卷，当前源码/基础设施检索未查到共享文件服务的拥有实现。先增加应用层本地持久卷适配，多副本必须共享受控卷，不新增基础设施服务或平行会话模型。文件仅以实际SHA-256摘要寻址，流式限长，临时文件后原子不覆盖发布；同摘要复用前核验字节，不信任上传文件名或外部URL。后续在原会话关联并冻结附件身份，读取须数据范围及独立敏感权限、原治理审计。当前仅存储适配，不代表播放器/完整上传交付。
 
 存储专项10359终态exit0：ConversationAudioStorageTest五项真实文件系统测试通过，含CyclicBarrier双线程发布同字节、最终只有一份文件且完整读回。日志/private/tmp/iqc-b-audio-storage-concurrency-tests.log。该验证仅证明本地存储适配，不包含媒体探测、应用启动配置、HTTP敏感权限或播放。
+
+V72完整正式DDL在任务专用MySQL随机库专项通过40722 exit0：原baseline会话表旧记录迁移后音频字段仍NULL，新完整身份精确读回，部分字段/负长度/零时长/错误媒体类型/大写摘要/超安全整数六类CHECK拒绝，finally清理本测试库。日志/private/tmp/iqc-b-audio-identity-ddl.log；不是完整Flyway新库/升级或服务附件绑定验收。
