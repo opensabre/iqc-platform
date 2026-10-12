@@ -60,7 +60,7 @@ public class ActionDispatcher {
             }
         }
     }
-    private ScheduledActorAccessService.CreationBound ownerBound(ActionExecution row) throws com.fasterxml.jackson.core.JsonProcessingException {
+    ScheduledActorAccessService.CreationBound ownerBound(ActionExecution row) throws com.fasterxml.jackson.core.JsonProcessingException {
         if(row.getInputSnapshotJson()==null || !Objects.equals(SelectorAssetService.hash(row.getInputSnapshotJson()),row.getInputSnapshotHash())
                 || row.getPolicySnapshotJson()==null || !Objects.equals(SelectorAssetService.hash(row.getPolicySnapshotJson()),row.getActionPolicyHash()))
             throw IqcException.invalidState("动作分派冻结摘要不一致");
