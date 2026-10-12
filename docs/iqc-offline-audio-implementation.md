@@ -25,3 +25,7 @@ V1.1.71 在原消息表增加可选 start_ms/end_ms/confidence，不推断缺失
 实际MySQL专项已通过：正式baseline消息表先写旧记录，再应用完整V71，旧字段保持NULL；超过24小时坐标与六位置信度精确读回；部分端点、倒序、负数、超精确范围、超范围置信度均被CHECK拒绝。日志/private/tmp/iqc-b-offline-alignment-ddl.log。该专项不是完整Flyway新库/升级路径或真实服务落库/生产冻结验收。首轮17项应用兼容测试通过，加入严格JSON解析后的回归尚待终态；代码尚未提交，不宣称离线音频完成。
 
 严格整数解析回归54839已退出0：OfflineTranscriptIngress4、ImportService3、Controller6、TXT5共18项一次零失败/错误/跳过。覆盖新指纹/区间/置信度边界、两输入DTO小数/文本/越界拒绝、旧冻结JSON构造兼容。日志/private/tmp/iqc-b-offline-transcript-exact-tests.log；真实服务Mapper和完整v1/v2生产冻结往返仍需独立验证。
+
+## 冻结往返修复与回归
+
+实际capture/prepare回归暴露Java LongNode与持久JSON IntNode的节点类型差异导致合法v2被规范检查拒绝。typed输入经同一exact parser JSON往返再比较，保留字段形状、精确数值及摘要校验，不使用double。修复后OfflineProductionSnapshot3/OfflineTranscriptIngress4/原ReviewSampleInputValidator10共17项一次通过、零失败/错误/跳过；v2坐标与confidence往返、恢复不重读归档、v1原五字段兼容、时间戳篡改及v1携带对齐拒绝通过。归档Mapper/范围仍替身；日志/private/tmp/iqc-b-offline-production-snapshot-fixed.log，不替代真实Mapper落库与完整Flyway验收。

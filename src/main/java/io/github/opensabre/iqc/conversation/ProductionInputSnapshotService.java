@@ -161,7 +161,9 @@ public class ProductionInputSnapshotService {
             var mapper=exact();List<Input> values=mapper.readValue(body.toString(),mapper.getTypeFactory().constructCollectionType(List.class,Input.class));
             if(SCHEMA.equals(envelope.path("schemaVersion").asText()) && values.stream().flatMap(input->input.messages().stream())
                     .anyMatch(message->message.startMs()!=null || message.confidence()!=null))throw IqcException.invalidState("旧生产协议不能携带转写对齐字段");
-            if(!json.valueToTree(values).equals(body))throw IqcException.invalidState("生产冻结输入不是规范表示");
+            // Persisted integer tokens may decode as IntNode while Java Long fields serialize as LongNode.
+            // Round-trip with the same exact parser before comparing shape and values; never use doubles.
+            if(!exact().readTree(write(values)).equals(body))throw IqcException.invalidState("生产冻结输入不是规范表示");
             var ids=values.stream().map(Input::conversationId).toList();
             if(new HashSet<>(ids).size()!=ids.size() || !json.valueToTree(ids).equals(json.readTree(task.getConversationIdsJson())))
                 throw IqcException.invalidState("生产冻结会话清单与任务不一致");
