@@ -43,3 +43,9 @@ V1.1.71 在原消息表增加可选 start_ms/end_ms/confidence，不推断缺失
 ### 真实 MySQL 导入与生产冻结验证
 
 `IsolatedMysqlOfflineTranscriptIT` 已通过（37872 exit0，1项集成场景）。专用34307服务器身份核对后，仅创建随机数据库，完整Flyway迁移至71、validate及再次migrate零变更；结束清理本测试数据库。原Mapper和Spring事务服务真实执行API导入，>24h坐标和DECIMAL置信度读回、重复输入返回同会话且只有一条消息、不同区间拒绝、修改归档后prepare恢复原冻结端点、实际行改变后原请求重放拒绝、无范围授权时capture拒绝。范围与计次替身，不覆盖完整HTTP登录鉴权或音频附件。日志/private/tmp/iqc-b-offline-mysql-transcript-tests.log。
+
+### 附件存储实施选择
+
+IQC Compose仅提供日志卷，当前源码/基础设施检索未查到共享文件服务的拥有实现。先增加应用层本地持久卷适配，多副本必须共享受控卷，不新增基础设施服务或平行会话模型。文件仅以实际SHA-256摘要寻址，流式限长，临时文件后原子不覆盖发布；同摘要复用前核验字节，不信任上传文件名或外部URL。后续在原会话关联并冻结附件身份，读取须数据范围及独立敏感权限、原治理审计。当前仅存储适配，不代表播放器/完整上传交付。
+
+存储专项10359终态exit0：ConversationAudioStorageTest五项真实文件系统测试通过，含CyclicBarrier双线程发布同字节、最终只有一份文件且完整读回。日志/private/tmp/iqc-b-audio-storage-concurrency-tests.log。该验证仅证明本地存储适配，不包含媒体探测、应用启动配置、HTTP敏感权限或播放。
