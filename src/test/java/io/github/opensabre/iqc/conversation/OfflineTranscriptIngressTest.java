@@ -59,4 +59,16 @@ class OfflineTranscriptIngressTest {
         assertEquals(1L,json.readValue("{\"role\":\"user\",\"content\":\"hello\",\"startMs\":1,\"endMs\":2}",ApiConversationInput.Message.class).startMs());
     }
 
+    @Test void legacyStructuredIngressPreservesOriginalJsonIncludingNullTime() throws Exception {
+        var json=new ObjectMapper();
+        var request=new ApiConversationInput("external",null,null,null,List.of(new ApiConversationInput.Message(null,"user","hello")));
+        var legacy=json.readTree("{\"externalId\":\"external\",\"batchNo\":null,\"title\":null,\"metadata\":null,\"messages\":[{\"time\":null,\"role\":\"user\",\"content\":\"hello\"}]}");
+        assertEquals(legacy,json.readTree(json.writeValueAsString(request)));
+        assertEquals(request,json.treeToValue(legacy,ApiConversationInput.class));
+        var aligned=json.valueToTree(new ApiConversationInput.Message(null,"user","hello",0L,1L,BigDecimal.ZERO));
+        assertEquals(0L,aligned.path("startMs").longValue());
+        assertEquals(1L,aligned.path("endMs").longValue());
+        assertTrue(aligned.has("confidence"));
+    }
+
 }
