@@ -23,6 +23,8 @@ public class ActionExecutionController {
     private final ActionDiscoveryRequestService discovery;
     private final io.github.opensabre.iqc.action.ActionReconciliationService reconciliation;
     private final io.github.opensabre.iqc.action.ActionRecoveryRequestService recovery;
+    private final io.github.opensabre.iqc.action.ActionFailureEscalationService failures;
+    private final io.github.opensabre.iqc.schedule.ScheduledActorAccessService actors;
     public record ReconciliationRequest(long version,String reason) { }
     @GetMapping
     @ResourcePermission(code="iqc:action:history:view",name="查看结果动作记录",type="iqc",description="查看授权会话结果的动作状态，不返回冻结输入或策略配置")
@@ -33,6 +35,12 @@ public class ActionExecutionController {
             @org.springframework.web.bind.annotation.RequestParam(defaultValue="false") boolean includeAttempts,
             @org.springframework.web.bind.annotation.RequestParam(required=false) String beforeAttempt) {
         return queries.history(id,actionExecutionId,includeHistory,beforeVersion,includeAttempts,beforeAttempt);
+    }
+    @GetMapping("/{actionExecutionId}/failure-review")
+    @ResourcePermission(code="iqc:action:failure-review:view",name="查看失败升级复核关联",type="iqc",description="仅核对原负责人动作已保存的历史升级复核，不新建或重发")
+    public io.github.opensabre.iqc.action.ActionFailureEscalationService.Response failureReview(
+            @PathVariable String id,@PathVariable String actionExecutionId) {
+        return failures.lookup(id,actionExecutionId,actors.capture());
     }
     @PostMapping("/enqueue")
     @ResourcePermission(code="iqc:action:enqueue",name="请求生产结果动作检查",type="iqc",description="安排负责人生产结果的后台动作检查，不直接发送或重试动作")

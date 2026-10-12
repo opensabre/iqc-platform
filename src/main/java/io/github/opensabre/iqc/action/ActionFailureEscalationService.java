@@ -50,14 +50,18 @@ public class ActionFailureEscalationService {
 
     /** Historical proof only: no current-EID requirement, send grants, locks, creation or receipt changes. */
     @Transactional(readOnly=true,propagation=Propagation.REQUIRES_NEW,isolation=Isolation.REPEATABLE_READ)
-    public Response lookup(String id) {
-        if(id==null || !id.matches("[a-f0-9]{64}"))throw IqcException.invalidArgument("失败升级动作标识无效");
+    public Response lookup(String resultId,String id,io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound actor) {
+        if(resultId==null || !resultId.matches("[A-Za-z0-9][A-Za-z0-9:_./@+-]{0,63}")
+                || id==null || !id.matches("[a-f0-9]{64}"))throw IqcException.invalidArgument("失败升级动作标识无效");
         var row=actions.selectById(id);
-        if(row==null)throw IqcException.notFound("失败升级动作不存在");
+        if(row==null || !Objects.equals(resultId,row.getSourceResultId()))throw IqcException.notFound("结果失败升级动作不存在");
         if(!Objects.equals(scope.owner(),row.getOwner()))throw IqcException.accessDenied("无权核对失败升级来源");
         var validated=sources.validateHistorical(new ActionProductionSourceValidator.Reference(row.getTaskId(),
                 row.getExecutionId(),row.getConversationId(),row.getSourceResultId(),row.getOwner()));
-        if(!scope.canView(row.getOwner(),validated.ownerGroupId()))throw IqcException.accessDenied("无权核对失败升级来源");
+        if(actor==null || validated.ownerBound()==null || !Objects.equals(actor.owner(),row.getOwner())
+                || !Objects.equals(actor.userId(),validated.ownerBound().userId())
+                || !scope.canView(row.getOwner(),validated.ownerGroupId()))
+            throw IqcException.accessDenied("无权核对失败升级稳定负责人来源");
         if(!"FAILED".equals(row.getStatus()))return new Response(id,"NOT_ELIGIBLE",null);
         String token=verifiedToken(row,validated);
         if(token==null)return new Response(id,"NOT_CONFIGURED",null);

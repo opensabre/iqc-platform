@@ -17,3 +17,9 @@ PRD 第12节要求可配置失败处理，现有ESCALATE_REVIEW目前只是冻�
 已升级的复核请求以原稳定令牌持久防重，仍可能在后续循环中被读取；这是一份有界轮询实现，不声称百万级容量或避免所有重复读取。需要后续运行指标/历史展示来说明等待原因，旧EID、EXPIRED与阻塞政策仍待补齐。
 
 历史只读lookup首批：按原负责人/任务范围验证实际历史Task/EID/Result、原FAILED确认领取结算、完整冻结政策/input与触发条件，再以同一verifiedToken规则查询原复核请求及指纹。新旧EID不影响已创建产物证明，不要求发送grants、不会开轮或改原失败回执；未找到产物返回UNCONFIRMED，不冒充WAITING原因。入口当前内部使用，HTTP/角色菜单与界面尚未接入，亦未放宽原负责人查询为团队任意用户。后台新建仍沿原当前来源验证，旧EID如何新建复核尚待定义。
+
+## 只读HTTP接入缺口
+
+现有ActionExecutionController.history只展示原动作账本/尝试，不能证明已保存失败升级产物。扩展同一controller的GET /{actionExecutionId}/failure-review，独立iqc:action:failure-review:view；路径resultId与实际动作sourceResultId必须一致。复用原lookup历史来源/负责人范围和原复核持久请求证明，不接收客户端回执/结果ID或新建指令。组织01/900257已核对无占用，按原四只读角色授予查看，实际查询仍仅原负责人范围，不授创建或重试。HTTP/SQL/真实角色/浏览器验收仍待，未发现产物不推断等待原因。
+
+HTTP读取还复用原ScheduledActorAccessService.capture，在查询事务开始前解析当前账号稳定ID；查询服务核对该ID与冻结ownerBound，避免用户名复用被当作原负责人。当前解析不要求发送权限，也不在数据库锁内调用组织RPC；不新增身份模型或修改framework。
