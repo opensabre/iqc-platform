@@ -73,6 +73,52 @@ public class BusinessItemReviewService {
         return existing;
     }
 
+    /** Historical evidence for the automatic escalation token; never opens a new round. */
+    @Transactional(readOnly = true)
+    public ResultReview lookupEscalation(String resultId, String requestId, String reason) {
+        if (requestId == null || !requestId.matches("[A-Za-z0-9_-]{16,64}"))
+            throw IqcException.invalidArgument("复核升级请求标识无效");
+        String owner = actor();
+        var source = results.selectById(resultId);
+        var task = source == null ? null : tasks.selectById(source.getTaskId());
+        if (task == null || !owner.equals(task.getCreatedBy()) || !scope.canView(task.getCreatedBy(), task.getOwnerGroupId()))
+            throw IqcException.accessDenied("无权核对业务复核来源");
+        var existing = reviews.selectById("br-" + hash(List.of(owner, requestId)).substring(0, 60));
+        if (existing == null) return null;
+        if (existing.getReviewRevision() == null || existing.getReviewRevision() < 1)
+            throw IqcException.invalidState("复核升级产物轮次损坏");
+        return lookupRequest(resultId, existing.getReviewRevision() - 1, requestId, reason);
+    }
+
+    /** Internal owning operation. Null means an existing pending round must finish first. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public ResultReview requestEscalation(String resultId, String requestId, String reason) {
+        scope.requireScheduledResources(Set.of("iqc:review:create"));
+        if (requestId == null || !requestId.matches("[A-Za-z0-9_-]{16,64}"))
+            throw IqcException.invalidArgument("复核升级请求标识无效");
+        String comment = reason(reason);
+        Context context = context(resultId); // Original Task lock serializes all review round openings.
+        var existing = lookupEscalation(resultId, requestId, comment);
+        if (existing != null) {
+            scope.requireScheduledResources(Set.of("iqc:review:create"));
+            return existing;
+        }
+        requireCurrent(context);
+        var latest = latest(resultId, false);
+        if (latest != null && (!"BUSINESS".equals(latest.getTargetType())
+                || !resultId.equals(latest.getBusinessResultId()) || latest.getReviewRevision() == null
+                || latest.getReviewRevision() < 1
+                || !Set.of("PENDING", "COMPLETED", "REJECTED").contains(Objects.toString(latest.getStatus(), ""))))
+            throw IqcException.invalidState("复核升级最新轮次损坏");
+        if (latest != null && "PENDING".equals(latest.getStatus())) return null;
+        int revision = latest == null ? 0 : latest.getReviewRevision();
+        if (revision == Integer.MAX_VALUE) throw IqcException.invalidState("复核升级轮次已耗尽");
+        scope.requireScheduledResources(Set.of("iqc:review:create"));
+        var opened = request(resultId, revision, requestId, comment);
+        scope.requireScheduledResources(Set.of("iqc:review:create"));
+        return opened;
+    }
+
     /** Opens the next review round; caller supplies the last observed revision and a stable retry token. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ResultReview request(String resultId, int expectedRevision, String requestId, String reason) {
