@@ -61,3 +61,5 @@ PCM WAV校验与字节存储联合28621已终态exit0，WAV3+Storage5共8项通�
 57849实际MySQL回归exit0：完整Flyway新库至72、73项validate、repeat零变更；原Mapper音频绑定wrong revision零更新、首次更新1、不同身份覆盖0、读回完整身份与一般JSON隐藏通过。日志/private/tmp/iqc-b-audio-binding-mysql-tests.log。附件字节和绑定授权仍未形成HTTP闭环。
 
 71504终态exit0：原音频快照5、来源校验11、WAV3、存储5共24项通过。v3独立音频身份冻结、归档身份变化后恢复、旧v2携带身份拒绝、段超duration拒绝通过，v1/v2未带附件兼容回归保持。日志/private/tmp/iqc-b-audio-frozen-identity-tests.log；Mapper/范围替身，真实SQL v3验证仍待。
+
+37964终态exit0：实际MySQL离线原事务服务1+快照5+来源校验11共17项通过。正式随机新库完整Flyway至72/validate/noop，实际行绑定完整身份后capture v3，修改归档摘要后prepare仍还原旧audio摘要和duration，消息区间恢复保持。日志/private/tmp/iqc-b-audio-v3-mysql-tests.log；fixture仅验证身份协议，未包含真实音频文件/HTTP授权，不代替上传播放闭环。
