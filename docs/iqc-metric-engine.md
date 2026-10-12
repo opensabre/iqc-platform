@@ -7,3 +7,9 @@ PRD第7节的Metric Engine需要可计算的静默、响应、抢话和说话占
 空输入或任一片段缺区间保持UNKNOWN，无匹配响应对/零分母也UNKNOWN；角色指标遇未声明角色UNKNOWN，坏坐标/重复ID/混合会话属于错误。最多10000片段，超限拒绝，不截断后冒充完整指标。区间并集和重叠使用排序/活动集合，避免二次方枚举。输入来自后续冻结NodeContext桥接，不接受模型输出冒充时间证据。
 
 当前仅数值内核，Finding适配、资产发布冻结/目录、配置界面与实际运行验收仍待。真正音频静默/抢话、Session/小模型/Skill API/并行DAG仍保留原PRD范围，不以这些转写派生量替代完成要求。未新增或运行测试、未运行SQL/部署。
+
+## Finding桥接首批
+
+TranscriptMetricEngine固定transcript-timing-v1，严格配置metric/显式角色/原Finding引用及服务器冻结定义，NUMBER定义必须允许METRIC证据。只使用原NodeContext.__messages完整可信清单，mapped messages必须完全相同，不能靠裁剪/模型补时间形成全会话指标；原__task EID参与稳定事实身份，完整manifest hash/实际message IDs和单位/样本数作为METRIC证据。UNKNOWN只输出_state，不输出数值或假证据；无confidence=1声明，无评分/风险推断或业务副作用。
+
+目前桥接未注册生产运行时，资产发布仍不接受METRIC；后续需要同一发布/版本冻结与配置界面接入，不能通过试运行临时config冒充已发布能力。真实源/数据范围/运行回放/容量验收待，核心音频Metric要求仍保留。
