@@ -24,6 +24,7 @@ import java.util.*;
 public class ProductionInputSnapshotService {
     public static final String SCHEMA="iqc-production-inputs-v1";
     public static final String ALIGNED_SCHEMA="iqc-production-inputs-v2";
+    public static final String AUDIO_SCHEMA="iqc-production-inputs-v3";
     private static final int MAX_BYTES=16*1024*1024;
     public record Message(String id,int sequence,String role,String content,LocalTime relativeTime,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.conversation.ExactMillisecondsDeserializer.class) Long startMs,
@@ -39,7 +40,23 @@ public class ProductionInputSnapshotService {
             if(confidence!=null)confidence=confidence.stripTrailingZeros();
         }
     }
-    public record Input(String conversationId,String sourceFingerprint,JsonNode businessContext,List<Message> messages) {
+    /** Frozen attachment identity stays separate from the context sent to model providers. */
+    public record Audio(String sha256,long sizeBytes,String mediaType,long durationMs) {
+        public Audio {
+            if(sha256==null || !sha256.matches("[a-f0-9]{64}") || sizeBytes<1 || sizeBytes>9007199254740991L
+                    || durationMs<1 || durationMs>9007199254740991L
+                    || mediaType==null || !Set.of("audio/wav","audio/mpeg","audio/ogg","audio/flac","audio/mp4").contains(mediaType))
+                throw new IllegalArgumentException("invalid frozen audio identity");
+        }
+        static Audio from(Conversation row) {
+            if(row.getAudioSha256()==null && row.getAudioSizeBytes()==null && row.getAudioMediaType()==null && row.getAudioDurationMs()==null)return null;
+            if(row.getAudioSizeBytes()==null || row.getAudioDurationMs()==null)throw new IllegalArgumentException("partial archived audio identity");
+            return new Audio(row.getAudioSha256(),row.getAudioSizeBytes(),row.getAudioMediaType(),row.getAudioDurationMs());
+        }
+    }
+    public record Input(String conversationId,String sourceFingerprint,JsonNode businessContext,List<Message> messages,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) Audio audio) {
+        public Input(String conversationId,String sourceFingerprint,JsonNode businessContext,List<Message> messages){this(conversationId,sourceFingerprint,businessContext,messages,null);}
         public Input {
             if(conversationId==null || !conversationId.matches("[A-Za-z0-9:_-]{1,64}") || businessContext==null || !businessContext.isObject()
                     || messages==null || messages.isEmpty() || messages.size()>10000)
@@ -47,7 +64,9 @@ public class ProductionInputSnapshotService {
             businessContext=businessContext.deepCopy();messages=List.copyOf(messages);
             int previous=-1;Set<String> ids=new HashSet<>();
             for(var message:messages){if(message.sequence()<=previous || !ids.add(message.id()))
-                throw new IllegalArgumentException("frozen messages must be ordered and unique");previous=message.sequence();}
+                throw new IllegalArgumentException("frozen messages must be ordered and unique");
+                if(audio!=null && message.endMs()!=null && message.endMs()>audio.durationMs())throw new IllegalArgumentException("segment exceeds frozen audio duration");
+                previous=message.sequence();}
         }
         @Override public JsonNode businessContext(){return businessContext.deepCopy();}
     }
@@ -77,6 +96,8 @@ public class ProductionInputSnapshotService {
                 row.setContent(value.content());row.setRelativeTime(value.relativeTime());row.setStartMs(value.startMs());row.setEndMs(value.endMs());row.setConfidence(value.confidence());return row;}).toList();
         }
         public Map<String,List<ConversationMessage>> messages(){return messages;}
+        /** Returns only the task's frozen attachment; the caller must authorize any byte access separately. */
+        public Audio audio(String conversationId){var input=originals.get(conversationId);if(input==null)throw IqcException.invalidState("会话不在冻结输入中");return input.audio();}
         public JsonNode businessContext(String id){var value=contexts.get(id);if(value==null)throw IqcException.invalidState("会话不在冻结输入中");return value.deepCopy();}
     }
     private final ConversationMapper conversations;
@@ -101,12 +122,12 @@ public class ProductionInputSnapshotService {
             count+=records.size();
             var frozen=records.stream().map(value->{if(value.getSequenceNo()==null)throw IqcException.invalidState("归档消息顺序缺失");
                 return new Message(value.getId(),value.getSequenceNo(),value.getSpeakerRole(),value.getContent(),value.getRelativeTime(),value.getStartMs(),value.getEndMs(),value.getConfidence());}).toList();
-            var input=new Input(id,row.getSourceFingerprint(),context(row),frozen);
+            var input=new Input(id,row.getSourceFingerprint(),context(row),frozen,Audio.from(row));
             bytes+=write(input).getBytes(StandardCharsets.UTF_8).length;if(bytes>MAX_BYTES)throw IqcException.invalidArgument("生产输入冻结超过16MiB");
             inputs.add(input);
         }
         boolean aligned=inputs.stream().flatMap(input->input.messages().stream()).anyMatch(message->message.startMs()!=null || message.confidence()!=null);
-        var body=json.valueToTree(inputs);var envelope=json.createObjectNode().put("schemaVersion",aligned?ALIGNED_SCHEMA:SCHEMA)
+        var body=json.valueToTree(inputs);var envelope=json.createObjectNode().put("schemaVersion",inputs.stream().anyMatch(input->input.audio()!=null)?AUDIO_SCHEMA:aligned?ALIGNED_SCHEMA:SCHEMA)
                 .put("hashAlgorithm","selector-decimal-sha256-v1").put("contentHash",SelectorAssetService.hash(body.toString()));
         envelope.set("conversations",body);if(envelope.toString().getBytes(StandardCharsets.UTF_8).length>MAX_BYTES)
             throw IqcException.invalidArgument("生产输入冻结超过16MiB");return envelope;
@@ -154,11 +175,13 @@ public class ProductionInputSnapshotService {
             var envelope=original.path("productionInputs");var body=envelope.path("conversations");
             if(!"PIPELINE".equals(original.path("executionStrategy").path("mode").asText()) || original.has("evaluationSnapshot")
                     || !Set.of("PIPELINE","PIPELINE_TRIAL").contains(task.getTaskType())
-                    || !Set.of(SCHEMA,ALIGNED_SCHEMA).contains(envelope.path("schemaVersion").asText()) || !"selector-decimal-sha256-v1".equals(envelope.path("hashAlgorithm").asText())
+                    || !Set.of(SCHEMA,ALIGNED_SCHEMA,AUDIO_SCHEMA).contains(envelope.path("schemaVersion").asText()) || !"selector-decimal-sha256-v1".equals(envelope.path("hashAlgorithm").asText())
                     || !body.isArray() || body.size()>1000 || envelope.toString().getBytes(StandardCharsets.UTF_8).length>MAX_BYTES
                     || !SelectorAssetService.hash(body.toString()).equals(envelope.path("contentHash").asText()))
                 throw IqcException.invalidState("生产冻结输入协议或摘要无效");
             var mapper=exact();List<Input> values=mapper.readValue(body.toString(),mapper.getTypeFactory().constructCollectionType(List.class,Input.class));
+            if(!AUDIO_SCHEMA.equals(envelope.path("schemaVersion").asText()) && values.stream().anyMatch(input->input.audio()!=null))
+                throw IqcException.invalidState("旧生产协议不能携带音频身份");
             if(SCHEMA.equals(envelope.path("schemaVersion").asText()) && values.stream().flatMap(input->input.messages().stream())
                     .anyMatch(message->message.startMs()!=null || message.confidence()!=null))throw IqcException.invalidState("旧生产协议不能携带转写对齐字段");
             // Persisted integer tokens may decode as IntNode while Java Long fields serialize as LongNode.

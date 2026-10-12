@@ -49,4 +49,24 @@ class OfflineProductionSnapshotTest {
         envelope.put("contentHash",io.github.opensabre.iqc.selector.SelectorAssetService.hash(body.toString()));envelope.put("schemaVersion",ProductionInputSnapshotService.SCHEMA);
         assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->service.prepare(task(root),root));
     }
+    private ObjectNode audioCapture(){
+        capture(true);
+        var row=conversations.selectById("conversation");row.setAudioSha256("a".repeat(64));row.setAudioSizeBytes(16044L);row.setAudioMediaType("audio/wav");row.setAudioDurationMs(86400500L);
+        var root=json.createObjectNode();root.putObject("executionStrategy").put("mode","PIPELINE");root.set("productionInputs",service.capture(List.of("conversation")));return root;
+    }
+    @Test void audioIdentityIsFrozenSeparatelyAndNeverReloadedFromArchive(){
+        var root=audioCapture();assertEquals(ProductionInputSnapshotService.AUDIO_SCHEMA,root.path("productionInputs").path("schemaVersion").asText());
+        var task=task(root);var prepared=service.prepare(task,root);
+        assertEquals("a".repeat(64),prepared.audio("conversation").sha256());
+        assertFalse(prepared.businessContext("conversation").has("audio"));
+        conversations.selectById("conversation").setAudioSha256("b".repeat(64));
+        assertEquals("a".repeat(64),service.prepare(task,root).audio("conversation").sha256());
+    }
+    @Test void oldProtocolCannotCarryAudioAndSegmentsCannotExceedDuration(){
+        var root=audioCapture();((ObjectNode)root.path("productionInputs")).put("schemaVersion",ProductionInputSnapshotService.ALIGNED_SCHEMA);
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->service.prepare(task(root),root));
+        var row=conversations.selectById("conversation");row.setAudioDurationMs(86400499L);
+        assertThrows(IllegalArgumentException.class,()->service.capture(List.of("conversation")));
+    }
+
 }

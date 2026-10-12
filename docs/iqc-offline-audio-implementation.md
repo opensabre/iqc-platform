@@ -59,3 +59,5 @@ PCM WAV校验与字节存储联合28621已终态exit0，WAV3+Storage5共8项通�
 原ProductionInputSnapshotService.Input扩展可选独立audio身份，不把存储摘要/原音频投递给模型的businessContext。仅存在音频的capture使用新v3协议；旧v1/v2的可选audio保持省略，禁止在旧协议塞入新身份字段。身份包含摘要、长度、媒体类型、真实时长，全部校验；有区间时endMs不得超过真实durationMs。prepare只恢复已冻结身份，不回读归档，不用后补附件改变历史输入。读取仍需当前独立敏感权限及会话数据范围，公开一般会话JSON不暴露存储身份。此段是待实施约束，当前Java快照尚未接入audio。
 
 57849实际MySQL回归exit0：完整Flyway新库至72、73项validate、repeat零变更；原Mapper音频绑定wrong revision零更新、首次更新1、不同身份覆盖0、读回完整身份与一般JSON隐藏通过。日志/private/tmp/iqc-b-audio-binding-mysql-tests.log。附件字节和绑定授权仍未形成HTTP闭环。
+
+71504终态exit0：原音频快照5、来源校验11、WAV3、存储5共24项通过。v3独立音频身份冻结、归档身份变化后恢复、旧v2携带身份拒绝、段超duration拒绝通过，v1/v2未带附件兼容回归保持。日志/private/tmp/iqc-b-audio-frozen-identity-tests.log；Mapper/范围替身，真实SQL v3验证仍待。
