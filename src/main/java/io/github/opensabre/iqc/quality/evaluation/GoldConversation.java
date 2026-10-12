@@ -13,8 +13,17 @@ public record GoldConversation(String schemaVersion, String sourceSampleId, Stri
                                Difficulty difficulty, GoldDecision decision) {
     public static final String SCHEMA = "iqc-gold-conversation-v1";
     public enum Difficulty { BASIC, INTERMEDIATE, HARD }
-    public record Message(String id, String role, String content, int sequence, java.time.LocalTime relativeTime) {
+    public record Message(String id, String role, String content, int sequence, java.time.LocalTime relativeTime,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.conversation.ExactMillisecondsDeserializer.class) Long startMs,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.conversation.ExactMillisecondsDeserializer.class) Long endMs,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) java.math.BigDecimal confidence) {
+        public Message(String id,String role,String content,int sequence,java.time.LocalTime relativeTime) {
+            this(id,role,content,sequence,relativeTime,null,null,null);
+        }
         public Message {
+            io.github.opensabre.iqc.conversation.TranscriptAlignment.validate(startMs,endMs,confidence);
             required(id, "message id"); required(role, "message role");
             if(id.length()>64 || role.length()>128) throw new IllegalArgumentException("gold message identity too long");
             Objects.requireNonNull(content, "message content");

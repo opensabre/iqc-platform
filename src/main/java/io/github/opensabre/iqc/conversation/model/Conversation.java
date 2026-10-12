@@ -36,4 +36,12 @@ public class Conversation extends BasePo {
     private Integer ignoredBlankLines;
     private String status;
     private String ownerGroupId;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String audioSha256;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private Long audioSizeBytes;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String audioMediaType;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private Long audioDurationMs;
 }

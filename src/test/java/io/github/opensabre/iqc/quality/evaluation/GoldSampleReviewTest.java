@@ -113,4 +113,41 @@ class GoldSampleReviewTest {
         assertThatThrownBy(() -> service.annotate("sample", malformed)).hasMessageContaining("必须是对象");
     }
 
+    @Test void alignedCandidateAnnotationPreservesFrozenCoordinates() throws Exception {
+        var request=annotation(json.nullNode());
+        var input=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(sample.getContentSnapshot());
+        input.put("schemaVersion","iqc-conversation-candidate-input-v2");
+        var segment=(com.fasterxml.jackson.databind.node.ObjectNode)input.path("segments").get(0);
+        segment.put("startMs",86400001L).put("endMs",86400500L).put("confidence",new java.math.BigDecimal("0.75"));
+        sample.setContentSnapshot(input.toString());
+        var lineage=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(sample.getExpectedJson());
+        lineage.put("inputHash",io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(input.toString()));
+        sample.setExpectedJson(lineage.toString());
+        service.annotate("sample",request);
+        var message=service.read(sample.getGoldDraftJson(),GoldDraft.class).messages().getFirst();
+        assertThat(message.startMs()).isEqualTo(86400001L);
+        assertThat(message.endMs()).isEqualTo(86400500L);
+        assertThat(message.confidence()).isEqualByComparingTo("0.75");
+    }
+
+    @Test void oldCandidateProtocolCannotSmuggleAlignmentEvenWithMatchingHash() throws Exception {
+        var request=annotation(json.nullNode());
+        var input=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(sample.getContentSnapshot());
+        ((com.fasterxml.jackson.databind.node.ObjectNode)input.path("segments").get(0)).put("startMs",0).put("endMs",1);
+        sample.setContentSnapshot(input.toString());
+        var lineage=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(sample.getExpectedJson());
+        lineage.put("inputHash",io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(input.toString()));
+        sample.setExpectedJson(lineage.toString());
+        assertThatThrownBy(()->service.annotate("sample",request)).hasMessageContaining("旧候选协议");
+        assertThat(sample.getGoldDraftRevision()).isEqualTo(1);
+        verifyNoInteractions(versions);
+    }
+    @Test void legacyGoldMessageJsonPreservesNullRelativeTimeAndOmitsNewFields() throws Exception {
+        var mapper=new ObjectMapper();
+        var legacy=mapper.readTree("{\"id\":\"m\",\"role\":\"user\",\"content\":\"text\",\"sequence\":1,\"relativeTime\":null}");
+        var message=new GoldConversation.Message("m","user","text",1,null);
+        assertThat(mapper.readTree(mapper.writeValueAsString(message))).isEqualTo(legacy);
+        assertThat(mapper.treeToValue(legacy,GoldConversation.Message.class)).isEqualTo(message);
+    }
+
 }

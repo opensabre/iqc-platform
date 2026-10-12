@@ -23,7 +23,7 @@ class PipelineEvaluationAdmissionTest {
     @BeforeEach
     void frozenInputs() throws Exception {
         var gold = new GoldConversation(GoldConversation.SCHEMA, "sample", "conversation",
-                List.of(new GoldConversation.Message("message", "客户", "frozen text", 1, null)), null,
+                List.of(new GoldConversation.Message("message", "客户", "frozen text", 1, null,86400001L,86400500L,new java.math.BigDecimal("0.75"))), null,
                 List.of(new GoldFinding("FACT", Finding.ValueType.BOOLEAN, Finding.State.KNOWN,
                         json.valueToTree(true), List.of())), "annotator", "reviewer", "candidate", List.of(),
                 GoldConversation.Difficulty.BASIC, null);
@@ -57,6 +57,9 @@ class PipelineEvaluationAdmissionTest {
         assertThat(prepared.datasetHash()).isEqualTo("dataset-hash");
         assertThat(prepared.messages().get("conversation").getFirst().getContent()).isEqualTo("frozen text");
         assertThat(prepared.messages().get("conversation").getFirst().getSpeakerRole()).isEqualTo("user");
+        assertThat(prepared.messages().get("conversation").getFirst().getStartMs()).isEqualTo(86400001L);
+        assertThat(prepared.messages().get("conversation").getFirst().getEndMs()).isEqualTo(86400500L);
+        assertThat(prepared.messages().get("conversation").getFirst().getConfidence()).isEqualByComparingTo("0.75");
         assertThat(prepared.dataset().members().getFirst().gold().messages().getFirst().role()).isEqualTo("客户");
         assertThatThrownBy(() -> prepared.messages().clear()).isInstanceOf(UnsupportedOperationException.class);
     }
