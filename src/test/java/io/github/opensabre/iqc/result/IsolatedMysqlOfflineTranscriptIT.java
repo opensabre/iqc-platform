@@ -74,6 +74,14 @@ class IsolatedMysqlOfflineTranscriptIT {
         assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM iqc_conversation_message",Integer.class));
         var changed=new ApiConversationInput("external",null,"offline",null,List.of(new ApiConversationInput.Message(null,"user","hello",86400001L,86400501L,new BigDecimal("0.75"))));
         assertThrows(ConversationReplayConflictException.class,()->ingress.ingest(changed,null));
+        var rows=context.getBean(ConversationMapper.class);
+        assertEquals(0,rows.bindAudio(conversation.getId(),"wrong-revision","a".repeat(64),16044,"audio/wav",1000));
+        assertEquals(1,rows.bindAudio(conversation.getId(),conversation.getSourceFingerprint(),"a".repeat(64),16044,"audio/wav",1000));
+        assertEquals(0,rows.bindAudio(conversation.getId(),conversation.getSourceFingerprint(),"b".repeat(64),16044,"audio/wav",1000));
+        var bound=rows.selectById(conversation.getId());
+        assertEquals("a".repeat(64),bound.getAudioSha256());assertEquals(1000L,bound.getAudioDurationMs());
+        assertFalse(json.valueToTree(bound).has("audioSha256"));
+        assertFalse(json.valueToTree(bound).has("audioSizeBytes"));
         var snapshots=context.getBean(ProductionInputSnapshotService.class);
         assertTrue(org.springframework.aop.support.AopUtils.isAopProxy(snapshots));
         var root=json.createObjectNode();root.putObject("executionStrategy").put("mode","PIPELINE");root.set("productionInputs",snapshots.capture(List.of(conversation.getId())));

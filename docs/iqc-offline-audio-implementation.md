@@ -53,3 +53,9 @@ IQC Compose仅提供日志卷，当前源码/基础设施检索未查到共享�
 V72完整正式DDL在任务专用MySQL随机库专项通过40722 exit0：原baseline会话表旧记录迁移后音频字段仍NULL，新完整身份精确读回，部分字段/负长度/零时长/错误媒体类型/大写摘要/超安全整数六类CHECK拒绝，finally清理本测试库。日志/private/tmp/iqc-b-audio-identity-ddl.log；不是完整Flyway新库/升级或服务附件绑定验收。
 
 PCM WAV校验与字节存储联合28621已终态exit0，WAV3+Storage5共8项通过；PCM时长由实际frame计算，格式参数/边界/截断和伪造拒绝，不使用外部ffprobe。日志/private/tmp/iqc-b-audio-wav-metadata-fixed-tests.log。仅PCM WAV子集，其他编码/上传关联/权限/播放仍待。
+
+### 音频冻结协议接入约束
+
+原ProductionInputSnapshotService.Input扩展可选独立audio身份，不把存储摘要/原音频投递给模型的businessContext。仅存在音频的capture使用新v3协议；旧v1/v2的可选audio保持省略，禁止在旧协议塞入新身份字段。身份包含摘要、长度、媒体类型、真实时长，全部校验；有区间时endMs不得超过真实durationMs。prepare只恢复已冻结身份，不回读归档，不用后补附件改变历史输入。读取仍需当前独立敏感权限及会话数据范围，公开一般会话JSON不暴露存储身份。此段是待实施约束，当前Java快照尚未接入audio。
+
+57849实际MySQL回归exit0：完整Flyway新库至72、73项validate、repeat零变更；原Mapper音频绑定wrong revision零更新、首次更新1、不同身份覆盖0、读回完整身份与一般JSON隐藏通过。日志/private/tmp/iqc-b-audio-binding-mysql-tests.log。附件字节和绑定授权仍未形成HTTP闭环。
