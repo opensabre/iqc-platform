@@ -1,0 +1,71 @@
+package io.github.opensabre.iqc.action;
+
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.opensabre.iqc.governance.IqcException;
+import io.github.opensabre.iqc.quality.BusinessItemReviewService;
+import io.github.opensabre.iqc.selector.SelectorAssetService;
+import io.github.opensabre.iqc.shared.IqcDataScope;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.*;
+import java.util.Objects;
+import java.util.Set;
+
+/** Local owning transaction; no send, receipt alteration or machine-result write. */
+@Service @RequiredArgsConstructor
+public class ActionFailureEscalationService {
+    public record Response(String id,String state,String reviewId) { }
+    private final ActionExecutionMapper actions;
+    private final ActionProductionSourceValidator sources;
+    private final BusinessItemReviewService reviews;
+    private final IqcDataScope scope;
+    private final ObjectMapper json;
+
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
+    public Response escalate(String id,long version) {
+        if(id==null || !id.matches("[a-f0-9]{64}") || version<1)
+            throw IqcException.invalidArgument("失败升级动作观察无效");
+        scope.requireScheduledResources(ActionEnqueueService.REQUIRED_GRANTS);
+        scope.requireScheduledResources(Set.of("iqc:review:create"));
+        var initial=actions.selectById(id);
+        if(initial==null)throw IqcException.notFound("失败升级动作不存在");
+        if(!Objects.equals(scope.owner(),initial.getOwner()))throw IqcException.accessDenied("失败升级负责人不一致");
+        // The existing production validator locks Task -> Execution -> Result before Action.
+        var validated=sources.validate(new ActionProductionSourceValidator.Reference(initial.getTaskId(),
+                initial.getExecutionId(),initial.getConversationId(),initial.getSourceResultId(),initial.getOwner()));
+        scope.requireScheduledBound(validated.ownerBound());
+        var row=actions.selectOne(Wrappers.<ActionExecution>lambdaQuery().eq(ActionExecution::getId,id).last("FOR UPDATE"));
+        if(row==null || !Objects.equals(row.getVersion(),version) || !"FAILED".equals(row.getStatus()))
+            return new Response(id,"STALE_OBSERVATION",null);
+        if(!Set.of("CONFIRMED_FINAL_FAILURE","CONFIRMED_RETRYABLE_FAILURE").contains(Objects.toString(row.getOutcome(),""))
+                || row.getAttemptCount()==null || row.getAttemptCount()<1 || row.getClaimToken()==null
+                || !row.getClaimToken().matches("[a-f0-9]{32}") || row.getClaimedAtUtc()==null || row.getSettledAtUtc()==null)
+            throw IqcException.invalidState("失败升级缺少已确认的领取结算");
+        try {
+            var policy=validated.policy();
+            if(policy==null)throw IqcException.invalidState("失败升级缺少冻结动作策略");
+            String body=json.writeValueAsString(policy);
+            var action=policy.actions().stream().filter(value->value.actionId().equals(row.getActionId())).findFirst()
+                    .orElseThrow(()->IqcException.invalidState("失败升级缺少原动作"));
+            var source=new ActionExecutionContract.Source(validated.reference().taskId(),validated.reference().executionId(),
+                    validated.reference().conversationId(),validated.reference().resultId(),validated.decisionReference(),
+                    SelectorAssetService.hash(body),action.actionId(),validated.reference().owner());
+            ActionEnqueueService.requireSame(row,source,action,validated,source.idempotencyKey(action.type()),body);
+            if(action.failureHandling()!=ActionPolicy.FailureHandling.ESCALATE_REVIEW)
+                return new Response(id,"NOT_CONFIGURED",null);
+            if(ActionPolicy.evaluate(action.condition(),validated.context())!=ActionPolicy.Match.MATCH)
+                throw IqcException.invalidState("失败升级原触发条件不一致");
+            // Independent of attempts, observation versions and subsequent review decisions.
+            String token=SelectorAssetService.hash("iqc-action-failure-review-v1:"+source.idempotencyKey(action.type()));
+            scope.requireScheduledResources(ActionEnqueueService.REQUIRED_GRANTS);
+            scope.requireScheduledResources(Set.of("iqc:review:create"));
+            var review=reviews.requestEscalation(source.resultId(),token,"动作失败升级复核，原动作记录："+id);
+            scope.requireScheduledResources(ActionEnqueueService.REQUIRED_GRANTS);
+            scope.requireScheduledResources(Set.of("iqc:review:create"));
+            return new Response(id,review==null?"WAITING_REVIEW":"ESCALATED",review==null?null:review.getId());
+        } catch(com.fasterxml.jackson.core.JsonProcessingException failure) {
+            throw IqcException.invalidState("失败升级冻结策略损坏");
+        }
+    }
+}
