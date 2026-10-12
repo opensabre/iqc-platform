@@ -59,7 +59,7 @@ public final class ReviewSampleInputValidator {
     }
     private static List<io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Message> executionFields(List<ConversationMessage> messages) {
         return messages.stream().map(message->new io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Message(
-                message.getId(),message.getSequenceNo(),message.getSpeakerRole(),message.getContent(),message.getRelativeTime())).toList();
+                message.getId(),message.getSequenceNo(),message.getSpeakerRole(),message.getContent(),message.getRelativeTime(),message.getStartMs(),message.getEndMs(),message.getConfidence())).toList();
     }
 
 }

@@ -124,7 +124,9 @@ public class PipelineEvaluationService {
             var message = new ConversationMessage(); message.setId(source.id()); message.setConversationId(gold.conversationId());
             message.setSequenceNo(source.sequence()); message.setSpeakerRole(io.github.opensabre.iqc.conversation.ConversationSpeakerRole.canonical(source.role()));
             message.setContent(source.content());
-            message.setRelativeTime(source.relativeTime()); return message;
+            message.setRelativeTime(source.relativeTime());
+            message.setStartMs(source.startMs()); message.setEndMs(source.endMs()); message.setConfidence(source.confidence());
+            return message;
         }).toList();
     }
     private void validateGold(DatasetSnapshot dataset, PipelineRelease release) {

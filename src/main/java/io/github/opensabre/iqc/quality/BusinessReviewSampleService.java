@@ -124,7 +124,8 @@ public class BusinessReviewSampleService {
         var verifiedInput = io.github.opensabre.iqc.result.ReviewSampleInputValidator.validateInput(
                 source.getExecutionTraceJson(), transcript, task, source.getConversationId(), json);
         String executionInputHash = verifiedInput.executionInputHash();
-        var input = json.createObjectNode().put("schemaVersion", "iqc-conversation-candidate-input-v1")
+        boolean aligned = transcript.stream().anyMatch(message -> message.getStartMs()!=null || message.getEndMs()!=null || message.getConfidence()!=null);
+        var input = json.createObjectNode().put("schemaVersion", aligned ? "iqc-conversation-candidate-input-v2" : "iqc-conversation-candidate-input-v1")
                 .put("conversationId", source.getConversationId()).put("channel", conversation.getChannel())
                 .put("sourceType", conversation.getSourceType()).put("businessType", conversation.getBusinessType())
                 .put("employeeId", conversation.getEmployeeId()).put("employeeGroupId", conversation.getEmployeeGroupId())
@@ -138,9 +139,13 @@ public class BusinessReviewSampleService {
                     || !sequences.add(message.getSequenceNo()) || message.getContent() == null || message.getId().length() > 64
                     || message.getSpeakerRole() == null || message.getSpeakerRole().isBlank() || message.getSpeakerRole().length() > 128)
                 throw IqcException.invalidState("候选会话消息或顺序损坏");
-            segments.addObject().put("id", message.getId()).put("sequenceNo", message.getSequenceNo())
+            io.github.opensabre.iqc.conversation.TranscriptAlignment.validate(message.getStartMs(),message.getEndMs(),message.getConfidence());
+            var segment = segments.addObject().put("id", message.getId()).put("sequenceNo", message.getSequenceNo())
                     .put("speakerRole", message.getSpeakerRole()).put("relativeTime", message.getRelativeTime() == null ? null : message.getRelativeTime().toString())
                     .put("content", message.getContent());
+            if(message.getStartMs()!=null)segment.put("startMs",message.getStartMs());
+            if(message.getEndMs()!=null)segment.put("endMs",message.getEndMs());
+            if(message.getConfidence()!=null)segment.put("confidence",message.getConfidence());
         }
         var snapshot = parse(task.getRuleSnapshotJson());
         boolean pipeline = snapshot.has("pipelineSnapshot");

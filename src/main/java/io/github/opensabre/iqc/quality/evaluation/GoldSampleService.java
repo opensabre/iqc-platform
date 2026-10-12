@@ -90,15 +90,23 @@ public class GoldSampleService {
         return new Input(frozen.stream().map(message -> {
                 if (message.getSequenceNo() == null) throw new IllegalArgumentException("missing message sequence");
                 return new GoldConversation.Message(message.getId(), message.getSpeakerRole(), message.getContent(),
-                        message.getSequenceNo(), message.getRelativeTime());
+                        message.getSequenceNo(), message.getRelativeTime(),message.getStartMs(),message.getEndMs(),message.getConfidence());
             }).toList(), context);
+    }
+
+    private static Long coordinate(JsonNode segment,String field) {
+        var value=segment.get(field);
+        if(value==null || value.isNull())return null;
+        if(!value.isIntegralNumber() || !value.canConvertToLong())throw IqcException.invalidState("候选时间坐标必须是整数");
+        return value.longValue();
     }
 
     /** B's reviewed business candidate has a frozen transcript; never recapture its live conversation. */
     private Input reviewedCandidate(QualitySample sample) {
         JsonNode input = read(sample.getContentSnapshot(), JsonNode.class);
         JsonNode lineage = read(sample.getExpectedJson(), JsonNode.class);
-        if (!"iqc-conversation-candidate-input-v1".equals(input.path("schemaVersion").asText())
+        boolean aligned = "iqc-conversation-candidate-input-v2".equals(input.path("schemaVersion").asText());
+        if ((!aligned && !"iqc-conversation-candidate-input-v1".equals(input.path("schemaVersion").asText()))
                 || !"iqc-reviewed-business-candidate-v1".equals(lineage.path("schemaVersion").asText())
                 || !sample.getConversationId().equals(input.path("conversationId").asText())
                 || !Objects.equals(sample.getSourceResultId(), lineage.path("sourceResultId").asText())
@@ -115,8 +123,15 @@ public class GoldSampleService {
                 try { relative = java.time.LocalTime.parse(segment.path("relativeTime").asText()); }
                 catch (java.time.DateTimeException exception) { throw IqcException.invalidState("候选消息相对时间无效"); }
             }
+            if (!aligned && (segment.has("startMs") || segment.has("endMs") || segment.has("confidence")))
+                throw IqcException.invalidState("旧候选协议不能携带音频对齐");
+            Long start = coordinate(segment,"startMs"), end = coordinate(segment,"endMs");
+            var confidenceNode=segment.get("confidence");
+            if(confidenceNode!=null && !confidenceNode.isNull() && !confidenceNode.isNumber())
+                throw IqcException.invalidState("候选置信度必须是数字");
             frozen.add(new GoldConversation.Message(segment.path("id").asText(), segment.path("speakerRole").asText(),
-                    segment.path("content").asText(), segment.path("sequenceNo").intValue(), relative));
+                    segment.path("content").asText(), segment.path("sequenceNo").intValue(), relative,start,end,
+                    confidenceNode==null || confidenceNode.isNull()?null:confidenceNode.decimalValue()));
         }
         var context = json.createObjectNode();
         var metadata = ((com.fasterxml.jackson.databind.node.ObjectNode) input).deepCopy(); metadata.remove("segments");

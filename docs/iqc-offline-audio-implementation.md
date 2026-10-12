@@ -29,3 +29,11 @@ V1.1.71 在原消息表增加可选 start_ms/end_ms/confidence，不推断缺失
 ## 冻结往返修复与回归
 
 实际capture/prepare回归暴露Java LongNode与持久JSON IntNode的节点类型差异导致合法v2被规范检查拒绝。typed输入经同一exact parser JSON往返再比较，保留字段形状、精确数值及摘要校验，不使用double。修复后OfflineProductionSnapshot3/OfflineTranscriptIngress4/原ReviewSampleInputValidator10共17项一次通过、零失败/错误/跳过；v2坐标与confidence往返、恢复不重读归档、v1原五字段兼容、时间戳篡改及v1携带对齐拒绝通过。归档Mapper/范围仍替身；日志/private/tmp/iqc-b-offline-production-snapshot-fixed.log，不替代真实Mapper落库与完整Flyway验收。
+
+### 候选、金标和评估对齐传递
+
+有实际区间或置信度的复核候选输入使用 `iqc-conversation-candidate-input-v2`，其摘要覆盖新增字段；无对齐继续使用原 v1。金标冻结直接读取候选冻结输入，不回读已变化的会话；v1 候选携带对齐字段会被拒绝。原金标 Message 增加可选 startMs/endMs/confidence，空值省略以保留旧冻结 JSON。区间沿用配对、非负、顺序和安全整数约束，置信度为0到1且最多六位有效小数。评估重建原 ConversationMessage 时保留这些字段。
+
+本轮测试仍在运行，尚不能据此声称冻结至评估完整验收。音频引用、受控读取与双向播放定位仍未接通。
+
+金标及来源联合回归33665已终态exit0：GoldReview10、BusinessCandidate7、EvaluationAdmission4、DatasetVersion7、ReviewSampleInputValidator11共39项零失败/错误/跳过。涵盖冻结端点/置信度变更或删除拒绝、等价小数scale接受、旧金标JSON与旧候选协议兼容，以及实际评估prepare保留区间。日志/private/tmp/iqc-b-offline-gold-lineage-fixed-tests.log。Mapper与身份仍为替身，不替代真实数据库、音频存储或播放验收。

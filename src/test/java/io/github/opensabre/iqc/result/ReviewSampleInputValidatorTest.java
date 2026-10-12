@@ -41,12 +41,12 @@ class ReviewSampleInputValidatorTest {
         var task=new io.github.opensabre.iqc.task.model.InspectionTask();task.setId("task");task.setTaskType("PIPELINE");
         task.setStatus("SUCCEEDED");task.setConversationIdsJson("[\"conversation\"]");task.setTotalMessages(messages.size());
         var values=messages.stream().map(m->new io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Message(
-                m.getId(),m.getSequenceNo(),m.getSpeakerRole(),m.getContent(),m.getRelativeTime())).toList();
+                m.getId(),m.getSequenceNo(),m.getSpeakerRole(),m.getContent(),m.getRelativeTime(),m.getStartMs(),m.getEndMs(),m.getConfidence())).toList();
         var input=new io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Input("conversation","fingerprint",
                 json.createObjectNode().put("businessType","support"),values);
         var body=json.valueToTree(List.of(input));var root=json.createObjectNode();root.putObject("executionStrategy").put("mode","PIPELINE");
-        root.putObject("productionInputs").put("schemaVersion","iqc-production-inputs-v1")
-                .put("hashAlgorithm","selector-decimal-sha256-v1").put("contentHash",PipelineAssetService.hash(body.toString())).set("conversations",body);
+        root.putObject("productionInputs").put("schemaVersion",messages.stream().anyMatch(m->m.getStartMs()!=null || m.getConfidence()!=null)?"iqc-production-inputs-v2":"iqc-production-inputs-v1")
+                .put("hashAlgorithm","selector-decimal-sha256-v1").put("contentHash",io.github.opensabre.iqc.selector.SelectorAssetService.hash(body.toString())).set("conversations",body);
         task.setRuleSnapshotJson(root.toString());return task;
     }
     private String frozenTrace(io.github.opensabre.iqc.task.model.InspectionTask task) throws Exception {
@@ -72,7 +72,7 @@ class ReviewSampleInputValidatorTest {
         var messages=List.of(message("m1",1,"agent"));var task=frozenTask(messages);String trace=frozenTrace(task);
         var root=json.readTree(task.getRuleSnapshotJson());var body=root.path("productionInputs").path("conversations");
         ((com.fasterxml.jackson.databind.node.ObjectNode)body.get(0).path("businessContext")).put("businessType","changed");
-        ((com.fasterxml.jackson.databind.node.ObjectNode)root.path("productionInputs")).put("contentHash",PipelineAssetService.hash(body.toString()));
+        ((com.fasterxml.jackson.databind.node.ObjectNode)root.path("productionInputs")).put("contentHash",io.github.opensabre.iqc.selector.SelectorAssetService.hash(body.toString()));
         task.setRuleSnapshotJson(root.toString());
         assertThatThrownBy(()->ReviewSampleInputValidator.validateInput(trace,messages,task,"conversation",json)).hasMessageContaining("原执行输入一致");
     }
@@ -106,4 +106,18 @@ class ReviewSampleInputValidatorTest {
         for(String trace: new String[]{null,"{","{}","{\"schemaVersion\":\"future\",\"inputHash\":\"anything\"}"})
             assertThatThrownBy(() -> ReviewSampleInputValidator.validate(trace,messages,json)).hasMessageContaining("原执行输入一致");
     }
+    @Test void frozenAlignmentRejectsChangedEndpointsAndConfidenceButAcceptsEquivalentScale() throws Exception {
+        var message=message("m1",1,"agent");
+        message.setStartMs(86400001L);message.setEndMs(86400500L);message.setConfidence(new java.math.BigDecimal("0.75"));
+        var transcript=List.of(message);var task=frozenTask(transcript);var trace=frozenTrace(task);
+        message.setConfidence(new java.math.BigDecimal("0.750000"));
+        assertThat(ReviewSampleInputValidator.validateInput(trace,transcript,task,"conversation",json).executionInputHash()).isEqualTo(jsonReadHash(trace));
+        message.setEndMs(86400501L);
+        assertThatThrownBy(()->ReviewSampleInputValidator.validateInput(trace,transcript,task,"conversation",json)).hasMessageContaining("原执行输入一致");
+        message.setEndMs(86400500L);message.setConfidence(new java.math.BigDecimal("0.74"));
+        assertThatThrownBy(()->ReviewSampleInputValidator.validateInput(trace,transcript,task,"conversation",json)).hasMessageContaining("原执行输入一致");
+        message.setConfidence(new java.math.BigDecimal("0.75"));message.setStartMs(null);message.setEndMs(null);
+        assertThatThrownBy(()->ReviewSampleInputValidator.validateInput(trace,transcript,task,"conversation",json)).hasMessageContaining("原执行输入一致");
+    }
+
 }
