@@ -4,7 +4,7 @@
 
 原 PRD 第15节要求统一会话的 ASR/附件信息，Segment 的 speaker/text/startMs/endMs/confidence/sequence，以及音频与转写按时间戳双向定位。第13节要求复核音频时间轴，第19节要求原始音频敏感权限，非功能需求要求音频/会话访问审计。实时语音排除不改变这些离线要求。
 
-现有 `conversation/model/Conversation.java` 已有 asrStatus、归属、业务字段和原始来源指纹；`ConversationMessage.java` 已有顺序、角色、正文和 LocalTime。`ConversationApiIngestService` 复用原导入、原指纹与计次，当前不接收音频引用或毫秒区间。`ProductionInputSnapshotService.Message` 冻结 id/sequence/role/content/relativeTime，尚未冻结音频对齐元数据。LocalTime 不能独立表达大于24小时的相对时长，也不能从单个起点推断真实 endMs。
+现有 `conversation/model/Conversation.java` 已有 asrStatus、归属、业务字段和原始来源指纹；`ConversationMessage.java` 已有顺序、角色、正文和 LocalTime。`ConversationApiIngestService` 复用原导入、原指纹与计次，已接收毫秒区间和置信度，尚未接收音频引用。`ProductionInputSnapshotService.Message` 冻结 id/sequence/role/content/relativeTime，现已用可选字段及v2协议冻结转写对齐元数据，尚未冻结音频附件身份。LocalTime 不能独立表达大于24小时的相对时长，也不能从单个起点推断真实 endMs。
 
 本次检索 IQC conversation 模块、base-sysadmin 与 framework 文件名未发现已接通的附件存储/受控音频读取能力；这不是全平台不存在该能力的证明。实施存储前还须核对基础设施、其它应用及正式文件配置，不能直接新增对象存储服务或任意URL代理。
 
@@ -34,6 +34,12 @@ V1.1.71 在原消息表增加可选 start_ms/end_ms/confidence，不推断缺失
 
 有实际区间或置信度的复核候选输入使用 `iqc-conversation-candidate-input-v2`，其摘要覆盖新增字段；无对齐继续使用原 v1。金标冻结直接读取候选冻结输入，不回读已变化的会话；v1 候选携带对齐字段会被拒绝。原金标 Message 增加可选 startMs/endMs/confidence，空值省略以保留旧冻结 JSON。区间沿用配对、非负、顺序和安全整数约束，置信度为0到1且最多六位有效小数。评估重建原 ConversationMessage 时保留这些字段。
 
-本轮测试仍在运行，尚不能据此声称冻结至评估完整验收。音频引用、受控读取与双向播放定位仍未接通。
+本轮39项应用回归通过；真实SQL和端到端验收仍需单独验证。音频引用、受控读取与双向播放定位仍未接通。
 
 金标及来源联合回归33665已终态exit0：GoldReview10、BusinessCandidate7、EvaluationAdmission4、DatasetVersion7、ReviewSampleInputValidator11共39项零失败/错误/跳过。涵盖冻结端点/置信度变更或删除拒绝、等价小数scale接受、旧金标JSON与旧候选协议兼容，以及实际评估prepare保留区间。日志/private/tmp/iqc-b-offline-gold-lineage-fixed-tests.log。Mapper与身份仍为替身，不替代真实数据库、音频存储或播放验收。
+
+复用补充：`opensabre-admin/src/api/file.ts` 定义 `/v1/files` 上传/删除，但当前 base 服务及 framework 的 Java 源码检索未找到对应拥有实现，Compose/基础设施文档也未发现可接通的对象存储配置。该客户端定义不能作为已存在文件服务的证据。存储实施仍需明确应用层持久卷或已有外部存储适配，复用原会话归属及鉴权/审计，不新增平行会话模型。
+
+### 真实 MySQL 导入与生产冻结验证
+
+`IsolatedMysqlOfflineTranscriptIT` 已通过（37872 exit0，1项集成场景）。专用34307服务器身份核对后，仅创建随机数据库，完整Flyway迁移至71、validate及再次migrate零变更；结束清理本测试数据库。原Mapper和Spring事务服务真实执行API导入，>24h坐标和DECIMAL置信度读回、重复输入返回同会话且只有一条消息、不同区间拒绝、修改归档后prepare恢复原冻结端点、实际行改变后原请求重放拒绝、无范围授权时capture拒绝。范围与计次替身，不覆盖完整HTTP登录鉴权或音频附件。日志/private/tmp/iqc-b-offline-mysql-transcript-tests.log。
