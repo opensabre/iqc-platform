@@ -23,13 +23,20 @@ import java.util.*;
 @Service @RequiredArgsConstructor
 public class ProductionInputSnapshotService {
     public static final String SCHEMA="iqc-production-inputs-v1";
+    public static final String ALIGNED_SCHEMA="iqc-production-inputs-v2";
     private static final int MAX_BYTES=16*1024*1024;
-    public record Message(String id,int sequence,String role,String content,LocalTime relativeTime) {
+    public record Message(String id,int sequence,String role,String content,LocalTime relativeTime,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.conversation.ExactMillisecondsDeserializer.class) Long startMs,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.conversation.ExactMillisecondsDeserializer.class) Long endMs,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) java.math.BigDecimal confidence) {
+        public Message(String id,int sequence,String role,String content,LocalTime relativeTime){this(id,sequence,role,content,relativeTime,null,null,null);}
         public Message {
             if(id==null || !id.matches("[A-Za-z0-9:_-]{1,64}") || sequence<0 || role==null || role.isBlank()
                     || role.length()>128 || content==null || content.length()>MAX_BYTES)
                 throw new IllegalArgumentException("invalid frozen production message");
             role=ConversationSpeakerRole.canonical(role);
+            TranscriptAlignment.validate(startMs,endMs,confidence);
+            if(confidence!=null)confidence=confidence.stripTrailingZeros();
         }
     }
     public record Input(String conversationId,String sourceFingerprint,JsonNode businessContext,List<Message> messages) {
@@ -67,7 +74,7 @@ public class ProductionInputSnapshotService {
         private static List<ConversationMessage> convert(Input input){
             return input.messages().stream().map(value->{var row=new ConversationMessage();row.setId(value.id());
                 row.setConversationId(input.conversationId());row.setSequenceNo(value.sequence());row.setSpeakerRole(value.role());
-                row.setContent(value.content());row.setRelativeTime(value.relativeTime());return row;}).toList();
+                row.setContent(value.content());row.setRelativeTime(value.relativeTime());row.setStartMs(value.startMs());row.setEndMs(value.endMs());row.setConfidence(value.confidence());return row;}).toList();
         }
         public Map<String,List<ConversationMessage>> messages(){return messages;}
         public JsonNode businessContext(String id){var value=contexts.get(id);if(value==null)throw IqcException.invalidState("会话不在冻结输入中");return value.deepCopy();}
@@ -93,12 +100,13 @@ public class ProductionInputSnapshotService {
             if(records.isEmpty() || records.size()>10000 || count+records.size()>100000)throw IqcException.invalidArgument("生产输入消息数为空或超过冻结上限");
             count+=records.size();
             var frozen=records.stream().map(value->{if(value.getSequenceNo()==null)throw IqcException.invalidState("归档消息顺序缺失");
-                return new Message(value.getId(),value.getSequenceNo(),value.getSpeakerRole(),value.getContent(),value.getRelativeTime());}).toList();
+                return new Message(value.getId(),value.getSequenceNo(),value.getSpeakerRole(),value.getContent(),value.getRelativeTime(),value.getStartMs(),value.getEndMs(),value.getConfidence());}).toList();
             var input=new Input(id,row.getSourceFingerprint(),context(row),frozen);
             bytes+=write(input).getBytes(StandardCharsets.UTF_8).length;if(bytes>MAX_BYTES)throw IqcException.invalidArgument("生产输入冻结超过16MiB");
             inputs.add(input);
         }
-        var body=json.valueToTree(inputs);var envelope=json.createObjectNode().put("schemaVersion",SCHEMA)
+        boolean aligned=inputs.stream().flatMap(input->input.messages().stream()).anyMatch(message->message.startMs()!=null || message.confidence()!=null);
+        var body=json.valueToTree(inputs);var envelope=json.createObjectNode().put("schemaVersion",aligned?ALIGNED_SCHEMA:SCHEMA)
                 .put("hashAlgorithm","selector-decimal-sha256-v1").put("contentHash",SelectorAssetService.hash(body.toString()));
         envelope.set("conversations",body);if(envelope.toString().getBytes(StandardCharsets.UTF_8).length>MAX_BYTES)
             throw IqcException.invalidArgument("生产输入冻结超过16MiB");return envelope;
@@ -146,12 +154,16 @@ public class ProductionInputSnapshotService {
             var envelope=original.path("productionInputs");var body=envelope.path("conversations");
             if(!"PIPELINE".equals(original.path("executionStrategy").path("mode").asText()) || original.has("evaluationSnapshot")
                     || !Set.of("PIPELINE","PIPELINE_TRIAL").contains(task.getTaskType())
-                    || !SCHEMA.equals(envelope.path("schemaVersion").asText()) || !"selector-decimal-sha256-v1".equals(envelope.path("hashAlgorithm").asText())
+                    || !Set.of(SCHEMA,ALIGNED_SCHEMA).contains(envelope.path("schemaVersion").asText()) || !"selector-decimal-sha256-v1".equals(envelope.path("hashAlgorithm").asText())
                     || !body.isArray() || body.size()>1000 || envelope.toString().getBytes(StandardCharsets.UTF_8).length>MAX_BYTES
                     || !SelectorAssetService.hash(body.toString()).equals(envelope.path("contentHash").asText()))
                 throw IqcException.invalidState("生产冻结输入协议或摘要无效");
             var mapper=exact();List<Input> values=mapper.readValue(body.toString(),mapper.getTypeFactory().constructCollectionType(List.class,Input.class));
-            if(!json.valueToTree(values).equals(body))throw IqcException.invalidState("生产冻结输入不是规范表示");
+            if(SCHEMA.equals(envelope.path("schemaVersion").asText()) && values.stream().flatMap(input->input.messages().stream())
+                    .anyMatch(message->message.startMs()!=null || message.confidence()!=null))throw IqcException.invalidState("旧生产协议不能携带转写对齐字段");
+            // Persisted integer tokens may decode as IntNode while Java Long fields serialize as LongNode.
+            // Round-trip with the same exact parser before comparing shape and values; never use doubles.
+            if(!exact().readTree(write(values)).equals(body))throw IqcException.invalidState("生产冻结输入不是规范表示");
             var ids=values.stream().map(Input::conversationId).toList();
             if(new HashSet<>(ids).size()!=ids.size() || !json.valueToTree(ids).equals(json.readTree(task.getConversationIdsJson())))
                 throw IqcException.invalidState("生产冻结会话清单与任务不一致");
