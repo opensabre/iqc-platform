@@ -8,6 +8,10 @@ import java.time.LocalDateTime;
 import java.util.List;
 @Mapper
 public interface ActionExecutionMapper extends BaseMapper<ActionExecution> {
+    /** Advisory keyset page; failures remain durable and can be revisited after a restart. */
+    @Select("<script>SELECT id,version FROM iqc_action_execution WHERE status='FAILED' AND outcome IN ('CONFIRMED_FINAL_FAILURE','CONFIRMED_RETRYABLE_FAILURE')<if test='after != null'> AND id &gt; #{after}</if> ORDER BY id ASC LIMIT 100</script>")
+    List<ActionExecution> findConfirmedFailures(@Param("after") String after);
+
     /** Discovery is advisory: only a successful conditional claim grants execution. */
     @Select("""
         SELECT a.id,a.version FROM iqc_action_execution a
