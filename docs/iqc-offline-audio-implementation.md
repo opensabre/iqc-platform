@@ -51,3 +51,5 @@ IQC Compose仅提供日志卷，当前源码/基础设施检索未查到共享�
 存储专项10359终态exit0：ConversationAudioStorageTest五项真实文件系统测试通过，含CyclicBarrier双线程发布同字节、最终只有一份文件且完整读回。日志/private/tmp/iqc-b-audio-storage-concurrency-tests.log。该验证仅证明本地存储适配，不包含媒体探测、应用启动配置、HTTP敏感权限或播放。
 
 V72完整正式DDL在任务专用MySQL随机库专项通过40722 exit0：原baseline会话表旧记录迁移后音频字段仍NULL，新完整身份精确读回，部分字段/负长度/零时长/错误媒体类型/大写摘要/超安全整数六类CHECK拒绝，finally清理本测试库。日志/private/tmp/iqc-b-audio-identity-ddl.log；不是完整Flyway新库/升级或服务附件绑定验收。
+
+PCM WAV校验与字节存储联合28621已终态exit0，WAV3+Storage5共8项通过；PCM时长由实际frame计算，格式参数/边界/截断和伪造拒绝，不使用外部ffprobe。日志/private/tmp/iqc-b-audio-wav-metadata-fixed-tests.log。仅PCM WAV子集，其他编码/上传关联/权限/播放仍待。
