@@ -19,3 +19,13 @@ PRD V1.0 §12 要求 WEBHOOK、CREATE_WORK_ORDER、CREATE_COACHING_TASK。当前
 适配器配置须引用部署侧批准的目的地及精确协议版本，不能让发布配置任意改变远端凭据或接收地址。配置不应包含认证秘密。外部请求携带原 idempotencyKey 与 inputSnapshotHash；外部系统须保证重复键的请求内容一致。HTTP 2xx 只表示传输结果，未核对持久回执不能结算 CONFIRMED_SUCCESS。超时或无法确定是否已提交保持 UNKNOWN，由原账本进入核对流程；查询不存在不自动授权重发。默认不登记不具备实际实现的适配器。
 
 端点配置、鉴权接入、实际发送及只读核对、管理配置和隔离接收端验收仍待实现。本文件不表示外部动作已经可用，也不是部署或真实发送记录。
+
+## 配置和接收端协议草案
+
+动作配置为 `destinationId`、正整数 `destinationVersion`、对象 `payload`；payload 按 UTF-8 限制 16KiB、嵌套不超过 16 层，并在解析和读取时深拷贝。目的地的 URL、连接/请求期限、响应上限与认证引用由部署侧配置，发布版本只引用目的地精确版本。改变端点或认证契约时增加目的地版本，旧引用不自动改为最新版本。
+
+发送请求应包含 `schemaVersion`、`actionType`、`idempotencyKey`、`inputSnapshotHash`、原生产来源引用及冻结 payload。接收端重复收到相同键时返回同一持久回执；同键不同摘要必须拒绝。只读核对以该键查询同一目的地版本，禁止把查询失败降为再次 POST。
+
+回执应回传 `idempotencyKey`、`inputSnapshotHash`、`outcome`、`evidenceReference`、`resultReference` 和可选 `errorCode`。本地验证键与摘要一致后，继续由原 ActionAdapter.Receipt 检查确认成功/失败的证据与错误约束；不新增本地回执表。响应缺失、超限、摘要不一致或无法判断远端提交状态均保持 UNKNOWN。
+
+这些字段是待接入协议；尚无目的地注册、HTTP 实现或生产接收端验证，不表示三个外部动作已可派发。
