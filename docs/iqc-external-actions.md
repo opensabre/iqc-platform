@@ -29,3 +29,9 @@ PRD V1.0 §12 要求 WEBHOOK、CREATE_WORK_ORDER、CREATE_COACHING_TASK。当前
 回执应回传 `idempotencyKey`、`inputSnapshotHash`、`outcome`、`evidenceReference`、`resultReference` 和可选 `errorCode`。本地验证键与摘要一致后，继续由原 ActionAdapter.Receipt 检查确认成功/失败的证据与错误约束；不新增本地回执表。响应缺失、超限、摘要不一致或无法判断远端提交状态均保持 UNKNOWN。
 
 这些字段是待接入协议；尚无目的地注册、HTTP 实现或生产接收端验证，不表示三个外部动作已可派发。
+
+## 部署侧目的地约束
+
+下一步目的地配置按 `(destinationId, destinationVersion)` 唯一绑定动作类型、HTTPS 发送端点和只读回执端点；重复键应在启动时拒绝，找不到精确版本时保持适配不可用。两个端点不得带 URI 用户信息、片段或由动作载荷拼接的路径；只读查询仅追加已经验证的 64 字符幂等键。客户端不得跟随重定向。
+
+连接期限、请求期限和最大响应字节由部署侧设定并有界校验，读取回执时也执行字节上限。认证由部署配置引用的秘密来源提供，不写入 ActionPolicy、inputSnapshot 或审计返回值。目的地配置和 HTTP 实现尚未编码；此节是实现约束而非已运行证据。
