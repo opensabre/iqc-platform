@@ -82,7 +82,7 @@ public class PipelineConversationEvaluator {
             items.add(new SchemeResultEvaluator.ItemResult(mapping.itemCode(),mapping.itemCode(),rule.path("id").asText(),rule.path("versionNo").asInt(),status,matched));
         }
         var score=InspectionScoring.evaluate(release.scoring(),decisions);
-        var riskDecision=PipelineDecisionEvaluator.riskDecision(release,fused,score);
+        var riskDecision=PipelineDecisionEvaluator.riskDecision(release,fused,score,businessContext);
         return new Evaluation("iqc-pipeline-execution-v1",PipelineAssetService.hash(input.toString()),run,fused,List.copyOf(items),score,
                 riskDecision==null?PipelineDecisionEvaluator.riskLevel(release.items(),fused,score):riskDecision.level(),mode,riskDecision);
     }

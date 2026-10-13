@@ -5,3 +5,15 @@ PRD 11.4要求组合Finding、score、label和业务字段。实施前核对原P
 首批组合Finding等值/状态、质检项状态、最终分数及ALL/ANY/NOT，拒绝读取尚未计算的风险等级和最终结果状态以避免循环；1到100条规则、总条件节点1000，各树沿原16层/100节点约束。匹配规则取最高等级及明确默认等级；若可能命中的未知规则会提高已确认等级，输出UNKNOWN，不把未知当未命中；已确认HIGH且未知LOW不改变最高等级。规则命中过程作为可选riskDecision保存在原执行Trace，沿原源证明重新计算核对。
 
 没有风险政策沿旧失败项目严重度投影，旧JSON省略新null字段，既有构造兼容。新风险不隐式依赖全会话分数FINAL；已确认红线可独立于其它待定评分触发已确认等级。风险条件本身若引用未知评分则继续UNKNOWN。标签/业务字段组合仍需原标签投影、主体归属及冻结业务上下文证明；不接活归档或伪造标签，也不以首批条件代替完整PRD完成。生产/评测/政策重算使用纯投影，不重发业务动作。首批代码已接原发布冻结、生产Evaluator、评测校验、动作来源证明与DecisionRevision；政策重算校验原风险并保存原/目标等级及规则轨迹，沿原projectionJson保留原事实。界面复用ActionConditionEditor及其有界校验，禁止风险/最终结果自引用；启用后需明确添加规则，不能用空规则隐式发布。真实运行/标签字段组合及复杂风险/复核与其余要求仍待，未新增运行测试/SQL/部署。
+
+## 标签和业务字段组合的实施边界
+
+原条件树缺少标签及业务字段叶子。新增LABEL_EQUALS/BUSINESS_EQUALS到同一条件协议，仅风险政策允许消费；普通动作发布继续拒绝，避免动作适配范围变更。标签code用两个JSON pointer段定位冻结labelId/valueCode，沿原FindingLabelPolicy.projectionBinding与FindingLabelProjection.project计算，不读取标签档案或动作回执；只比较已知投影。业务code是冻结businessContext内的非根JSON pointer；缺失/null/对象/数组不能冒充确定标量。复用原数值精确等值比较与三态组合，不添加语言/表/输入副本。生产来源校验从ProductionInputSnapshotService核验原上下文；评测从原Gold冻结输入；DecisionRevision从原生产输入及其摘要重算，保持原事实/输入不变。标签投影的主体角色仍沿原冻结标签声明和事实证据，不推断新的参与者归属。
+
+### 来源校验与界面
+
+LABEL_EQUALS仅引用已声明的标签值绑定，路径按JSON pointer转义`~`和`/`；保存/发布及历史冻结校验检查绑定存在。BUSINESS_EQUALS读取冻结对象里的标量，支持嵌套路径与数组定位；字段缺失/null/对象/数组本身为UNKNOWN，字符串/布尔/数值不互相强制转换。数值比较沿BigDecimal精确等值，NOT仍保留未知。条件指针非根、最多512字/16段，禁止空段/非法转义/控制字符。
+
+评测使用Gold快照businessContext并校验执行输入摘要；生产动作核对从原prepared input取上下文；重算复用ProductionInputSnapshotService公开messages与validateResult，核验原执行摘要后取上下文。没有原上下文的旧结果不读取当前档案，字段条件保持未知。原Context六参数构造、riskDecision/riskLevel三参数入口保留，默认空标签/空上下文。
+
+配置界面复用原条件编辑器与选择器数值保真检查；标签选项来自当前政策绑定，业务字段用冻结上下文路径。普通动作编辑器不提供新叶子，动作发布仍拒绝。无法在前端精确保存的JSON数值拒绝输入/加载编辑，需沿现有类型化API维护；不悄悄舍入，但完整高精度可视化维护仍是待办。同步修复原列表编辑入口只认可串行schema，允许重新打开已保存并行草稿。后台80224修正公开入口后的skipTests test-compile已terminal exit0，UI16016首轮build exit0，最终UI构建仍待终态；未新增运行测试/SQL/部署，不等于DB/API/浏览器验收。

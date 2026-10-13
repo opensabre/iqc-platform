@@ -7,6 +7,7 @@ import io.github.opensabre.iqc.scoring.InspectionScoring;
 import io.github.opensabre.iqc.task.retry.AutomaticRetryPolicy;
 import java.math.BigDecimal;
 import java.util.HashSet;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -18,7 +19,7 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
     public enum FailureHandling {RECORD_ONLY,ESCALATE_REVIEW}
     public enum Idempotency {PRODUCTION_SOURCE_V1}
     public enum Match {MATCH,NO_MATCH,UNKNOWN}
-    public enum Kind {ALWAYS,ALL,ANY,NOT,FINDING_EQUALS,FINDING_STATE,ITEM_STATUS,RISK_AT_LEAST,FINAL_SCORE_BELOW,RESULT_STATUS}
+    public enum Kind {ALWAYS,ALL,ANY,NOT,FINDING_EQUALS,FINDING_STATE,ITEM_STATUS,RISK_AT_LEAST,FINAL_SCORE_BELOW,RESULT_STATUS,LABEL_EQUALS,BUSINESS_EQUALS}
     public record Action(String actionId,ActionExecutionContract.Type type,Condition condition,
                          Idempotency idempotency,AutomaticRetryPolicy retry,FailureHandling failureHandling,
                          JsonNode configuration,
@@ -57,6 +58,7 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
                     if(value==null || !value.isValueNode() || value.toString().length()>4096)
                         throw new IllegalArgumentException("Action leaf requires a bounded scalar");
                     if(kind==Kind.FINDING_EQUALS || kind==Kind.FINDING_STATE || kind==Kind.ITEM_STATUS)ActionPolicy.code(code);
+                    else if(kind==Kind.LABEL_EQUALS || kind==Kind.BUSINESS_EQUALS)contextPointer(code,kind==Kind.LABEL_EQUALS?2:0);
                     else if(code!=null)throw new IllegalArgumentException("Unexpected action condition code");
                     switch(kind) {
                         case FINDING_STATE -> enumValue(Finding.State.class,value);
@@ -79,12 +81,21 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
         @Override public JsonNode value(){return value==null?null:value.deepCopy();}
     }
     public record Context(Map<String,FindingFusion.Result> findings,Map<String,InspectionScoring.ItemStatus> items,
-                          InspectionScoring.ScoreStatus scoreStatus,BigDecimal finalScore,String riskLevel,String resultStatus) {
+                          InspectionScoring.ScoreStatus scoreStatus,BigDecimal finalScore,String riskLevel,String resultStatus,
+                          Map<String,io.github.opensabre.iqc.label.FindingLabelProjection.Projection> labels,JsonNode businessContext) {
+        public Context(Map<String,FindingFusion.Result> findings,Map<String,InspectionScoring.ItemStatus> items,
+                InspectionScoring.ScoreStatus scoreStatus,BigDecimal finalScore,String riskLevel,String resultStatus) {
+            this(findings,items,scoreStatus,finalScore,riskLevel,resultStatus,Map.of(),null);
+        }
         public Context {
-            findings=Map.copyOf(findings);items=Map.copyOf(items);
+            findings=Map.copyOf(findings);items=Map.copyOf(items);labels=Map.copyOf(labels);
+            if(businessContext!=null && !businessContext.isObject())throw new IllegalArgumentException("Business context must be an object");
+            businessContext=businessContext==null?null:businessContext.deepCopy();
+            labels.forEach((key,label)->{if(!key.equals(io.github.opensabre.iqc.label.FindingLabelPolicy.bindingAddress(new io.github.opensabre.iqc.label.FindingLabelPolicy.Binding(label.binding().labelId(),label.binding().labelVersion(),label.binding().valueCode(),label.binding().findingCode()))))throw new IllegalArgumentException("Risk label key mismatch");});
             findings.forEach((key,fact)->{if(!Objects.equals(key,fact.code()))throw new IllegalArgumentException("Action finding key mismatch");});
             Objects.requireNonNull(scoreStatus);
         }
+        @Override public JsonNode businessContext(){return businessContext==null?null:businessContext.deepCopy();}
     }
     public ActionPolicy {
         if(!SCHEMA.equals(schemaVersion) || actions==null || actions.size()>100)
@@ -110,6 +121,12 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
                 var actual=fact.value();var expected=condition.value();
                 yield truth(actual.isNumber() && expected.isNumber()?actual.decimalValue().compareTo(expected.decimalValue())==0:actual.equals(expected));
             }
+            case LABEL_EQUALS -> {
+                var label=context.labels().get(condition.code());
+                yield label==null || label.status()!=io.github.opensabre.iqc.label.FindingLabelProjection.Status.KNOWN
+                        ?Match.UNKNOWN:scalarMatch(label.value(),condition.value());
+            }
+            case BUSINESS_EQUALS -> scalarMatch(context.businessContext==null?null:context.businessContext.at(condition.code()),condition.value());
             case FINDING_STATE -> {
                 var fact=context.findings().get(condition.code());
                 yield fact==null || fact.state()==null?Match.UNKNOWN:truth(fact.state().name().equals(condition.value().textValue()));
@@ -137,6 +154,18 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
         }
         return unknown?Match.UNKNOWN:all?Match.MATCH:Match.NO_MATCH;
     }
+    private static Match scalarMatch(JsonNode actual,JsonNode expected) {
+        if(actual==null || actual.isMissingNode() || actual.isNull() || !actual.isValueNode())return Match.UNKNOWN;
+        return truth(actual.isNumber() && expected.isNumber()?actual.decimalValue().compareTo(expected.decimalValue())==0:actual.equals(expected));
+    }
+    private static void contextPointer(String pointer,int exactSegments) {
+        if(pointer==null || pointer.length()>512 || !pointer.startsWith("/") || java.util.regex.Pattern.compile("~(?![01])").matcher(pointer).find() || pointer!=null && pointer.codePoints().anyMatch(Character::isISOControl))
+            throw new IllegalArgumentException("Invalid frozen context pointer");
+        var parts=pointer.substring(1).split("/",-1);
+        if(parts.length>16 || exactSegments>0 && parts.length!=exactSegments || Arrays.stream(parts).anyMatch(String::isEmpty))
+            throw new IllegalArgumentException("Invalid frozen context pointer segments");
+        com.fasterxml.jackson.core.JsonPointer.compile(pointer);
+    }
     private static Match truth(boolean value){return value?Match.MATCH:Match.NO_MATCH;}
     private static void code(String value){if(value==null || !value.matches("[A-Za-z0-9][A-Za-z0-9:_./@+-]{0,127}"))throw new IllegalArgumentException("Invalid action code");}
     private static <E extends Enum<E>> void enumValue(Class<E> type,JsonNode value) {
@@ -148,6 +177,8 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
         for(var child:children){if(++count[0]>100)throw new IllegalArgumentException("Action condition exceeds limits");bounds(child.children(),depth+1,count);}
     }
     private static void validateReferences(Condition condition,Set<String> findings,Set<String> items) {
+        if(condition.kind()==Kind.LABEL_EQUALS || condition.kind()==Kind.BUSINESS_EQUALS)
+            throw new IllegalArgumentException("Frozen context conditions are currently risk policy only");
         if((condition.kind()==Kind.FINDING_EQUALS || condition.kind()==Kind.FINDING_STATE) && !findings.contains(condition.code())
                 || condition.kind()==Kind.ITEM_STATUS && !items.contains(condition.code()))
             throw new IllegalArgumentException("Action condition references undeclared finding or item");

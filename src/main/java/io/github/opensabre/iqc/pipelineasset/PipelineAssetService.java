@@ -289,7 +289,7 @@ public class PipelineAssetService {
                 || item.appliesWhenFindingCode()!=null && !codes.contains(item.appliesWhenFindingCode()))
             throw IqcException.invalidArgument("业务项目或适用条件引用未声明的事实编码");
         if(release.riskPolicy()!=null)release.riskPolicy().validateReferences(codes,
-                release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));
+                release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()),release.labelPolicy());
         if(release.actionPolicy()!=null)release.actionPolicy().validateReferences(codes,
                 release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));
         io.github.opensabre.iqc.label.FindingLabelPolicy labelPolicy=null;
@@ -331,7 +331,7 @@ public class PipelineAssetService {
                 release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));
         if(release.riskPolicy()!=null)release.riskPolicy().validateReferences(release.pipeline().nodes().stream()
                 .map(node->node.config().path("findingDefinition").path("code").asText()).collect(java.util.stream.Collectors.toSet()),
-                release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));
+                release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()),release.labelPolicy());
         if(!requireExecutionAvailability)return;
         for(var node:release.pipeline().nodes()) {
             if("METRIC".equals(node.type())) {

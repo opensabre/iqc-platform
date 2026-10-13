@@ -32,6 +32,17 @@ public record RiskPolicy(String schemaVersion,Finding.Severity defaultLevel,List
     public void validateReferences(Set<String> findings,Set<String> items) {
         int[] count={0};for(var rule:rules)validateCondition(rule.condition(),findings,items,count);
     }
+    public void validateReferences(Set<String> findings,Set<String> items,io.github.opensabre.iqc.label.FindingLabelPolicy labels) {
+        validateReferences(findings,items);
+        var addresses=new HashSet<String>();
+        if(labels!=null)labels.bindings().forEach(binding->addresses.add(io.github.opensabre.iqc.label.FindingLabelPolicy.bindingAddress(binding)));
+        for(var rule:rules)validateLabels(rule.condition(),addresses);
+    }
+    private static void validateLabels(ActionPolicy.Condition condition,Set<String> addresses) {
+        if(condition.kind()==ActionPolicy.Kind.LABEL_EQUALS && !addresses.contains(condition.code()))
+            throw new IllegalArgumentException("Risk condition references undeclared frozen label value");
+        for(var child:condition.children())validateLabels(child,addresses);
+    }
     private static void validateCondition(ActionPolicy.Condition condition,Set<String> findings,Set<String> items,int[] count) {
         if(++count[0]>1000)throw new IllegalArgumentException("Risk condition graph exceeds 1000 nodes");
         if(condition.kind()==ActionPolicy.Kind.RISK_AT_LEAST || condition.kind()==ActionPolicy.Kind.RESULT_STATUS)
