@@ -5,6 +5,7 @@ import io.github.opensabre.iqc.governance.IqcException;
 import io.github.opensabre.iqc.selector.SelectorAssetService;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Set;
 
 /** Shared immutable-policy validation for claim and blocked recovery; never performs state writes or adapter I/O. */
 final class ActionFrozenPolicy {
@@ -31,4 +32,38 @@ final class ActionFrozenPolicy {
         if(row.getAttemptCount()==null || row.getAttemptCount()<0)throw IqcException.invalidState("动作尝试计数无效");
         return new Prepared(action,source,policyBody);
     }
+    /** Validates an outbound request against existing frozen source and claim; no network or state writes. */
+    static ActionPolicy.Action validateOutboundRequest(ActionAdapter.Request request,
+            ActionProductionSourceValidator.Validated validated,ActionExecution row,
+            ActionAdapter.Definition definition,boolean historical,ObjectMapper json) {
+        if (request == null || !definition.equals(request.adapter()) || validated == null || validated.policy() == null || row == null)
+            throw IqcException.invalidState("告警缺少原生产政策或领取记录");
+        var action = validated.policy().actions().stream()
+                .filter(value -> request.source().actionId().equals(value.actionId())).findFirst().orElseThrow();
+        if (action.type() != definition.type() || action.effectiveAdapterVersion() != definition.version()
+                || ActionPolicy.evaluate(action.condition(), validated.context()) != ActionPolicy.Match.MATCH)
+            throw IqcException.invalidState("告警冻结政策类型或触发条件不一致");
+        try {
+            String body = json.writeValueAsString(validated.policy());
+            ActionEnqueueService.requireSame(row, request.source(), action, validated, request.idempotencyKey(), body);
+            if (!Objects.equals(request.policySnapshotJson(), body)
+                    || !Objects.equals(request.inputSnapshotJson(), validated.inputSnapshotJson())
+                    || !Objects.equals(request.inputSnapshotHash(), validated.inputSnapshotHash())
+                    || !Objects.equals(row.getAttemptCount(), request.attempt())
+                    || row.getVersion() == null || row.getVersion() < 1
+                    || row.getClaimToken() == null || !row.getClaimToken().matches("[a-f0-9]{32}")
+                    || row.getClaimedAtUtc() == null
+                    || (!historical && !"RUNNING".equals(row.getStatus()))
+                    || (historical && !Set.of("REQUIRES_RECONCILIATION", "COMPLETE").contains(row.getStatus())))
+                throw IqcException.invalidState("告警领取或原冻结请求已变化");
+            if (!historical && (request.attempt() > (action.retry() == null ? 1 : action.retry().maximumAttempts())
+                    || action.retry() != null && action.retry().effectiveUntil() != null
+                    && !Instant.now().isBefore(action.retry().effectiveUntil())))
+                throw IqcException.invalidState("告警尝试次数或期限已耗尽");
+            return action;
+        } catch (com.fasterxml.jackson.core.JsonProcessingException failure) {
+            throw IqcException.invalidState("告警冻结政策损坏");
+        }
+    }
+
 }

@@ -9,7 +9,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import java.time.Instant;
 import java.util.Objects;
 import java.util.Set;
 
@@ -63,33 +62,7 @@ public class SendAlertPreparationService {
 
     private SendAlertConfiguration validate(ActionAdapter.Request request,
             ActionProductionSourceValidator.Validated validated, ActionExecution row, boolean historical) {
-        if (validated == null || validated.policy() == null || row == null)
-            throw IqcException.invalidState("告警缺少原生产政策或领取记录");
-        var action = validated.policy().actions().stream()
-                .filter(value -> request.source().actionId().equals(value.actionId())).findFirst().orElseThrow();
-        if (action.type() != DEFINITION.type() || action.effectiveAdapterVersion() != DEFINITION.version()
-                || ActionPolicy.evaluate(action.condition(), validated.context()) != ActionPolicy.Match.MATCH)
-            throw IqcException.invalidState("告警冻结政策类型或触发条件不一致");
-        try {
-            String body = json.writeValueAsString(validated.policy());
-            ActionEnqueueService.requireSame(row, request.source(), action, validated, request.idempotencyKey(), body);
-            if (!Objects.equals(request.policySnapshotJson(), body)
-                    || !Objects.equals(request.inputSnapshotJson(), validated.inputSnapshotJson())
-                    || !Objects.equals(request.inputSnapshotHash(), validated.inputSnapshotHash())
-                    || !Objects.equals(row.getAttemptCount(), request.attempt())
-                    || row.getVersion() == null || row.getVersion() < 1
-                    || row.getClaimToken() == null || !row.getClaimToken().matches("[a-f0-9]{32}")
-                    || row.getClaimedAtUtc() == null
-                    || (!historical && !"RUNNING".equals(row.getStatus()))
-                    || (historical && !Set.of("REQUIRES_RECONCILIATION", "COMPLETE").contains(row.getStatus())))
-                throw IqcException.invalidState("告警领取或原冻结请求已变化");
-            if (!historical && (request.attempt() > (action.retry() == null ? 1 : action.retry().maximumAttempts())
-                    || action.retry() != null && action.retry().effectiveUntil() != null
-                    && !Instant.now().isBefore(action.retry().effectiveUntil())))
-                throw IqcException.invalidState("告警尝试次数或期限已耗尽");
-            return SendAlertConfiguration.parse(action.configuration());
-        } catch (com.fasterxml.jackson.core.JsonProcessingException failure) {
-            throw IqcException.invalidState("告警冻结政策损坏");
-        }
+        return SendAlertConfiguration.parse(ActionFrozenPolicy.validateOutboundRequest(
+                request, validated, row, DEFINITION, historical, json).configuration());
     }
 }

@@ -1,0 +1,21 @@
+# 外部动作适配
+
+PRD V1.0 §12 要求 WEBHOOK、CREATE_WORK_ORDER、CREATE_COACHING_TASK。当前原 ActionExecutionContract 有枚举，ActionAdapterRegistry 尚无这些类型的适配器；公共通知 SEND_ALERT 只提供短信/邮件，不等同于这些交付。现有工作区未找到可复用的工单/辅导业务实现。不能新建并行的工单、辅导或发送账本来掩盖外部系统未接入。
+
+## 复用边界
+
+复用原 ActionPolicy 冻结配置、ActionEnqueueService 生产来源证明、ActionExecution 独立账本、ActionClaimService 领取、ActionSettlementService 围栏、ActionRecoveryService 与只读核对。外部请求在领取事务提交后执行，分析结果不因发送失败而撤销。评测和试运行不发送外部动作。
+
+原 SendAlertPreparationService 的不可变请求/来源/策略摘要、适配器精确版本、领取 token/时间/尝试次数与期限校验移入原 ActionFrozenPolicy.validateOutboundRequest；告警继续负责其当前授权、事务和通知配置解析。其它适配器应复用此校验，不复制一套来源证明。源码调整及告警回归状态以协作记录为准。
+
+## 待实现的远端契约
+
+| 动作 | 外部职责 | 成功证据 |
+|---|---|---|
+| WEBHOOK | 接收冻结业务事件，按幂等键去重 | 与幂等键及请求摘要绑定的持久回执 |
+| CREATE_WORK_ORDER | 在拥有工单模型的系统创建或返回既有工单 | 可核对的工单 ID 和创建回执 |
+| CREATE_COACHING_TASK | 在拥有辅导模型的系统创建或返回既有任务 | 可核对的辅导任务 ID 和创建回执 |
+
+适配器配置须引用部署侧批准的目的地及精确协议版本，不能让发布配置任意改变远端凭据或接收地址。配置不应包含认证秘密。外部请求携带原 idempotencyKey 与 inputSnapshotHash；外部系统须保证重复键的请求内容一致。HTTP 2xx 只表示传输结果，未核对持久回执不能结算 CONFIRMED_SUCCESS。超时或无法确定是否已提交保持 UNKNOWN，由原账本进入核对流程；查询不存在不自动授权重发。默认不登记不具备实际实现的适配器。
+
+端点配置、鉴权接入、实际发送及只读核对、管理配置和隔离接收端验收仍待实现。本文件不表示外部动作已经可用，也不是部署或真实发送记录。
