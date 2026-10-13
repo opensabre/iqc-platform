@@ -33,9 +33,55 @@ public record PipelineRelease(String schemaVersion, PipelineDefinition pipeline,
     }
     public record ItemMapping(String itemCode, String findingCode, SchemeDefinition.HitMeaning hitMeaning,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-            String appliesWhenFindingCode) {
+            String appliesWhenFindingCode,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            NumericPredicate numericPredicate,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            NumericPredicate appliesWhenNumericPredicate) {
         public ItemMapping(String itemCode,String findingCode,SchemeDefinition.HitMeaning hitMeaning) {
-            this(itemCode,findingCode,hitMeaning,null);
+            this(itemCode,findingCode,hitMeaning,null,null,null);
+        }
+        public ItemMapping(String itemCode,String findingCode,SchemeDefinition.HitMeaning hitMeaning,String appliesWhenFindingCode) {
+            this(itemCode,findingCode,hitMeaning,appliesWhenFindingCode,null,null);
+        }
+        public ItemMapping {
+            if(appliesWhenFindingCode!=null && appliesWhenFindingCode.isBlank()
+                    || appliesWhenNumericPredicate!=null && appliesWhenFindingCode==null)
+                throw new IllegalArgumentException("Numeric applicability requires a declared finding");
+        }
+    }
+    /** Exact threshold data reuses the pipeline comparator; absent fields retain legacy boolean mapping. */
+    public record NumericPredicate(PipelineDefinition.Operator operator,
+            @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=DecimalThresholdDeserializer.class) String threshold) {
+        public NumericPredicate {
+            if(operator==null || operator==PipelineDefinition.Operator.EXISTS || threshold==null || threshold.length()>64
+                    || !threshold.matches("[-+]?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?"))
+                throw new IllegalArgumentException("Numeric predicate requires a comparison and exact decimal string");
+            var decimal=new java.math.BigDecimal(threshold);
+            if(decimal.precision()>38 || decimal.scale()>18)throw new IllegalArgumentException("Numeric threshold exceeds precision/scale bounds");
+        }
+        public boolean matches(com.fasterxml.jackson.databind.JsonNode actual) {
+            if(actual==null || !actual.isNumber())throw new IllegalArgumentException("Numeric predicate requires a numeric fact");
+            return io.github.opensabre.iqc.pipeline.PipelineRuntime.matches(new PipelineDefinition.Condition("",operator,
+                    com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.numberNode(new java.math.BigDecimal(threshold))),actual);
+        }
+    }
+    /** Local wire guard: Jackson's default String coercion must not normalize an already rounded JSON number. */
+    public static final class DecimalThresholdDeserializer extends com.fasterxml.jackson.databind.JsonDeserializer<String> {
+        @Override public String deserialize(com.fasterxml.jackson.core.JsonParser parser,com.fasterxml.jackson.databind.DeserializationContext context) throws java.io.IOException {
+            if(!parser.hasToken(com.fasterxml.jackson.core.JsonToken.VALUE_STRING))
+                throw com.fasterxml.jackson.databind.JsonMappingException.from(parser,"Numeric threshold must be a decimal JSON string");
+            return parser.getText();
+        }
+    }
+    public void validateFindingTypes(java.util.Map<String,io.github.opensabre.iqc.finding.Finding.ValueType> types) {
+        for(var item:items) {
+            var expected=item.numericPredicate()==null?io.github.opensabre.iqc.finding.Finding.ValueType.BOOLEAN:io.github.opensabre.iqc.finding.Finding.ValueType.NUMBER;
+            if(types.get(item.findingCode())!=expected)throw new IllegalArgumentException("Business predicate differs from frozen finding type");
+            if(item.appliesWhenFindingCode()!=null) {
+                var gate=item.appliesWhenNumericPredicate()==null?io.github.opensabre.iqc.finding.Finding.ValueType.BOOLEAN:io.github.opensabre.iqc.finding.Finding.ValueType.NUMBER;
+                if(types.get(item.appliesWhenFindingCode())!=gate)throw new IllegalArgumentException("Applicability predicate differs from frozen finding type");
+            }
         }
     }
     public PipelineRelease {

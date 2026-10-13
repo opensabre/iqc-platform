@@ -24,10 +24,10 @@ public final class PipelineDecisionEvaluator {
         for (var mapping : mappings) {
             if (!codes.add(mapping.itemCode())) throw new IllegalArgumentException("Duplicate business mapping");
             var fact = byCode.get(mapping.findingCode());
-            InspectionScoring.ItemStatus status = status(fact, mapping.hitMeaning());
+            InspectionScoring.ItemStatus status = status(fact, mapping.hitMeaning(),mapping.numericPredicate());
             if (mapping.appliesWhenFindingCode() != null) {
                 var gate = byCode.get(mapping.appliesWhenFindingCode());
-                var gateStatus = status(gate, SchemeDefinition.HitMeaning.COMPLIANCE);
+                var gateStatus = status(gate, SchemeDefinition.HitMeaning.COMPLIANCE,mapping.appliesWhenNumericPredicate());
                 status = switch (gateStatus) {
                     case PASS -> status;
                     case FAIL -> InspectionScoring.ItemStatus.NOT_APPLICABLE;
@@ -56,14 +56,20 @@ public final class PipelineDecisionEvaluator {
         return highest.name();
     }
 
-    private static InspectionScoring.ItemStatus status(FindingFusion.Result fact, SchemeDefinition.HitMeaning meaning) {
+    private static InspectionScoring.ItemStatus status(FindingFusion.Result fact, SchemeDefinition.HitMeaning meaning,PipelineRelease.NumericPredicate numeric) {
         if (fact == null) return InspectionScoring.ItemStatus.NOT_EVALUATED;
         return switch (fact.state()) {
             case KNOWN -> {
-                if (fact.value() == null || !fact.value().isBoolean())
-                    throw new IllegalArgumentException("Boolean policy requires a boolean known finding");
-                boolean fail = meaning == SchemeDefinition.HitMeaning.VIOLATION
-                        ? fact.value().booleanValue() : !fact.value().booleanValue();
+                boolean matched;
+                if(numeric!=null) {
+                    if(fact.valueType()!=Finding.ValueType.NUMBER)throw new IllegalArgumentException("Numeric policy requires NUMBER finding");
+                    matched=numeric.matches(fact.value());
+                } else {
+                    if(fact.valueType()!=Finding.ValueType.BOOLEAN || fact.value()==null || !fact.value().isBoolean())
+                        throw new IllegalArgumentException("Boolean policy requires a boolean known finding");
+                    matched=fact.value().booleanValue();
+                }
+                boolean fail=meaning==SchemeDefinition.HitMeaning.VIOLATION?matched:!matched;
                 yield fail ? InspectionScoring.ItemStatus.FAIL : InspectionScoring.ItemStatus.PASS;
             }
             case ERROR -> InspectionScoring.ItemStatus.ERROR;

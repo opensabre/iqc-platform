@@ -55,7 +55,8 @@ public final class PipelineRuntime implements AutoCloseable {
                 validatePointer(node.condition().pointer()); Objects.requireNonNull(node.condition().operator());
                 if(node.condition().operator()!=PipelineDefinition.Operator.EXISTS && node.condition().value()==null)
                     throw new IllegalArgumentException("Comparison condition requires value");
-                if((node.condition().operator()==PipelineDefinition.Operator.GREATER_OR_EQUAL || node.condition().operator()==PipelineDefinition.Operator.LESS_OR_EQUAL)
+                if((node.condition().operator()==PipelineDefinition.Operator.GREATER_OR_EQUAL || node.condition().operator()==PipelineDefinition.Operator.LESS_OR_EQUAL
+                            || node.condition().operator()==PipelineDefinition.Operator.GREATER_THAN || node.condition().operator()==PipelineDefinition.Operator.LESS_THAN)
                     && !node.condition().value().isNumber()) throw new IllegalArgumentException("Numeric condition requires number");
             }
             ValueSchema.validateSchema(node.outputSchema());
@@ -329,7 +330,8 @@ public final class PipelineRuntime implements AutoCloseable {
         var object=JSON.createObjectNode(); object.set("input",input.deepCopy()); object.set("variables",JSON.valueToTree(vars));
         object.set("upstream",JSON.valueToTree(upstream)); return object;
     }
-    private static boolean matches(PipelineDefinition.Condition condition,JsonNode context) {
+    /** Shared pure comparison used by node branching and numeric business predicates. */
+    public static boolean matches(PipelineDefinition.Condition condition,JsonNode context) {
         if(condition==null) return true;
         JsonNode actual=context.at(condition.pointer()); JsonNode expected=condition.value();
         return switch(condition.operator()) {
@@ -337,6 +339,8 @@ public final class PipelineRuntime implements AutoCloseable {
             case EQUALS -> !actual.isMissingNode() && equalValue(actual,expected);
             case NOT_EQUALS -> !actual.isMissingNode() && !actual.isNull() && expected!=null && !equalValue(actual,expected);
             case GREATER_OR_EQUAL -> actual.isNumber() && expected!=null && expected.isNumber() && actual.decimalValue().compareTo(expected.decimalValue())>=0;
+            case GREATER_THAN -> actual.isNumber() && expected!=null && expected.isNumber() && actual.decimalValue().compareTo(expected.decimalValue())>0;
+            case LESS_THAN -> actual.isNumber() && expected!=null && expected.isNumber() && actual.decimalValue().compareTo(expected.decimalValue())<0;
             case LESS_OR_EQUAL -> actual.isNumber() && expected!=null && expected.isNumber() && actual.decimalValue().compareTo(expected.decimalValue())<=0;
         };
     }

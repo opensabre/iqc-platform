@@ -9,7 +9,7 @@ public record PipelineDefinition(String schemaVersion, List<Node> nodes) {
     public static final String SCHEMA = "iqc-pipeline-v1";
     public static final String PARALLEL_SCHEMA = "iqc-pipeline-parallel-v1";
     public enum OnError { FAIL_PIPELINE, CONTINUE, MARK_REVIEW, FALLBACK }
-    public enum Operator { EXISTS, EQUALS, NOT_EQUALS, GREATER_OR_EQUAL, LESS_OR_EQUAL }
+    public enum Operator { EXISTS, EQUALS, NOT_EQUALS, GREATER_OR_EQUAL, LESS_OR_EQUAL, GREATER_THAN, LESS_THAN }
     public record Condition(String pointer, Operator operator, JsonNode value) {
         public Condition { value = value == null ? null : value.deepCopy(); }
         @Override public JsonNode value() { return value == null ? null : value.deepCopy(); }
