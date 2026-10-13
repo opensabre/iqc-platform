@@ -28,6 +28,40 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class HierarchicalResultServiceTest {
+    /** A lost checkpoint write must fail the transactional materialization, rather than report success. */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {0, 1})
+    void pipelineCommitRequiresExactlyOneCheckpointUpdate(int updated) {
+        var snapshot=objectMapper.createObjectNode();
+        var task=new InspectionTask();task.setId("task");task.setStatus("RUNNING");
+        task.setCurrentExecutionId("execution");task.setRuleSnapshotJson(snapshot.toString());
+        when(tasks.selectOne(any())).thenReturn(task);
+        when(conversations.insert(any(ConversationInspectionResult.class))).thenAnswer(invocation->{
+            ((ConversationInspectionResult)invocation.getArgument(0)).setId("conversation-result");return 1;
+        });
+        when(observations.insert(any(InspectionResult.class))).thenAnswer(invocation->{
+            ((InspectionResult)invocation.getArgument(0)).setId("observation");return 1;
+        });
+        var work=new io.github.opensabre.iqc.task.model.TaskItem();work.setId("work");work.setTaskId("task");
+        work.setExecutionId("execution");work.setConversationId("conversation-1");work.setMessageId("m1");work.setStatus("PENDING");
+        when(taskItems.selectOne(any())).thenReturn(work);
+        when(taskItems.updateById(any(io.github.opensabre.iqc.task.model.TaskItem.class))).thenReturn(updated);
+        var scoring=io.github.opensabre.iqc.scoring.InspectionScoring.evaluate(
+                new io.github.opensabre.iqc.scoring.InspectionScoring.Policy("iqc-score-v2",
+                        io.github.opensabre.iqc.scoring.InspectionScoring.Mode.DEDUCTION,100,60,List.of()),List.of());
+        var run=new io.github.opensabre.iqc.pipeline.PipelineRuntime.Run(
+                io.github.opensabre.iqc.pipeline.PipelineRuntime.Status.SUCCESS,List.of(),List.of(),java.util.Map.of(),false);
+        var evaluated=new io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation(
+                "test","test",run,List.of(),List.of(),scoring,"LOW",io.github.opensabre.iqc.pipeline.PipelineRuntime.Mode.PRODUCTION);
+        if(updated==0) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(()->service.materializePipeline(task,"execution",snapshot,
+                    List.of(message("m1",1)),evaluated,List.of(work))).hasMessageContaining("检查点进度提交失败");
+        } else {
+            assertThat(service.materializePipeline(task,"execution",snapshot,List.of(message("m1",1)),evaluated,List.of(work))).isNotNull();
+            assertThat(work.getResultId()).isEqualTo("observation");assertThat(work.getAttemptCount()).isEqualTo(1);
+        }
+    }
+
     @Test
     void routeBatchLinksObservationAndProgressAndDoesNotDuplicateCompletedWork() {
         var snapshot = schemeSnapshot(); var task = new InspectionTask(); task.setId("task");

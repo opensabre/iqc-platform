@@ -49,6 +49,41 @@ class OfflineProductionSnapshotTest {
         envelope.put("contentHash",io.github.opensabre.iqc.selector.SelectorAssetService.hash(body.toString()));envelope.put("schemaVersion",ProductionInputSnapshotService.SCHEMA);
         assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->service.prepare(task(root),root));
     }
+    /** Result validation uses the same full input and business context hash as execution. */
+    private io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation result(
+            String hash,io.github.opensabre.iqc.pipeline.PipelineRuntime.Mode mode){
+        return new io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation(
+                "test",hash,null,List.of(),List.of(),null,null,mode);
+    }
+    @Test void resultRejectsChangedTextContextHashAndEvaluationMode(){
+        var root=capture(true);var task=task(root);var prepared=service.prepare(task,root);
+        var frozen=prepared.messages().get("conversation");
+        var input=json.createObjectNode();input.set("messages",json.valueToTree(frozen));
+        input.set("businessContext",prepared.businessContext("conversation"));
+        var hash=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(input.toString());
+        var production=io.github.opensabre.iqc.pipeline.PipelineRuntime.Mode.PRODUCTION;
+        assertDoesNotThrow(()->service.validateResult(task,root,frozen,result(hash,production),prepared));
+        input.withObject("businessContext").put("businessType","changed");
+        var alteredHash=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(input.toString());
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,
+                ()->service.validateResult(task,root,frozen,result(alteredHash,production),prepared));
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,
+                ()->service.validateResult(task,root,frozen,result(hash,io.github.opensabre.iqc.pipeline.PipelineRuntime.Mode.EVALUATION),prepared));
+        frozen.getFirst().setContent("changed");
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,
+                ()->service.validateResult(task,root,frozen,result(hash,production),prepared));
+    }
+    @Test void preparedResultCannotBeReusedForAnotherTaskOrSnapshot(){
+        var root=capture(true);var task=task(root);var prepared=service.prepare(task,root);
+        var frozen=prepared.messages().get("conversation");
+        var evaluated=result("unused",io.github.opensabre.iqc.pipeline.PipelineRuntime.Mode.PRODUCTION);
+        task.setId("other-task");
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,
+                ()->service.validateResult(task,root,frozen,evaluated,prepared));
+        task.setId("task");task.setRuleSnapshotJson(root.toString()+" ");
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,
+                ()->service.validateResult(task,root,frozen,evaluated,prepared));
+    }
     private ObjectNode audioCapture(){
         capture(true);
         var row=conversations.selectById("conversation");row.setAudioSha256("a".repeat(64));row.setAudioSizeBytes(16044L);row.setAudioMediaType("audio/wav");row.setAudioDurationMs(86400500L);

@@ -128,7 +128,7 @@ public class HierarchicalResultService {
             if(observationMapper.insert(observation)!=1 || observation.getId()==null) throw new IllegalStateException("流水线消息检查点提交失败");
             item.setResultId(observation.getId()); item.setStatus(failed?"FAILED":"SUCCEEDED");
             item.setAttemptCount((item.getAttemptCount()==null?0:item.getAttemptCount())+1); item.setErrorMessage(failed?"流水线执行失败，可重试":null);
-            taskItemMapper.updateById(item);
+            if(taskItemMapper.updateById(item)!=1) throw new IllegalStateException("流水线检查点进度提交失败");
         }
         return conversation;
     }
