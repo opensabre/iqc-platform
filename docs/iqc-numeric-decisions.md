@@ -1,0 +1,13 @@
+# 数值事实业务映射
+
+实施前核对原PipelineDefinition.Condition/PipelineRuntime数字比较、PipelineRelease.ItemMapping、PipelineDecisionEvaluator、ActionPolicy FINDING_EQUALS、Selector/StructuredConditionMatcher及已有标签与评分政策。指标和Session计数已有NUMBER事实，原评分只接BOOLEAN；不能把NUMBER.booleanValue或0当成布尔命中，也不应在检测器直接扣分。复用原业务映射和条件Operator/十进制比较，在ItemMapping追加可选numericPredicate及appliesWhenNumericPredicate；不新增评分表、发现副本或比较语言。
+
+阈值为有界精确十进制字符串（38位精度、18位小数、64字符），复用EQUALS/NOT_EQUALS/GREATER_OR_EQUAL/LESS_OR_EQUAL并补严格GREATER_THAN/LESS_THAN。无谓词继续原BOOLEAN语义；有谓词必须NUMBER，比较结果按原hitMeaning映射PASS/FAIL。适用条件比较不满足为NOT_APPLICABLE，未知/冲突为REVIEW_REQUIRED、错误为ERROR、未执行为NOT_EVALUATED。原数值、单位、证据与严重度不改写；风险仍沿原失败项目严重度政策。
+
+可选字段为空省略，保留旧3/4参数构造及旧发布JSON。发布端核对冻结事实类型；生产、评测、复核及源证明沿原纯PipelineDecisionEvaluator，政策重算不得重新调用检测或动作。界面使用文本阈值，不经JS浮点转换。真正复杂评分/独立风险政策及完整运行验收仍保留待办。当前是实施前缺口记录，未新增运行测试/SQL/部署。
+
+## 编码进展
+
+原ItemMapping两个可选谓词已接入，严格阈值字符串解码拒绝JSON数值/布尔隐式转换；38位精度/18位小数/64字符上限。生产、评测、BusinessItemReviewEvaluator及ActionProductionSourceValidator/DecisionRevisionService均复用原PipelineDecisionEvaluator，不新建评分记录或事实副本。发布及执行可用性检查匹配冻结NUMBER/BOOLEAN类型，历史只读结构路径保持。前端阈值文本直接保存，不通过JSON.parse或Number转换。42291首轮后端编译与12196 vue-tsc/Vite均退出0；最后严格解码编译和真实来源/重算/评分/权限与浏览器验收待，未新增运行测试/SQL/部署。
+
+最终后端17518离线skipTests test-compile退出0，日志/tmp/iqc-numeric-decisions-wire-compile.log。原事实单位不变，阈值按原值单位比较，不进行秒/毫秒或比例/百分数自动换算。前端启用谓词后默认空阈值，必须显式输入；清空适用事实同步清除其谓词，避免隐藏的旧比较残留。最后UI构建及真实验收结果以交接为准。

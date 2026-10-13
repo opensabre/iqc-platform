@@ -283,11 +283,8 @@ public class PipelineAssetService {
                     node.inputMapping(),config,node.condition(),node.timeoutMs(),node.retries(),node.onError(),node.fallbackNodeId(),node.outputSchema(),node.enabled()));
         }
         var findingTypes=labelFindingTypes(new PipelineDefinition(release.pipeline().schemaVersion(),nodes));
-        for(var item:release.items()) {
-            if(findingTypes.get(item.findingCode())!=Finding.ValueType.BOOLEAN
-                    || item.appliesWhenFindingCode()!=null && findingTypes.get(item.appliesWhenFindingCode())!=Finding.ValueType.BOOLEAN)
-                throw IqcException.invalidArgument("当前评分项目及适用条件必须引用布尔事实，数值事实不能直接作为命中判断");
-        }
+        try {release.validateFindingTypes(findingTypes);}
+        catch(IllegalArgumentException invalid){throw IqcException.invalidArgument("业务项目与适用条件的谓词必须匹配事实类型：布尔直接判断，数值需要明确阈值");}
         for(var item:release.items()) if(!codes.contains(item.findingCode())
                 || item.appliesWhenFindingCode()!=null && !codes.contains(item.appliesWhenFindingCode()))
             throw IqcException.invalidArgument("业务项目或适用条件引用未声明的事实编码");
@@ -316,7 +313,11 @@ public class PipelineAssetService {
     }
     private void validateFrozen(PipelineRelease release) { validateFrozen(release,true); }
     private void validateFrozen(PipelineRelease release,boolean requireExecutionAvailability) {
-        if(requireExecutionAvailability)runtime.validate(release.pipeline());else runtime.validateStructure(release.pipeline());
+        if(requireExecutionAvailability) {
+            runtime.validate(release.pipeline());
+            try {release.validateFindingTypes(labelFindingTypes(release.pipeline()));}
+            catch(IllegalArgumentException invalid){throw IqcException.invalidState("冻结业务比较与事实类型不一致");}
+        } else runtime.validateStructure(release.pipeline());
         if(release.labelPolicy()!=null) {
             release.labelPolicy().validateFrozen();
             release.labelPolicy().validateFindingTypes(labelFindingTypes(release.pipeline()));
