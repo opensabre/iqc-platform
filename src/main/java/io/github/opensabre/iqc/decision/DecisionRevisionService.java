@@ -25,13 +25,27 @@ import java.util.*;
 public class DecisionRevisionService {
     public record Projection(String schemaVersion, String sourceResultId, String sourceHash,
             InspectionScoring.Result original, List<FindingFusion.Result> fusion,
-            List<InspectionScoring.Decision> decisions, InspectionScoring.Result recalculated) { }
+            List<InspectionScoring.Decision> decisions, InspectionScoring.Result recalculated,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            String originalRiskLevel,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            String recalculatedRiskLevel,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            RiskPolicy.Decision originalRiskDecision,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            RiskPolicy.Decision recalculatedRiskDecision) {
+        public Projection(String schemaVersion,String sourceResultId,String sourceHash,InspectionScoring.Result original,
+                List<FindingFusion.Result> fusion,List<InspectionScoring.Decision> decisions,InspectionScoring.Result recalculated) {
+            this(schemaVersion,sourceResultId,sourceHash,original,fusion,decisions,recalculated,null,null,null,null);
+        }
+    }
     private final DecisionRevisionMapper revisions;
     private final ConversationInspectionResultMapper results;
     private final InspectionTaskMapper tasks;
     private final PipelineAssetService assets;
     private final IqcDataScope scope;
     private final ObjectMapper json;
+    private final io.github.opensabre.iqc.conversation.ProductionInputSnapshotService inputs;
 
     @Transactional(isolation=Isolation.READ_COMMITTED)
     public DecisionRevision create(String resultId, String targetPipelineId, int targetVersion,
@@ -85,13 +99,26 @@ public class DecisionRevisionService {
                     || (originalScore.finalScore() == null ? result.getFinalScore() != null
                     : result.getFinalScore() == null || originalScore.finalScore().compareTo(result.getFinalScore()) != 0))
                 throw IqcException.invalidState("源事实或评分快照不一致");
+            var preparedInput=inputs.prepare(task,snapshot);
+            com.fasterxml.jackson.databind.JsonNode businessContext=null;
+            if(preparedInput!=null) {
+                inputs.validateResult(task,snapshot,preparedInput.messages().get(result.getConversationId()),trace,preparedInput);
+                businessContext=preparedInput.businessContext(result.getConversationId());
+            }
+            var originalRiskDecision=PipelineDecisionEvaluator.riskDecision(release,originalFusion,originalScore,businessContext);
+            String originalRisk=PipelineDecisionEvaluator.riskLevel(release,originalFusion,originalScore,businessContext);
+            if(!Objects.equals(originalRisk,trace.riskLevel()) || !Objects.equals(originalRisk,result.getRiskLevel())
+                    || !json.valueToTree(originalRiskDecision).equals(json.valueToTree(trace.riskDecision())))
+                throw IqcException.invalidState("源风险轨迹与冻结政策不一致");
             var target = assets.publishedRelease(targetPipelineId,targetVersion);
             var fusion = FindingFusion.fuse(raw,target.release().fusion());
             var decisions = PipelineDecisionEvaluator.decisions(target.release().items(),fusion);
             var score = InspectionScoring.evaluate(target.release().scoring(),decisions);
             String sourceHash = hash(Arrays.asList(task.getRuleSnapshotJson(),result.getId(),
                     result.getExecutionTraceJson(),result.getBusinessItemResultsJson(),result.getScoringResultJson()));
-            var projection = new Projection("iqc-decision-revision-v1",resultId,sourceHash,originalScore,fusion,decisions,score);
+            var projection = new Projection("iqc-decision-revision-v1",resultId,sourceHash,originalScore,fusion,decisions,score,
+                    originalRisk,PipelineDecisionEvaluator.riskLevel(target.release(),fusion,score,businessContext),
+                    originalRiskDecision,PipelineDecisionEvaluator.riskDecision(target.release(),fusion,score,businessContext));
             var saved = new DecisionRevision();
             saved.setId(id); saved.setSourceResultId(resultId); saved.setTaskId(task.getId());
             saved.setSourceHash(sourceHash); saved.setRequestFingerprint(fingerprint);

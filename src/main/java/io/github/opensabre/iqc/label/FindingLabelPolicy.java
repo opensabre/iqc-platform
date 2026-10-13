@@ -33,6 +33,10 @@ public record FindingLabelPolicy(String schemaVersion,List<Binding> bindings,
         directory=directory==null?null:directory.deepCopy();
     }
     @Override public JsonNode directory(){return directory==null?null:directory.deepCopy();}
+    public static String bindingAddress(Binding binding) {
+        return "/"+pointerSegment(binding.labelId())+"/"+pointerSegment(binding.valueCode());
+    }
+    private static String pointerSegment(String value){return value.replace("~","~0").replace("/","~1");}
     public void validateReferences(Set<String> findingCodes) {
         for(var binding:bindings)if(!findingCodes.contains(binding.findingCode()))
             throw new IllegalArgumentException("Label policy references undeclared finding");

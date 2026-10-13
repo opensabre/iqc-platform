@@ -19,7 +19,14 @@ import java.util.*;
 @RequiredArgsConstructor
 public class PipelineConversationEvaluator {
     public record Evaluation(String schemaVersion,String inputHash,PipelineRuntime.Run run,
-            List<FindingFusion.Result> fusion,List<SchemeResultEvaluator.ItemResult> items,InspectionScoring.Result scoring,String riskLevel,PipelineRuntime.Mode mode) { }
+            List<FindingFusion.Result> fusion,List<SchemeResultEvaluator.ItemResult> items,InspectionScoring.Result scoring,String riskLevel,PipelineRuntime.Mode mode,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            io.github.opensabre.iqc.pipelineasset.RiskPolicy.Decision riskDecision) {
+        public Evaluation(String schemaVersion,String inputHash,PipelineRuntime.Run run,List<FindingFusion.Result> fusion,
+                List<SchemeResultEvaluator.ItemResult> items,InspectionScoring.Result scoring,String riskLevel,PipelineRuntime.Mode mode) {
+            this(schemaVersion,inputHash,run,fusion,items,scoring,riskLevel,mode,null);
+        }
+    }
     private final PipelineRuntime runtime;
     private final ObjectMapper json;
     private final io.github.opensabre.iqc.task.dao.InspectionTaskMapper tasks;
@@ -75,7 +82,8 @@ public class PipelineConversationEvaluator {
             items.add(new SchemeResultEvaluator.ItemResult(mapping.itemCode(),mapping.itemCode(),rule.path("id").asText(),rule.path("versionNo").asInt(),status,matched));
         }
         var score=InspectionScoring.evaluate(release.scoring(),decisions);
+        var riskDecision=PipelineDecisionEvaluator.riskDecision(release,fused,score,businessContext);
         return new Evaluation("iqc-pipeline-execution-v1",PipelineAssetService.hash(input.toString()),run,fused,List.copyOf(items),score,
-                PipelineDecisionEvaluator.riskLevel(release.items(),fused,score),mode);
+                riskDecision==null?PipelineDecisionEvaluator.riskLevel(release.items(),fused,score):riskDecision.level(),mode,riskDecision);
     }
 }

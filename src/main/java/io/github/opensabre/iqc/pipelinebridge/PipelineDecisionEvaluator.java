@@ -43,7 +43,31 @@ public final class PipelineDecisionEvaluator {
             List<PipelineRelease.ItemMapping> mappings, List<FindingFusion.Result> facts) {
         return InspectionScoring.evaluate(policy, decisions(mappings, facts));
     }
-    /** Current compatibility projection; independent configurable risk policies remain a separate iteration. */
+    public static io.github.opensabre.iqc.pipelineasset.RiskPolicy.Decision riskDecision(PipelineRelease release,
+            List<FindingFusion.Result> facts,InspectionScoring.Result score) {
+        return riskDecision(release,facts,score,null);
+    }
+    public static io.github.opensabre.iqc.pipelineasset.RiskPolicy.Decision riskDecision(PipelineRelease release,
+            List<FindingFusion.Result> facts,InspectionScoring.Result score,com.fasterxml.jackson.databind.JsonNode businessContext) {
+        if(release.riskPolicy()==null)return null;
+        var byCode=new LinkedHashMap<String,FindingFusion.Result>();facts.forEach(fact->{if(byCode.putIfAbsent(fact.code(),fact)!=null)throw new IllegalArgumentException("Duplicate risk finding code");});
+        var statuses=new LinkedHashMap<String,InspectionScoring.ItemStatus>();decisions(release.items(),facts).forEach(value->statuses.put(value.itemCode(),value.status()));
+        var labels=new LinkedHashMap<String,io.github.opensabre.iqc.label.FindingLabelProjection.Projection>();
+        if(release.labelPolicy()!=null)for(var binding:release.labelPolicy().bindings()) {
+            var projection=io.github.opensabre.iqc.label.FindingLabelProjection.project(release.labelPolicy().projectionBinding(binding),byCode.get(binding.findingCode()));
+            labels.put(io.github.opensabre.iqc.label.FindingLabelPolicy.bindingAddress(binding),projection);
+        }
+        return release.riskPolicy().evaluate(new io.github.opensabre.iqc.action.ActionPolicy.Context(byCode,statuses,score.scoreStatus(),score.finalScore(),null,null,labels,businessContext));
+    }
+    public static String riskLevel(PipelineRelease release,List<FindingFusion.Result> facts,InspectionScoring.Result score) {
+        return riskLevel(release,facts,score,null);
+    }
+    public static String riskLevel(PipelineRelease release,List<FindingFusion.Result> facts,InspectionScoring.Result score,
+            com.fasterxml.jackson.databind.JsonNode businessContext) {
+        var decision=riskDecision(release,facts,score,businessContext);
+        return decision==null?riskLevel(release.items(),facts,score):decision.level();
+    }
+    /** Compatibility projection for releases without an independent risk policy. */
     public static String riskLevel(List<PipelineRelease.ItemMapping> mappings,List<FindingFusion.Result> facts,InspectionScoring.Result score) {
         if(score.scoreStatus()==InspectionScoring.ScoreStatus.PENDING) return "UNKNOWN";
         var byCode=new HashMap<String,FindingFusion.Result>(); facts.forEach(fact->byCode.put(fact.code(),fact));

@@ -193,8 +193,10 @@ public class PipelineEvaluationService {
             throw IqcException.invalidState("评测模式或运行输入摘要无效");
         BusinessItemReviewEvaluator.evaluatePipeline("evaluation", prepared.release(), actual, actual.items(), List.of(),
                 member.gold().messages().stream().map(GoldConversation.Message::id).collect(Collectors.toSet()));
-        if(!io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.riskLevel(prepared.release().items(),actual.fusion(),actual.scoring()).equals(actual.riskLevel()))
+        if(!io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.riskLevel(prepared.release(),actual.fusion(),actual.scoring(),member.gold().businessContext()).equals(actual.riskLevel()))
             throw IqcException.invalidState("评测风险投影与冻结事实不一致");
+        if(!json.valueToTree(io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.riskDecision(prepared.release(),actual.fusion(),actual.scoring(),member.gold().businessContext())).equals(json.valueToTree(actual.riskDecision())))
+            throw IqcException.invalidState("评测风险规则轨迹与冻结政策不一致");
         Set<String> messageIds=member.gold().messages().stream().map(GoldConversation.Message::id).collect(Collectors.toSet());
         for(var fact:actual.fusion().stream().flatMap(value->value.rawFindings().stream()).toList()) {
             String identity=executionId+":"+member.gold().conversationId()+":"+fact.source().nodeId();

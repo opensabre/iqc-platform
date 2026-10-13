@@ -131,7 +131,7 @@ public class ActionProductionSourceValidator {
                     throw IqcException.invalidState("动作来源业务项状态不一致");
             }
             if(!seen.equals(decisions.keySet()))throw IqcException.invalidState("动作来源业务项清单不一致");
-            String risk=PipelineDecisionEvaluator.riskLevel(release.items(),fused,score);
+            String risk=PipelineDecisionEvaluator.riskLevel(release,fused,score,prepared.businessContext(reference.conversationId()));
             boolean failed=trace.run().status()==PipelineRuntime.Status.FAILED
                     || trace.run().status()==PipelineRuntime.Status.CANCELLED
                     || trace.items().stream().anyMatch(item->item.status()==InspectionScoring.ItemStatus.ERROR);
@@ -141,6 +141,7 @@ public class ActionProductionSourceValidator {
                     || !json.valueToTree(trace.items()).equals(json.readTree(result.getBusinessItemResultsJson()))
                     || !Objects.equals(score.scoreStatus().name(),result.getScoreStatus())
                     || !Objects.equals(failed?"ERROR":score.conclusion().name(),result.getResultStatus())
+                    || !json.valueToTree(PipelineDecisionEvaluator.riskDecision(release,fused,score,prepared.businessContext(reference.conversationId()))).equals(json.valueToTree(trace.riskDecision()))
                     || !Objects.equals(risk,trace.riskLevel()) || !Objects.equals(risk,result.getRiskLevel())
                     || (score.finalScore()==null?result.getFinalScore()!=null:
                         result.getFinalScore()==null || score.finalScore().compareTo(result.getFinalScore())!=0))
