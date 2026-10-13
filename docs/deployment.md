@@ -182,3 +182,9 @@ Servlet multipart 默认单文件200 MB、请求201 MB（预留表单开销）�
 首个文件解码器验证实际PCM WAV结构并推导时长，不信任文件名或上传Content-Type。
 其他音频格式、ASR、完整权限与审计链、真实浏览器Range播放及保留清理仍待验收/开发。
 上传绑定失败可能留下未引用的不可变文件；在制定引用与保留策略前不得自动删除可能共享的摘要文件。
+
+音频三个HTTP入口另外复用原 `ScheduledActorAccessService.capture/resolveCurrent`：
+每次以当前用户签名链读取组织资源投影，分别要求 `iqc:audio:upload/view/read`。
+注册注解不能替代此检查。失效账号、过期投影、独立权限缺失或原群组/全局范围被收缩时拒绝。
+部署须包含组织 `/internal/iqc/scheduler-access/current/{userId}` 原入口及可信签名配置；
+不能退回后台身份或单靠前端权限。实际组织服务HTTP与网关安全链仍须联合验收。

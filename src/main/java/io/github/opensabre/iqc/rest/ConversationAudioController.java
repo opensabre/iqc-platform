@@ -15,20 +15,29 @@ import java.io.*;
 @RequestMapping("/api/iqc/conversations/{id}/audio")
 public class ConversationAudioController {
     private final ConversationAudioService service;
+    private final io.github.opensabre.iqc.schedule.ScheduledActorAccessService actors;
+    private void requireCurrent(String resource) {
+        var bound=actors.capture();
+        var current=actors.resolveCurrent(bound,java.util.Set.of(resource));
+        if(current==null || current.all()!=bound.all() || !java.util.Objects.equals(current.groupId(),bound.groupId()))
+            throw io.github.opensabre.iqc.governance.IqcException.accessDenied("音频访问范围已变化，请重新认证");
+    }
     @PostMapping(consumes="multipart/form-data")
     @ResourcePermission(code="iqc:audio:upload",name="上传原始音频",type="iqc",description="绑定经过实际媒体校验的原始音频")
     @Audit(operationType=OperationType.UPLOAD,description="上传会话原始音频",module="IQC_AUDIO",request=false,response=false)
     public ConversationAudioService.Metadata upload(@PathVariable String id,@RequestPart("file") MultipartFile file) throws IOException {
+        requireCurrent("iqc:audio:upload");
         try(var input=file.getInputStream()){return service.upload(id,input);}
     }
     @GetMapping
     @ResourcePermission(code="iqc:audio:view",name="查看音频信息",type="iqc",description="查看授权会话的音频元数据")
     @Audit(operationType=OperationType.QUERY,description="查看会话音频信息",module="IQC_AUDIO",request=false,response=false)
-    public ConversationAudioService.Metadata metadata(@PathVariable String id){return service.metadata(id);}
+    public ConversationAudioService.Metadata metadata(@PathVariable String id){requireCurrent("iqc:audio:view");return service.metadata(id);}
     @GetMapping("/content")
     @ResourcePermission(code="iqc:audio:read",name="读取原始音频",type="iqc",description="敏感原始音频读取及Range播放")
     @Audit(operationType=OperationType.DOWNLOAD,description="读取会话原始音频",module="IQC_AUDIO",request=false,response=false)
     public void content(@PathVariable String id,@RequestHeader(value="Range",required=false) String range,HttpServletResponse response) throws IOException {
+        requireCurrent("iqc:audio:read");
         var metadata=service.metadata(id);long size=metadata.sizeBytes(),start=0,end=size-1;
         response.setHeader("Cache-Control","private, no-store");response.setHeader("X-Content-Type-Options","nosniff");
         response.setHeader("Accept-Ranges","bytes");
