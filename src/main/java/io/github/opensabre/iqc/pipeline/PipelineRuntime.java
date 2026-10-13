@@ -39,7 +39,7 @@ public final class PipelineRuntime implements AutoCloseable {
     /** Historical snapshots retain graph/contract checks without requiring today's engine registry. */
     public void validateStructure(PipelineDefinition definition) { validateDefinition(definition,false); }
     private void validateDefinition(PipelineDefinition definition,boolean requireCurrentEngines) {
-        if(!PipelineDefinition.SCHEMA.equals(definition.schemaVersion()) || definition.nodes().isEmpty() || definition.nodes().size()>200)
+        if(!(PipelineDefinition.SCHEMA.equals(definition.schemaVersion()) || PipelineDefinition.PARALLEL_SCHEMA.equals(definition.schemaVersion())) || definition.nodes().isEmpty() || definition.nodes().size()>200)
             throw new IllegalArgumentException("Unsupported pipeline schema or node count");
         var preceding=new HashSet<String>();
         var indexed=new HashMap<String,PipelineDefinition.Node>();
@@ -67,6 +67,7 @@ public final class PipelineRuntime implements AutoCloseable {
                 throw new IllegalArgumentException("Fallback must reference a disabled non-recursive node");
             if(!node.dependsOn().containsAll(fallback.dependsOn())) throw new IllegalArgumentException("Fallback dependencies must be available to source node");
         }
+        if(PipelineDefinition.PARALLEL_SCHEMA.equals(definition.schemaVersion()))parallelContract(definition);
     }
     public Run execute(PipelineDefinition definition, JsonNode input, Map<String,JsonNode> initialVariables, Mode mode) {
         return execute(definition,input,initialVariables,mode,trace -> { });
@@ -75,6 +76,8 @@ public final class PipelineRuntime implements AutoCloseable {
                        java.util.function.Consumer<Trace> progress) {
         Objects.requireNonNull(progress);
         validate(definition); Objects.requireNonNull(input); Objects.requireNonNull(mode);
+        if(PipelineDefinition.PARALLEL_SCHEMA.equals(definition.schemaVersion()))
+            return executeParallel(definition,input,initialVariables,mode,progress);
         var vars=new LinkedHashMap<>(NodeContext.snapshot(initialVariables==null?Map.of():initialVariables));
         var upstream=new LinkedHashMap<String,NodeResult>(); var trace=new ArrayList<Trace>(); var findings=new ArrayList<Finding>();
         var nodes=new HashMap<String,PipelineDefinition.Node>(); definition.nodes().forEach(n->nodes.put(n.nodeId(),n));
@@ -106,6 +109,177 @@ public final class PipelineRuntime implements AutoCloseable {
             upstream.put(node.nodeId(),result); findings.addAll(result.findings()); vars.putAll(result.variables());
         }
         return new Run(partial?Status.PARTIAL_SUCCESS:Status.SUCCESS,trace,findings,vars,review);
+    }
+    private record ParallelContract(Map<String,Set<String>> ancestors,Map<String,String> owners) { }
+    /** Reuses output schemas to prove ownership, rather than inventing a second variable declaration model. */
+    private static ParallelContract parallelContract(PipelineDefinition definition) {
+        var indexed=new LinkedHashMap<String,PipelineDefinition.Node>();definition.nodes().forEach(node->indexed.put(node.nodeId(),node));
+        var ancestors=new LinkedHashMap<String,Set<String>>();var owners=new LinkedHashMap<String,String>();
+        for(var node:definition.nodes()) {
+            if(new HashSet<>(node.dependsOn()).size()!=node.dependsOn().size())throw new IllegalArgumentException("Duplicate DAG dependency");
+            var previous=new LinkedHashSet<String>();
+            for(var dependency:node.dependsOn()){previous.add(dependency);previous.addAll(ancestors.get(dependency));}
+            ancestors.put(node.nodeId(),Set.copyOf(previous));
+            if(!node.enabled())continue;
+            if(node.dependsOn().stream().anyMatch(id->!indexed.get(id).enabled()))throw new IllegalArgumentException("Enabled DAG node cannot depend on a disabled fallback");
+            registerExports(node,node.nodeId(),owners);
+            if(node.onError()==PipelineDefinition.OnError.FALLBACK)registerExports(indexed.get(node.fallbackNodeId()),node.nodeId(),owners);
+        }
+        for(var node:definition.nodes())if(node.enabled()) {
+            validateReads(node,ancestors.get(node.nodeId()),owners);
+            if(node.onError()==PipelineDefinition.OnError.FALLBACK)validateReads(indexed.get(node.fallbackNodeId()),ancestors.get(node.nodeId()),owners);
+        }
+        return new ParallelContract(Map.copyOf(ancestors),Map.copyOf(owners));
+    }
+    private static void registerExports(PipelineDefinition.Node node,String producer,Map<String,String> owners) {
+        var schema=node.outputSchema();
+        if(schema==null || !"object".equals(schema.path("type").asText()) || !schema.path("properties").isObject()
+                || !schema.path("additionalProperties").isBoolean() || schema.path("additionalProperties").booleanValue())
+            throw new IllegalArgumentException("Parallel outputs require an explicit closed object schema");
+        for(var property:schema.path("properties").properties()) {
+            if(property.getKey().isBlank() || property.getKey().startsWith("__"))throw new IllegalArgumentException("Invalid parallel export name");
+            var prior=owners.putIfAbsent(property.getKey(),producer);
+            if(prior!=null && !prior.equals(producer))throw new IllegalArgumentException("Parallel variable has multiple producers: "+property.getKey());
+        }
+    }
+    private static void validateReads(PipelineDefinition.Node node,Set<String> ancestors,Map<String,String> owners) {
+        var reads=new ArrayList<String>(node.inputMapping().values());if(node.condition()!=null)reads.add(node.condition().pointer());
+        for(String pointer:reads) {
+            var path=com.fasterxml.jackson.core.JsonPointer.compile(pointer);String root=path.getMatchingProperty();
+            if("input".equals(root))continue;
+            if((!"variables".equals(root) && !"upstream".equals(root)) || path.tail().matches())throw new IllegalArgumentException("Parallel reads require input or an explicit variable/upstream key");
+            String key=path.tail().getMatchingProperty();String producer="upstream".equals(root)?key:owners.get(key);
+            if(producer!=null && !ancestors.contains(producer))throw new IllegalArgumentException("Parallel read requires an explicit ancestor dependency: "+pointer);
+        }
+    }
+    private record TimedOutcome(NodeResult result,Exception failure,long finished) { }
+    private record Attempt(PipelineDefinition.Node node,int number,Instant start,long tick,java.util.concurrent.atomic.AtomicLong finished,Future<TimedOutcome> future,NodeResult early) { }
+    private Attempt beginParallel(PipelineDefinition.Node node,int number,JsonNode input,Map<String,JsonNode> vars,Map<String,NodeResult> upstream,Mode mode) {
+        Instant start=Instant.now();long tick=System.nanoTime();var finished=new java.util.concurrent.atomic.AtomicLong();
+        try {
+            var adapter=adapters.get(node.type());if(adapter.sideEffecting())throw new IllegalArgumentException("Detection cannot execute side effects");
+            JsonNode mapped=input.deepCopy();
+            if(!node.inputMapping().isEmpty()) {
+                var object=JSON.createObjectNode();var available=context(input,vars,upstream);
+                for(var entry:node.inputMapping().entrySet()) {
+                    var value=available.at(entry.getValue());if(value.isMissingNode())throw new IllegalArgumentException("Missing mapped input");
+                    object.set(entry.getKey(),value.deepCopy());
+                }
+                mapped=object;
+            }
+            var request=new NodeContext(node,mapped,vars,upstream,mode,number);
+            var future=executor.submit(()->{
+                try {
+                    try {return new TimedOutcome(Objects.requireNonNull(adapter.execute(request)),null,System.nanoTime());}
+                    catch(Exception failure){return new TimedOutcome(null,failure,System.nanoTime());}
+                } finally {finished.set(System.nanoTime());}
+            });
+            return new Attempt(node,number,start,tick,finished,future,null);
+        } catch(Exception failure) {
+            finished.set(System.nanoTime());
+            return new Attempt(node,number,start,tick,finished,null,NodeResult.failure(NodeResult.Status.ERROR,
+                    failure instanceof RejectedExecutionException?"Executor capacity exhausted":"Node input or admission failed"));
+        }
+    }
+    private NodeResult awaitParallel(Attempt attempt) {
+        if(attempt.early()!=null)return attempt.early();
+        try {
+            long remaining=TimeUnit.MILLISECONDS.toNanos(attempt.node().timeoutMs())-(System.nanoTime()-attempt.tick());
+            if(remaining<=0 && !attempt.future().isDone())throw new TimeoutException();
+            var outcome=attempt.future().isDone()?attempt.future().get():attempt.future().get(remaining,TimeUnit.NANOSECONDS);
+            if(outcome.finished()-attempt.tick()>TimeUnit.MILLISECONDS.toNanos(attempt.node().timeoutMs()))throw new TimeoutException();
+            if(outcome.failure()!=null)throw outcome.failure();
+            if(outcome.result().status()==NodeResult.Status.SUCCESS)ValueSchema.check(attempt.node().outputSchema(),outcome.result().variables());
+            return outcome.result();
+        } catch(InterruptedException interrupted) {
+            attempt.future().cancel(true);Thread.currentThread().interrupt();return NodeResult.failure(NodeResult.Status.CANCELLED,"Execution interrupted");
+        } catch(TimeoutException timeout) {
+            attempt.future().cancel(true);return NodeResult.failure(NodeResult.Status.TIMEOUT,"Node deadline exceeded");
+        } catch(CancellationException cancelled) {
+            return NodeResult.failure(NodeResult.Status.CANCELLED,"Attempt cancelled");
+        } catch(Exception failure) {
+            var wait=io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException.budgetWait(failure);if(wait!=null)throw wait;
+            attempt.future().cancel(true);return NodeResult.failure(NodeResult.Status.ERROR,"Node execution or output validation failed");
+        }
+    }
+    private static long parallelDuration(Attempt attempt,NodeResult result) {
+        long end=attempt.finished().get();if(end==0)end=System.nanoTime();
+        long elapsed=TimeUnit.NANOSECONDS.toMillis(Math.max(0,end-attempt.tick()));
+        return result.status()==NodeResult.Status.TIMEOUT?Math.min(elapsed,attempt.node().timeoutMs()):elapsed;
+    }
+    private NodeResult finishParallel(Attempt first,JsonNode input,Map<String,JsonNode> vars,Map<String,NodeResult> upstream,Mode mode,
+            List<Trace> trace,java.util.function.Consumer<Trace> progress,Set<Attempt> outstanding) {
+        Attempt attempt=first;
+        while(true) {
+            var result=awaitParallel(attempt);outstanding.remove(attempt);
+            record(trace,new Trace(attempt.node().nodeId(),attempt.number(),attempt.start(),parallelDuration(attempt,result),result),progress);
+            if(result.status()==NodeResult.Status.SUCCESS || result.status()==NodeResult.Status.CANCELLED || result.status()==NodeResult.Status.TIMEOUT
+                    || attempt.number()>attempt.node().retries())return result;
+            attempt=beginParallel(attempt.node(),attempt.number()+1,input,vars,upstream,mode);outstanding.add(attempt);
+        }
+    }
+    private Run executeParallel(PipelineDefinition definition,JsonNode input,Map<String,JsonNode> initialVariables,Mode mode,
+            java.util.function.Consumer<Trace> progress) {
+        var contract=parallelContract(definition);var initial=NodeContext.snapshot(initialVariables==null?Map.of():initialVariables);
+        for(var key:contract.owners().keySet())if(initial.containsKey(key))throw new IllegalArgumentException("Parallel exports cannot overwrite initial variables");
+        var vars=new LinkedHashMap<>(initial);var upstream=new LinkedHashMap<String,NodeResult>();var trace=new ArrayList<Trace>();var findings=new ArrayList<Finding>();
+        var nodes=new LinkedHashMap<String,PipelineDefinition.Node>();definition.nodes().forEach(node->nodes.put(node.nodeId(),node));
+        var remaining=new LinkedHashSet<String>();definition.nodes().stream().filter(PipelineDefinition.Node::enabled).forEach(node->remaining.add(node.nodeId()));
+        var outstanding=new LinkedHashSet<Attempt>();boolean partial=false,review=false;Status finalStatus=null;RuntimeException executionFailure=null;
+        try {
+            execution: while(!remaining.isEmpty()) {
+                if(Thread.currentThread().isInterrupted()){finalStatus=Status.CANCELLED;break execution;}
+                var ready=remaining.stream().filter(id->upstream.keySet().containsAll(nodes.get(id).dependsOn())).limit(executor.getMaximumPoolSize()).toList();
+                if(ready.isEmpty())throw new IllegalStateException("Parallel DAG cannot make progress");
+                var started=new LinkedHashMap<String,Attempt>();var snapshots=new HashMap<String,Map<String,JsonNode>>();var previous=new HashMap<String,Map<String,NodeResult>>();
+                for(var id:ready) {
+                    var node=nodes.get(id);var scopedVars=new LinkedHashMap<>(initial);var scopedUpstream=new LinkedHashMap<String,NodeResult>();
+                    for(var ancestor:contract.ancestors().get(id)) {
+                        var prior=upstream.get(ancestor);if(prior!=null){scopedUpstream.put(ancestor,prior);if(prior.status()==NodeResult.Status.SUCCESS)scopedVars.putAll(prior.variables());}
+                    }
+                    if(node.dependsOn().stream().anyMatch(dependency->upstream.get(dependency).status()!=NodeResult.Status.SUCCESS)) {
+                        var skipped=NodeResult.failure(NodeResult.Status.SKIPPED,"Dependency unavailable");upstream.put(id,skipped);
+                        record(trace,new Trace(id,0,Instant.now(),0,skipped),progress);partial=true;review=true;continue;
+                    }
+                    if(!matches(node.condition(),context(input,scopedVars,scopedUpstream))) {
+                        var skipped=NodeResult.failure(NodeResult.Status.SKIPPED,"Condition not met");upstream.put(id,skipped);record(trace,new Trace(id,0,Instant.now(),0,skipped),progress);continue;
+                    }
+                    snapshots.put(id,NodeContext.snapshot(scopedVars));previous.put(id,Map.copyOf(scopedUpstream));
+                    var attempt=beginParallel(node,1,input,scopedVars,scopedUpstream,mode);started.put(id,attempt);outstanding.add(attempt);
+                }
+                for(var entry:started.entrySet()) {
+                    var node=nodes.get(entry.getKey());var scopedVars=snapshots.get(node.nodeId());var scopedUpstream=previous.get(node.nodeId());
+                    var result=finishParallel(entry.getValue(),input,scopedVars,scopedUpstream,mode,trace,progress,outstanding);
+                    if(result.status()==NodeResult.Status.CANCELLED){finalStatus=Status.CANCELLED;break execution;}
+                    if(result.status()!=NodeResult.Status.SUCCESS && node.onError()==PipelineDefinition.OnError.FALLBACK) {
+                        var fallback=beginParallel(nodes.get(node.fallbackNodeId()),1,input,scopedVars,scopedUpstream,mode);outstanding.add(fallback);
+                        result=finishParallel(fallback,input,scopedVars,scopedUpstream,mode,trace,progress,outstanding);
+                    }
+                    if(result.status()==NodeResult.Status.CANCELLED){finalStatus=Status.CANCELLED;break execution;}
+                    upstream.put(node.nodeId(),result);
+                    if(result.status()!=NodeResult.Status.SUCCESS) {
+                        partial=true;review|=node.onError()==PipelineDefinition.OnError.MARK_REVIEW || node.onError()==PipelineDefinition.OnError.FALLBACK;
+                        if(node.onError()==PipelineDefinition.OnError.FAIL_PIPELINE){finalStatus=Status.FAILED;break execution;}
+                    } else {findings.addAll(result.findings());vars.putAll(result.variables());}
+                }
+                remaining.removeAll(ready);
+            }
+        } catch(RuntimeException failure) {executionFailure=failure;}
+        finally {
+            // Every submitted attempt is cancelled or observed. Completion callbacks stay on the caller thread.
+            for(var attempt:outstanding) {
+                NodeResult abandoned;
+                if(attempt.future()!=null && !attempt.future().isDone() && attempt.future().cancel(true)){abandoned=NodeResult.failure(NodeResult.Status.CANCELLED,"Parallel execution stopped");}
+                else {try{abandoned=awaitParallel(attempt);}catch(RuntimeException failure){abandoned=NodeResult.failure(NodeResult.Status.ERROR,"Attempt interrupted by execution deferral");}}
+                var item=new Trace(attempt.node().nodeId(),attempt.number(),attempt.start(),parallelDuration(attempt,abandoned),abandoned);
+                trace.add(item);
+                if(abandoned.status()==NodeResult.Status.SUCCESS){findings.addAll(abandoned.findings());vars.putAll(abandoned.variables());}
+                try {progress.accept(item);}
+                catch(RuntimeException callbackFailure){if(executionFailure==null)executionFailure=callbackFailure;else if(executionFailure!=callbackFailure)executionFailure.addSuppressed(callbackFailure);}
+            }
+        }
+        if(executionFailure!=null)throw executionFailure;
+        return new Run(finalStatus!=null?finalStatus:partial?Status.PARTIAL_SUCCESS:Status.SUCCESS,trace,findings,vars,review);
     }
     private NodeResult invoke(PipelineDefinition.Node node,JsonNode input,Map<String,JsonNode> vars,
                               Map<String,NodeResult> upstream,Mode mode,List<Trace> trace,java.util.function.Consumer<Trace> progress) {

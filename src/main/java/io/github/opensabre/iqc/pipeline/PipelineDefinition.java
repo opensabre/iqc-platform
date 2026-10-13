@@ -4,9 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.util.List;
 import java.util.Map;
 
-/** Frozen sequential/conditional pipeline; JSON pointers address input, variables and upstream. */
+/** Frozen sequential/conditional or explicit parallel graph; JSON pointers address input, variables and upstream. */
 public record PipelineDefinition(String schemaVersion, List<Node> nodes) {
     public static final String SCHEMA = "iqc-pipeline-v1";
+    public static final String PARALLEL_SCHEMA = "iqc-pipeline-parallel-v1";
     public enum OnError { FAIL_PIPELINE, CONTINUE, MARK_REVIEW, FALLBACK }
     public enum Operator { EXISTS, EQUALS, NOT_EQUALS, GREATER_OR_EQUAL, LESS_OR_EQUAL }
     public record Condition(String pointer, Operator operator, JsonNode value) {
