@@ -16,8 +16,15 @@ public record PipelineRelease(String schemaVersion, PipelineDefinition pipeline,
                               @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
                               io.github.opensabre.iqc.action.ActionPolicy actionPolicy,
                               @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-                              io.github.opensabre.iqc.label.FindingLabelPolicy labelPolicy) {
+                              io.github.opensabre.iqc.label.FindingLabelPolicy labelPolicy,
+                              @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                              RiskPolicy riskPolicy) {
     public static final String SCHEMA = "iqc-pipeline-release-v1";
+    public PipelineRelease(String schemaVersion,PipelineDefinition pipeline,FusionPolicy fusion,InspectionScoring.Policy scoring,
+            List<ItemMapping> items,PublicationGatePolicy publicationGate,io.github.opensabre.iqc.action.ActionPolicy actionPolicy,
+            io.github.opensabre.iqc.label.FindingLabelPolicy labelPolicy) {
+        this(schemaVersion,pipeline,fusion,scoring,items,publicationGate,actionPolicy,labelPolicy,null);
+    }
     public PipelineRelease(String schemaVersion,PipelineDefinition pipeline,FusionPolicy fusion,
                            InspectionScoring.Policy scoring,List<ItemMapping> items,PublicationGatePolicy publicationGate,
                            io.github.opensabre.iqc.action.ActionPolicy actionPolicy) {

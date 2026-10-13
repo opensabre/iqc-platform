@@ -1,0 +1,7 @@
+# 独立风险政策首批
+
+PRD 11.4要求组合Finding、score、label和业务字段。实施前核对原PipelineDecisionEvaluator.riskLevel、ActionPolicy.Condition/Context/Match、评分/标签目录、RiskEvent适配与组织授权；已有风险只是评分失败项目的最高事实严重度，没有独立冻结风险规则。复用原三态条件树及NONE/LOW/MEDIUM/HIGH/CRITICAL vocabulary，在PipelineRelease追加可选冻结政策，不新建风险分级表、事实副本或条件语言。
+
+首批组合Finding等值/状态、质检项状态、最终分数及ALL/ANY/NOT，拒绝读取尚未计算的风险等级和最终结果状态以避免循环；1到100条规则、总条件节点1000，各树沿原16层/100节点约束。匹配规则取最高等级及明确默认等级；若可能命中的未知规则会提高已确认等级，输出UNKNOWN，不把未知当未命中；已确认HIGH且未知LOW不改变最高等级。规则命中过程作为可选riskDecision保存在原执行Trace，沿原源证明重新计算核对。
+
+没有风险政策沿旧失败项目严重度投影，旧JSON省略新null字段，既有构造兼容。新风险不隐式依赖全会话分数FINAL；已确认红线可独立于其它待定评分触发已确认等级。风险条件本身若引用未知评分则继续UNKNOWN。标签/业务字段组合仍需原标签投影、主体归属及冻结业务上下文证明；不接活归档或伪造标签，也不以首批条件代替完整PRD完成。生产/评测/政策重算使用纯投影，不重发业务动作。首批代码已接原发布冻结、生产Evaluator、评测校验、动作来源证明与DecisionRevision；政策重算校验原风险并保存原/目标等级及规则轨迹，沿原projectionJson保留原事实。界面复用ActionConditionEditor及其有界校验，禁止风险/最终结果自引用；启用后需明确添加规则，不能用空规则隐式发布。真实运行/标签字段组合及复杂风险/复核与其余要求仍待，未新增运行测试/SQL/部署。

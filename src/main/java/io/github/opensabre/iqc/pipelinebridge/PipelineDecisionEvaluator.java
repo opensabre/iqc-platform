@@ -43,6 +43,17 @@ public final class PipelineDecisionEvaluator {
             List<PipelineRelease.ItemMapping> mappings, List<FindingFusion.Result> facts) {
         return InspectionScoring.evaluate(policy, decisions(mappings, facts));
     }
+    public static io.github.opensabre.iqc.pipelineasset.RiskPolicy.Decision riskDecision(PipelineRelease release,
+            List<FindingFusion.Result> facts,InspectionScoring.Result score) {
+        if(release.riskPolicy()==null)return null;
+        var byCode=new LinkedHashMap<String,FindingFusion.Result>();facts.forEach(fact->{if(byCode.putIfAbsent(fact.code(),fact)!=null)throw new IllegalArgumentException("Duplicate risk finding code");});
+        var statuses=new LinkedHashMap<String,InspectionScoring.ItemStatus>();decisions(release.items(),facts).forEach(value->statuses.put(value.itemCode(),value.status()));
+        return release.riskPolicy().evaluate(new io.github.opensabre.iqc.action.ActionPolicy.Context(byCode,statuses,score.scoreStatus(),score.finalScore(),null,null));
+    }
+    public static String riskLevel(PipelineRelease release,List<FindingFusion.Result> facts,InspectionScoring.Result score) {
+        var decision=riskDecision(release,facts,score);
+        return decision==null?riskLevel(release.items(),facts,score):decision.level();
+    }
     /** Current compatibility projection; independent configurable risk policies remain a separate iteration. */
     public static String riskLevel(List<PipelineRelease.ItemMapping> mappings,List<FindingFusion.Result> facts,InspectionScoring.Result score) {
         if(score.scoreStatus()==InspectionScoring.ScoreStatus.PENDING) return "UNKNOWN";

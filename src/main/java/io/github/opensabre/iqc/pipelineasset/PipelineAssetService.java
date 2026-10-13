@@ -288,6 +288,8 @@ public class PipelineAssetService {
         for(var item:release.items()) if(!codes.contains(item.findingCode())
                 || item.appliesWhenFindingCode()!=null && !codes.contains(item.appliesWhenFindingCode()))
             throw IqcException.invalidArgument("业务项目或适用条件引用未声明的事实编码");
+        if(release.riskPolicy()!=null)release.riskPolicy().validateReferences(codes,
+                release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));
         if(release.actionPolicy()!=null)release.actionPolicy().validateReferences(codes,
                 release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));
         io.github.opensabre.iqc.label.FindingLabelPolicy labelPolicy=null;
@@ -298,7 +300,7 @@ public class PipelineAssetService {
             labelPolicy.validateFindingTypes(findingTypes);
         }
         io.github.opensabre.iqc.label.FindingLabelActionConfiguration.validateDeclaredActions(release.actionPolicy(),labelPolicy);
-        var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes),release.fusion(),release.scoring(),release.items(),release.publicationGate(),release.actionPolicy(),labelPolicy);
+        var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes),release.fusion(),release.scoring(),release.items(),release.publicationGate(),release.actionPolicy(),labelPolicy,release.riskPolicy());
         runtime.validate(frozen.pipeline()); return frozen;
     }
     private static Map<String,Finding.ValueType> labelFindingTypes(PipelineDefinition pipeline) {
@@ -326,6 +328,9 @@ public class PipelineAssetService {
         }
         if(release.actionPolicy()!=null)release.actionPolicy().validateReferences(
                 release.pipeline().nodes().stream().map(node->node.config().path("findingDefinition").path("code").asText()).collect(java.util.stream.Collectors.toSet()),
+                release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));
+        if(release.riskPolicy()!=null)release.riskPolicy().validateReferences(release.pipeline().nodes().stream()
+                .map(node->node.config().path("findingDefinition").path("code").asText()).collect(java.util.stream.Collectors.toSet()),
                 release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));
         if(!requireExecutionAvailability)return;
         for(var node:release.pipeline().nodes()) {
