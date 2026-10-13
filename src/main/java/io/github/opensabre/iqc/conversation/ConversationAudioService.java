@@ -46,12 +46,15 @@ public class ConversationAudioService {
         var row=authorized(id);var storage=storage();
         var staging=Files.createTempFile("iqc-audio-validation-",".wav");
         try {
+            java.security.MessageDigest digest;
+            try{digest=java.security.MessageDigest.getInstance("SHA-256");}
+            catch(java.security.NoSuchAlgorithmException impossible){throw new IllegalStateException(impossible);}
             long size=0;byte[] buffer=new byte[8192];
             try(var out=Files.newOutputStream(staging)) {
                 for(int count;(count=input.read(buffer))!=-1;) {
                     if(count==0)continue;
                     if(count>properties.getMaxAudioSizeBytes()-size)throw IqcException.invalidArgument("音频超过大小限制");
-                    out.write(buffer,0,count);size+=count;
+                    out.write(buffer,0,count);digest.update(buffer,0,count);size+=count;
                 }
             }
             ConversationWavMetadata media;
@@ -61,13 +64,15 @@ public class ConversationAudioService {
                     .eq(io.github.opensabre.iqc.conversation.model.ConversationMessage::getConversationId,id).last("LIMIT 10001"));
             if(transcript.size()>10000 || transcript.stream().anyMatch(message->message.getEndMs()!=null && message.getEndMs()>media.durationMs()))
                 throw IqcException.invalidArgument("转写区间超过实际音频时长");
-            ConversationAudioStorage.Stored stored;
-            try(var bytes=Files.newInputStream(staging)){stored=storage.save(bytes);}
+            var identity=new ConversationAudioStorage.Stored(java.util.HexFormat.of().formatHex(digest.digest()),size);
             if(row.getAudioSha256()!=null) {
-                if(!row.getAudioSha256().equals(stored.sha256()) || !metadata(row).equals(new Metadata(id,media.mediaType(),stored.sizeBytes(),media.durationMs())))
+                if(!row.getAudioSha256().equals(identity.sha256()) || !metadata(row).equals(new Metadata(id,media.mediaType(),identity.sizeBytes(),media.durationMs())))
                     throw IqcException.invalidState("已有音频不能替换，请使用新的会话修订");
+                try(var bytes=Files.newInputStream(staging)){storage.save(bytes);}
                 return metadata(row);
             }
+            ConversationAudioStorage.Stored stored;
+            try(var bytes=Files.newInputStream(staging)){stored=storage.save(bytes);}
             if(conversations.bindAudio(id,row.getSourceFingerprint(),stored.sha256(),stored.sizeBytes(),media.mediaType(),media.durationMs())!=1) {
                 var actual=authorized(id);
                 if(!stored.sha256().equals(actual.getAudioSha256()) || !metadata(actual).equals(new Metadata(id,media.mediaType(),stored.sizeBytes(),media.durationMs())))

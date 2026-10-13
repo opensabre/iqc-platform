@@ -40,4 +40,10 @@ class ConversationAudioServiceTest {
  assertThrows(IqcException.class,()->service.upload("c",input));verifyNoInteractions(input,messages);
  assertThrows(IqcException.class,()->service.metadata("c"));assertThrows(IqcException.class,()->service.open("c"));
  }
+ @Test void rejectsReplacementBeforePublishingAnotherDigest() throws Exception {
+ var row=conversations.selectById("c");row.setAudioSha256("0".repeat(64));row.setAudioSizeBytes(16044L);row.setAudioMediaType("audio/wav");row.setAudioDurationMs(1000L);
+ assertThrows(IqcException.class,()->service.upload("c",new ByteArrayInputStream(wav())));
+ try(var files=Files.list(directory)){assertEquals(0,files.count());}
+ verify(conversations,never()).bindAudio(anyString(),anyString(),anyString(),anyLong(),anyString(),anyLong());
+ }
 }
