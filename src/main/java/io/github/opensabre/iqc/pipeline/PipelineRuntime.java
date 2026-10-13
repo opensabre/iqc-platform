@@ -160,11 +160,16 @@ public final class PipelineRuntime implements AutoCloseable {
         JsonNode actual=context.at(condition.pointer()); JsonNode expected=condition.value();
         return switch(condition.operator()) {
             case EXISTS -> !actual.isMissingNode() && !actual.isNull();
-            case EQUALS -> !actual.isMissingNode() && actual.equals(expected);
-            case NOT_EQUALS -> !actual.isMissingNode() && !actual.isNull() && expected!=null && !actual.equals(expected);
+            case EQUALS -> !actual.isMissingNode() && equalValue(actual,expected);
+            case NOT_EQUALS -> !actual.isMissingNode() && !actual.isNull() && expected!=null && !equalValue(actual,expected);
             case GREATER_OR_EQUAL -> actual.isNumber() && expected!=null && expected.isNumber() && actual.decimalValue().compareTo(expected.decimalValue())>=0;
             case LESS_OR_EQUAL -> actual.isNumber() && expected!=null && expected.isNumber() && actual.decimalValue().compareTo(expected.decimalValue())<=0;
         };
+    }
+    /** Scalar numeric equality follows the existing action-condition decimal comparison contract. */
+    private static boolean equalValue(JsonNode actual,JsonNode expected) {
+        return actual.isNumber() && expected!=null && expected.isNumber()
+                ?actual.decimalValue().compareTo(expected.decimalValue())==0:actual.equals(expected);
     }
     private static void validatePointer(String pointer) {
         if(pointer==null || (!pointer.isEmpty() && !pointer.startsWith("/"))) throw new IllegalArgumentException("Expected JSON pointer");

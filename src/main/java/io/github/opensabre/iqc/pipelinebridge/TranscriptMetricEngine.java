@@ -14,9 +14,9 @@ public final class TranscriptMetricEngine implements EngineAdapter {
     private final ObjectMapper json;
     public TranscriptMetricEngine(ObjectMapper json){this.json=Objects.requireNonNull(json);}
     @Override public String type(){return "METRIC";}
-    @Override public NodeResult execute(NodeContext context) throws Exception {
-        if(!VERSION.equals(context.node().version()))throw new IllegalArgumentException("Unsupported transcript metric version");
-        var config=context.node().config();
+    /** Shared publication/execution contract; frozen definitions are resolved by the owning asset service. */
+    public static void validateConfiguration(String version,com.fasterxml.jackson.databind.JsonNode config,FindingDefinition definition) {
+        if(!VERSION.equals(version))throw new IllegalArgumentException("Unsupported transcript metric version");
         if(config==null || !config.isObject())throw new IllegalArgumentException("Metric configuration required");
         var fields=config.fieldNames();
         while(fields.hasNext())if(!Set.of("metric","agentRole","customerRole","findingReference","findingDefinition").contains(fields.next()))
@@ -24,11 +24,18 @@ public final class TranscriptMetricEngine implements EngineAdapter {
         for(String key:List.of("metric","agentRole","customerRole"))
             if(!config.path(key).isTextual() || config.path(key).asText().isBlank() || config.path(key).asText().length()>64)
                 throw new IllegalArgumentException("Transcript metric requires bounded explicit configuration");
-        var metric=TranscriptTimingMetrics.Metric.valueOf(config.path("metric").asText());
-        var definition=json.treeToValue(config.path("findingDefinition"),FindingDefinition.class);
+        TranscriptTimingMetrics.Metric.valueOf(config.path("metric").asText());
+        if(config.path("agentRole").asText().equals(config.path("customerRole").asText()))
+            throw new IllegalArgumentException("Transcript participant roles must differ");
         if(definition==null || definition.valueType()!=Finding.ValueType.NUMBER
                 || !definition.evidenceTypes().isEmpty() && !definition.evidenceTypes().contains(Finding.EvidenceType.METRIC))
             throw new IllegalArgumentException("Metric requires a numeric semantic definition permitting metric evidence");
+    }
+    @Override public NodeResult execute(NodeContext context) throws Exception {
+        var config=context.node().config();
+        var definition=json.treeToValue(config==null?null:config.path("findingDefinition"),FindingDefinition.class);
+        validateConfiguration(context.node().version(),config,definition);
+        var metric=TranscriptTimingMetrics.Metric.valueOf(config.path("metric").asText());
         var manifest=context.variables().get("__messages");
         if(manifest==null || !manifest.isArray() || manifest.size()>10000)
             throw new IllegalArgumentException("Complete trusted transcript manifest required");

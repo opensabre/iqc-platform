@@ -222,6 +222,18 @@ public class PipelineAssetService {
         for(var node:release.pipeline().nodes()) {
             if(node.config()!=null && !node.config().isObject()) throw IqcException.invalidArgument("节点配置必须为对象");
             var config=node.config()==null?json.createObjectNode():(ObjectNode)node.config();
+            if("METRIC".equals(node.type())) {
+                var reference=config.path("findingReference");validateReference(reference);
+                var definition=findings.publishedDefinition(reference.path("id").asText(),reference.path("versionNo").intValue());
+                config.set("findingDefinition",json.valueToTree(definition));
+                try { io.github.opensabre.iqc.pipelinebridge.TranscriptMetricEngine.validateConfiguration(node.version(),config,definition); }
+                catch(IllegalArgumentException invalid) {throw IqcException.invalidArgument("转写指标配置、版本或事实定义无效");}
+                codes.add(definition.code());
+                nodes.add(new PipelineDefinition.Node(node.nodeId(),node.type(),node.name(),
+                        io.github.opensabre.iqc.pipelinebridge.TranscriptMetricEngine.VERSION,node.dependsOn(),node.inputMapping(),
+                        config,node.condition(),node.timeoutMs(),node.retries(),node.onError(),node.fallbackNodeId(),node.outputSchema(),node.enabled()));
+                continue;
+            }
             var allowed=Set.of("ruleReference","findingReference","agentReference","inputScope","phase","ruleSnapshot","findingDefinition","agentSnapshot");
             for(var field:config.properties()) if(!allowed.contains(field.getKey())) throw IqcException.invalidArgument("当前引擎不支持该节点配置字段");
             var ref=config.path("ruleReference"); validateReference(ref);
@@ -303,6 +315,17 @@ public class PipelineAssetService {
                 release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));
         if(!requireExecutionAvailability)return;
         for(var node:release.pipeline().nodes()) {
+            if("METRIC".equals(node.type())) {
+                var config=node.config();var reference=config.path("findingReference");validateReference(reference);
+                findings.publishedDefinitionForExecution(reference.path("id").asText(),reference.path("versionNo").intValue());
+                try {
+                    io.github.opensabre.iqc.pipelinebridge.TranscriptMetricEngine.validateConfiguration(node.version(),config,
+                            json.treeToValue(config.path("findingDefinition"),FindingDefinition.class));
+                } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException invalid) {
+                    throw IqcException.invalidState("已发布转写指标冻结定义无效");
+                }
+                continue;
+            }
             var config=node.config(); var rule=config.path("ruleSnapshot"); var current=rules.selectById(rule.path("id").asText());
             if(current==null || "DISABLED".equals(current.getStatus())) throw IqcException.invalidState("流水线依赖规则已停用");
             // Check reference availability while retaining the frozen body.
@@ -315,7 +338,7 @@ public class PipelineAssetService {
     }
     private void validateReference(JsonNode reference) {
         if(!reference.isObject() || !reference.path("id").isTextual() || reference.path("id").asText().isBlank()
-                || !reference.path("versionNo").isIntegralNumber() || reference.path("versionNo").asInt()<1)
+                || !reference.path("versionNo").isIntegralNumber() || !reference.path("versionNo").canConvertToInt() || reference.path("versionNo").asInt()<1)
             throw IqcException.invalidArgument("节点必须引用明确的资产ID和正整数版本");
     }
     private PipelineAsset require(String id,boolean lock) {
