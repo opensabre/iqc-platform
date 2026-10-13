@@ -11,3 +11,7 @@
 原ItemMapping两个可选谓词已接入，严格阈值字符串解码拒绝JSON数值/布尔隐式转换；38位精度/18位小数/64字符上限。生产、评测、BusinessItemReviewEvaluator及ActionProductionSourceValidator/DecisionRevisionService均复用原PipelineDecisionEvaluator，不新建评分记录或事实副本。发布及执行可用性检查匹配冻结NUMBER/BOOLEAN类型，历史只读结构路径保持。前端阈值文本直接保存，不通过JSON.parse或Number转换。42291首轮后端编译与12196 vue-tsc/Vite均退出0；最后严格解码编译和真实来源/重算/评分/权限与浏览器验收待，未新增运行测试/SQL/部署。
 
 最终后端17518离线skipTests test-compile退出0，日志/tmp/iqc-numeric-decisions-wire-compile.log。原事实单位不变，阈值按原值单位比较，不进行秒/毫秒或比例/百分数自动换算。前端启用谓词后默认空阈值，必须显式输入；清空适用事实同步清除其谓词，避免隐藏的旧比较残留。最后UI构建及真实验收结果以交接为准。
+
+## B 真实处理后会话执行验证
+
+2026-10-13 合并ce01863后31193退出0：ProcessedConversationPipelineTest四项及ParallelPipelineRuntimeTest四项，共8项通过。实际Metric/Session、原并行Runtime、PipelineConversationEvaluator、FindingFusion及InspectionScoring运行；Task lease Mapper为替身。指标值100与阈值字符串100/99.999999999999999999比较分别产出PASS/FAIL及100/90分，原数值保持100；生产/评测事实和评分一致，声明参与者缺失保持UNKNOWN及PENDING。该结果不证明真实数据库发布/物化、供应商或浏览器验收。数值适用条件、纯政策重算及更多未知/错误状态验收仍待。

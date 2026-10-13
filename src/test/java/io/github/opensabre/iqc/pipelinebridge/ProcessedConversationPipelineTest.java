@@ -78,6 +78,22 @@ class ProcessedConversationPipelineTest {
             assertEquals(PipelineAssetService.hash(evaluator.executionInput(messages,context).toString()),production.inputHash());
         }
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"100","99.999999999999999999"})
+    void exactMetricThresholdControlsBusinessScoreWithoutChangingRawMetric(String threshold) throws Exception {
+        var base=release();
+        var numeric=new PipelineRelease(base.schemaVersion(),base.pipeline(),base.fusion(),base.scoring(),List.of(
+                new PipelineRelease.ItemMapping("offer-check","GAP_MS",SchemeDefinition.HitMeaning.COMPLIANCE,null,
+                        new PipelineRelease.NumericPredicate(PipelineDefinition.Operator.LESS_OR_EQUAL,threshold),null)));
+        var messages=List.of(message("customer",1,"customer","question",0,100),message("agent",2,"agent","offer",200,300));
+        try(var runtime=new PipelineRuntime(List.of(new TranscriptMetricEngine(json),new SessionAggregationEngine(json)),2,4)){
+            var result=evaluator(runtime).evaluate(task(),numeric,messages,PipelineRuntime.Mode.PRODUCTION,json.createObjectNode());
+            boolean pass=threshold.equals("100");
+            assertEquals(pass?InspectionScoring.ItemStatus.PASS:InspectionScoring.ItemStatus.FAIL,result.items().getFirst().status());
+            assertEquals(0,result.scoring().finalScore().compareTo(new java.math.BigDecimal(pass?"100":"90")));
+            assertEquals(100,result.run().variables().get("timing_value").intValue());
+        }
+    }
     @Test void missingRequiredSessionParticipantRemainsUnknownAndBusinessScorePending() throws Exception {
         var messages=List.of(message("customer",1,"customer","offer",0,100));
         try(var runtime=new PipelineRuntime(List.of(new TranscriptMetricEngine(json),new SessionAggregationEngine(json)),2,4)){
