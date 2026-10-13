@@ -41,10 +41,24 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
         @Override public JsonNode configuration(){return configuration.deepCopy();}
         public int effectiveAdapterVersion(){return adapterVersion==null?1:adapterVersion;}
     }
-    public record Condition(Kind kind,String code,JsonNode value,List<Condition> children) {
+    public record Condition(Kind kind,String code,JsonNode value,List<Condition> children,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.DecimalThresholdDeserializer.class)
+            String decimalOperand) {
+        public Condition(Kind kind,String code,JsonNode value,List<Condition> children) {
+            this(kind,code,value,children,null);
+        }
         public Condition {
             Objects.requireNonNull(kind);children=children==null?List.of():List.copyOf(children);
             value=value==null || value.isNull()?null:value.deepCopy();
+            JsonNode effective=value;
+            if(decimalOperand!=null) {
+                if(value!=null || !Set.of(Kind.FINDING_EQUALS,Kind.LABEL_EQUALS,Kind.BUSINESS_EQUALS,Kind.FINAL_SCORE_BELOW).contains(kind))
+                    throw new IllegalArgumentException("Exact decimal requires a numeric comparison and null value");
+                new io.github.opensabre.iqc.pipelineasset.PipelineRelease.NumericPredicate(
+                        io.github.opensabre.iqc.pipeline.PipelineDefinition.Operator.EQUALS,decimalOperand);
+                effective=com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.numberNode(new BigDecimal(decimalOperand));
+            }
             boolean group=kind==Kind.ALL || kind==Kind.ANY || kind==Kind.NOT;
             if(group) {
                 if(code!=null || value!=null || children.isEmpty() || children.size()>100
@@ -55,7 +69,7 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
                 if(kind==Kind.ALWAYS) {
                     if(code!=null || value!=null)throw new IllegalArgumentException("ALWAYS cannot contain operands");
                 } else {
-                    if(value==null || !value.isValueNode() || value.toString().length()>4096)
+                    if(effective==null || !effective.isValueNode() || effective.toString().length()>4096)
                         throw new IllegalArgumentException("Action leaf requires a bounded scalar");
                     if(kind==Kind.FINDING_EQUALS || kind==Kind.FINDING_STATE || kind==Kind.ITEM_STATUS)ActionPolicy.code(code);
                     else if(kind==Kind.LABEL_EQUALS || kind==Kind.BUSINESS_EQUALS)contextPointer(code,kind==Kind.LABEL_EQUALS?2:0);
@@ -65,7 +79,7 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
                         case ITEM_STATUS -> enumValue(InspectionScoring.ItemStatus.class,value);
                         case RISK_AT_LEAST -> enumValue(Finding.Severity.class,value);
                         case FINAL_SCORE_BELOW -> {
-                            if(!value.isNumber() || value.decimalValue().precision()>38 || Math.abs((long)value.decimalValue().scale())>18)
+                            if(!effective.isNumber() || effective.decimalValue().precision()>38 || Math.abs((long)effective.decimalValue().scale())>18)
                                 throw new IllegalArgumentException("Action score threshold invalid");
                         }
                         case RESULT_STATUS -> {
@@ -79,6 +93,10 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
             bounds(children,1,new int[]{1});
         }
         @Override public JsonNode value(){return value==null?null:value.deepCopy();}
+        @com.fasterxml.jackson.annotation.JsonIgnore
+        public JsonNode operand() {
+            return decimalOperand==null?value():com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.numberNode(new BigDecimal(decimalOperand));
+        }
     }
     public record Context(Map<String,FindingFusion.Result> findings,Map<String,InspectionScoring.ItemStatus> items,
                           InspectionScoring.ScoreStatus scoreStatus,BigDecimal finalScore,String riskLevel,String resultStatus,
@@ -118,15 +136,15 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
             case FINDING_EQUALS -> {
                 var fact=context.findings().get(condition.code());
                 if(fact==null || fact.state()!=Finding.State.KNOWN || fact.value()==null)yield Match.UNKNOWN;
-                var actual=fact.value();var expected=condition.value();
+                var actual=fact.value();var expected=condition.operand();
                 yield truth(actual.isNumber() && expected.isNumber()?actual.decimalValue().compareTo(expected.decimalValue())==0:actual.equals(expected));
             }
             case LABEL_EQUALS -> {
                 var label=context.labels().get(condition.code());
                 yield label==null || label.status()!=io.github.opensabre.iqc.label.FindingLabelProjection.Status.KNOWN
-                        ?Match.UNKNOWN:scalarMatch(label.value(),condition.value());
+                        ?Match.UNKNOWN:scalarMatch(label.value(),condition.operand());
             }
-            case BUSINESS_EQUALS -> scalarMatch(context.businessContext==null?null:context.businessContext.at(condition.code()),condition.value());
+            case BUSINESS_EQUALS -> scalarMatch(context.businessContext==null?null:context.businessContext.at(condition.code()),condition.operand());
             case FINDING_STATE -> {
                 var fact=context.findings().get(condition.code());
                 yield fact==null || fact.state()==null?Match.UNKNOWN:truth(fact.state().name().equals(condition.value().textValue()));
@@ -140,7 +158,7 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
                 yield truth(Finding.Severity.valueOf(context.riskLevel()).compareTo(Finding.Severity.valueOf(condition.value().textValue()))>=0);
             }
             case FINAL_SCORE_BELOW -> context.scoreStatus()!=InspectionScoring.ScoreStatus.FINAL || context.finalScore()==null
-                    ?Match.UNKNOWN:truth(context.finalScore().compareTo(condition.value().decimalValue())<0);
+                    ?Match.UNKNOWN:truth(context.finalScore().compareTo(condition.operand().decimalValue())<0);
             case RESULT_STATUS -> context.resultStatus()==null?Match.UNKNOWN:truth(context.resultStatus().equals(condition.value().textValue()));
         };
     }
