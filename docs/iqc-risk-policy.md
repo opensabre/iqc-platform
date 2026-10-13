@@ -16,4 +16,4 @@ LABEL_EQUALS仅引用已声明的标签值绑定，路径按JSON pointer转义`~
 
 评测使用Gold快照businessContext并校验执行输入摘要；生产动作核对从原prepared input取上下文；重算复用ProductionInputSnapshotService公开messages与validateResult，核验原执行摘要后取上下文。没有原上下文的旧结果不读取当前档案，字段条件保持未知。原Context六参数构造、riskDecision/riskLevel三参数入口保留，默认空标签/空上下文。
 
-配置界面复用原条件编辑器与选择器数值保真检查；标签选项来自当前政策绑定，业务字段用冻结上下文路径。普通动作编辑器不提供新叶子，动作发布仍拒绝。无法在前端精确保存的JSON数值拒绝输入/加载编辑，需沿现有类型化API维护；不悄悄舍入，但完整高精度可视化维护仍是待办。同步修复原列表编辑入口只认可串行schema，允许重新打开已保存并行草稿。后台80224修正公开入口后的skipTests test-compile已terminal exit0，UI16016首轮build exit0，最终UI构建仍待终态；未新增运行测试/SQL/部署，不等于DB/API/浏览器验收。
+配置界面复用原条件编辑器与选择器数值保真检查；标签选项来自当前政策绑定，业务字段用冻结上下文路径。普通动作编辑器不提供新叶子，动作发布仍拒绝。无法在前端精确保存的JSON数值拒绝输入/加载编辑，暂不提供直接维护；不悄悄舍入，但完整高精度参数端到端保存/冻结/恢复及可视化维护仍是待办。同步修复原列表编辑入口只认可串行schema，允许重新打开已保存并行草稿。后台80224修正公开入口后的skipTests test-compile已terminal exit0，UI16016首轮build exit0，最终UI构建仍待终态；未新增运行测试/SQL/部署，不等于DB/API/浏览器验收。
