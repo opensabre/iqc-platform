@@ -90,6 +90,28 @@ public final class DlsEngine {
         List<ConversationMessage> ordered = messages.stream()
                 .sorted(Comparator.comparing(message -> message.getSequenceNo() == null ? Integer.MAX_VALUE : message.getSequenceNo()))
                 .toList();
+        return evaluateEntry(compiled, scanHits(compiled, ordered, Integer.MAX_VALUE, Long.MAX_VALUE), ordered.size());
+    }
+
+    /** Session aggregation shares the exact original matcher; count means distinct matched messages. */
+    public static SessionEvaluation evaluateSession(Compiled compiled, List<ConversationMessage> messages, String countDefinition) {
+        if (messages == null || messages.isEmpty() || messages.size() > 10000)
+            throw new IllegalArgumentException("Session requires 1 to 10000 complete messages");
+        if (countDefinition != null && !compiled.rulePatterns().containsKey(countDefinition))
+            throw new IllegalArgumentException("Session count must reference an existing RULE definition");
+        if ((long) compiled.rulePatterns().size() * messages.size() > 1000000)
+            throw new IllegalArgumentException("Session matching workload exceeds one million rule/message pairs");
+        var ordered = messages.stream().sorted(Comparator.comparing(ConversationMessage::getSequenceNo)).toList();
+        var hits = scanHits(compiled, ordered, 10000, 1000000);
+        var counted = new LinkedHashMap<String, Hit>();
+        if (countDefinition != null) for (var hit : hits.get(countDefinition)) counted.putIfAbsent(hit.messageId(), hit);
+        return new SessionEvaluation(evaluateEntry(compiled, hits, ordered.size()), counted.size(), List.copyOf(counted.values()));
+    }
+    public record SessionEvaluation(Evaluation entry, long matchedMessageCount, List<Hit> countedEvidence) { }
+
+    private static Map<String, List<Hit>> scanHits(Compiled compiled, List<ConversationMessage> ordered,
+            int maximumHits, long maximumMatchedCharacters) {
+        int totalHits = 0; long matchedCharacters = 0;
         Map<String, List<Hit>> hits = new LinkedHashMap<>();
         Map<String, DlsRuleDocument.Definition> definitions = new LinkedHashMap<>();
         compiled.document().definitions().forEach(definition -> definitions.put(definition.name(), definition));
@@ -97,10 +119,15 @@ public final class DlsEngine {
             DlsRuleDocument.Definition definition = definitions.get(entry.getKey());
             List<Hit> ruleHits = new ArrayList<>();
             for (int index = 0; index < ordered.size(); index++) {
+                if (maximumHits < Integer.MAX_VALUE && Thread.currentThread().isInterrupted())
+                    throw new IllegalStateException("Session scan interrupted");
                 ConversationMessage message = ordered.get(index);
                 if (!roleMatches(definition.targetRole(), message.getSpeakerRole())) continue;
                 Matcher matcher = entry.getValue().matcher(message.getContent() == null ? "" : message.getContent());
                 while (matcher.find()) {
+                    if (totalHits >= maximumHits || matcher.end() - matcher.start() > maximumMatchedCharacters - matchedCharacters)
+                        throw new IllegalArgumentException("Session match evidence exceeds configured bounds");
+                    totalHits++; matchedCharacters += matcher.end() - matcher.start();
                     ruleHits.add(new Hit(entry.getKey(), message.getId(), message.getSequenceNo(), index,
                             matcher.start(), matcher.end(), matcher.group()));
                     if (matcher.start() == matcher.end() && matcher.end() == message.getContent().length()) break;
@@ -108,8 +135,11 @@ public final class DlsEngine {
             }
             hits.put(entry.getKey(), List.copyOf(ruleHits));
         }
+        return Map.copyOf(hits);
+    }
+    private static Evaluation evaluateEntry(Compiled compiled, Map<String, List<Hit>> hits, int messageCount) {
         for (String clause : splitTopLevel(compiled.document().entryExpression(), ';')) {
-            ClauseEvaluation evaluation = evaluateClause(clause, hits, ordered.size());
+            ClauseEvaluation evaluation = evaluateClause(clause, hits, messageCount);
             if (evaluation.hit()) return new Evaluation(true, evaluation.evidence(), "DLS 最终规则命中");
         }
         return new Evaluation(false, List.of(), "DLS 最终规则未命中");
