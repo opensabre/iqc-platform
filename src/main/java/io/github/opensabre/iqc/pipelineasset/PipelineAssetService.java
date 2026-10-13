@@ -234,7 +234,9 @@ public class PipelineAssetService {
                         config,node.condition(),node.timeoutMs(),node.retries(),node.onError(),node.fallbackNodeId(),node.outputSchema(),node.enabled()));
                 continue;
             }
-            var allowed=Set.of("ruleReference","findingReference","agentReference","inputScope","phase","ruleSnapshot","findingDefinition","agentSnapshot");
+            boolean session="SESSION".equals(node.type());
+            var allowed=session?Set.of("ruleReference","findingReference","aggregation","countDefinition","ruleSnapshot","findingDefinition")
+                    :Set.of("ruleReference","findingReference","agentReference","inputScope","phase","ruleSnapshot","findingDefinition","agentSnapshot");
             for(var field:config.properties()) if(!allowed.contains(field.getKey())) throw IqcException.invalidArgument("当前引擎不支持该节点配置字段");
             var ref=config.path("ruleReference"); validateReference(ref);
             String ruleId=ref.path("id").asText(); int number=ref.path("versionNo").asInt();
@@ -245,6 +247,7 @@ public class PipelineAssetService {
                     .eq(io.github.opensabre.iqc.rule.model.QualityRuleVersion::getStatus,"PUBLISHED"));
             if(current==null || "DISABLED".equals(current.getStatus()) || version==null) throw IqcException.invalidArgument("节点必须引用可用的已发布规则版本");
             String type="LLM".equalsIgnoreCase(version.getRuleType())?"LLM":"DLS".equalsIgnoreCase(version.getRuleType())?"DLS":"RULE";
+            if(session && "DLS".equals(type))type="SESSION";
             if(!type.equals(node.type())) throw IqcException.invalidArgument("节点引擎与规则类型不一致");
             if(!Set.of("DIRECT","REVIEW","VERIFY").contains(config.path("phase").asText("DIRECT"))
                     || !Set.of("MESSAGE","CONVERSATION").contains(config.path("inputScope").asText("RULE".equals(type)?"MESSAGE":"CONVERSATION")))
@@ -254,9 +257,13 @@ public class PipelineAssetService {
             config.set("ruleSnapshot",frozen);
             var findingRef=config.path("findingReference"); validateReference(findingRef);
             FindingDefinition definition=findings.publishedDefinition(findingRef.path("id").asText(),findingRef.path("versionNo").asInt());
-            if(definition.valueType()!=Finding.ValueType.BOOLEAN) throw IqcException.invalidArgument("当前规则适配器仅输出布尔事实，其他类型需对应引擎");
+            if(!session && definition.valueType()!=Finding.ValueType.BOOLEAN) throw IqcException.invalidArgument("当前规则适配器仅输出布尔事实，其他类型需对应引擎");
             config.set("findingDefinition",json.valueToTree(definition)); codes.add(definition.code());
             config.remove("agentSnapshot");
+            if(session) {
+                try {io.github.opensabre.iqc.pipelinebridge.SessionAggregationEngine.validateConfiguration(json,node.version(),config,definition);}
+                catch(IllegalArgumentException invalid){throw IqcException.invalidArgument("会话聚合版本、配置或事实定义无效");}
+            }
             if("LLM".equals(type)) {
                 var agentRef=config.path("agentReference"); validateReference(agentRef); String agentId=agentRef.path("id").asText();
                 var agent=agents.selectById(agentId);
@@ -272,8 +279,14 @@ public class PipelineAssetService {
                 catch(com.fasterxml.jackson.core.JsonProcessingException ex) { throw IqcException.invalidArgument("智能体配置无效"); }
                 var body=(ObjectNode)json.valueToTree(av); body.put("id",agentId); config.set("agentSnapshot",body);
             }
-            nodes.add(new PipelineDefinition.Node(node.nodeId(),node.type(),node.name(),String.valueOf(number),node.dependsOn(),
+            nodes.add(new PipelineDefinition.Node(node.nodeId(),node.type(),node.name(),session?io.github.opensabre.iqc.pipelinebridge.SessionAggregationEngine.VERSION:String.valueOf(number),node.dependsOn(),
                     node.inputMapping(),config,node.condition(),node.timeoutMs(),node.retries(),node.onError(),node.fallbackNodeId(),node.outputSchema(),node.enabled()));
+        }
+        var findingTypes=labelFindingTypes(new PipelineDefinition(release.pipeline().schemaVersion(),nodes));
+        for(var item:release.items()) {
+            if(findingTypes.get(item.findingCode())!=Finding.ValueType.BOOLEAN
+                    || item.appliesWhenFindingCode()!=null && findingTypes.get(item.appliesWhenFindingCode())!=Finding.ValueType.BOOLEAN)
+                throw IqcException.invalidArgument("当前评分项目及适用条件必须引用布尔事实，数值事实不能直接作为命中判断");
         }
         for(var item:release.items()) if(!codes.contains(item.findingCode())
                 || item.appliesWhenFindingCode()!=null && !codes.contains(item.appliesWhenFindingCode()))
@@ -285,7 +298,7 @@ public class PipelineAssetService {
             release.labelPolicy().validateReferences(codes);
             if(labelPolicies==null)throw IqcException.invalidState("标签目录冻结服务未配置");
             labelPolicy=labelPolicies.getObject().freeze(release.labelPolicy());
-            labelPolicy.validateFindingTypes(labelFindingTypes(new PipelineDefinition(release.pipeline().schemaVersion(),nodes)));
+            labelPolicy.validateFindingTypes(findingTypes);
         }
         io.github.opensabre.iqc.label.FindingLabelActionConfiguration.validateDeclaredActions(release.actionPolicy(),labelPolicy);
         var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes),release.fusion(),release.scoring(),release.items(),release.publicationGate(),release.actionPolicy(),labelPolicy);
@@ -330,6 +343,12 @@ public class PipelineAssetService {
             if(current==null || "DISABLED".equals(current.getStatus())) throw IqcException.invalidState("流水线依赖规则已停用");
             // Check reference availability while retaining the frozen body.
             var ref=config.path("findingReference"); findings.publishedDefinitionForExecution(ref.path("id").asText(),ref.path("versionNo").asInt());
+            if("SESSION".equals(node.type())) {
+                validateReference(config.path("ruleReference"));validateReference(ref);
+                try {io.github.opensabre.iqc.pipelinebridge.SessionAggregationEngine.validateConfiguration(json,node.version(),config,
+                        json.treeToValue(config.path("findingDefinition"),FindingDefinition.class));}
+                catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException invalid){throw IqcException.invalidState("已发布会话聚合冻结定义无效");}
+            }
             if("LLM".equals(node.type())) {
                 var agent=agents.selectById(config.path("agentSnapshot").path("id").asText());
                 if(agent==null || "DISABLED".equals(agent.getStatus())) throw IqcException.invalidState("流水线智能体已停用");

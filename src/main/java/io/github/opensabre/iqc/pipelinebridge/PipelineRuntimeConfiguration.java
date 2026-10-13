@@ -13,6 +13,6 @@ public class PipelineRuntimeConfiguration {
     public PipelineRuntime pipelineRuntime(ObjectMapper json,ObjectProvider<InspectionExecutionService> detector,
             @Value("${iqc.pipeline.max-workers:16}") int workers,@Value("${iqc.pipeline.max-queued:128}") int queued) {
         return new PipelineRuntime(List.of(new FrozenDetectorEngine("RULE",json,detector),new FrozenDetectorEngine("DLS",json,detector),
-                new FrozenDetectorEngine("LLM",json,detector),new TranscriptMetricEngine(json)),workers,queued);
+                new FrozenDetectorEngine("LLM",json,detector),new TranscriptMetricEngine(json),new SessionAggregationEngine(json)),workers,queued);
     }
 }
