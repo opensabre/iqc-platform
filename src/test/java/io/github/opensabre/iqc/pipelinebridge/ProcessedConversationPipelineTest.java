@@ -94,6 +94,38 @@ class ProcessedConversationPipelineTest {
             assertEquals(100,result.run().variables().get("timing_value").intValue());
         }
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void numericApplicabilityDistinguishesFalseFromUnknown(boolean missingTiming) throws Exception {
+        var base=release();
+        var conditional=new PipelineRelease(base.schemaVersion(),base.pipeline(),base.fusion(),base.scoring(),List.of(
+                new PipelineRelease.ItemMapping("offer-check","OFFER",SchemeDefinition.HitMeaning.COMPLIANCE,"GAP_MS",null,
+                        new PipelineRelease.NumericPredicate(PipelineDefinition.Operator.GREATER_OR_EQUAL,"101"))));
+        var customer=message("customer",1,"customer","question",0,100);
+        if(missingTiming){customer.setStartMs(null);customer.setEndMs(null);}
+        var messages=List.of(customer,message("agent",2,"agent","offer",200,300));
+        try(var runtime=new PipelineRuntime(List.of(new TranscriptMetricEngine(json),new SessionAggregationEngine(json)),2,4)){
+            var result=evaluator(runtime).evaluate(task(),conditional,messages,PipelineRuntime.Mode.PRODUCTION,json.createObjectNode());
+            assertEquals(missingTiming?InspectionScoring.ItemStatus.REVIEW_REQUIRED:InspectionScoring.ItemStatus.NOT_APPLICABLE,
+                    result.items().getFirst().status());
+            assertEquals(missingTiming?InspectionScoring.ScoreStatus.PENDING:InspectionScoring.ScoreStatus.NOT_APPLICABLE,
+                    result.scoring().scoreStatus());assertNull(result.scoring().finalScore());
+            assertTrue(result.run().variables().get("session_value").booleanValue());
+        }
+    }
+    @Test void numericPolicyRecalculationReusesOriginalFusedFactsAfterRuntimeCloses() throws Exception {
+        PipelineConversationEvaluator.Evaluation original;var base=release();
+        try(var runtime=new PipelineRuntime(List.of(new TranscriptMetricEngine(json),new SessionAggregationEngine(json)),2,4)){
+            original=evaluator(runtime).evaluate(task(),base,List.of(message("customer",1,"customer","question",0,100),
+                    message("agent",2,"agent","offer",200,300)),PipelineRuntime.Mode.PRODUCTION,json.createObjectNode());
+        }
+        var mapping=List.of(new PipelineRelease.ItemMapping("offer-check","GAP_MS",SchemeDefinition.HitMeaning.COMPLIANCE,null,
+                new PipelineRelease.NumericPredicate(PipelineDefinition.Operator.LESS_THAN,"100"),null));
+        var recalculated=PipelineDecisionEvaluator.evaluate(base.scoring(),mapping,original.fusion());
+        assertEquals(0,recalculated.finalScore().compareTo(new java.math.BigDecimal("90")));
+        assertEquals(0,original.scoring().finalScore().compareTo(new java.math.BigDecimal("100")));
+        assertEquals(100,original.run().variables().get("timing_value").intValue());
+    }
     @Test void missingRequiredSessionParticipantRemainsUnknownAndBusinessScorePending() throws Exception {
         var messages=List.of(message("customer",1,"customer","offer",0,100));
         try(var runtime=new PipelineRuntime(List.of(new TranscriptMetricEngine(json),new SessionAggregationEngine(json)),2,4)){
