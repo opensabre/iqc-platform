@@ -8,6 +8,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Verifies advanced business scoring without invoking detection again. */
 class AdvancedInspectionScoringTest {
     @Test
+    void tinyAdjustmentBelowHalfCentNeverBecomesHalfCentThroughIntermediateRounding() {
+        var advanced = new Advanced(Advanced.SCHEMA, "0", "100",
+                List.of(new ItemAdjustment("a", "1", "0.004999999999999999", "0", null, null)),
+                List.of(), List.of());
+        var policy = new Policy(ADVANCED_VERSION, Mode.POINTS, 100, 50,
+                List.of(new Item("a", 1, false), new Item("b", 1, false)), advanced);
+        var result = evaluate(policy, List.of(new Decision("a", ItemStatus.PASS), new Decision("b", ItemStatus.FAIL)));
+        assertThat(result.finalScore()).isEqualByComparingTo("50.00");
+        assertThat(result.advanced().rawNumerator()).isEqualByComparingTo("100.009999999999999998");
+        assertThat(result.advanced().rawDenominator()).isEqualByComparingTo("2");
+    }
+
+    @Test
     void frozenBusinessConditionDistinguishesMissingNonmatchingAndMatchingInput() throws Exception {
         var json = new com.fasterxml.jackson.databind.ObjectMapper();
         var condition = new io.github.opensabre.iqc.action.ActionPolicy.Condition(
