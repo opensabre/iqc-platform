@@ -130,6 +130,7 @@ class ProcessedConversationPipelineTest {
         var messages=List.of(message("customer",1,"customer","offer",0,100));
         try(var runtime=new PipelineRuntime(List.of(new TranscriptMetricEngine(json),new SessionAggregationEngine(json)),2,4)){
             var result=evaluator(runtime).evaluate(task(),release(),messages,PipelineRuntime.Mode.PRODUCTION,json.createObjectNode());
+            assertEquals(PipelineRuntime.Status.SUCCESS,result.run().status(),()->"Session applicability run: "+result.run().trace());
             var fact=result.run().findings().stream().filter(value->value.code().equals("OFFER")).findFirst().orElseThrow();
             assertEquals(Finding.State.UNKNOWN,fact.state());assertNull(fact.value());assertTrue(fact.evidence().isEmpty());
             assertFalse(result.run().variables().containsKey("session_value"));
