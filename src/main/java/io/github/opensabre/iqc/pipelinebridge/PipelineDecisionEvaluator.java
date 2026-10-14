@@ -43,6 +43,22 @@ public final class PipelineDecisionEvaluator {
             List<PipelineRelease.ItemMapping> mappings, List<FindingFusion.Result> facts) {
         return InspectionScoring.evaluate(policy, decisions(mappings, facts));
     }
+    public static InspectionScoring.Result evaluate(PipelineRelease release,List<FindingFusion.Result> facts,
+            com.fasterxml.jackson.databind.JsonNode businessContext) {
+        var decisions=decisions(release.items(),facts);
+        return InspectionScoring.evaluate(release.scoring(),decisions,release.scoring().advanced()==null?null:inputContext(release,facts,decisions,businessContext));
+    }
+    public static io.github.opensabre.iqc.action.ActionPolicy.Context inputContext(PipelineRelease release,List<FindingFusion.Result> facts,
+            List<InspectionScoring.Decision> decisions,com.fasterxml.jackson.databind.JsonNode businessContext) {
+        var byCode=new LinkedHashMap<String,FindingFusion.Result>();facts.forEach(fact->{if(byCode.putIfAbsent(fact.code(),fact)!=null)throw new IllegalArgumentException("Duplicate decision finding code");});
+        var statuses=new LinkedHashMap<String,InspectionScoring.ItemStatus>();decisions.forEach(value->statuses.put(value.itemCode(),value.status()));
+        var labels=new LinkedHashMap<String,io.github.opensabre.iqc.label.FindingLabelProjection.Projection>();
+        if(release.labelPolicy()!=null)for(var binding:release.labelPolicy().bindings()) {
+            var projection=io.github.opensabre.iqc.label.FindingLabelProjection.project(release.labelPolicy().projectionBinding(binding),byCode.get(binding.findingCode()));
+            labels.put(io.github.opensabre.iqc.label.FindingLabelPolicy.bindingAddress(binding),projection);
+        }
+        return new io.github.opensabre.iqc.action.ActionPolicy.Context(byCode,statuses,InspectionScoring.ScoreStatus.PENDING,null,null,null,labels,businessContext);
+    }
     public static io.github.opensabre.iqc.pipelineasset.RiskPolicy.Decision riskDecision(PipelineRelease release,
             List<FindingFusion.Result> facts,InspectionScoring.Result score) {
         return riskDecision(release,facts,score,null);
@@ -50,14 +66,8 @@ public final class PipelineDecisionEvaluator {
     public static io.github.opensabre.iqc.pipelineasset.RiskPolicy.Decision riskDecision(PipelineRelease release,
             List<FindingFusion.Result> facts,InspectionScoring.Result score,com.fasterxml.jackson.databind.JsonNode businessContext) {
         if(release.riskPolicy()==null)return null;
-        var byCode=new LinkedHashMap<String,FindingFusion.Result>();facts.forEach(fact->{if(byCode.putIfAbsent(fact.code(),fact)!=null)throw new IllegalArgumentException("Duplicate risk finding code");});
-        var statuses=new LinkedHashMap<String,InspectionScoring.ItemStatus>();decisions(release.items(),facts).forEach(value->statuses.put(value.itemCode(),value.status()));
-        var labels=new LinkedHashMap<String,io.github.opensabre.iqc.label.FindingLabelProjection.Projection>();
-        if(release.labelPolicy()!=null)for(var binding:release.labelPolicy().bindings()) {
-            var projection=io.github.opensabre.iqc.label.FindingLabelProjection.project(release.labelPolicy().projectionBinding(binding),byCode.get(binding.findingCode()));
-            labels.put(io.github.opensabre.iqc.label.FindingLabelPolicy.bindingAddress(binding),projection);
-        }
-        return release.riskPolicy().evaluate(new io.github.opensabre.iqc.action.ActionPolicy.Context(byCode,statuses,score.scoreStatus(),score.finalScore(),null,null,labels,businessContext));
+        var inputs=inputContext(release,facts,decisions(release.items(),facts),businessContext);
+        return release.riskPolicy().evaluate(new io.github.opensabre.iqc.action.ActionPolicy.Context(inputs.findings(),inputs.items(),score.scoreStatus(),score.finalScore(),null,null,inputs.labels(),businessContext));
     }
     public static String riskLevel(PipelineRelease release,List<FindingFusion.Result> facts,InspectionScoring.Result score) {
         return riskLevel(release,facts,score,null);

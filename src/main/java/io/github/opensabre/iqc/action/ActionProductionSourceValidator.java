@@ -122,7 +122,7 @@ public class ActionProductionSourceValidator {
             var raw=new ArrayList<Finding>();
             trace.fusion().forEach(fact->raw.addAll(fact.rawFindings()));
             var fused=FindingFusion.fuse(raw,release.fusion());
-            var score=PipelineDecisionEvaluator.evaluate(release.scoring(),release.items(),fused);
+            var score=PipelineDecisionEvaluator.evaluate(release,fused,prepared.businessContext(reference.conversationId()));
             var decisions=new java.util.HashMap<String,InspectionScoring.ItemStatus>();
             PipelineDecisionEvaluator.decisions(release.items(),fused).forEach(value->decisions.put(value.itemCode(),value.status()));
             var seen=new java.util.HashSet<String>();

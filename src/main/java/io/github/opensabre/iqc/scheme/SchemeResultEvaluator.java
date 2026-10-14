@@ -112,10 +112,13 @@ public final class SchemeResultEvaluator {
 
     /** Shared policy boundary for scheme and Pipeline projections; no synthetic scheme is required. */
     public static Evaluation scoreItems(InspectionScoring.Policy policy, List<ItemResult> items) {
+        return scoreItems(policy,items,null);
+    }
+    public static Evaluation scoreItems(InspectionScoring.Policy policy,List<ItemResult> items,io.github.opensabre.iqc.action.ActionPolicy.Context context) {
         Set<String> scored = policy.items().stream().map(InspectionScoring.Item::itemCode).collect(Collectors.toSet());
         var decisions = items.stream().filter(item -> scored.contains(item.itemCode()))
                 .map(item -> new InspectionScoring.Decision(item.itemCode(), item.status())).toList();
-        return new Evaluation(List.copyOf(items), InspectionScoring.evaluate(policy, decisions));
+        return new Evaluation(List.copyOf(items), InspectionScoring.evaluate(policy, decisions,context));
     }
 
     /** Null means a fully evaluated positive gate; only a complete negative gate permits NOT_APPLICABLE. */

@@ -192,7 +192,7 @@ public class PipelineEvaluationService {
                 || !PipelineAssetService.hash(evaluator.executionInput(convert(member.gold()), member.gold().businessContext()).toString()).equals(actual.inputHash()))
             throw IqcException.invalidState("评测模式或运行输入摘要无效");
         BusinessItemReviewEvaluator.evaluatePipeline("evaluation", prepared.release(), actual, actual.items(), List.of(),
-                member.gold().messages().stream().map(GoldConversation.Message::id).collect(Collectors.toSet()));
+                member.gold().messages().stream().map(GoldConversation.Message::id).collect(Collectors.toSet()),member.gold().businessContext());
         if(!io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.riskLevel(prepared.release(),actual.fusion(),actual.scoring(),member.gold().businessContext()).equals(actual.riskLevel()))
             throw IqcException.invalidState("评测风险投影与冻结事实不一致");
         if(!json.valueToTree(io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.riskDecision(prepared.release(),actual.fusion(),actual.scoring(),member.gold().businessContext())).equals(json.valueToTree(actual.riskDecision())))

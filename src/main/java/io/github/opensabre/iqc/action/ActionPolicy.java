@@ -194,6 +194,16 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
         if(depth>16 || count[0]>100)throw new IllegalArgumentException("Action condition exceeds limits");
         for(var child:children){if(++count[0]>100)throw new IllegalArgumentException("Action condition exceeds limits");bounds(child.children(),depth+1,count);}
     }
+    /** Shared pre-decision input references; consumers cannot read derived decisions recursively. */
+    public static void validateDecisionInputs(Condition condition,Set<String> findings,Set<String> items,Set<String> labels,boolean allowScore) {
+        if(condition.kind()==Kind.RISK_AT_LEAST || condition.kind()==Kind.RESULT_STATUS || !allowScore && condition.kind()==Kind.FINAL_SCORE_BELOW)
+            throw new IllegalArgumentException("Decision condition cannot read derived score/risk/result");
+        if(findings!=null && (condition.kind()==Kind.FINDING_EQUALS || condition.kind()==Kind.FINDING_STATE) && !findings.contains(condition.code())
+                || items!=null && condition.kind()==Kind.ITEM_STATUS && !items.contains(condition.code())
+                || labels!=null && condition.kind()==Kind.LABEL_EQUALS && !labels.contains(condition.code()))
+            throw new IllegalArgumentException("Decision condition references undeclared input");
+        condition.children().forEach(child->validateDecisionInputs(child,findings,items,labels,allowScore));
+    }
     private static void validateReferences(Condition condition,Set<String> findings,Set<String> items) {
         if(condition.kind()==Kind.LABEL_EQUALS || condition.kind()==Kind.BUSINESS_EQUALS)
             throw new IllegalArgumentException("Frozen context conditions are currently risk policy only");

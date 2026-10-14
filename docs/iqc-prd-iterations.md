@@ -329,3 +329,10 @@ CREATE_RISK_EVENT v1引用原冻结生产结果/动作账本，稳定幂等事�
 - 同一Condition追加可选decimalOperand字符串，value须null，沿原严格String解码/NumericPredicate校验/BigDecimal比较；四类数值条件可用，组/状态/文本条件拒绝。原快照/恢复/Hash保存文本，无框架或全局Jackson修改，无新语言/表。
 - 原四参数构造及null字段省略兼容，原条件值入口不改。配置界面显式数值模式，复用原阈值校验并消除重复验证，原JSON数值保真保护保留。
 - 61909 backend skipTests test-compile与48952 UI build运行中，终态见协作记录；完整HTTP/DB/浏览器/真实运行与其它全部需求继续，未新增运行测试/SQL/部署。
+
+## 2026-10-14 V3复杂评分首批
+
+- 原InspectionScoring追加advanced/V3：精确权重与正负调整、整体/维度上下限和覆盖、三态条件、否决、等级映射；旧V2不变。不造表/事实/语言，不重跑检测或动作。
+- 原生产/评测/复核/政策重算/动作来源/业务CSV使用同一冻结输入纯投影；修复METRIC/LLM空规则字段在复核/Trace被错误拒绝，按真实冻结节点证明，不伪造规则。原配置/结果/复核/Trace面板接维度/等级/加权与调整，精确字符串及BigInt校验复用。
+- POINTS直接精确分子/分母一次舍入，保留原始分子分母，近似rawScore不决定最终分/等级。26573最终backend skipTests test-compile退出0；UI15425/36971已通过，最终复核校验构建待终态。
+- 无新增运行测试/SQL/部署；真实发布/Task/HTTP/DB/复核/重算/源证明/CSV/浏览器/旧Scheme发布及全部其它PRD继续，不标记全目标完成。
