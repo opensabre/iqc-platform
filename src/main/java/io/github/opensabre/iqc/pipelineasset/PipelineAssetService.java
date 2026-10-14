@@ -234,6 +234,14 @@ public class PipelineAssetService {
                         config,node.condition(),node.timeoutMs(),node.retries(),node.onError(),node.fallbackNodeId(),node.outputSchema(),node.enabled()));
                 continue;
             }
+            if("SKILL_API".equals(node.type())) {
+                freezeSkillApi(config,node.version());
+                codes.add(config.path("findingDefinition").path("code").asText());
+                nodes.add(new PipelineDefinition.Node(node.nodeId(),node.type(),node.name(),
+                        io.github.opensabre.iqc.pipelinebridge.SkillApiDetectorEngine.VERSION,node.dependsOn(),node.inputMapping(),
+                        config,node.condition(),node.timeoutMs(),node.retries(),node.onError(),node.fallbackNodeId(),node.outputSchema(),node.enabled()));
+                continue;
+            }
             boolean session="SESSION".equals(node.type());
             var allowed=session?Set.of("ruleReference","findingReference","aggregation","countDefinition","ruleSnapshot","findingDefinition")
                     :Set.of("ruleReference","findingReference","agentReference","inputScope","phase","ruleSnapshot","findingDefinition","agentSnapshot");
@@ -351,6 +359,17 @@ public class PipelineAssetService {
                 }
                 continue;
             }
+            if("SKILL_API".equals(node.type())) {
+                var config=node.config();
+                try {io.github.opensabre.iqc.pipelinebridge.SkillApiDetectorEngine.validateConfiguration(node.version(),config);}
+                catch(IllegalArgumentException invalid){throw IqcException.invalidState("Skill/API冻结协议无效");}
+                var reference=config.path("findingReference");validateReference(reference);
+                findings.publishedDefinitionForExecution(reference.path("id").asText(),reference.path("versionNo").intValue());
+                var agent=agents.selectById(config.path("agentReference").path("id").asText());
+                if(agent==null || "DISABLED".equals(agent.getStatus()))throw IqcException.invalidState("Skill/API智能体已停用");
+                agentAssets.validateDetectionCapabilities(config.path("skillSnapshot").path("id").asText(),config.path("mcpSnapshot").path("id").asText());
+                continue;
+            }
             var config=node.config(); var rule=config.path("ruleSnapshot"); var current=rules.selectById(rule.path("id").asText());
             if(current==null || "DISABLED".equals(current.getStatus())) throw IqcException.invalidState("流水线依赖规则已停用");
             // Check reference availability while retaining the frozen body.
@@ -366,6 +385,44 @@ public class PipelineAssetService {
                 if(agent==null || "DISABLED".equals(agent.getStatus())) throw IqcException.invalidState("流水线智能体已停用");
             }
         }
+    }
+    /** Freezes Skill/MCP bodies from one published Agent version without remote inspection or latest substitution. */
+    private void freezeSkillApi(ObjectNode config,String version) {
+        var allowed=Set.of("agentReference","skillReference","mcpReference","findingReference","toolName",
+                "toolInputSchema","toolOutputSchema","skillSnapshot","mcpSnapshot","findingDefinition");
+        for(var field:config.properties())if(!allowed.contains(field.getKey()))throw IqcException.invalidArgument("Skill/API不支持该配置字段");
+        var agentRef=config.path("agentReference");validateReference(agentRef);
+        var current=agents.selectById(agentRef.path("id").asText());
+        var published=agentVersions.selectOne(Wrappers.<io.github.opensabre.iqc.agent.model.QualityAgentVersion>lambdaQuery()
+                .eq(io.github.opensabre.iqc.agent.model.QualityAgentVersion::getAgentId,agentRef.path("id").asText())
+                .eq(io.github.opensabre.iqc.agent.model.QualityAgentVersion::getVersionNo,agentRef.path("versionNo").intValue())
+                .eq(io.github.opensabre.iqc.agent.model.QualityAgentVersion::getStatus,"PUBLISHED"));
+        if(current==null || "DISABLED".equals(current.getStatus()) || published==null)throw IqcException.invalidArgument("Skill/API须引用可用已发布智能体版本");
+        var agentConfig=parse(published.getConfigJson());
+        if(!"3.0".equals(agentConfig.path("schemaVersion").asText()))throw IqcException.invalidArgument("Skill/API须使用新版冻结能力资产");
+        config.set("skillSnapshot",frozenCapability(agentConfig.path("assetSnapshots").path("skills"),config.path("skillReference")));
+        config.set("mcpSnapshot",frozenCapability(agentConfig.path("assetSnapshots").path("mcpServers"),config.path("mcpReference")));
+        agentAssets.validateDetectionCapabilities(config.path("skillSnapshot").path("id").asText(),config.path("mcpSnapshot").path("id").asText());
+        var reference=config.path("findingReference");validateReference(reference);
+        config.set("findingDefinition",json.valueToTree(findings.publishedDefinition(reference.path("id").asText(),reference.path("versionNo").intValue())));
+        try {
+            io.github.opensabre.iqc.pipelinebridge.SkillApiDetectorEngine.validateConfiguration(version,config);
+            var skill=config.path("skillSnapshot");
+            io.github.opensabre.iqc.pipeline.ValueSchema.validateSchema(json.readTree(skill.path("inputSchemaJson").asText()));
+            io.github.opensabre.iqc.pipeline.ValueSchema.validateSchema(json.readTree(skill.path("outputSchemaJson").asText()));
+        } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException invalid) {
+            throw IqcException.invalidArgument("Skill/API冻结版本或结构化协议无效");
+        }
+    }
+    private JsonNode frozenCapability(JsonNode assets,JsonNode reference) {
+        validateReference(reference);
+        if(!assets.isArray())throw IqcException.invalidArgument("智能体缺少冻结能力资产");
+        var matching=new ArrayList<JsonNode>();
+        for(var asset:assets)if(reference.path("id").asText().equals(asset.path("id").asText())
+                && asset.path("versionNo").isIntegralNumber() && asset.path("versionNo").canConvertToInt()
+                && reference.path("versionNo").intValue()==asset.path("versionNo").intValue())matching.add(asset);
+        if(matching.size()!=1)throw IqcException.invalidArgument("能力引用必须匹配智能体中唯一的冻结版本");
+        return matching.getFirst().deepCopy();
     }
     private void validateReference(JsonNode reference) {
         if(!reference.isObject() || !reference.path("id").isTextual() || reference.path("id").asText().isBlank()

@@ -11,8 +11,9 @@ import java.util.List;
 public class PipelineRuntimeConfiguration {
     @Bean(destroyMethod="close")
     public PipelineRuntime pipelineRuntime(ObjectMapper json,ObjectProvider<InspectionExecutionService> detector,
+            io.github.opensabre.iqc.result.llm.SnapshotMcpToolProvider mcpTools,
             @Value("${iqc.pipeline.max-workers:16}") int workers,@Value("${iqc.pipeline.max-queued:128}") int queued) {
         return new PipelineRuntime(List.of(new FrozenDetectorEngine("RULE",json,detector),new FrozenDetectorEngine("DLS",json,detector),
-                new FrozenDetectorEngine("LLM",json,detector),new TranscriptMetricEngine(json),new SessionAggregationEngine(json)),workers,queued);
+                new FrozenDetectorEngine("LLM",json,detector),new TranscriptMetricEngine(json),new SessionAggregationEngine(json),new SkillApiDetectorEngine(json,mcpTools)),workers,queued);
     }
 }

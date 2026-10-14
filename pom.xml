@@ -104,6 +104,12 @@
             <artifactId>mcp-core</artifactId>
             <version>0.14.0</version>
         </dependency>
+        <!-- MCP core exposes the JSON SPI; HTTP transports need its matching runtime implementation. -->
+        <dependency>
+            <groupId>io.modelcontextprotocol.sdk</groupId>
+            <artifactId>mcp-json-jackson2</artifactId>
+            <version>0.14.0</version>
+        </dependency>
         <dependency>
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-ooxml</artifactId>

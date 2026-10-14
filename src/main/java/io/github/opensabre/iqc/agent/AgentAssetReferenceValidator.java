@@ -20,9 +20,15 @@ public class AgentAssetReferenceValidator {
         requireEnabledModel(config.primaryModelProfileId());
         distinct(config.fallbackModelProfileIds()).forEach(this::requireEnabledModel);
         if (!AgentConfiguration.CAPABILITY_SCHEMA.equals(config.schemaVersion()) && !"AGENT_LLM".equals(config.mode())) return;
-        distinct(config.mcpServerIds()).forEach(id -> { var item=mcps.selectById(id); if(item==null||!"ENABLED".equals(item.getStatus())) throw IqcException.invalidState("MCP 不存在或已停用: "+id); });
-        distinct(config.skillIds()).forEach(id -> { var item=skills.selectById(id); if(item==null||!"ENABLED".equals(item.getStatus())) throw IqcException.invalidState("Skill 不存在或已停用: "+id); });
+        distinct(config.mcpServerIds()).forEach(this::requireEnabledMcp);
+        distinct(config.skillIds()).forEach(this::requireEnabledSkill);
     }
+    /** Checks current availability without replacing the caller's frozen Skill/MCP version bodies. */
+    public void validateDetectionCapabilities(String skillId,String mcpId) {
+        requireEnabledSkill(skillId);requireEnabledMcp(mcpId);
+    }
+    private void requireEnabledMcp(String id) {var item=mcps.selectById(id);if(item==null||!"ENABLED".equals(item.getStatus()))throw IqcException.invalidState("MCP 不存在或已停用: "+id);}
+    private void requireEnabledSkill(String id) {var item=skills.selectById(id);if(item==null||!"ENABLED".equals(item.getStatus()))throw IqcException.invalidState("Skill 不存在或已停用: "+id);}
     /** Resolves enabled references into a secret-free immutable Agent asset snapshot. */
     public AssetSnapshots snapshot(AgentConfiguration config) {
         validate(config);
