@@ -21,7 +21,7 @@ public final class ExternalActionDestinations {
             if(connectTimeoutMs<1 || requestTimeoutMs<connectTimeoutMs || requestTimeoutMs>60000
                     || maximumResponseBytes<1 || maximumResponseBytes>65536)
                 throw new IllegalArgumentException("Destination transport limits are invalid");
-            if(bearerTokenEnvironmentVariable!=null && !bearerTokenEnvironmentVariable.matches("[A-Z][A-Z0-9_]{0,127}"))
+            if(bearerTokenEnvironmentVariable!=null && !bearerTokenEnvironmentVariable.matches("[A-Z][A-Z0-9_]{1,127}"))
                 throw new IllegalArgumentException("Destination secret reference is invalid");
         }
         /** Only a verified idempotency key is appended; no caller-controlled URL or path is accepted. */

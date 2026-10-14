@@ -1,6 +1,7 @@
 package io.github.opensabre.iqc.action;
 
 import io.github.opensabre.iqc.shared.IqcDataScope;
+import io.github.opensabre.iqc.result.llm.SecretReferenceResolver;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -14,7 +15,7 @@ public class ExternalActionBeans {
     @Bean ExternalActionDestinations externalActionDestinations(ExternalActionProperties properties) {
         return new ExternalActionDestinations(properties.destinations());
     }
-    @Bean HttpExternalActionTransport httpExternalActionTransport() { return new HttpExternalActionTransport(); }
+    @Bean HttpExternalActionTransport httpExternalActionTransport(SecretReferenceResolver secrets) { return new HttpExternalActionTransport(secrets); }
     @Bean ExternalActionAdapter webhookActionAdapter(ExternalActionPreparationService preparation,
             ExternalActionDestinations destinations,HttpExternalActionTransport transport,IqcDataScope scope) {
         return new ExternalActionAdapter(ActionExecutionContract.Type.WEBHOOK,preparation,destinations,transport,scope);

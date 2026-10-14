@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.StreamReadConstraints;
 import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.opensabre.iqc.result.llm.SecretReferenceResolver;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.time.Duration;
@@ -23,12 +24,13 @@ public final class HttpExternalActionTransport {
     private final Function<String,String> secrets;
 
     /** Clients are reused per immutable destination, with redirect following disabled. */
-    public HttpExternalActionTransport() {
+    public HttpExternalActionTransport(SecretReferenceResolver resolver) {
+        Objects.requireNonNull(resolver);
         var cache = new ConcurrentHashMap<ExternalActionDestinations.Destination,HttpClient>();
         clients = destination -> cache.computeIfAbsent(destination, profile -> HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(profile.connectTimeoutMs()))
                 .followRedirects(HttpClient.Redirect.NEVER).build());
-        secrets = System::getenv;
+        secrets = variable -> resolver.resolve("env:" + variable);
     }
 
     HttpExternalActionTransport(Function<ExternalActionDestinations.Destination,HttpClient> clients,

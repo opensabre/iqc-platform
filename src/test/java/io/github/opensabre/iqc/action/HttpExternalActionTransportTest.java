@@ -18,6 +18,12 @@ class HttpExternalActionTransportTest {
     private final ObjectMapper json = new ObjectMapper();
     private final HttpClient client = mock(HttpClient.class);
     private final HttpExternalActionTransport transport = new HttpExternalActionTransport(d -> client, name -> "secret");
+    @Test void productionConstructorReusesExistingSecretReferenceBeforeAnyNetwork() {
+        var reference=new java.util.concurrent.atomic.AtomicReference<String>();
+        var production=new HttpExternalActionTransport(name->{reference.set(name);return null;});
+        assertEquals(ActionExecutionContract.Outcome.UNKNOWN,production.send(request(),configuration(),destination(1000)).outcome());
+        assertEquals("env:IQC_RECEIVER_TOKEN",reference.get());
+    }
     private ActionAdapter.Request request() {
         var source = new ActionExecutionContract.Source("task", "execution", "conversation", "result", "result",
                 SelectorAssetService.hash("{}"), "webhook", "alice");

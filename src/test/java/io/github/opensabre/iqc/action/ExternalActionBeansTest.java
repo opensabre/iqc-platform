@@ -10,6 +10,7 @@ import static org.mockito.Mockito.*;
 class ExternalActionBeansTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withUserConfiguration(ExternalActionBeans.class)
+            .withBean(io.github.opensabre.iqc.result.llm.SecretReferenceResolver.class,()->mock(io.github.opensabre.iqc.result.llm.SecretReferenceResolver.class))
             .withBean(ExternalActionPreparationService.class,()->mock(ExternalActionPreparationService.class))
             .withBean(IqcDataScope.class,()->mock(IqcDataScope.class));
     private String[] profile() {
@@ -35,6 +36,7 @@ class ExternalActionBeansTest {
             assertNull(context.getStartupFailure());
             var adapters=context.getBeansOfType(ExternalActionAdapter.class);
             assertEquals(3,adapters.size());
+            verifyNoInteractions(context.getBean(io.github.opensabre.iqc.result.llm.SecretReferenceResolver.class));
             assertEquals(java.util.Set.of(ActionExecutionContract.Type.WEBHOOK,
                     ActionExecutionContract.Type.CREATE_WORK_ORDER,ActionExecutionContract.Type.CREATE_COACHING_TASK),
                     adapters.values().stream().map(adapter->adapter.definition().type()).collect(java.util.stream.Collectors.toSet()));
