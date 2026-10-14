@@ -155,6 +155,7 @@ public class BatchResultQueryService {
             if ((long) ids.size() * release.items().size() > 50_000)
                 throw IqcException.invalidArgument("业务导出最多50000行，请缩小任务范围");
             var csv = new StringBuilder("\uFEFF任务ID,流水线ID,发布版本,草稿修订,快照哈希,任务类型,会话ID,原始结果ID,执行实例,评分状态,会话最终分（勿按行求和）,评分政策版本,评分方式,质检项编码,质检项名称,判定,项目绑定规则ID,项目绑定规则版本,规则字段含义,计分贡献,一票否决,事实编码,事实状态,确定事实值JSON,选中事实ID,选中检测节点,项目证据消息ID,融合保留证据JSON（含未选中候选）\n");
+            if(release.scoring().advanced()!=null){int column=csv.indexOf("计分贡献");csv.replace(column,column+"计分贡献".length(),"配置贡献（未加权）");csv.setLength(csv.length()-1);csv.append(",整体原始分,整体等级,项目权重,加权基准贡献,额外调整贡献,评分适用匹配,评分状态,维度编码,维度状态,维度最终分\n");}
             long bytes = csv.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
             for (String id : ids) {
                 var canonical = latestCanonical(task, id);
@@ -170,7 +171,8 @@ public class BatchResultQueryService {
                             .select(ConversationMessage::getId).eq(ConversationMessage::getConversationId, id)).stream()
                             .map(ConversationMessage::getId).collect(Collectors.toSet());
                     var checked = io.github.opensabre.iqc.quality.BusinessItemReviewEvaluator.evaluatePipeline(
-                            canonical.getId(), release, trace, original, List.of(), allowed);
+                            canonical.getId(), release, trace, original, List.of(), allowed,
+                            io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.validatedBusinessContext(task,snapshot,trace,id,objectMapper));
                     score = checked.original().scoring();
                     var saved = objectMapper.readValue(canonical.getScoringResultJson(), InspectionScoring.Result.class);
                     if (!objectMapper.valueToTree(score).equals(objectMapper.valueToTree(saved))
@@ -203,6 +205,16 @@ public class BatchResultQueryService {
                             fact == null ? "" : String.join(";", fact.selectedIds()), String.join(";", selectedNodes),
                             item == null ? "" : objectMapper.writeValueAsString(item.matchedMessageIds()),
                             fact == null ? "" : objectMapper.writeValueAsString(fact.evidence())};
+                    if(release.scoring().advanced()!=null) {
+                        var advanced=score==null?null:score.advanced();
+                        var weighted=advanced==null?null:advanced.lines().stream().filter(value->mapping.itemCode().equals(value.itemCode())).findFirst().orElse(null);
+                        var dimension=weighted==null || weighted.dimensionCode()==null?null:advanced.dimensions().stream().filter(value->weighted.dimensionCode().equals(value.code())).findFirst().orElse(null);
+                        var extended=new ArrayList<Object>(java.util.Arrays.asList(cells));
+                        extended.addAll(java.util.Arrays.asList(advanced==null?null:advanced.rawScore(),advanced==null?null:advanced.grade(),weighted==null?null:weighted.weight(),
+                                weighted==null?null:weighted.baseContribution(),weighted==null?null:weighted.adjustment(),weighted==null?null:weighted.applicability(),weighted==null?null:weighted.status(),
+                                weighted==null?null:weighted.dimensionCode(),dimension==null?null:dimension.scoreStatus(),dimension==null?null:dimension.finalScore()));
+                        cells=extended.toArray();
+                    }
                     String row = java.util.Arrays.stream(cells).map(value -> InspectionExecutionService.row(value == null ? "" : value.toString()))
                             .collect(Collectors.joining(",")) + "\n";
                     bytes += row.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;

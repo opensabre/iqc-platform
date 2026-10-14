@@ -40,18 +40,32 @@ public final class BusinessItemReviewEvaluator {
     }
 
     /** Frozen display binding; actual Pipeline detector provenance remains in Finding/Fusion traces. */
-    public record ItemContract(String itemCode, String name, String ruleId, int ruleVersionNo) { }
+    public record ItemContract(String itemCode,String name,String ruleId,int ruleVersionNo,
+            String detectorNodeId,String detectorType,String detectorVersion) {
+        public ItemContract(String itemCode,String name,String ruleId,int ruleVersionNo){this(itemCode,name,ruleId,ruleVersionNo,null,null,null);}
+        boolean validSource() {
+            if(ruleId==null)return false;
+            if(!ruleId.isBlank() && ruleVersionNo>0)return true;
+            return ruleId.isEmpty() && ruleVersionNo==0 && detectorNodeId!=null && !detectorNodeId.isBlank()
+                    && Set.of("METRIC","LLM").contains(java.util.Objects.toString(detectorType,"")) && detectorVersion!=null && !detectorVersion.isBlank();
+        }
+    }
 
     public static Projection evaluateFrozen(String sourceResultId, InspectionScoring.Policy policy,
             List<ItemContract> contracts, List<SchemeResultEvaluator.ItemResult> originalItems,
             List<Decision> decisions, Set<String> conversationMessageIds) {
+        return evaluateFrozen(sourceResultId,policy,contracts,originalItems,decisions,conversationMessageIds,null);
+    }
+    public static Projection evaluateFrozen(String sourceResultId,InspectionScoring.Policy policy,
+            List<ItemContract> contracts,List<SchemeResultEvaluator.ItemResult> originalItems,List<Decision> decisions,
+            Set<String> conversationMessageIds,io.github.opensabre.iqc.action.ActionPolicy.Context context) {
         if (sourceResultId == null || sourceResultId.isBlank() || policy == null || contracts == null
                 || originalItems == null || decisions == null || conversationMessageIds == null)
             throw IqcException.invalidArgument("复核必须指定原始结果、冻结政策和项目结论");
         Map<String, ItemContract> expected = new HashMap<>();
         for (var item : contracts) {
             if (item == null || item.itemCode() == null || item.itemCode().isBlank() || item.name() == null
-                    || item.ruleId() == null || item.ruleId().isBlank() || item.ruleVersionNo() < 1
+                    || !item.validSource()
                     || expected.putIfAbsent(item.itemCode(), item) != null)
                 throw IqcException.invalidState("冻结复核项目损坏或重复");
         }
@@ -96,8 +110,8 @@ public final class BusinessItemReviewEvaluator {
             reviewed.add(decision == null ? machine.getLast() : new SchemeResultEvaluator.ItemResult(item.itemCode(),
                     configured.name(), item.ruleId(), item.ruleVersionNo(), decision.finalStatus(), decision.evidenceMessageIds()));
         }
-        return new Projection(sourceResultId, SchemeResultEvaluator.scoreItems(policy, machine),
-                SchemeResultEvaluator.scoreItems(policy, reviewed), List.copyOf(normalized));
+        return new Projection(sourceResultId, SchemeResultEvaluator.scoreItems(policy, machine,context),
+                SchemeResultEvaluator.scoreItems(policy, reviewed,context), List.copyOf(normalized));
     }
 
     /** Validates the stored machine facts before applying a separate human business-item overlay. */
@@ -106,6 +120,12 @@ public final class BusinessItemReviewEvaluator {
             io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation trace,
             List<SchemeResultEvaluator.ItemResult> originalItems, List<Decision> decisions,
             Set<String> conversationMessageIds) {
+        return evaluatePipeline(sourceResultId,release,trace,originalItems,decisions,conversationMessageIds,null);
+    }
+    public static Projection evaluatePipeline(String sourceResultId,io.github.opensabre.iqc.pipelineasset.PipelineRelease release,
+            io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation trace,
+            List<SchemeResultEvaluator.ItemResult> originalItems,List<Decision> decisions,Set<String> conversationMessageIds,
+            com.fasterxml.jackson.databind.JsonNode businessContext) {
         if (release == null || trace == null || !"iqc-pipeline-execution-v1".equals(trace.schemaVersion())
                 || trace.run() == null || trace.run().status() == null || trace.mode() == null || trace.inputHash() == null || trace.fusion() == null || trace.items() == null || trace.scoring() == null
                 || originalItems == null || !originalItems.equals(trace.items()))
@@ -146,9 +166,12 @@ public final class BusinessItemReviewEvaluator {
                     node.config().path("findingDefinition").path("code").asText())).findFirst()
                     .orElseThrow(() -> IqcException.invalidState("流水线业务项缺少冻结事实生产者"));
             var rule = producer.config().path("ruleSnapshot");
-            return new ItemContract(mapping.itemCode(), mapping.itemCode(), rule.path("id").asText(), rule.path("versionNo").asInt());
+            return new ItemContract(mapping.itemCode(),mapping.itemCode(),rule.path("id").asText(),rule.path("versionNo").asInt(),
+                    producer.nodeId(),producer.type(),producer.version());
         }).toList();
-        var projection = evaluateFrozen(sourceResultId, release.scoring(), contracts, originalItems, decisions, conversationMessageIds);
+        var projection = evaluateFrozen(sourceResultId, release.scoring(), contracts, originalItems, decisions, conversationMessageIds,
+                release.scoring().advanced()==null?null:io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.inputContext(release,fusion,
+                        originalItems.stream().map(item->new InspectionScoring.Decision(item.itemCode(),item.status())).toList(),businessContext));
         if (!projection.original().scoring().equals(trace.scoring()))
             throw IqcException.invalidState("流水线机器评分与冻结政策不一致");
         return projection;

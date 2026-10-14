@@ -165,6 +165,15 @@ public class ProductionInputSnapshotService {
         if(!io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(input.toString()).equals(evaluated.inputHash()))
             throw IqcException.invalidState("生产执行输入摘要与冻结文本/上下文不一致");
     }
+    /** Read-only decision context reuses the original persisted-input and result fingerprint checks. */
+    public static JsonNode validatedBusinessContext(InspectionTask task,JsonNode snapshot,
+            io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation trace,String conversationId,ObjectMapper json) {
+        var validator=new ProductionInputSnapshotService(null,null,null,json);
+        var prepared=validator.prepare(task,snapshot);
+        if(prepared==null)return null;
+        validator.validateResult(task,snapshot,prepared.messages().get(conversationId),trace,prepared);
+        return prepared.businessContext(conversationId);
+    }
     public Prepared prepare(InspectionTask task,JsonNode snapshot){
         if(!hasSnapshot(snapshot))return null;
         if(task==null)throw IqcException.invalidState("生产冻结输入缺少任务");

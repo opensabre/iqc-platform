@@ -361,6 +361,11 @@ public class BusinessItemReviewService {
             var decisions = checked.decisions().stream().collect(Collectors.toMap(BusinessItemReviewEvaluator.Decision::itemCode, item -> item));
             var machineScore = checked.original().scoring();
             var reviewedScore = checked.reviewed().scoring();
+            if(machineScore.advanced()!=null || reviewedScore.advanced()!=null){
+                int machineColumn=csv.indexOf("机器计分贡献");csv.replace(machineColumn,machineColumn+"机器计分贡献".length(),"机器配置贡献（未加权）");
+                int reviewedColumn=csv.indexOf("人工计分贡献");csv.replace(reviewedColumn,reviewedColumn+"人工计分贡献".length(),"人工配置贡献（未加权）");
+                csv.setLength(csv.length()-1);csv.append(",机器等级,人工等级,机器复杂评分JSON,人工复杂评分JSON\n");
+            }
             var machineLines = machineScore.lines().stream().collect(Collectors.toMap(io.github.opensabre.iqc.scoring.InspectionScoring.Line::itemCode, line -> line));
             var reviewedLines = reviewedScore.lines().stream().collect(Collectors.toMap(io.github.opensabre.iqc.scoring.InspectionScoring.Line::itemCode, line -> line));
             for (int index = 0; index < checked.reviewed().items().size(); index++) {
@@ -369,7 +374,7 @@ public class BusinessItemReviewService {
                 var decision = decisions.get(item.itemCode());
                 var machineLine = machineLines.get(item.itemCode());
                 var reviewedLine = reviewedLines.get(item.itemCode());
-                appendCsv(csv, task.getId(), task.getName(), result.getConversationId(), result.getId(), result.getExecutionId(),
+                Object[] cells=new Object[]{task.getId(), task.getName(), result.getConversationId(), result.getId(), result.getExecutionId(),
                         review.getId(), review.getReviewRevision(), review.getStatus(), review.getSourceHash(), review.getReviewerId(),
                         review.getReviewedTime(), review.getRequestComment(), review.getReviewComment(), machineScore.policyVersion(),
                         machineScore.mode(), machineScore.scoreStatus(), exportScore(machineScore), reviewedScore.scoreStatus(), exportScore(reviewedScore),
@@ -382,7 +387,16 @@ public class BusinessItemReviewService {
                         machineLine == null ? null : machineLine.vetoTriggered(), reviewedLine == null ? null : reviewedLine.vetoTriggered(),
                         pipelineMarker.path("pipelineId").asText(""), pipelineMarker.path("versionNo").asText(""),
                         pipelineMarker.path("draftRevision").asText(""), pipelineMarker.path("contentHash").asText(""),
-                        "冻结项目绑定；检测来源见执行轨迹");
+                        "冻结项目绑定；检测来源见执行轨迹"};
+                if(machineScore.advanced()!=null || reviewedScore.advanced()!=null){
+                    var extended=new java.util.ArrayList<Object>(java.util.Arrays.asList(cells));
+                    extended.add(machineScore.advanced()==null?null:machineScore.advanced().grade());
+                    extended.add(reviewedScore.advanced()==null?null:reviewedScore.advanced().grade());
+                    extended.add(machineScore.advanced()==null?null:mapper.writeValueAsString(machineScore.advanced()));
+                    extended.add(reviewedScore.advanced()==null?null:mapper.writeValueAsString(reviewedScore.advanced()));
+                    cells=extended.toArray();
+                }
+                appendCsv(csv,cells);
             }
             return csv.toString();
         } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
@@ -455,7 +469,8 @@ public class BusinessItemReviewService {
         if (snapshot.has("pipelineSnapshot")) {
             var release = pipelineRelease(snapshot);
             var trace = mapper.readValue(result.getExecutionTraceJson(), io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation.class);
-            return BusinessItemReviewEvaluator.evaluatePipeline(result.getId(), release, trace, original, decisions, allowed);
+            return BusinessItemReviewEvaluator.evaluatePipeline(result.getId(), release, trace, original, decisions, allowed,
+                    io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.validatedBusinessContext(task,snapshot,trace,result.getConversationId(),mapper));
         }
         return BusinessItemReviewEvaluator.evaluate(result.getId(), SchemeResultEvaluator.definition(snapshot, mapper), original, decisions, allowed);
     }

@@ -91,20 +91,20 @@ public class DecisionRevisionService {
             var raw = new ArrayList<Finding>();
             trace.fusion().forEach(value -> raw.addAll(value.rawFindings()));
             var originalFusion = FindingFusion.fuse(raw,release.fusion());
-            var originalScore = PipelineDecisionEvaluator.evaluate(release.scoring(),release.items(),originalFusion);
-            if (!json.valueToTree(originalFusion).equals(json.valueToTree(trace.fusion()))
-                    || !json.valueToTree(originalScore).equals(json.valueToTree(trace.scoring()))
-                    || !json.valueToTree(originalScore).equals(json.readTree(result.getScoringResultJson()))
-                    || !originalScore.scoreStatus().name().equals(result.getScoreStatus())
-                    || (originalScore.finalScore() == null ? result.getFinalScore() != null
-                    : result.getFinalScore() == null || originalScore.finalScore().compareTo(result.getFinalScore()) != 0))
-                throw IqcException.invalidState("源事实或评分快照不一致");
             var preparedInput=inputs.prepare(task,snapshot);
             com.fasterxml.jackson.databind.JsonNode businessContext=null;
             if(preparedInput!=null) {
                 inputs.validateResult(task,snapshot,preparedInput.messages().get(result.getConversationId()),trace,preparedInput);
                 businessContext=preparedInput.businessContext(result.getConversationId());
             }
+            var originalScore = PipelineDecisionEvaluator.evaluate(release,originalFusion,businessContext);
+            if (!json.valueToTree(originalFusion).equals(json.valueToTree(trace.fusion()))
+                    || !json.valueToTree(originalScore).equals(json.valueToTree(trace.scoring()))
+                    || !json.valueToTree(originalScore).equals(json.valueToTree(json.readerFor(InspectionScoring.Result.class).with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).readValue(result.getScoringResultJson())))
+                    || !originalScore.scoreStatus().name().equals(result.getScoreStatus())
+                    || (originalScore.finalScore() == null ? result.getFinalScore() != null
+                    : result.getFinalScore() == null || originalScore.finalScore().compareTo(result.getFinalScore()) != 0))
+                throw IqcException.invalidState("源事实或评分快照不一致");
             var originalRiskDecision=PipelineDecisionEvaluator.riskDecision(release,originalFusion,originalScore,businessContext);
             String originalRisk=PipelineDecisionEvaluator.riskLevel(release,originalFusion,originalScore,businessContext);
             if(!Objects.equals(originalRisk,trace.riskLevel()) || !Objects.equals(originalRisk,result.getRiskLevel())
@@ -113,7 +113,7 @@ public class DecisionRevisionService {
             var target = assets.publishedRelease(targetPipelineId,targetVersion);
             var fusion = FindingFusion.fuse(raw,target.release().fusion());
             var decisions = PipelineDecisionEvaluator.decisions(target.release().items(),fusion);
-            var score = InspectionScoring.evaluate(target.release().scoring(),decisions);
+            var score = PipelineDecisionEvaluator.evaluate(target.release(),fusion,businessContext);
             String sourceHash = hash(Arrays.asList(task.getRuleSnapshotJson(),result.getId(),
                     result.getExecutionTraceJson(),result.getBusinessItemResultsJson(),result.getScoringResultJson()));
             var projection = new Projection("iqc-decision-revision-v1",resultId,sourceHash,originalScore,fusion,decisions,score,

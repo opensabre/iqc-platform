@@ -299,6 +299,7 @@ public class PipelineAssetService {
             labelPolicy=labelPolicies.getObject().freeze(release.labelPolicy());
             labelPolicy.validateFindingTypes(findingTypes);
         }
+        release.scoring().validateReferences(codes,release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()),labelPolicy);
         io.github.opensabre.iqc.label.FindingLabelActionConfiguration.validateDeclaredActions(release.actionPolicy(),labelPolicy);
         var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes),release.fusion(),release.scoring(),release.items(),release.publicationGate(),release.actionPolicy(),labelPolicy,release.riskPolicy());
         runtime.validate(frozen.pipeline()); return frozen;
@@ -331,6 +332,8 @@ public class PipelineAssetService {
                 release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()));
         if(release.riskPolicy()!=null)release.riskPolicy().validateReferences(release.pipeline().nodes().stream()
                 .map(node->node.config().path("findingDefinition").path("code").asText()).collect(java.util.stream.Collectors.toSet()),
+                release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()),release.labelPolicy());
+        release.scoring().validateReferences(release.pipeline().nodes().stream().map(node->node.config().path("findingDefinition").path("code").asText()).collect(java.util.stream.Collectors.toSet()),
                 release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()),release.labelPolicy());
         if(!requireExecutionAvailability)return;
         for(var node:release.pipeline().nodes()) {
