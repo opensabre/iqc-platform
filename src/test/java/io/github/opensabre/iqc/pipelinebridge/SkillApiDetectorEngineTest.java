@@ -76,4 +76,12 @@ class SkillApiDetectorEngineTest {
         assertThatThrownBy(()->engine.execute(context(json.createObjectNode(),vars()))).hasMessageContaining("successful structured MCP output");
         verify(client).close();
     }
+    @Test void wrongInputHashRejectsOtherwiseValidCanonicalOutput() throws Exception {
+        var engine=engine();
+        var output=Map.of("schemaVersion","iqc-skill-response-v1","skillId","skill","skillVersion",3,"inputHash","wrong",
+                "state","KNOWN","value",true,"reason","Cached record","evidence",List.of(Map.of("reference","record:1")));
+        when(client.callTool(any())).thenReturn(new McpSchema.CallToolResult(List.of(),false,output,null));
+        assertThatThrownBy(()->engine.execute(context(json.createObjectNode(),vars()))).hasMessageContaining("identity differs");
+        verify(client).close();
+    }
 }

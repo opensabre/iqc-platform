@@ -45,8 +45,9 @@ public class SnapshotMcpToolProvider {
     /** Opens exactly one approved detection tool and rejects changed published schemas before calling it. */
     public Session openReadOnlyTool(JsonNode server,String toolName,JsonNode inputSchema,JsonNode outputSchema) {
         if(server==null || !server.isObject() || !server.path("id").isTextual()
+                || !server.path("id").asText().matches("[A-Za-z0-9_-]{1,128}")
                 || !server.path("versionNo").isIntegralNumber() || !server.path("versionNo").canConvertToInt()
-                || server.path("versionNo").intValue()<1 || toolName==null || toolName.isBlank())
+                || server.path("versionNo").intValue()<1 || toolName==null || !toolName.matches("[A-Za-z0-9_.-]{1,128}"))
             throw new IllegalArgumentException("Frozen detection MCP identity required");
         String approval=server.path("id").asText()+":"+server.path("versionNo").intValue()+":"+toolName;
         if(!approvedReadOnlyTools.contains(approval) || !allowedTools(server.path("allowedToolsJson").asText("[]")).contains(toolName))
