@@ -24,7 +24,7 @@ class SkillApiDetectorEngineTest {
             @Override protected McpSyncClient createClient(JsonNode snapshot){return client;}
         });
     }
-    private NodeContext context(JsonNode input,Map<String,JsonNode> vars) throws Exception {
+    NodeContext context(JsonNode input,Map<String,JsonNode> vars) throws Exception {
         var config=json.createObjectNode().put("toolName","inspect");
         config.set("mcpSnapshot",json.createObjectNode().put("id","server").put("versionNo",1).put("allowedToolsJson","[\"inspect\"]"));
         config.set("skillSnapshot",json.createObjectNode().put("id","skill").put("code","CHECK").put("versionNo",3)
@@ -38,7 +38,7 @@ class SkillApiDetectorEngineTest {
                 PipelineDefinition.OnError.FAIL_PIPELINE,null,null,true);
         return new NodeContext(node,input,vars,Map.of(),PipelineRuntime.Mode.EVALUATION,1);
     }
-    private Map<String,JsonNode> vars(){return Map.of("__messages",json.createArrayNode(),"__task",json.createObjectNode().put("currentExecutionId","execution"));}
+    Map<String,JsonNode> vars(){return Map.of("__messages",json.createArrayNode(),"__task",json.createObjectNode().put("currentExecutionId","execution"));}
     @Test void structuredEvidenceProducesFindingWithOriginalExecutionSource() throws Exception {
         var engine=engine();
         var output=Map.of("state","KNOWN","value",true,"reason","Record confirmed","evidence",List.of(Map.of("reference","record:1","details",Map.of("version",2))));
