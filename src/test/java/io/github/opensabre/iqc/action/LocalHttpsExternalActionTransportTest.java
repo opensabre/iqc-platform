@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.security.KeyStore;
 import java.time.Duration;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.net.ssl.KeyManagerFactory;
@@ -54,7 +55,8 @@ class LocalHttpsExternalActionTransportTest {
         final AtomicInteger posts=new AtomicInteger(),gets=new AtomicInteger(),creations=new AtomicInteger(),redirectHits=new AtomicInteger();
         final ConcurrentHashMap<String,ObjectNode> receipts=new ConcurrentHashMap<>();
         volatile ObjectNode lastRequest;
-        volatile boolean loseResponse,redirect;
+        final CountDownLatch bodyStarted=new CountDownLatch(1),releaseBody=new CountDownLatch(1);
+        volatile boolean loseResponse,redirect,oversize,stall;
         Receiver() throws Exception {
             server=HttpsServer.create(new InetSocketAddress("127.0.0.1",0),0);
             server.setHttpsConfigurator(new HttpsConfigurator(tls));
@@ -71,6 +73,16 @@ class LocalHttpsExternalActionTransportTest {
                             .put("resultReference","owned:1"));
                     if(loseResponse)return;
                     if(redirect){exchange.getResponseHeaders().set("Location","/redirect-target");exchange.sendResponseHeaders(302,-1);return;}
+                    if(oversize){
+                        var bytes=new byte[8192];exchange.sendResponseHeaders(200,bytes.length);
+                        try{exchange.getResponseBody().write(bytes);}catch(java.io.IOException cancelled){/* Client may cancel an oversized stream. */}
+                        return;
+                    }
+                    if(stall){
+                        exchange.sendResponseHeaders(200,0);exchange.getResponseBody().write('{');exchange.getResponseBody().flush();bodyStarted.countDown();
+                        try{releaseBody.await(5,TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}
+                        return;
+                    }
                     var bytes=json.writeValueAsBytes(receipt);exchange.sendResponseHeaders(200,bytes.length);exchange.getResponseBody().write(bytes);
                 }
             });
@@ -92,7 +104,7 @@ class LocalHttpsExternalActionTransportTest {
             return new ExternalActionDestinations.Destination("receiver",1,type,URI.create(base+"/events"),URI.create(base+"/receipts/"),5000,15000,4096,"IQC_TEST_TOKEN");
         }
         HttpExternalActionTransport transport(){return new HttpExternalActionTransport(d->client,name->"local-test-secret");}
-        public void close(){server.stop(0);client.close();}
+        public void close(){releaseBody.countDown();server.stop(0);client.close();}
     }
     private ActionAdapter.Request request(ActionExecutionContract.Type type){
         var source=new ActionExecutionContract.Source("task","execution","conversation","result","result",SelectorAssetService.hash("{}"),"external","alice");
@@ -130,6 +142,26 @@ class LocalHttpsExternalActionTransportTest {
             receiver.redirect=true;var request=request(ActionExecutionContract.Type.WEBHOOK);
             assertEquals(ActionExecutionContract.Outcome.UNKNOWN,receiver.transport().send(request,configuration(),receiver.destination(request.adapter().type())).outcome());
             assertEquals(1,receiver.posts.get());assertEquals(0,receiver.redirectHits.get());
+        }
+    }
+    @Test void oversizedRealResponseCannotConfirmOutcome() throws Exception {
+        try(var receiver=new Receiver()){
+            receiver.oversize=true;var request=request(ActionExecutionContract.Type.WEBHOOK);
+            assertEquals(ActionExecutionContract.Outcome.UNKNOWN,receiver.transport().send(request,configuration(),receiver.destination(request.adapter().type())).outcome());
+            assertEquals(1,receiver.posts.get());assertEquals(0,receiver.gets.get());
+        }
+    }
+    @Test void responseBodyStallEndsAtDeadlineAfterHeadersArrive() throws Exception {
+        try(var receiver=new Receiver()){
+            var request=request(ActionExecutionContract.Type.WEBHOOK);var transport=receiver.transport();var normal=receiver.destination(request.adapter().type());
+            assertEquals(ActionExecutionContract.Outcome.CONFIRMED_SUCCESS,transport.send(request,configuration(),normal).outcome());
+            receiver.stall=true;
+            var bounded=new ExternalActionDestinations.Destination(normal.id(),normal.version(),normal.type(),normal.sendUri(),normal.receiptsUri(),1000,1500,4096,normal.bearerTokenEnvironmentVariable());
+            long started=System.nanoTime();
+            assertEquals(ActionExecutionContract.Outcome.UNKNOWN,transport.send(request,configuration(),bounded).outcome());
+            assertTrue(receiver.bodyStarted.await(1,TimeUnit.SECONDS),"Response headers and partial body must actually arrive");
+            assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started)<4500,"Client must finish before the receiver releases its 5-second stalled body");
+            assertEquals(2,receiver.posts.get());assertEquals(0,receiver.gets.get());
         }
     }
 }
