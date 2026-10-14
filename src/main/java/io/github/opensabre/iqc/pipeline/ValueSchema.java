@@ -6,11 +6,20 @@ import java.util.Map;
 import java.util.Set;
 
 /** Deliberately limited schema dialect for NodeResult.variables; unsupported keywords fail publication. */
-final class ValueSchema {
+public final class ValueSchema {
     private static final Set<String> KEYS=Set.of("type","properties","required","enum","items","additionalProperties");
     private static final Set<String> TYPES=Set.of("object","array","string","number","integer","boolean","null");
     private ValueSchema() { }
-    static void validateSchema(JsonNode schema) { if(schema!=null) validate(schema,0); }
+    /** Checks the shared restricted dialect before freezing an execution contract. */
+    public static void validateSchema(JsonNode schema) { if(schema!=null) validate(schema,0); }
+    /** Validates a detector's structured input or output using the same dialect as node variables. */
+    public static void checkData(JsonNode schema,JsonNode value) {
+        validateSchema(schema);
+        if(schema!=null) {
+            if(value==null)throw new IllegalArgumentException("Structured value required");
+            checkValue(schema,value,"data");
+        }
+    }
     private static void validate(JsonNode schema,int depth) {
         if(depth>16 || !schema.isObject()) throw new IllegalArgumentException("Invalid output schema");
         schema.fieldNames().forEachRemaining(key->{if(!KEYS.contains(key)) throw new IllegalArgumentException("Unsupported output schema keyword: "+key);});
