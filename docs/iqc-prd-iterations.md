@@ -327,3 +327,9 @@ CREATE_RISK_EVENT v1引用原冻结生产结果/动作账本，稳定幂等事�
 - PRD11.4四类来源已接同一风险条件树：Finding、score、原冻结标签投影、原冻结业务上下文。LABEL_EQUALS地址引用原绑定，BUSINESS_EQUALS缺失/null/复杂值保持未知；原三态ALL/ANY/NOT、最高风险及未知上界不变。
 - 原生产/评测/动作来源校验/DecisionRevision均传同一执行上下文；重算校验原输入摘要，不读当前会话档案，不新表/语言/副本，不重发动作。
 - 后台80224离线skipTests test-compile通过；UI16016首轮通过，数值保真/并行草稿加载最终构建待终态；完整高精度可视化维护与实际DB/API/浏览器/发布/复核验收仍待。完整其余需求继续，未新增运行测试/SQL/部署。
+
+## 2026-10-14 精确条件操作数
+
+- 同一Condition追加可选decimalOperand字符串，value须null，沿原严格String解码/NumericPredicate校验/BigDecimal比较；四类数值条件可用，组/状态/文本条件拒绝。原快照/恢复/Hash保存文本，无框架或全局Jackson修改，无新语言/表。
+- 原四参数构造及null字段省略兼容，原条件值入口不改。配置界面显式数值模式，复用原阈值校验并消除重复验证，原JSON数值保真保护保留。
+- 61909 backend skipTests test-compile与48952 UI build运行中，终态见协作记录；完整HTTP/DB/浏览器/真实运行与其它全部需求继续，未新增运行测试/SQL/部署。
