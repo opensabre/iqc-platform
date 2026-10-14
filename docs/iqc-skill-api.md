@@ -13,3 +13,9 @@ MCP 回执必须 isError=false 并携带对象 structuredContent。该对象同�
 应用拒绝超过64KiB的序列化请求/回执、超过100条证据及过长原因或引用。这是应用层检查，不能当作 SDK 网络响应流在分配前的大小限制。客户端生命周期和认证仍由原 SnapshotMcpToolProvider 管理；原 Runtime 负责超时、取消、重试与失败政策。
 
 已通过节点与只读入口 fixture 测试7项、原发布冻结/节点/授权组合15项；fixture 中仅 MCP 客户端被替代，未证明真实服务器协议、权限或持久性。界面版本加载、选项和竞态/无效草稿8项组合测试已通过，完整构建及追加协议拒绝测试另见协作日志。完整历史恢复、实际 MCP 服务器、Task/结果 SQL、API 与浏览器验收仍需完成，SmallModel 为独立待办。
+
+## 2026-10-15 复核链路集成缺口
+
+集成后确认原复核ItemContract仅接受METRIC/LLM的真实非规则节点绑定，Skill/API原ruleId为空/version=0会被误拒，阻断评测/复核/导出。沿原节点/引擎版本及Finding来源核对增加SKILL_API，不制造规则ID/版本，原Scheme/RULE约束保留。前端Trace同样接受受支持的SKILL_API非规则来源。与Review V2字段、精确采样身份及A/B Editor区域一同合并，真实发布/任务/队列/SQL/API/浏览器仍待。
+
+本次27161 backend离线skipTests test-compile已terminal exit0，81530最终UI构建仍在运行。另只读核对BenchmarkVariableComparator：PROMPT/MODEL/SKILL路径目前只识别LLM/agentSnapshot，独立SKILL_API不能被现有单变量报告证明，须后续在原比较器扩展并保留除声明变量外全部冻结配置，不能以PIPELINE复合差异冒充Skill单变量。未新增运行测试/SQL/部署，真实发布/Task/评测/复核/CSV/角色/浏览器继续。

@@ -308,9 +308,10 @@ public class PipelineAssetService {
             labelPolicy=labelPolicies.getObject().freeze(release.labelPolicy());
             labelPolicy.validateFindingTypes(findingTypes);
         }
+        if(release.reviewPolicy()!=null)release.reviewPolicy().validateReferences(codes,release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()),labelPolicy,release.actionPolicy());
         release.scoring().validateReferences(codes,release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()),labelPolicy);
         io.github.opensabre.iqc.label.FindingLabelActionConfiguration.validateDeclaredActions(release.actionPolicy(),labelPolicy);
-        var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes),release.fusion(),release.scoring(),release.items(),release.publicationGate(),release.actionPolicy(),labelPolicy,release.riskPolicy());
+        var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes),release.fusion(),release.scoring(),release.items(),release.publicationGate(),release.actionPolicy(),labelPolicy,release.riskPolicy(),release.reviewPolicy());
         runtime.validate(frozen.pipeline()); return frozen;
     }
     private static Map<String,Finding.ValueType> labelFindingTypes(PipelineDefinition pipeline) {
@@ -344,6 +345,8 @@ public class PipelineAssetService {
                 release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()),release.labelPolicy());
         release.scoring().validateReferences(release.pipeline().nodes().stream().map(node->node.config().path("findingDefinition").path("code").asText()).collect(java.util.stream.Collectors.toSet()),
                 release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()),release.labelPolicy());
+        if(release.reviewPolicy()!=null)release.reviewPolicy().validateReferences(release.pipeline().nodes().stream().map(node->node.config().path("findingDefinition").path("code").asText()).collect(java.util.stream.Collectors.toSet()),
+                release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()),release.labelPolicy(),release.actionPolicy());
         if(!requireExecutionAvailability)return;
         for(var node:release.pipeline().nodes()) {
             if("METRIC".equals(node.type())) {

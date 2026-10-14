@@ -47,7 +47,7 @@ public final class BusinessItemReviewEvaluator {
             if(ruleId==null)return false;
             if(!ruleId.isBlank() && ruleVersionNo>0)return true;
             return ruleId.isEmpty() && ruleVersionNo==0 && detectorNodeId!=null && !detectorNodeId.isBlank()
-                    && Set.of("METRIC","LLM").contains(java.util.Objects.toString(detectorType,"")) && detectorVersion!=null && !detectorVersion.isBlank();
+                    && Set.of("METRIC","LLM","SKILL_API").contains(java.util.Objects.toString(detectorType,"")) && detectorVersion!=null && !detectorVersion.isBlank();
         }
     }
 

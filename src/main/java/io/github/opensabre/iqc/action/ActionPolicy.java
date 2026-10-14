@@ -19,7 +19,7 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
     public enum FailureHandling {RECORD_ONLY,ESCALATE_REVIEW}
     public enum Idempotency {PRODUCTION_SOURCE_V1}
     public enum Match {MATCH,NO_MATCH,UNKNOWN}
-    public enum Kind {ALWAYS,ALL,ANY,NOT,FINDING_EQUALS,FINDING_STATE,ITEM_STATUS,RISK_AT_LEAST,FINAL_SCORE_BELOW,RESULT_STATUS,LABEL_EQUALS,BUSINESS_EQUALS}
+    public enum Kind {ALWAYS,ALL,ANY,NOT,FINDING_EQUALS,FINDING_STATE,ITEM_STATUS,RISK_AT_LEAST,FINAL_SCORE_BELOW,RESULT_STATUS,LABEL_EQUALS,BUSINESS_EQUALS,REVIEW_REQUIRED}
     public record Action(String actionId,ActionExecutionContract.Type type,Condition condition,
                          Idempotency idempotency,AutomaticRetryPolicy retry,FailureHandling failureHandling,
                          JsonNode configuration,
@@ -82,6 +82,7 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
                             if(!effective.isNumber() || effective.decimalValue().precision()>38 || Math.abs((long)effective.decimalValue().scale())>18)
                                 throw new IllegalArgumentException("Action score threshold invalid");
                         }
+                        case REVIEW_REQUIRED -> {if(!value.isBoolean())throw new IllegalArgumentException("Review condition requires a boolean");}
                         case RESULT_STATUS -> {
                             if(!value.isTextual() || !Set.of("QUALIFIED","UNQUALIFIED","PENDING","NOT_APPLICABLE","ERROR").contains(value.textValue()))
                                 throw new IllegalArgumentException("Action result status invalid");
@@ -100,12 +101,18 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
     }
     public record Context(Map<String,FindingFusion.Result> findings,Map<String,InspectionScoring.ItemStatus> items,
                           InspectionScoring.ScoreStatus scoreStatus,BigDecimal finalScore,String riskLevel,String resultStatus,
-                          Map<String,io.github.opensabre.iqc.label.FindingLabelProjection.Projection> labels,JsonNode businessContext) {
+                          Map<String,io.github.opensabre.iqc.label.FindingLabelProjection.Projection> labels,JsonNode businessContext,String reviewStatus) {
         public Context(Map<String,FindingFusion.Result> findings,Map<String,InspectionScoring.ItemStatus> items,
                 InspectionScoring.ScoreStatus scoreStatus,BigDecimal finalScore,String riskLevel,String resultStatus) {
             this(findings,items,scoreStatus,finalScore,riskLevel,resultStatus,Map.of(),null);
         }
+        public Context(Map<String,FindingFusion.Result> findings,Map<String,InspectionScoring.ItemStatus> items,
+                InspectionScoring.ScoreStatus scoreStatus,BigDecimal finalScore,String riskLevel,String resultStatus,
+                Map<String,io.github.opensabre.iqc.label.FindingLabelProjection.Projection> labels,JsonNode businessContext) {
+            this(findings,items,scoreStatus,finalScore,riskLevel,resultStatus,labels,businessContext,null);
+        }
         public Context {
+            if(reviewStatus!=null&&!Set.of("REQUIRED","NOT_REQUIRED","UNKNOWN").contains(reviewStatus))throw new IllegalArgumentException("Invalid review status");
             findings=Map.copyOf(findings);items=Map.copyOf(items);labels=Map.copyOf(labels);
             if(businessContext!=null && !businessContext.isObject())throw new IllegalArgumentException("Business context must be an object");
             businessContext=businessContext==null?null:businessContext.deepCopy();
@@ -159,6 +166,8 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
             }
             case FINAL_SCORE_BELOW -> context.scoreStatus()!=InspectionScoring.ScoreStatus.FINAL || context.finalScore()==null
                     ?Match.UNKNOWN:truth(context.finalScore().compareTo(condition.operand().decimalValue())<0);
+            case REVIEW_REQUIRED -> context.reviewStatus()==null || "UNKNOWN".equals(context.reviewStatus())?Match.UNKNOWN:
+                    truth("REQUIRED".equals(context.reviewStatus())==condition.value().booleanValue());
             case RESULT_STATUS -> context.resultStatus()==null?Match.UNKNOWN:truth(context.resultStatus().equals(condition.value().textValue()));
         };
     }
@@ -196,13 +205,21 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
     }
     /** Shared pre-decision input references; consumers cannot read derived decisions recursively. */
     public static void validateDecisionInputs(Condition condition,Set<String> findings,Set<String> items,Set<String> labels,boolean allowScore) {
-        if(condition.kind()==Kind.RISK_AT_LEAST || condition.kind()==Kind.RESULT_STATUS || !allowScore && condition.kind()==Kind.FINAL_SCORE_BELOW)
+        if(condition.kind()==Kind.REVIEW_REQUIRED || condition.kind()==Kind.RISK_AT_LEAST || condition.kind()==Kind.RESULT_STATUS || !allowScore && condition.kind()==Kind.FINAL_SCORE_BELOW)
             throw new IllegalArgumentException("Decision condition cannot read derived score/risk/result");
+        validateInputLeaf(condition,findings,items,labels);
+        condition.children().forEach(child->validateDecisionInputs(child,findings,items,labels,allowScore));
+    }
+    public static void validatePostDecisionInputs(Condition condition,Set<String> findings,Set<String> items,Set<String> labels) {
+        if(condition.kind()==Kind.REVIEW_REQUIRED)throw new IllegalArgumentException("Review policy cannot read itself");
+        validateInputLeaf(condition,findings,items,labels);
+        condition.children().forEach(child->validatePostDecisionInputs(child,findings,items,labels));
+    }
+    private static void validateInputLeaf(Condition condition,Set<String> findings,Set<String> items,Set<String> labels) {
         if(findings!=null && (condition.kind()==Kind.FINDING_EQUALS || condition.kind()==Kind.FINDING_STATE) && !findings.contains(condition.code())
                 || items!=null && condition.kind()==Kind.ITEM_STATUS && !items.contains(condition.code())
                 || labels!=null && condition.kind()==Kind.LABEL_EQUALS && !labels.contains(condition.code()))
             throw new IllegalArgumentException("Decision condition references undeclared input");
-        condition.children().forEach(child->validateDecisionInputs(child,findings,items,labels,allowScore));
     }
     private static void validateReferences(Condition condition,Set<String> findings,Set<String> items) {
         if(condition.kind()==Kind.LABEL_EQUALS || condition.kind()==Kind.BUSINESS_EQUALS)

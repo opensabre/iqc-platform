@@ -39,7 +39,7 @@ public record RiskPolicy(String schemaVersion,Finding.Severity defaultLevel,List
     }
     private static void validateCondition(ActionPolicy.Condition condition,Set<String> findings,Set<String> items,int[] count) {
         if(++count[0]>1000)throw new IllegalArgumentException("Risk condition graph exceeds 1000 nodes");
-        if(condition.kind()==ActionPolicy.Kind.RISK_AT_LEAST || condition.kind()==ActionPolicy.Kind.RESULT_STATUS)
+        if(condition.kind()==ActionPolicy.Kind.REVIEW_REQUIRED || condition.kind()==ActionPolicy.Kind.RISK_AT_LEAST || condition.kind()==ActionPolicy.Kind.RESULT_STATUS)
             throw new IllegalArgumentException("Risk policy cannot read derived risk/result status");
         for(var child:condition.children())validateCondition(child,findings,items,count);
     }
