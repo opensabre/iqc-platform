@@ -1,6 +1,6 @@
 # 外部动作适配
 
-PRD V1.0 §12 要求 WEBHOOK、CREATE_WORK_ORDER、CREATE_COACHING_TASK。当前原 ActionExecutionContract 有枚举，ActionAdapterRegistry 尚无这些类型的适配器；公共通知 SEND_ALERT 只提供短信/邮件，不等同于这些交付。现有工作区未找到可复用的工单/辅导业务实现。不能新建并行的工单、辅导或发送账本来掩盖外部系统未接入。
+PRD V1.0 §12 要求 WEBHOOK、CREATE_WORK_ORDER、CREATE_COACHING_TASK。三个类型已沿原 ActionAdapterRegistry 接入精确 v1 适配器，由部署目的地配置选择接收端；公共通知 SEND_ALERT 继续提供短信/邮件。现有工作区未找到可复用的工单/辅导业务实现，因此通过外部拥有这些业务模型的系统创建，不新增平行业务表。接收端真实验收仍待完成。
 
 ## 复用边界
 
@@ -8,7 +8,7 @@ PRD V1.0 §12 要求 WEBHOOK、CREATE_WORK_ORDER、CREATE_COACHING_TASK。当前
 
 原 SendAlertPreparationService 的不可变请求/来源/策略摘要、适配器精确版本、领取 token/时间/尝试次数与期限校验移入原 ActionFrozenPolicy.validateOutboundRequest；告警继续负责其当前授权、事务和通知配置解析。其它适配器应复用此校验，不复制一套来源证明。源码调整及告警回归状态以协作记录为准。
 
-## 待实现的远端契约
+## 远端契约及接收端待验收要求
 
 | 动作 | 外部职责 | 成功证据 |
 |---|---|---|
@@ -18,7 +18,7 @@ PRD V1.0 §12 要求 WEBHOOK、CREATE_WORK_ORDER、CREATE_COACHING_TASK。当前
 
 适配器配置须引用部署侧批准的目的地及精确协议版本，不能让发布配置任意改变远端凭据或接收地址。配置不应包含认证秘密。外部请求携带原 idempotencyKey 与 inputSnapshotHash；外部系统须保证重复键的请求内容一致。HTTP 2xx 只表示传输结果，未核对持久回执不能结算 CONFIRMED_SUCCESS。超时或无法确定是否已提交保持 UNKNOWN，由原账本进入核对流程；查询不存在不自动授权重发。默认不登记不具备实际实现的适配器。
 
-端点配置、鉴权接入、实际发送及只读核对、管理配置和隔离接收端验收仍待实现。本文件不表示外部动作已经可用，也不是部署或真实发送记录。
+已实现部署目的地注册表、HTTP 发送/只读核对客户端、Spring 配置及适配器登记。客户端、响应限流和目的地绑定共 10 项测试通过；Spring 绑定、适配器、准备及告警组合 21 项通过；真实事务代理拦截及合并后的会话组合 20 项通过。界面配置与载荷 3 项测试及构建通过。隔离接收端、完整来源账本 SQL 和浏览器验收仍待完成；没有部署或真实外部发送记录。
 
 ## 配置和接收端协议草案
 
@@ -28,10 +28,35 @@ PRD V1.0 §12 要求 WEBHOOK、CREATE_WORK_ORDER、CREATE_COACHING_TASK。当前
 
 回执应回传 `idempotencyKey`、`inputSnapshotHash`、`outcome`、`evidenceReference`、`resultReference` 和可选 `errorCode`。本地验证键与摘要一致后，继续由原 ActionAdapter.Receipt 检查确认成功/失败的证据与错误约束；不新增本地回执表。响应缺失、超限、摘要不一致或无法判断远端提交状态均保持 UNKNOWN。
 
-这些字段是待接入协议；尚无目的地注册、HTTP 实现或生产接收端验证，不表示三个外部动作已可派发。
+HTTP 实现使用请求协议 `iqc-external-action-request-v1` 和回执协议 `iqc-external-action-receipt-v1`；Spring 目的地配置与适配器登记测试通过，尚无生产接收端验证，不表示三个外部动作已完成验收。
 
 ## 部署侧目的地约束
 
 已实现不可变 `ExternalActionDestinations` 注册表，按 `(destinationId, destinationVersion)` 唯一绑定动作类型、HTTPS 发送端点和只读回执端点；构造时拒绝重复键，找不到精确版本或动作类型不匹配时拒绝解析。两个端点不得带 URI 用户信息、查询参数或片段；只读查询仅追加已经验证的 64 字符幂等键。HTTP 客户端接入后不得跟随重定向。
 
-注册表已校验连接期限、请求期限、最大响应字节和秘密环境变量引用格式，并复制配置列表；目的地与动作配置共 4 个单元测试通过。读取回执时仍需由待接入客户端执行字节上限。认证由部署配置引用的秘密来源提供，不写入 ActionPolicy、inputSnapshot 或审计返回值。Spring 部署配置绑定、HTTP 实现及适配器登记仍待实现，尚无实际外部发送证据。
+注册表已校验连接期限、请求期限、最大响应字节和秘密环境变量引用格式，并复制配置列表；目的地与动作配置共 4 个单元测试通过。`BoundedActionResponseSubscriber` 分块执行回执字节上限，超限取消订阅，其 3 项测试通过。认证由部署配置引用的秘密来源提供，不写入 ActionPolicy、inputSnapshot 或审计返回值。Spring 部署配置绑定及适配器登记已实现，尚无实际外部发送证据。
+
+`HttpExternalActionTransport` 使用 HTTPS POST 和只读 GET，客户端禁用重定向，完整响应使用有界订阅者，额外等待期限覆盖完整响应体，超时取消 future；中断恢复线程标志。严格 JSON 解码拒绝重复字段和尾随内容，回执验证幂等键、输入摘要与协议，并沿原 Receipt 检查持久证据和错误码。异常与无法确认的响应保持 UNKNOWN，不保存远端响应或异常消息。5 项 HTTP 边界测试通过；模拟客户端验证不等于真实接收端验收。
+
+## 部署配置
+
+配置绑定与三个适配器已经通过局部测试。使用单独的 `iqc.actions.external.enabled` 开关，默认关闭；原派发器 `iqc.actions.enabled` 开关保持独立。发布动作只有在部署侧存在匹配类型的精确目的地版本时才能通过配置验证。下面是配置格式示例，不是已启用的部署：
+
+```yaml
+iqc:
+  actions:
+    external:
+      enabled: false
+      destinations:
+        - id: webhook_receiver
+          version: 1
+          type: WEBHOOK
+          send-uri: https://receiver.example.invalid/events
+          receipts-uri: https://receiver.example.invalid/receipts/
+          connect-timeout-ms: 1000
+          request-timeout-ms: 10000
+          maximum-response-bytes: 16384
+          bearer-token-environment-variable: IQC_WEBHOOK_TOKEN
+```
+
+工单和辅导任务分别配置 `CREATE_WORK_ORDER` 与 `CREATE_COACHING_TASK` 的目的地，不能借用 WEBHOOK 类型配置。改变目的地协议或地址必须增加版本并保留历史回执查询能力；不得覆盖仍被冻结动作引用的旧版本。认证秘密只在调用前读取，不在发布或领取锁内访问远端。
