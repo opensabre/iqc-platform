@@ -21,7 +21,8 @@ class SkillApiPublicationFreezeTest {
     private final QualityAgentMapper agents=mock(QualityAgentMapper.class);
     private final QualityAgentVersionMapper versions=mock(QualityAgentVersionMapper.class);
     private final FindingCatalogService findings=mock(FindingCatalogService.class);
-    private final PipelineAssetService service=new PipelineAssetService(null,null,null,null,agents,versions,null,findings,json,null,null,null,null,null);
+    private final io.github.opensabre.iqc.agent.AgentAssetReferenceValidator capabilities=mock(io.github.opensabre.iqc.agent.AgentAssetReferenceValidator.class);
+    private final PipelineAssetService service=new PipelineAssetService(null,null,null,null,agents,versions,capabilities,findings,json,null,null,null,null,null);
     private ObjectNode config() throws Exception {
         return (ObjectNode)json.readTree("""
             {"agentReference":{"id":"agent","versionNo":2},"skillReference":{"id":"skill","versionNo":3},
@@ -49,6 +50,7 @@ class SkillApiPublicationFreezeTest {
         assertThat(config.path("skillSnapshot").path("versionNo").intValue()).isEqualTo(3);
         assertThat(config.path("mcpSnapshot").path("versionNo").intValue()).isEqualTo(4);
         assertThat(config.path("findingDefinition").path("code").asText()).isEqualTo("CHECK_OK");
+        verify(capabilities).validateDetectionCapabilities("skill","server");
     }
     @Test void wrongSkillVersionNeverFallsBackToAvailableVersion() throws Exception {
         fixture("{\"type\":\"object\"}");var config=config();((ObjectNode)config.get("skillReference")).put("versionNo",5);

@@ -364,6 +364,7 @@ public class PipelineAssetService {
                 findings.publishedDefinitionForExecution(reference.path("id").asText(),reference.path("versionNo").intValue());
                 var agent=agents.selectById(config.path("agentReference").path("id").asText());
                 if(agent==null || "DISABLED".equals(agent.getStatus()))throw IqcException.invalidState("Skill/API智能体已停用");
+                agentAssets.validateDetectionCapabilities(config.path("skillSnapshot").path("id").asText(),config.path("mcpSnapshot").path("id").asText());
                 continue;
             }
             var config=node.config(); var rule=config.path("ruleSnapshot"); var current=rules.selectById(rule.path("id").asText());
@@ -398,6 +399,7 @@ public class PipelineAssetService {
         if(!"3.0".equals(agentConfig.path("schemaVersion").asText()))throw IqcException.invalidArgument("Skill/API须使用新版冻结能力资产");
         config.set("skillSnapshot",frozenCapability(agentConfig.path("assetSnapshots").path("skills"),config.path("skillReference")));
         config.set("mcpSnapshot",frozenCapability(agentConfig.path("assetSnapshots").path("mcpServers"),config.path("mcpReference")));
+        agentAssets.validateDetectionCapabilities(config.path("skillSnapshot").path("id").asText(),config.path("mcpSnapshot").path("id").asText());
         var reference=config.path("findingReference");validateReference(reference);
         config.set("findingDefinition",json.valueToTree(findings.publishedDefinition(reference.path("id").asText(),reference.path("versionNo").intValue())));
         try {
