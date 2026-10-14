@@ -77,10 +77,15 @@ public final class PipelineDecisionEvaluator {
     public static io.github.opensabre.iqc.pipelineasset.ReviewPolicy.Decision reviewDecision(PipelineRelease release,
             List<FindingFusion.Result> facts,InspectionScoring.Result score,String risk,String resultStatus,String inputHash,
             com.fasterxml.jackson.databind.JsonNode businessContext,com.fasterxml.jackson.databind.ObjectMapper json) {
+        return reviewDecision(release,facts,score,risk,resultStatus,inputHash,businessContext,null,json);
+    }
+    public static io.github.opensabre.iqc.pipelineasset.ReviewPolicy.Decision reviewDecision(PipelineRelease release,
+            List<FindingFusion.Result> facts,InspectionScoring.Result score,String risk,String resultStatus,String inputHash,
+            com.fasterxml.jackson.databind.JsonNode businessContext,String samplingInputHash,com.fasterxml.jackson.databind.ObjectMapper json) {
         if(release.reviewPolicy()==null)return null;
         var inputs=inputContext(release,facts,decisions(release.items(),facts),businessContext);
         var context=new io.github.opensabre.iqc.action.ActionPolicy.Context(inputs.findings(),inputs.items(),score.scoreStatus(),score.finalScore(),risk,resultStatus,inputs.labels(),businessContext);
-        return release.reviewPolicy().evaluate(context,release.fusion(),inputHash,json);
+        return release.reviewPolicy().evaluate(context,release.fusion(),inputHash,samplingInputHash,json);
     }
     public static String riskLevel(PipelineRelease release,List<FindingFusion.Result> facts,InspectionScoring.Result score) {
         return riskLevel(release,facts,score,null);

@@ -119,8 +119,9 @@ public class DecisionRevisionService {
             if(!Objects.equals(originalRisk,trace.riskLevel()) || !Objects.equals(originalRisk,result.getRiskLevel())
                     || !json.valueToTree(originalRiskDecision).equals(json.valueToTree(trace.riskDecision())))
                 throw IqcException.invalidState("源风险轨迹与冻结政策不一致");
+            String samplingInputHash=preparedInput==null?null:PipelineConversationEvaluator.samplingInputHash(preparedInput.messages().get(result.getConversationId()),businessContext,json);
             String resultStatus=PipelineDecisionEvaluator.resultStatus(trace.run(),trace.items(),originalScore);
-            var originalReview=PipelineDecisionEvaluator.reviewDecision(release,originalFusion,originalScore,originalRisk,resultStatus,trace.inputHash(),businessContext,json);
+            var originalReview=PipelineDecisionEvaluator.reviewDecision(release,originalFusion,originalScore,originalRisk,resultStatus,trace.inputHash(),businessContext,samplingInputHash,json);
             if(!json.valueToTree(originalReview).equals(json.valueToTree(trace.reviewDecision())))throw IqcException.invalidState("源复核决定与冻结输入/政策不一致");
             var target = assets.publishedRelease(targetPipelineId,targetVersion);
             var fusion = FindingFusion.fuse(raw,target.release().fusion());
@@ -132,7 +133,7 @@ public class DecisionRevisionService {
                     originalRisk,PipelineDecisionEvaluator.riskLevel(target.release(),fusion,score,businessContext),
                     originalRiskDecision,PipelineDecisionEvaluator.riskDecision(target.release(),fusion,score,businessContext),originalReview,
                     PipelineDecisionEvaluator.reviewDecision(target.release(),fusion,score,PipelineDecisionEvaluator.riskLevel(target.release(),fusion,score,businessContext),
-                            trace.run().status()==io.github.opensabre.iqc.pipeline.PipelineRuntime.Status.FAILED||trace.run().status()==io.github.opensabre.iqc.pipeline.PipelineRuntime.Status.CANCELLED||decisions.stream().anyMatch(d->d.status()==InspectionScoring.ItemStatus.ERROR)?"ERROR":score.conclusion().name(),trace.inputHash(),businessContext,json));
+                            trace.run().status()==io.github.opensabre.iqc.pipeline.PipelineRuntime.Status.FAILED||trace.run().status()==io.github.opensabre.iqc.pipeline.PipelineRuntime.Status.CANCELLED||decisions.stream().anyMatch(d->d.status()==InspectionScoring.ItemStatus.ERROR)?"ERROR":score.conclusion().name(),trace.inputHash(),businessContext,samplingInputHash,json));
             var saved = new DecisionRevision();
             saved.setId(id); saved.setSourceResultId(resultId); saved.setTaskId(task.getId());
             saved.setSourceHash(sourceHash); saved.setRequestFingerprint(fingerprint);

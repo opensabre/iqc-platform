@@ -346,3 +346,9 @@ CREATE_RISK_EVENT v1引用原冻结生产结果/动作账本，稳定幂等事�
 - 复用原Condition/Selector sampleKey/Fusion选中事实、CREATE_REVIEW和原复核记录，冻结高风险/校准置信度半开区间/稳定概率抽样及显式未知策略，不新表/API/直接创建路径。普通fallback不叠加特殊概率，全部命中及桶/抑制保留原Trace。
 - 原发布/历史/生产/评测/动作源证明/政策重算及配置/Trace接通，唯一直接复核路由保证决定可进入原动作流程。旧nullable JSON省略及构造兼容，Score/Risk/Review分阶段禁止循环。
 - 95532最终backend skipTests test-compile与94003最终UI build退出0，未新增运行测试/SQL/部署；真实队列/角色/并发/历史/校准/分布/高精度输入采样身份/浏览器/完整发布及其余PRD继续。
+
+## 2026-10-14 Review V2精确采样身份
+
+- 新V2复用Selector精确JSON hash与原完整executionInput，全消息/冻结业务字段生成samplingInputHash，原inputHash及V1盐/桶保持。实际生产/评测/来源/重算共享该入口，不改全局Hash/框架/输入存储。
+- 历史无完整输入时非确定概率选择/桶为null并保留UNKNOWN，概率0/1仍可确认；不读当前档案冒充旧输入、不重跑/发送。界面默认V2并支持显式升级旧V1而保留规则。
+- 21035最终backend skipTests test-compile退出0，25081首轮UI通过、16763最终UI待终态；无新增运行测试/SQL/部署，真实精度/队列/历史/权限/完整其它要求继续。

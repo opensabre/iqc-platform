@@ -44,9 +44,18 @@ public class PipelineConversationEvaluator {
         return evaluate(task,release,messages,mode,null);
     }
     public com.fasterxml.jackson.databind.JsonNode executionInput(List<ConversationMessage> messages,com.fasterxml.jackson.databind.JsonNode businessContext) {
+        return executionInput(messages,businessContext,json);
+    }
+    public static com.fasterxml.jackson.databind.JsonNode executionInput(List<ConversationMessage> messages,com.fasterxml.jackson.databind.JsonNode businessContext,ObjectMapper json) {
         var input=json.createObjectNode(); input.set("messages",json.valueToTree(messages));
         if(businessContext!=null) input.set("businessContext",businessContext.deepCopy());
         return input;
+    }
+    public static String samplingInputHash(PipelineRelease release,List<ConversationMessage> messages,com.fasterxml.jackson.databind.JsonNode businessContext,ObjectMapper json) {
+        return release.reviewPolicy()!=null&&io.github.opensabre.iqc.pipelineasset.ReviewPolicy.EXACT_SCHEMA.equals(release.reviewPolicy().schemaVersion())?samplingInputHash(messages,businessContext,json):null;
+    }
+    public static String samplingInputHash(List<ConversationMessage> messages,com.fasterxml.jackson.databind.JsonNode businessContext,ObjectMapper json) {
+        return io.github.opensabre.iqc.selector.SelectorAssetService.hash(executionInput(messages,businessContext,json).toString());
     }
     public Evaluation evaluate(InspectionTask task,PipelineRelease release,List<ConversationMessage> messages,PipelineRuntime.Mode mode,
             com.fasterxml.jackson.databind.JsonNode businessContext) {
@@ -92,7 +101,7 @@ public class PipelineConversationEvaluator {
         var riskDecision=PipelineDecisionEvaluator.riskDecision(release,fused,score,businessContext);
         String inputHash=PipelineAssetService.hash(input.toString());
         String risk=riskDecision==null?PipelineDecisionEvaluator.riskLevel(release.items(),fused,score):riskDecision.level();
-        var review=PipelineDecisionEvaluator.reviewDecision(release,fused,score,risk,PipelineDecisionEvaluator.resultStatus(run,items,score),inputHash,businessContext,json);
+        var review=PipelineDecisionEvaluator.reviewDecision(release,fused,score,risk,PipelineDecisionEvaluator.resultStatus(run,items,score),inputHash,businessContext,release.reviewPolicy()!=null&&io.github.opensabre.iqc.pipelineasset.ReviewPolicy.EXACT_SCHEMA.equals(release.reviewPolicy().schemaVersion())?io.github.opensabre.iqc.selector.SelectorAssetService.hash(input.toString()):null,json);
         return new Evaluation("iqc-pipeline-execution-v1",inputHash,run,fused,List.copyOf(items),score,risk,mode,riskDecision,review);
     }
 }

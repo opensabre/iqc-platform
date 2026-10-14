@@ -135,7 +135,7 @@ public class ActionProductionSourceValidator {
             boolean failed=trace.run().status()==PipelineRuntime.Status.FAILED
                     || trace.run().status()==PipelineRuntime.Status.CANCELLED
                     || trace.items().stream().anyMatch(item->item.status()==InspectionScoring.ItemStatus.ERROR);
-            var review=PipelineDecisionEvaluator.reviewDecision(release,fused,score,risk,failed?"ERROR":score.conclusion().name(),trace.inputHash(),prepared.businessContext(reference.conversationId()),json);
+            var review=PipelineDecisionEvaluator.reviewDecision(release,fused,score,risk,failed?"ERROR":score.conclusion().name(),trace.inputHash(),prepared.businessContext(reference.conversationId()),PipelineConversationEvaluator.samplingInputHash(release,messages,prepared.businessContext(reference.conversationId()),json),json);
             if(!json.valueToTree(fused).equals(json.valueToTree(trace.fusion()))
                     || !json.valueToTree(score).equals(json.valueToTree(trace.scoring()))
                     || !json.valueToTree(score).equals(json.valueToTree(json.readValue(result.getScoringResultJson(),InspectionScoring.Result.class)))

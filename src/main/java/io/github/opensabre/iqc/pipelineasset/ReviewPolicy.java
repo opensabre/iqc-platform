@@ -12,6 +12,7 @@ import java.util.*;
 /** Pure frozen review eligibility; actual creation remains the original CREATE_REVIEW action. */
 public record ReviewPolicy(String schemaVersion,String seed,UnknownHandling unknownHandling,List<Rule> rules) {
     public static final String SCHEMA="iqc-review-policy-v1";
+    public static final String EXACT_SCHEMA="iqc-review-policy-v2";
     public enum UnknownHandling {REQUIRE_REVIEW,KEEP_UNKNOWN}
     public enum Status {REQUIRED,NOT_REQUIRED,UNKNOWN}
     public record ConfidenceGate(String findingCode,
@@ -31,12 +32,18 @@ public record ReviewPolicy(String schemaVersion,String seed,UnknownHandling unkn
         public Rule {identity(ruleId);Objects.requireNonNull(condition);ReviewPolicy.probability(probability);if(decimal(probability).scale()>4)throw new IllegalArgumentException("Sampling probability supports 4 decimal places");ActionPolicy.validatePostDecisionInputs(condition,null,null,null);}
     }
     public record RuleMatch(String ruleId,ActionPolicy.Match conditionMatch,ActionPolicy.Match confidenceMatch,
-            BigDecimal calibratedConfidence,int bucket,boolean selected,boolean suppressed,ActionPolicy.Match effectiveMatch) { }
-    public record Decision(String schemaVersion,String inputHash,Status status,List<RuleMatch> rules) {
-        public Decision {if(!"iqc-review-decision-v1".equals(schemaVersion)||inputHash==null||!inputHash.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("Invalid review decision identity");Objects.requireNonNull(status);rules=List.copyOf(rules);}
+            BigDecimal calibratedConfidence,Integer bucket,Boolean selected,boolean suppressed,ActionPolicy.Match effectiveMatch) { }
+    public record Decision(String schemaVersion,String inputHash,Status status,List<RuleMatch> rules,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String samplingInputHash) {
+        public Decision(String schemaVersion,String inputHash,Status status,List<RuleMatch> rules){this(schemaVersion,inputHash,status,rules,null);}
+        public Decision {
+            if(!Set.of("iqc-review-decision-v1","iqc-review-decision-v2").contains(schemaVersion)||inputHash==null||!inputHash.matches("[a-f0-9]{64}")
+                    ||samplingInputHash!=null&&(!samplingInputHash.matches("[a-f0-9]{64}")||!"iqc-review-decision-v2".equals(schemaVersion)))throw new IllegalArgumentException("Invalid review decision identity");
+            Objects.requireNonNull(status);rules=List.copyOf(rules);
+        }
     }
     public ReviewPolicy {
-        if(!SCHEMA.equals(schemaVersion)||seed==null||seed.isBlank()||seed.length()>128||seed.codePoints().anyMatch(Character::isISOControl))throw new IllegalArgumentException("Invalid review policy schema/seed");
+        if(!(SCHEMA.equals(schemaVersion)||EXACT_SCHEMA.equals(schemaVersion))||seed==null||seed.isBlank()||seed.length()>128||seed.codePoints().anyMatch(Character::isISOControl))throw new IllegalArgumentException("Invalid review policy schema/seed");
         Objects.requireNonNull(unknownHandling);rules=List.copyOf(rules);if(rules.isEmpty()||rules.size()>100)throw new IllegalArgumentException("Review policy requires 1 to 100 rules");
         var ids=new HashSet<String>();int count=0;for(var rule:rules){if(!ids.add(rule.ruleId()))throw new IllegalArgumentException("Duplicate review rule");count+=count(rule.condition());}if(count>1000)throw new IllegalArgumentException("Review conditions exceed 1000 nodes");if(rules.stream().filter(Rule::fallback).count()>1)throw new IllegalArgumentException("Review policy supports one ordinary fallback rule");
     }
@@ -53,17 +60,24 @@ public record ReviewPolicy(String schemaVersion,String seed,UnknownHandling unkn
         return condition.kind()==ActionPolicy.Kind.REVIEW_REQUIRED||condition.children().stream().anyMatch(ReviewPolicy::readsReview);
     }
     public Decision evaluate(ActionPolicy.Context context,FusionPolicy fusion,String inputHash,ObjectMapper json) {
+        return evaluate(context,fusion,inputHash,null,json);
+    }
+    public Decision evaluate(ActionPolicy.Context context,FusionPolicy fusion,String inputHash,String samplingInputHash,ObjectMapper json) {
+        boolean exact=EXACT_SCHEMA.equals(schemaVersion);
+        if(samplingInputHash!=null&&!samplingInputHash.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("Invalid exact sampling identity");
+        String identity=exact?samplingInputHash:inputHash;
         if(inputHash==null||!inputHash.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("Review requires frozen input identity");
         boolean required=false,unknown=false;var outcomes=new ArrayList<RuleMatch>();
         for(var rule:rules){var condition=ActionPolicy.evaluate(rule.condition(),context);BigDecimal value=confidence(rule.confidence(),context,fusion);
             var confidence=rule.confidence()==null?ActionPolicy.Match.MATCH:value==null?ActionPolicy.Match.UNKNOWN:
                     (rule.confidence().minimumInclusive()==null||value.compareTo(decimal(rule.confidence().minimumInclusive()))>=0)
                     &&(rule.confidence().maximumExclusive()==null||value.compareTo(decimal(rule.confidence().maximumExclusive()))<0)?ActionPolicy.Match.MATCH:ActionPolicy.Match.NO_MATCH;
-            String salt=PipelineAssetService.hash(json.valueToTree(List.of(SCHEMA,seed,rule.ruleId())).toString());
-            String key=io.github.opensabre.iqc.selector.ConversationSelectionService.sampleKey(salt,inputHash,json);
-            int bucket=new BigInteger(key,16).mod(BigInteger.valueOf(10000)).intValue();boolean selected=bucket<decimal(rule.probability()).multiply(BigDecimal.valueOf(10000)).intValueExact();
-            var match=!selected||condition==ActionPolicy.Match.NO_MATCH||confidence==ActionPolicy.Match.NO_MATCH?ActionPolicy.Match.NO_MATCH:
-                    condition==ActionPolicy.Match.UNKNOWN||confidence==ActionPolicy.Match.UNKNOWN?ActionPolicy.Match.UNKNOWN:ActionPolicy.Match.MATCH;
+            String salt=PipelineAssetService.hash(json.valueToTree(List.of(schemaVersion,seed,rule.ruleId())).toString());
+            Integer bucket=null;Boolean selected=null;int threshold=decimal(rule.probability()).multiply(BigDecimal.valueOf(10000)).intValueExact();
+            if(identity!=null){String key=io.github.opensabre.iqc.selector.ConversationSelectionService.sampleKey(salt,identity,json);bucket=new BigInteger(key,16).mod(BigInteger.valueOf(10000)).intValue();selected=bucket<threshold;}
+            else if(threshold==0)selected=false;else if(threshold==10000)selected=true;
+            var match=Boolean.FALSE.equals(selected)||condition==ActionPolicy.Match.NO_MATCH||confidence==ActionPolicy.Match.NO_MATCH?ActionPolicy.Match.NO_MATCH:
+                    selected==null||condition==ActionPolicy.Match.UNKNOWN||confidence==ActionPolicy.Match.UNKNOWN?ActionPolicy.Match.UNKNOWN:ActionPolicy.Match.MATCH;
             required|=match==ActionPolicy.Match.MATCH;unknown|=match==ActionPolicy.Match.UNKNOWN;
             outcomes.add(new RuleMatch(rule.ruleId(),condition,confidence,value,bucket,selected,false,match));
         }
@@ -77,7 +91,7 @@ public record ReviewPolicy(String schemaVersion,String seed,UnknownHandling unkn
             required|=outcome.effectiveMatch()==ActionPolicy.Match.MATCH;unknown|=outcome.effectiveMatch()==ActionPolicy.Match.UNKNOWN;
         }
         var status=required||unknown&&unknownHandling==UnknownHandling.REQUIRE_REVIEW?Status.REQUIRED:unknown?Status.UNKNOWN:Status.NOT_REQUIRED;
-        return new Decision("iqc-review-decision-v1",inputHash,status,outcomes);
+        return new Decision(exact?"iqc-review-decision-v2":"iqc-review-decision-v1",inputHash,status,outcomes,exact?samplingInputHash:null);
     }
     private static BigDecimal confidence(ConfidenceGate gate,ActionPolicy.Context context,FusionPolicy fusion) {
         if(gate==null)return null;var fact=context.findings().get(gate.findingCode());
