@@ -311,7 +311,9 @@ public class ConversationSelectionService {
     }
     private String bucket(String value){return value==null||value.isBlank()?"missing:":"id:"+value;}
     private int riskPriority(String level){if(level==null)return 0;return switch(level){case "CRITICAL"->5;case "HIGH"->4;case "MEDIUM"->3;case "LOW"->2;case "NONE"->1;default->0;};}
-    private String sampleKey(String seed,String id){return PipelineAssetService.hash(json.createArrayNode().add(seed).add(id).toString());}
+    private String sampleKey(String seed,String id){return sampleKey(seed,id,json);}
+    /** Shared deterministic sampling identity; retains the original selector ordering exactly. */
+    public static String sampleKey(String seed,String id,ObjectMapper json){return PipelineAssetService.hash(json.createArrayNode().add(seed).add(id).toString());}
     private static String text(Map<String,JsonNode> values,String key){var node=values.get(key);return node==null?null:node.asText();}
     private static LocalDateTime localTime(JsonNode value){if(value==null)return null;try{return LocalDateTime.parse(value.asText());}catch(java.time.format.DateTimeParseException invalid){throw IqcException.invalidArgument("Selector时间需ISO本地格式");}}
 }

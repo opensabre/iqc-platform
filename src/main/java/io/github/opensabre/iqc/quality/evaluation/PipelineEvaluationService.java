@@ -197,6 +197,9 @@ public class PipelineEvaluationService {
             throw IqcException.invalidState("评测风险投影与冻结事实不一致");
         if(!json.valueToTree(io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.riskDecision(prepared.release(),actual.fusion(),actual.scoring(),member.gold().businessContext())).equals(json.valueToTree(actual.riskDecision())))
             throw IqcException.invalidState("评测风险规则轨迹与冻结政策不一致");
+        var review=io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.reviewDecision(prepared.release(),actual.fusion(),actual.scoring(),actual.riskLevel(),
+                io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.resultStatus(actual.run(),actual.items(),actual.scoring()),actual.inputHash(),member.gold().businessContext(),json);
+        if(!json.valueToTree(review).equals(json.valueToTree(actual.reviewDecision())))throw IqcException.invalidState("评测复核决定与冻结输入/政策不一致");
         Set<String> messageIds=member.gold().messages().stream().map(GoldConversation.Message::id).collect(Collectors.toSet());
         for(var fact:actual.fusion().stream().flatMap(value->value.rawFindings().stream()).toList()) {
             String identity=executionId+":"+member.gold().conversationId()+":"+fact.source().nodeId();

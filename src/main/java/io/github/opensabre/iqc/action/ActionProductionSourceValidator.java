@@ -135,6 +135,7 @@ public class ActionProductionSourceValidator {
             boolean failed=trace.run().status()==PipelineRuntime.Status.FAILED
                     || trace.run().status()==PipelineRuntime.Status.CANCELLED
                     || trace.items().stream().anyMatch(item->item.status()==InspectionScoring.ItemStatus.ERROR);
+            var review=PipelineDecisionEvaluator.reviewDecision(release,fused,score,risk,failed?"ERROR":score.conclusion().name(),trace.inputHash(),prepared.businessContext(reference.conversationId()),json);
             if(!json.valueToTree(fused).equals(json.valueToTree(trace.fusion()))
                     || !json.valueToTree(score).equals(json.valueToTree(trace.scoring()))
                     || !json.valueToTree(score).equals(json.valueToTree(json.readValue(result.getScoringResultJson(),InspectionScoring.Result.class)))
@@ -142,6 +143,7 @@ public class ActionProductionSourceValidator {
                     || !Objects.equals(score.scoreStatus().name(),result.getScoreStatus())
                     || !Objects.equals(failed?"ERROR":score.conclusion().name(),result.getResultStatus())
                     || !json.valueToTree(PipelineDecisionEvaluator.riskDecision(release,fused,score,prepared.businessContext(reference.conversationId()))).equals(json.valueToTree(trace.riskDecision()))
+                    || !json.valueToTree(review).equals(json.valueToTree(trace.reviewDecision()))
                     || !Objects.equals(risk,trace.riskLevel()) || !Objects.equals(risk,result.getRiskLevel())
                     || (score.finalScore()==null?result.getFinalScore()!=null:
                         result.getFinalScore()==null || score.finalScore().compareTo(result.getFinalScore())!=0))
@@ -155,7 +157,7 @@ public class ActionProductionSourceValidator {
                     .put("resultStatus",result.getResultStatus()).put("riskLevel",risk);
             String body=json.writeValueAsString(frozen);
             var facts=new java.util.HashMap<String,FindingFusion.Result>();fused.forEach(fact->facts.put(fact.code(),fact));
-            var context=new ActionPolicy.Context(facts,decisions,score.scoreStatus(),score.finalScore(),risk,result.getResultStatus());
+            var context=new ActionPolicy.Context(facts,decisions,score.scoreStatus(),score.finalScore(),risk,result.getResultStatus(),java.util.Map.of(),null,review==null?null:review.status().name());
             return new Validated(reference,task.getOwnerGroupId(),result.getId(),body,PipelineAssetService.hash(body),
                     release.actionPolicy(),context,ownerBound,task.getStatus());
         } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException failure) {

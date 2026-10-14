@@ -69,6 +69,19 @@ public final class PipelineDecisionEvaluator {
         var inputs=inputContext(release,facts,decisions(release.items(),facts),businessContext);
         return release.riskPolicy().evaluate(new io.github.opensabre.iqc.action.ActionPolicy.Context(inputs.findings(),inputs.items(),score.scoreStatus(),score.finalScore(),null,null,inputs.labels(),businessContext));
     }
+    public static String resultStatus(io.github.opensabre.iqc.pipeline.PipelineRuntime.Run run,
+            List<io.github.opensabre.iqc.scheme.SchemeResultEvaluator.ItemResult> items,InspectionScoring.Result score) {
+        boolean failed=run.status()==io.github.opensabre.iqc.pipeline.PipelineRuntime.Status.FAILED||run.status()==io.github.opensabre.iqc.pipeline.PipelineRuntime.Status.CANCELLED||items.stream().anyMatch(item->item.status()==InspectionScoring.ItemStatus.ERROR);
+        return failed?"ERROR":score.conclusion().name();
+    }
+    public static io.github.opensabre.iqc.pipelineasset.ReviewPolicy.Decision reviewDecision(PipelineRelease release,
+            List<FindingFusion.Result> facts,InspectionScoring.Result score,String risk,String resultStatus,String inputHash,
+            com.fasterxml.jackson.databind.JsonNode businessContext,com.fasterxml.jackson.databind.ObjectMapper json) {
+        if(release.reviewPolicy()==null)return null;
+        var inputs=inputContext(release,facts,decisions(release.items(),facts),businessContext);
+        var context=new io.github.opensabre.iqc.action.ActionPolicy.Context(inputs.findings(),inputs.items(),score.scoreStatus(),score.finalScore(),risk,resultStatus,inputs.labels(),businessContext);
+        return release.reviewPolicy().evaluate(context,release.fusion(),inputHash,json);
+    }
     public static String riskLevel(PipelineRelease release,List<FindingFusion.Result> facts,InspectionScoring.Result score) {
         return riskLevel(release,facts,score,null);
     }

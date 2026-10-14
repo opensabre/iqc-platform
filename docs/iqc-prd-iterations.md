@@ -340,3 +340,9 @@ CREATE_RISK_EVENT v1引用原冻结生产结果/动作账本，稳定幂等事�
 - 原生产/评测/复核/政策重算/动作来源/业务CSV使用同一冻结输入纯投影；修复METRIC/LLM空规则字段在复核/Trace被错误拒绝，按真实冻结节点证明，不伪造规则。原配置/结果/复核/Trace面板接维度/等级/加权与调整，精确字符串及BigInt校验复用。
 - POINTS直接精确分子/分母一次舍入，保留原始分子分母，近似rawScore不决定最终分/等级。26573最终backend skipTests test-compile退出0；UI15425/36971已通过，最终复核校验构建待终态。
 - 无新增运行测试/SQL/部署；真实发布/Task/HTTP/DB/复核/重算/源证明/CSV/浏览器/旧Scheme发布及全部其它PRD继续，不标记全目标完成。
+
+## 2026-10-14 独立复核政策首批
+
+- 复用原Condition/Selector sampleKey/Fusion选中事实、CREATE_REVIEW和原复核记录，冻结高风险/校准置信度半开区间/稳定概率抽样及显式未知策略，不新表/API/直接创建路径。普通fallback不叠加特殊概率，全部命中及桶/抑制保留原Trace。
+- 原发布/历史/生产/评测/动作源证明/政策重算及配置/Trace接通，唯一直接复核路由保证决定可进入原动作流程。旧nullable JSON省略及构造兼容，Score/Risk/Review分阶段禁止循环。
+- 95532最终backend skipTests test-compile与94003最终UI build退出0，未新增运行测试/SQL/部署；真实队列/角色/并发/历史/校准/分布/高精度输入采样身份/浏览器/完整发布及其余PRD继续。

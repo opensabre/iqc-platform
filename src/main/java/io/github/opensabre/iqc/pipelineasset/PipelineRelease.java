@@ -18,8 +18,15 @@ public record PipelineRelease(String schemaVersion, PipelineDefinition pipeline,
                               @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
                               io.github.opensabre.iqc.label.FindingLabelPolicy labelPolicy,
                               @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-                              RiskPolicy riskPolicy) {
+                              RiskPolicy riskPolicy,
+                              @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                              ReviewPolicy reviewPolicy) {
     public static final String SCHEMA = "iqc-pipeline-release-v1";
+    public PipelineRelease(String schemaVersion,PipelineDefinition pipeline,FusionPolicy fusion,InspectionScoring.Policy scoring,
+            List<ItemMapping> items,PublicationGatePolicy publicationGate,io.github.opensabre.iqc.action.ActionPolicy actionPolicy,
+            io.github.opensabre.iqc.label.FindingLabelPolicy labelPolicy,RiskPolicy riskPolicy) {
+        this(schemaVersion,pipeline,fusion,scoring,items,publicationGate,actionPolicy,labelPolicy,riskPolicy,null);
+    }
     public PipelineRelease(String schemaVersion,PipelineDefinition pipeline,FusionPolicy fusion,InspectionScoring.Policy scoring,
             List<ItemMapping> items,PublicationGatePolicy publicationGate,io.github.opensabre.iqc.action.ActionPolicy actionPolicy,
             io.github.opensabre.iqc.label.FindingLabelPolicy labelPolicy) {
@@ -94,6 +101,9 @@ public record PipelineRelease(String schemaVersion, PipelineDefinition pipeline,
     public PipelineRelease {
         if (!SCHEMA.equals(schemaVersion)) throw new IllegalArgumentException("unsupported pipeline release schema");
         Objects.requireNonNull(pipeline); Objects.requireNonNull(fusion); Objects.requireNonNull(scoring);
+        if(reviewPolicy!=null)ReviewPolicy.validateRouting(actionPolicy);
+        else if(actionPolicy!=null&&actionPolicy.actions().stream().anyMatch(action->ReviewPolicy.readsReview(action.condition())))
+            throw new IllegalArgumentException("Review action condition requires a review policy");
         items = List.copyOf(items);
         var codes = new HashSet<String>();
         for (var item : items) if (item.itemCode() == null || item.itemCode().isBlank()
