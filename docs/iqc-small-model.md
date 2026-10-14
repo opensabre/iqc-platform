@@ -7,3 +7,11 @@ PRD8.2要求分类、NER、情绪、意图和语义匹配的专用模型。原Mo
 操作固定为CLASSIFICATION、NER、EMOTION、INTENT、SEMANTIC_MATCHING。分类可输出BOOLEAN/STRING/ENUM，情绪和意图输出STRING/ENUM，NER输出OBJECT，语义匹配输出NUMBER；业务阈值继续由原项目NumericPredicate承担。每个操作须冻结明确输入和结构化回执schema，模型回执须对应冻结模型id/version和请求hash，未知或失败不伪造规范值。请求仅携带安全模型身份和部署引用，不向工具发送模型secretRef。
 
 本文件为实施前复用与协议取舍记录；发布校验、执行器、原网关、界面及真实推理/Task/SQL/API/浏览器验收须分别完成并记录，不把协议类当作引擎已经实现。语音转换全部排除。
+
+## 当前请求与回执边界
+
+`iqc-small-model-request-v1`携带operation、安全model身份、映射input、可信messages与inputHash。messages始终来自运行时处理好的会话，不依赖管理员重复映射正文。model字段为白名单，禁止传递secretRef；MCP自身认证仍由原凭据解析器处理。
+
+`iqc-small-model-response-v1`须回显modelId、精确整数modelVersion、modelName、deploymentRef、operation和inputHash，提供原Finding所需state/value/reason/evidence/confidence。可选usage的token字段必须为精确整数；缺失用量沿原网关MISSING处理，不伪造零用量。外部拥有方对这些声明真实性的保障仍需要真实模型协议验收。
+
+发布从明确已发布Agent版本的primaryModel或fallbackModels和mcpServers选择唯一id/version，覆盖请求携带的snapshot。运行时复用原网关与当前资产enabled校验，历史读取沿原冻结恢复入口。注册和单元回归不等于实际数据库预算、权限、历史重算、真实模型部署或浏览器流程验收通过。
