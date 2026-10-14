@@ -1,0 +1,89 @@
+package io.github.opensabre.iqc.pipelinebridge;
+
+import com.fasterxml.jackson.databind.*;
+import io.github.opensabre.iqc.finding.*;
+import io.github.opensabre.iqc.pipeline.*;
+import io.github.opensabre.iqc.pipelineasset.PipelineAssetService;
+import io.github.opensabre.iqc.result.llm.SnapshotMcpToolProvider;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+
+/** Executes a frozen business Skill through one explicitly approved read-only MCP tool. */
+public final class SkillApiDetectorEngine implements EngineAdapter {
+    public static final String VERSION="skill-api-v1";
+    private final ObjectMapper json;
+    private final SnapshotMcpToolProvider tools;
+    public SkillApiDetectorEngine(ObjectMapper json,SnapshotMcpToolProvider tools){this.json=Objects.requireNonNull(json);this.tools=Objects.requireNonNull(tools);}
+    @Override public String type(){return "SKILL_API";}
+    /** Validates only frozen metadata; publication never invokes a remote tool. */
+    public static void validateConfiguration(String version,JsonNode config) {
+        if(!VERSION.equals(version) || config==null || !config.isObject())throw new IllegalArgumentException("Frozen Skill/API configuration required");
+        for(String field:List.of("skillSnapshot","mcpSnapshot","toolInputSchema","toolOutputSchema","findingDefinition"))
+            if(!config.path(field).isObject())throw new IllegalArgumentException("Missing Skill/API frozen contract: "+field);
+        var skill=config.path("skillSnapshot");
+        for(String field:List.of("id","code","instructions","inputSchemaJson","outputSchemaJson"))
+            if(!skill.path(field).isTextual() || skill.path(field).asText().isBlank())throw new IllegalArgumentException("Skill requires versioned instructions and schemas");
+        if(!skill.path("versionNo").isIntegralNumber() || !skill.path("versionNo").canConvertToInt() || skill.path("versionNo").intValue()<1)
+            throw new IllegalArgumentException("Skill version required");
+        if(!config.path("toolName").isTextual() || config.path("toolName").asText().isBlank())throw new IllegalArgumentException("Frozen tool name required");
+        ValueSchema.validateSchema(config.path("toolInputSchema"));ValueSchema.validateSchema(config.path("toolOutputSchema"));
+    }
+    @Override public NodeResult execute(NodeContext context) throws Exception {
+        var config=context.node().config();validateConfiguration(context.node().version(),config);
+        var skill=config.path("skillSnapshot");var input=context.input();
+        var inputSchema=json.readTree(skill.path("inputSchemaJson").asText());
+        var outputSchema=json.readTree(skill.path("outputSchemaJson").asText());
+        ValueSchema.checkData(inputSchema,input);ValueSchema.validateSchema(outputSchema);
+        var manifest=context.variables().get("__messages");
+        if(manifest==null || !manifest.isArray() || manifest.size()>10000 || input.has("messages") && !input.get("messages").equals(manifest))
+            throw new IllegalArgumentException("Trusted processed conversation manifest required");
+        var task=context.variables().get("__task");
+        if(task==null || !task.path("currentExecutionId").isTextual() || task.path("currentExecutionId").asText().isBlank())
+            throw new IllegalArgumentException("Trusted Skill execution identity required");
+        var request=json.createObjectNode().put("schemaVersion","iqc-skill-request-v1");
+        request.set("skill",skill);request.set("input",input);
+        String hash=PipelineAssetService.hash(json.writeValueAsString(List.of(request,manifest)));
+        request.put("inputHash",hash);
+        ValueSchema.checkData(config.path("toolInputSchema"),request);
+        String body=json.writeValueAsString(request);
+        if(body.getBytes(StandardCharsets.UTF_8).length>65536)throw new IllegalArgumentException("Skill request too large");
+        JsonNode output;
+        try(var session=tools.openReadOnlyTool(config.path("mcpSnapshot"),config.path("toolName").asText(),config.path("toolInputSchema"),config.path("toolOutputSchema"))) {
+            String response=session.callbacks()[0].call(body);
+            if(response.getBytes(StandardCharsets.UTF_8).length>65536)throw new IllegalArgumentException("Skill response too large");
+            var envelope=json.readTree(response);
+            if(!envelope.path("isError").isBoolean() || envelope.path("isError").booleanValue() || !envelope.path("structuredContent").isObject())
+                throw new IllegalArgumentException("Skill requires successful structured MCP output");
+            output=envelope.get("structuredContent");
+        }
+        ValueSchema.checkData(config.path("toolOutputSchema"),output);ValueSchema.checkData(outputSchema,output);
+        if(!"iqc-skill-response-v1".equals(output.path("schemaVersion").asText())
+                || !hash.equals(output.path("inputHash").asText())
+                || !skill.path("id").asText().equals(output.path("skillId").asText())
+                || !output.path("skillVersion").isIntegralNumber() || !output.path("skillVersion").canConvertToInt()
+                || skill.path("versionNo").intValue()!=output.path("skillVersion").intValue())
+            throw new IllegalArgumentException("Skill output identity differs from frozen request");
+        if(!output.path("state").isTextual() || !output.path("reason").isTextual() || output.path("reason").asText().length()>2000)
+            throw new IllegalArgumentException("Skill output requires state and bounded reason");
+        var state=Finding.State.valueOf(output.path("state").asText());
+        var definition=json.treeToValue(config.path("findingDefinition"),FindingDefinition.class);
+        String id=PipelineAssetService.hash(json.writeValueAsString(List.of(task.path("currentExecutionId").asText(),context.node().nodeId(),VERSION,context.attempt(),hash)));
+        var evidence=new ArrayList<Finding.Evidence>();
+        if(output.has("evidence")) {
+            if(!output.path("evidence").isArray() || output.path("evidence").size()>100)throw new IllegalArgumentException("Invalid Skill evidence");
+            for(var item:output.path("evidence")) {
+                if(!item.path("reference").isTextual() || item.path("reference").asText().isBlank() || item.path("reference").asText().length()>512)
+                    throw new IllegalArgumentException("External Skill evidence reference required");
+                evidence.add(new Finding.Evidence(id+":"+evidence.size(),Finding.EvidenceType.EXTERNAL_RESULT,item.path("reference").asText(),item.get("details")));
+            }
+        }
+        if(output.hasNonNull("confidence") && !output.path("confidence").isNumber())throw new IllegalArgumentException("Skill confidence must be numeric");
+        var fact=new Finding(id,definition.code(),definition.category(),definition.valueType(),output.get("value"),state,
+                output.hasNonNull("confidence")?output.get("confidence").decimalValue():null,definition.defaultSeverity(),output.path("reason").asText(),evidence,
+                new Finding.Source(context.node().nodeId(),type(),VERSION,context.attempt(),hash));
+        definition.validate(fact);
+        var variables=new LinkedHashMap<String,JsonNode>();variables.put(context.node().nodeId()+"_state",json.valueToTree(state));
+        if(state==Finding.State.KNOWN)variables.put(context.node().nodeId()+"_value",fact.value());
+        return new NodeResult(NodeResult.Status.SUCCESS,List.of(fact),variables,Map.of(),null);
+    }
+}
