@@ -63,27 +63,7 @@ public final class SkillApiDetectorEngine implements EngineAdapter {
                 || !output.path("skillVersion").isIntegralNumber() || !output.path("skillVersion").canConvertToInt()
                 || skill.path("versionNo").intValue()!=output.path("skillVersion").intValue())
             throw new IllegalArgumentException("Skill output identity differs from frozen request");
-        if(!output.path("state").isTextual() || !output.path("reason").isTextual() || output.path("reason").asText().length()>2000)
-            throw new IllegalArgumentException("Skill output requires state and bounded reason");
-        var state=Finding.State.valueOf(output.path("state").asText());
-        var definition=json.treeToValue(config.path("findingDefinition"),FindingDefinition.class);
-        String id=PipelineAssetService.hash(json.writeValueAsString(List.of(task.path("currentExecutionId").asText(),context.node().nodeId(),VERSION,context.attempt(),hash)));
-        var evidence=new ArrayList<Finding.Evidence>();
-        if(output.has("evidence")) {
-            if(!output.path("evidence").isArray() || output.path("evidence").size()>100)throw new IllegalArgumentException("Invalid Skill evidence");
-            for(var item:output.path("evidence")) {
-                if(!item.path("reference").isTextual() || item.path("reference").asText().isBlank() || item.path("reference").asText().length()>512)
-                    throw new IllegalArgumentException("External Skill evidence reference required");
-                evidence.add(new Finding.Evidence(id+":"+evidence.size(),Finding.EvidenceType.EXTERNAL_RESULT,item.path("reference").asText(),item.get("details")));
-            }
-        }
-        if(output.hasNonNull("confidence") && !output.path("confidence").isNumber())throw new IllegalArgumentException("Skill confidence must be numeric");
-        var fact=new Finding(id,definition.code(),definition.category(),definition.valueType(),output.get("value"),state,
-                output.hasNonNull("confidence")?output.get("confidence").decimalValue():null,definition.defaultSeverity(),output.path("reason").asText(),evidence,
-                new Finding.Source(context.node().nodeId(),type(),VERSION,context.attempt(),hash));
-        definition.validate(fact);
-        var variables=new LinkedHashMap<String,JsonNode>();variables.put(context.node().nodeId()+"_state",json.valueToTree(state));
-        if(state==Finding.State.KNOWN)variables.put(context.node().nodeId()+"_value",fact.value());
-        return new NodeResult(NodeResult.Status.SUCCESS,List.of(fact),variables,Map.of(),null);
+        return StructuredToolFindingCodec.decode(json,context,output,
+                task.path("currentExecutionId").asText(),hash,type(),VERSION);
     }
 }
