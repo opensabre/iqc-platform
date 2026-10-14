@@ -26,10 +26,54 @@ import java.util.Set;
 public class SnapshotMcpToolProvider {
     private final ObjectMapper objectMapper;
     private final SecretReferenceResolver secrets;
+    private final Set<String> approvedReadOnlyTools;
 
     public SnapshotMcpToolProvider(ObjectMapper objectMapper, SecretReferenceResolver secrets) {
+        this(objectMapper,secrets,"");
+    }
+
+    /** Deployment approval binds an immutable server id/version and tool; empty denies detection calls. */
+    @org.springframework.beans.factory.annotation.Autowired
+    public SnapshotMcpToolProvider(ObjectMapper objectMapper, SecretReferenceResolver secrets,
+            @org.springframework.beans.factory.annotation.Value("${iqc.pipeline.read-only-mcp-tools:}") String approvals) {
         this.objectMapper = objectMapper;
         this.secrets = secrets;
+        approvedReadOnlyTools=java.util.Arrays.stream(approvals.split(",")).map(String::trim)
+                .filter(value->!value.isEmpty()).collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    /** Opens exactly one approved detection tool and rejects changed published schemas before calling it. */
+    public Session openReadOnlyTool(JsonNode server,String toolName,JsonNode inputSchema,JsonNode outputSchema) {
+        if(server==null || !server.isObject() || !server.path("id").isTextual()
+                || !server.path("versionNo").isIntegralNumber() || !server.path("versionNo").canConvertToInt()
+                || server.path("versionNo").intValue()<1 || toolName==null || toolName.isBlank())
+            throw new IllegalArgumentException("Frozen detection MCP identity required");
+        String approval=server.path("id").asText()+":"+server.path("versionNo").intValue()+":"+toolName;
+        if(!approvedReadOnlyTools.contains(approval) || !allowedTools(server.path("allowedToolsJson").asText("[]")).contains(toolName))
+            throw new IllegalArgumentException("Detection MCP tool is not approved for this server version");
+        if(inputSchema==null || outputSchema==null)throw new IllegalArgumentException("Frozen detection schemas required");
+        io.github.opensabre.iqc.pipeline.ValueSchema.validateSchema(inputSchema);
+        io.github.opensabre.iqc.pipeline.ValueSchema.validateSchema(outputSchema);
+        McpSyncClient client=createClient(server);
+        try {
+            client.initialize();
+            var selected=client.listTools().tools().stream().filter(tool->toolName.equals(tool.name())).toList();
+            if(selected.size()!=1)throw new IllegalArgumentException("Frozen detection tool unavailable or ambiguous");
+            var tool=selected.getFirst();var hints=tool.annotations();
+            if(hints==null || !Boolean.TRUE.equals(hints.readOnlyHint()) || !Boolean.FALSE.equals(hints.destructiveHint()))
+                throw new IllegalArgumentException("Detection tool lacks explicit read-only declaration");
+            var liveInput=objectMapper.<com.fasterxml.jackson.databind.node.ObjectNode>valueToTree(tool.inputSchema());
+            if(liveInput==null)throw new IllegalArgumentException("Detection tool input schema missing");
+            // SDK optional dialect fields serialize as null; they do not add schema capabilities.
+            var absent=new ArrayList<String>();liveInput.fields().forEachRemaining(field->{if(field.getValue().isNull())absent.add(field.getKey());});
+            liveInput.remove(absent);
+            if(!inputSchema.equals(liveInput)
+                    || !outputSchema.equals(objectMapper.valueToTree(tool.outputSchema())))
+                throw new IllegalArgumentException("Detection tool schema differs from frozen contract");
+            return new Session(new ToolCallback[]{callback(server.path("code").asText("mcp"),client,tool)},List.of(client));
+        } catch(RuntimeException failure) {
+            closeQuietly(client);throw failure;
+        }
     }
 
     /** Schema 3 uses snapshotted capabilities; schema 2 keeps its original AGENT_LLM-only tool contract. */
