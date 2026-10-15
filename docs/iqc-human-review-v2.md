@@ -58,3 +58,11 @@ backend22842离线skipTests test-compile已terminal exit0；UI44434完整构建�
 人工改分命令须包含sourceResultId、当前计算评分的精确摘要、0..100且最多2位小数的字符串、必填原因。保留机器分数、项目/Finding重算分数及人工数字覆盖三者身份。新提交基准不匹配拒绝；沿用的人工改分遇到后续项目/Finding变化则标为STALE并停止生效，待重新确认，不能静默移植到新计算结果。原计算明细、一票否决和未确认事实保留，单纯改数字不能伪装成公式重算或证据确认。后续需同步Service/API、导出/报告/候选与UI，明确人工分数与计算分数显示；此段为设计边界，尚未实现人工改分流程。
 
 人工改分纯校验已加入原BusinessItemReviewEvaluator（未新增评分类/表）：ScoreAdjustment/ManualScoreProjection保存字符串分数、必填原因与计算摘要，scoringHash复用Selector精确摘要并绑定resultId。新命令基准不符拒绝，继承命令基准不符返回STALE/effectiveScore=null；APPLIED单独提供人工数字，不修改原InspectionScoring.Result、明细、否决或事实完整性。此阶段尚未接Service/API/报告/候选/UI，不能宣称人工改分已可用；仍须显式展示计算与人工分数并完成后续接入。
+
+## 人工改分轮次与界面接入
+
+c5d59ff纯内核离线skipTests test-compile已terminal exit0。原Projection增加可选manualScore，原4/5参构造与null JSON兼容。原decide支持score-only及同轮组合命令，旧无改分分支指纹保持，含改分用exact hash；继承前轮调整由新计算基准决定APPLIED/STALE。历史重算比较manualScore，机器与复核计算Result均不改写。原CSV追加改分状态/有效覆盖分数/原因/基准，候选expected.manualScore保留完整命令与状态；原reviewer/time与不可变轮次保留修改审计。
+
+原reviews查询增加SCORE_CONTEXT，复用原查看权限/数据范围与REPEATABLE_READ，返回当前复核计算摘要、字符串分数及有效/过期调整。原Controller仅在新scoreAdjustment有值时调用新重载，原消息整数finalScore不接业务覆盖，旧DTO构造/调用保留。
+
+ManualScoreReviewEditor接原父级冻结命令与重试，0..100两位小数字符串、必填原因、服务端基准hash、迟到响应隔离；历史人工分数与计算分数分列，STALE不冒充有效分数。当前业务汇总报表仍按计算分数统计，需下一步新增清楚标记的人工覆盖口径，不能把现有reviewed平均分宣称含人工改分。API/数据库/权限/浏览器/Gold审批与完整PRD继续，未部署。

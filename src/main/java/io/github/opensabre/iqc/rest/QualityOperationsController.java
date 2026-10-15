@@ -99,6 +99,11 @@ public class QualityOperationsController {
                                       @RequestParam(required=false) String taskId,
                                       @RequestParam(defaultValue="1") int current,
                                       @RequestParam(defaultValue="20") int size) {
+        if("SCORE_CONTEXT".equals(view)){
+            if(!business(targetType)||resultId==null||resultId.isBlank()||status!=null||taskId!=null)
+                throw IqcException.invalidArgument("评分复核上下文必须指定单一业务结果");
+            return businessReviews.scoreContext(resultId);
+        }
         if("FINDING_CONTEXT".equals(view)){
             if(!business(targetType)||resultId==null||resultId.isBlank()||status!=null||taskId!=null)
                 throw IqcException.invalidArgument("事实复核上下文必须指定单一业务结果");
@@ -125,8 +130,11 @@ public class QualityOperationsController {
                 throw IqcException.invalidArgument("业务复核必须指定修订与完成/退回决定");
             if (request.finalScore() != null || request.finalStatus() != null || request.finalRiskLevel() != null)
                 throw IqcException.invalidArgument("业务复核不能手工覆盖总分、整体状态或风险");
+            if(request.scoreAdjustment()!=null)return businessReviews.decide(reviewId,request.expectedRevision(),"REJECTED".equals(request.decision()),
+                    request.items(),request.findingDecisions(),request.scoreAdjustment(),request.comment());
             return businessReviews.decide(reviewId, request.expectedRevision(), "REJECTED".equals(request.decision()), request.items(),request.findingDecisions(),request.comment());
         }
+        if(request.scoreAdjustment()!=null)throw IqcException.invalidArgument("消息复核不接受业务人工改分命令");
         if(request.findingDecisions()!=null&&!request.findingDecisions().isEmpty())throw IqcException.invalidArgument("消息复核不接受Finding裁决");
         return service.decideReview(reviewId, request.decision(), request.finalStatus(), request.finalScore(), request.finalRiskLevel(), request.comment());
     }
@@ -171,10 +179,16 @@ public class QualityOperationsController {
     public record ReviewRequest(String comment, String targetType, Integer expectedRevision, String requestId) { }
     public record ReviewDecision(String decision, String finalStatus, Integer finalScore, String finalRiskLevel, String comment,
                                  String targetType, Integer expectedRevision, List<BusinessItemReviewEvaluator.Decision> items,
-                                 List<io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.Decision> findingDecisions) {
+                                 List<io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.Decision> findingDecisions,
+                                 BusinessItemReviewEvaluator.ScoreAdjustment scoreAdjustment) {
+        public ReviewDecision(String decision,String finalStatus,Integer finalScore,String finalRiskLevel,String comment,
+                String targetType,Integer expectedRevision,List<BusinessItemReviewEvaluator.Decision> items,
+                List<io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.Decision> findingDecisions){
+            this(decision,finalStatus,finalScore,finalRiskLevel,comment,targetType,expectedRevision,items,findingDecisions,null);
+        }
         public ReviewDecision(String decision,String finalStatus,Integer finalScore,String finalRiskLevel,String comment,
                 String targetType,Integer expectedRevision,List<BusinessItemReviewEvaluator.Decision> items){
-            this(decision,finalStatus,finalScore,finalRiskLevel,comment,targetType,expectedRevision,items,null);
+            this(decision,finalStatus,finalScore,finalRiskLevel,comment,targetType,expectedRevision,items,null,null);
         }
     }
     public record LabelReviewRequest(String comment, Integer expectedRevision, String requestId) { }
