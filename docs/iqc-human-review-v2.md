@@ -16,3 +16,11 @@
 ## 验收边界
 
 每项需覆盖服务/API/UI、冻结来源复算、旧历史/幂等兼容、候选与导出。编译/构建不替代真实队列、角色、并发、数据库与浏览器验收。当前Root不新增或运行测试；另一位开发者按其授权独立验证，仅集成其已提交产物。
+
+## 反馈分类当前实现
+
+后端475d1ae在原Decision增加可选feedbackCategory，旧六参构造保留且null不序列化；只接受上列七个精确值，原必填原因不放宽。归一化复制保留分类，Service原跨轮effective map和已保存Projection复算自然携带；QualityOperationsController直接接收Decision列表，无另一次丢字段映射。BusinessReviewSampleService原humanDecisions整体序列化保留分类。CSV仅有分类时追加“有效裁决反馈分类（可能沿用前轮）”，保持旧无分类导出列结构。
+
+UI27f48b5提供可清空分类选择、提交时仅有值才增加字段、冻结命令用于重试、成功/切结果清空和历史有效项目分类展示。历史缺少decisions数组按损坏处理。前端合入B d3be2d5事实版本类型修正为1eb3232，无框架修改。
+
+backend22842离线skipTests test-compile已terminal exit0；UI44434完整构建仍运行中。上述为代码/编译证据，不是数据库/API/浏览器/Gold审批端到端验收。Finding编辑、人工总分覆盖和二审仲裁仍未实施。
