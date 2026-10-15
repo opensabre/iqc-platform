@@ -27,6 +27,10 @@ public class AgentAssetReferenceValidator {
     public void validateDetectionCapabilities(String skillId,String mcpId) {
         requireEnabledSkill(skillId);requireEnabledMcp(mcpId);
     }
+    /** Availability only: retain the published model and MCP snapshot bodies. */
+    public void validateInferenceCapabilities(String modelId,String mcpId) {
+        requireEnabledModel(modelId);requireEnabledMcp(mcpId);
+    }
     private void requireEnabledMcp(String id) {var item=mcps.selectById(id);if(item==null||!"ENABLED".equals(item.getStatus()))throw IqcException.invalidState("MCP 不存在或已停用: "+id);}
     private void requireEnabledSkill(String id) {var item=skills.selectById(id);if(item==null||!"ENABLED".equals(item.getStatus()))throw IqcException.invalidState("Skill 不存在或已停用: "+id);}
     /** Resolves enabled references into a secret-free immutable Agent asset snapshot. */

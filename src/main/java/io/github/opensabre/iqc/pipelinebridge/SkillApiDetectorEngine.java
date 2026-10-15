@@ -44,18 +44,7 @@ public final class SkillApiDetectorEngine implements EngineAdapter {
         request.set("skill",skill);request.set("input",input);
         String hash=PipelineAssetService.hash(json.writeValueAsString(List.of(request,manifest)));
         request.put("inputHash",hash);
-        ValueSchema.checkData(config.path("toolInputSchema"),request);
-        String body=json.writeValueAsString(request);
-        if(body.getBytes(StandardCharsets.UTF_8).length>65536)throw new IllegalArgumentException("Skill request too large");
-        JsonNode output;
-        try(var session=tools.openReadOnlyTool(config.path("mcpSnapshot"),config.path("toolName").asText(),config.path("toolInputSchema"),config.path("toolOutputSchema"))) {
-            String response=session.callbacks()[0].call(body);
-            if(response.getBytes(StandardCharsets.UTF_8).length>65536)throw new IllegalArgumentException("Skill response too large");
-            var envelope=json.readTree(response);
-            if(!envelope.path("isError").isBoolean() || envelope.path("isError").booleanValue() || !envelope.path("structuredContent").isObject())
-                throw new IllegalArgumentException("Skill requires successful structured MCP output");
-            output=envelope.get("structuredContent");
-        }
+        JsonNode output=StructuredToolTransport.invoke(json,tools,config,request);
         ValueSchema.checkData(config.path("toolOutputSchema"),output);ValueSchema.checkData(outputSchema,output);
         if(!"iqc-skill-response-v1".equals(output.path("schemaVersion").asText())
                 || !hash.equals(output.path("inputHash").asText())

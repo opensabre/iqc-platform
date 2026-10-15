@@ -33,4 +33,12 @@ class DetectionCapabilityAvailabilityTest {
         assertThatThrownBy(()->validator.validateDetectionCapabilities("skill","server")).hasMessageContaining("MCP 不存在或已停用");
         verifyNoInteractions(models);
     }
+    @Test void inferenceRetainsFrozenIdentityWhileCheckingModelAndMcpAvailability() {
+        var model=new io.github.opensabre.iqc.modelprofile.model.IqcModelProfile();model.setStatus("ENABLED");model.setVersionNo(99);
+        var server=new IqcMcpServer();server.setStatus("ENABLED");server.setVersionNo(100);
+        when(models.selectById("model")).thenReturn(model);when(mcps.selectById("server")).thenReturn(server);
+        validator.validateInferenceCapabilities("model","server");verifyNoInteractions(skills);
+        model.setStatus("DISABLED");
+        assertThatThrownBy(()->validator.validateInferenceCapabilities("model","server")).hasMessageContaining("模型配置不存在或已停用");
+    }
 }

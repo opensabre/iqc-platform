@@ -234,11 +234,12 @@ public class PipelineAssetService {
                         config,node.condition(),node.timeoutMs(),node.retries(),node.onError(),node.fallbackNodeId(),node.outputSchema(),node.enabled()));
                 continue;
             }
-            if("SKILL_API".equals(node.type())) {
-                freezeSkillApi(config,node.version());
+            if(Set.of("SKILL_API","SMALL_MODEL").contains(node.type())) {
+                boolean inference="SMALL_MODEL".equals(node.type());
+                freezeStructuredTool(config,node.version(),inference);
                 codes.add(config.path("findingDefinition").path("code").asText());
                 nodes.add(new PipelineDefinition.Node(node.nodeId(),node.type(),node.name(),
-                        io.github.opensabre.iqc.pipelinebridge.SkillApiDetectorEngine.VERSION,node.dependsOn(),node.inputMapping(),
+                        (inference?io.github.opensabre.iqc.pipelinebridge.SmallModelContract.VERSION:io.github.opensabre.iqc.pipelinebridge.SkillApiDetectorEngine.VERSION),node.dependsOn(),node.inputMapping(),
                         config,node.condition(),node.timeoutMs(),node.retries(),node.onError(),node.fallbackNodeId(),node.outputSchema(),node.enabled()));
                 continue;
             }
@@ -359,6 +360,17 @@ public class PipelineAssetService {
                 }
                 continue;
             }
+            if("SMALL_MODEL".equals(node.type())) {
+                var config=node.config();
+                try {io.github.opensabre.iqc.pipelinebridge.SmallModelContract.validateConfiguration(node.version(),config,
+                        json.treeToValue(config.path("findingDefinition"),FindingDefinition.class));}
+                catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException invalid){throw IqcException.invalidState("已发布专用模型协议无效");}
+                var ref=config.path("findingReference");findings.publishedDefinitionForExecution(ref.path("id").asText(),ref.path("versionNo").intValue());
+                var agent=agents.selectById(config.path("agentReference").path("id").asText());
+                if(agent==null || "DISABLED".equals(agent.getStatus()))throw IqcException.invalidState("专用模型智能体已停用");
+                agentAssets.validateInferenceCapabilities(config.path("modelSnapshot").path("id").asText(),config.path("mcpSnapshot").path("id").asText());
+                continue;
+            }
             if("SKILL_API".equals(node.type())) {
                 var config=node.config();
                 try {io.github.opensabre.iqc.pipelinebridge.SkillApiDetectorEngine.validateConfiguration(node.version(),config);}
@@ -387,9 +399,12 @@ public class PipelineAssetService {
         }
     }
     /** Freezes Skill/MCP bodies from one published Agent version without remote inspection or latest substitution. */
-    private void freezeSkillApi(ObjectNode config,String version) {
-        var allowed=Set.of("agentReference","skillReference","mcpReference","findingReference","toolName",
-                "toolInputSchema","toolOutputSchema","skillSnapshot","mcpSnapshot","findingDefinition");
+    private void freezeSkillApi(ObjectNode config,String version) {freezeStructuredTool(config,version,false);}
+    private void freezeStructuredTool(ObjectNode config,String version,boolean inference) {
+        var allowed=new java.util.HashSet<>(Set.of("agentReference","skillReference","mcpReference","findingReference","toolName",
+                "toolInputSchema","toolOutputSchema","skillSnapshot","mcpSnapshot","findingDefinition"));
+        if(inference){allowed.remove("skillReference");allowed.remove("skillSnapshot");
+            allowed.addAll(Set.of("modelReference","modelSnapshot","operation","inputSchema","outputSchema"));}
         for(var field:config.properties())if(!allowed.contains(field.getKey()))throw IqcException.invalidArgument("Skill/API不支持该配置字段");
         var agentRef=config.path("agentReference");validateReference(agentRef);
         var current=agents.selectById(agentRef.path("id").asText());
@@ -400,12 +415,23 @@ public class PipelineAssetService {
         if(current==null || "DISABLED".equals(current.getStatus()) || published==null)throw IqcException.invalidArgument("Skill/API须引用可用已发布智能体版本");
         var agentConfig=parse(published.getConfigJson());
         if(!"3.0".equals(agentConfig.path("schemaVersion").asText()))throw IqcException.invalidArgument("Skill/API须使用新版冻结能力资产");
-        config.set("skillSnapshot",frozenCapability(agentConfig.path("assetSnapshots").path("skills"),config.path("skillReference")));
+        if(inference) {
+            var snapshots=agentConfig.path("assetSnapshots");var models=json.createArrayNode();
+            if(snapshots.path("primaryModel").isObject())models.add(snapshots.path("primaryModel"));
+            if(snapshots.path("fallbackModels").isArray())for(var model:snapshots.path("fallbackModels"))models.add(model);
+            config.set("modelSnapshot",frozenCapability(models,config.path("modelReference")));
+        } else config.set("skillSnapshot",frozenCapability(agentConfig.path("assetSnapshots").path("skills"),config.path("skillReference")));
         config.set("mcpSnapshot",frozenCapability(agentConfig.path("assetSnapshots").path("mcpServers"),config.path("mcpReference")));
-        agentAssets.validateDetectionCapabilities(config.path("skillSnapshot").path("id").asText(),config.path("mcpSnapshot").path("id").asText());
+        if(inference)agentAssets.validateInferenceCapabilities(config.path("modelSnapshot").path("id").asText(),config.path("mcpSnapshot").path("id").asText());
+        else agentAssets.validateDetectionCapabilities(config.path("skillSnapshot").path("id").asText(),config.path("mcpSnapshot").path("id").asText());
         var reference=config.path("findingReference");validateReference(reference);
         config.set("findingDefinition",json.valueToTree(findings.publishedDefinition(reference.path("id").asText(),reference.path("versionNo").intValue())));
         try {
+            if(inference) {
+                io.github.opensabre.iqc.pipelinebridge.SmallModelContract.validateConfiguration(version,config,
+                        json.treeToValue(config.path("findingDefinition"),FindingDefinition.class));
+                return;
+            }
             io.github.opensabre.iqc.pipelinebridge.SkillApiDetectorEngine.validateConfiguration(version,config);
             var skill=config.path("skillSnapshot");
             io.github.opensabre.iqc.pipeline.ValueSchema.validateSchema(json.readTree(skill.path("inputSchemaJson").asText()));
