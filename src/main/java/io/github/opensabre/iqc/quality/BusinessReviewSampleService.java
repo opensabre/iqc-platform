@@ -166,6 +166,25 @@ public class BusinessReviewSampleService {
                 .put("sourceHash", review.getSourceHash()).put("inputHash", hash(input)).put("executionInputHash", executionInputHash);
         expected.set("expected", json.valueToTree(projection.reviewed()));
         expected.set("humanDecisions", json.valueToTree(projection.decisions()));
+        if(projection.findingReview()!=null){
+            expected.set("humanFindingDecisions",json.valueToTree(projection.findingReview().findings().decisions()));
+            var reviewedFindings=json.createArrayNode();
+            for(var finding:projection.findingReview().findings().reviewed()){
+                var fact=json.createObjectNode().put("code",finding.code()).put("valueType",finding.valueType().name())
+                        .put("state",finding.state().name()).put("severity",finding.severity().name());
+                fact.set("value",finding.value());
+                // Gold evidence keeps only frozen message identities, never external tool details or raw detector output.
+                var evidenceIds=new java.util.LinkedHashSet<String>();
+                for(var evidence:finding.evidence()){
+                    if(ids.contains(evidence.reference()))evidenceIds.add(evidence.reference());
+                    var detail=evidence.details();
+                    if(detail!=null&&ids.contains(detail.path("messageId").asText()))evidenceIds.add(detail.path("messageId").asText());
+                    if(detail!=null&&detail.path("messageIds").isArray())detail.path("messageIds").forEach(value->{if(value.isTextual()&&ids.contains(value.asText()))evidenceIds.add(value.asText());});
+                }
+                fact.set("evidenceMessageIds",json.valueToTree(evidenceIds));reviewedFindings.add(fact);
+            }
+            expected.set("humanReviewedFindings",reviewedFindings);
+        }
         expected.set("scoringPolicy", json.valueToTree(scoring));
         // Keep only public version identity, not node settings, prompts, secrets or model call output.
         expected.set("policySource", json.createObjectNode().put("sourceType", pipeline ? "PIPELINE" : "SCHEME")

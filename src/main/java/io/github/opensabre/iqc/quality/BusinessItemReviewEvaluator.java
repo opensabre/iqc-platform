@@ -30,7 +30,13 @@ public final class BusinessItemReviewEvaluator {
 
     /** Both projections are returned so callers cannot accidentally present a review as a machine result. */
     public record Projection(String sourceResultId, SchemeResultEvaluator.Evaluation original,
-                             SchemeResultEvaluator.Evaluation reviewed, List<Decision> decisions) { }
+                             SchemeResultEvaluator.Evaluation reviewed, List<Decision> decisions,
+                             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                             HumanFindingReviewEvaluator.PolicyProjection findingReview) {
+        public Projection(String sourceResultId,SchemeResultEvaluator.Evaluation original,SchemeResultEvaluator.Evaluation reviewed,List<Decision> decisions){
+            this(sourceResultId,original,reviewed,decisions,null);
+        }
+    }
 
     /**
      * Applies one effective decision per item to a specific canonical result, not to a mutable task pointer.

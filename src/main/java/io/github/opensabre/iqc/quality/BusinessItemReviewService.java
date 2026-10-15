@@ -154,15 +154,24 @@ public class BusinessItemReviewService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ResultReview decide(String reviewId, int expectedRevision, boolean rejected,
                                List<BusinessItemReviewEvaluator.Decision> decisions, String reason) {
+        return decide(reviewId,expectedRevision,rejected,decisions,List.of(),reason);
+    }
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public ResultReview decide(String reviewId,int expectedRevision,boolean rejected,
+            List<BusinessItemReviewEvaluator.Decision> decisions,List<HumanFindingReviewEvaluator.Decision> findingDecisions,String reason) {
+        findingDecisions=findingDecisions==null?List.of():findingDecisions;
+        if(findingDecisions.stream().anyMatch(java.util.Objects::isNull))throw IqcException.invalidArgument("事实裁决不能为空");
         ResultReview initial = reviews.selectById(reviewId);
         if (initial == null || !"BUSINESS".equals(initial.getTargetType())) throw IqcException.notFound("业务复核不存在");
         Context context = context(initial.getBusinessResultId());
         ResultReview review = reviews.selectById(reviewId); // Re-read after taking the shared task lock.
         String comment = reason(reason);
         String reviewer = actor();
-        if (decisions == null || decisions.size() > 200 || rejected && !decisions.isEmpty() || !rejected && decisions.isEmpty())
-            throw IqcException.invalidArgument("退回复核不得包含裁决，完成复核必须包含项目裁决");
-        String fingerprint = hash(List.of(expectedRevision, rejected, decisions, comment, reviewer));
+        if (decisions == null || decisions.size() > 200 || findingDecisions.size()>1000
+                || rejected && (!decisions.isEmpty()||!findingDecisions.isEmpty()) || !rejected && decisions.isEmpty()&&findingDecisions.isEmpty())
+            throw IqcException.invalidArgument("退回复核不得包含裁决，完成复核必须包含项目或事实裁决");
+        String fingerprint = findingDecisions.isEmpty()?hash(List.of(expectedRevision,rejected,decisions,comment,reviewer))
+                :hash(List.of(expectedRevision,rejected,decisions,comment,reviewer,findingDecisions));
         if (!Objects.equals(review.getReviewRevision(), expectedRevision)) throw IqcException.invalidState("复核版本已变化");
         if (!"PENDING".equals(review.getStatus())) {
             if (fingerprint.equals(review.getDecisionFingerprint())) return review;
@@ -174,16 +183,23 @@ public class BusinessItemReviewService {
         if (!rejected) {
             // Each round stores the full effective overlay, while leaving all earlier round records untouched.
             var effective = new LinkedHashMap<String, BusinessItemReviewEvaluator.Decision>();
+            var effectiveFindings=new LinkedHashMap<String,HumanFindingReviewEvaluator.Decision>();
             ResultReview previous = latest(review.getBusinessResultId(), true);
             if (previous != null) {
                 if (!review.getSourceHash().equals(previous.getSourceHash())) throw IqcException.invalidState("历史复核基准不一致");
                 var projection = read(previous.getReviewedResultJson(), BusinessItemReviewEvaluator.Projection.class);
                 projection.decisions().forEach(item -> effective.put(item.itemCode(), item));
+                if(projection.findingReview()!=null)projection.findingReview().findings().decisions().forEach(item->effectiveFindings.put(item.findingCode(),item));
             }
             Set<String> submitted = new java.util.HashSet<>();
             for (var decision : decisions) {
                 if (decision == null || !submitted.add(decision.itemCode())) throw IqcException.invalidArgument("复核项目不能为空或重复");
                 effective.put(decision.itemCode(), decision);
+            }
+            var findingCodes=new java.util.HashSet<String>();
+            for(var decision:findingDecisions){
+                if(decision==null||!findingCodes.add(decision.findingCode()))throw IqcException.invalidArgument("同一事实不能重复复核");
+                effectiveFindings.put(decision.findingCode(),decision);
             }
             try {
                 var original = mapper.readValue(context.result().getBusinessItemResultsJson(), new TypeReference<List<SchemeResultEvaluator.ItemResult>>() { });
@@ -191,7 +207,7 @@ public class BusinessItemReviewService {
                         .eq(ConversationMessage::getConversationId, context.result().getConversationId())).stream()
                         .map(ConversationMessage::getId).collect(Collectors.toSet());
                 var projection = projection(context.task(), context.result(), original,
-                        List.copyOf(effective.values()), allowed);
+                        List.copyOf(effective.values()),List.copyOf(effectiveFindings.values()),allowed);
                 review.setReviewedResultJson(mapper.writeValueAsString(projection));
             } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
                 throw IqcException.invalidState("复核基准或结果快照损坏");
@@ -311,13 +327,14 @@ public class BusinessItemReviewService {
             var original = mapper.readValue(result.getBusinessItemResultsJson(), new TypeReference<List<SchemeResultEvaluator.ItemResult>>() { });
             var stored = read(review.getReviewedResultJson(), BusinessItemReviewEvaluator.Projection.class);
             if (stored == null || !result.getId().equals(stored.sourceResultId())) throw IqcException.invalidState("复核结果来源不一致");
-            if (stored.decisions() == null || stored.decisions().isEmpty())
+            if (stored.decisions() == null || stored.decisions().isEmpty()&&stored.findingReview()==null)
                 throw IqcException.invalidState("已完成复核缺少项目裁决");
             Set<String> allowed = messages.selectList(Wrappers.<ConversationMessage>lambdaQuery()
                     .eq(ConversationMessage::getConversationId, result.getConversationId())).stream()
                     .map(ConversationMessage::getId).collect(Collectors.toSet());
             // Revalidate the saved overlay against the frozen policy; reject corruption instead of repairing it on export.
-            var checked = projection(task, result, original, stored.decisions(), allowed);
+            var checked = projection(task,result,original,stored.decisions(),
+                    stored.findingReview()==null?List.of():stored.findingReview().findings().decisions(),allowed);
             if (!mapper.valueToTree(checked).equals(mapper.valueToTree(stored)))
                 throw IqcException.invalidState("复核项目或评分快照不一致，无法导出");
             return checked;
@@ -368,6 +385,8 @@ public class BusinessItemReviewService {
             }
             boolean hasFeedback=checked.decisions().stream().anyMatch(decision->decision.feedbackCategory()!=null);
             if(hasFeedback){csv.setLength(csv.length()-1);csv.append(",有效裁决反馈分类（可能沿用前轮）\n");}
+            boolean hasFindingReview=checked.findingReview()!=null;
+            if(hasFindingReview){csv.setLength(csv.length()-1);csv.append(",人工Finding裁决JSON（本轮有效）\n");}
             var machineLines = machineScore.lines().stream().collect(Collectors.toMap(io.github.opensabre.iqc.scoring.InspectionScoring.Line::itemCode, line -> line));
             var reviewedLines = reviewedScore.lines().stream().collect(Collectors.toMap(io.github.opensabre.iqc.scoring.InspectionScoring.Line::itemCode, line -> line));
             for (int index = 0; index < checked.reviewed().items().size(); index++) {
@@ -381,7 +400,7 @@ public class BusinessItemReviewService {
                         review.getReviewedTime(), review.getRequestComment(), review.getReviewComment(), machineScore.policyVersion(),
                         machineScore.mode(), machineScore.scoreStatus(), exportScore(machineScore), reviewedScore.scoreStatus(), exportScore(reviewedScore),
                         item.itemCode(), item.name(), item.ruleId(), item.ruleVersionNo(), machine.status(), item.status(),
-                        decision == null ? "MACHINE" : "HUMAN_EFFECTIVE", decision == null ? "" : decision.reason(),
+                        decision == null ? (hasFindingReview?"FINDING_REVIEW_PROJECTED":"MACHINE") : "HUMAN_EFFECTIVE", decision == null ? "" : decision.reason(),
                         mapper.writeValueAsString(machine.matchedMessageIds()), mapper.writeValueAsString(item.matchedMessageIds()),
                         marker.path("schemeId").asText(""), marker.path("versionNo").asText(""), marker.path("draftRevision").asText(""),
                         marker.path("contentHash").asText(""), marker.path("kind").asText(""),
@@ -401,6 +420,10 @@ public class BusinessItemReviewService {
                 if(hasFeedback){
                     var extended=new java.util.ArrayList<Object>(java.util.Arrays.asList(cells));
                     extended.add(decision==null?null:decision.feedbackCategory());cells=extended.toArray();
+                }
+                if(hasFindingReview){
+                    var extended=new java.util.ArrayList<Object>(java.util.Arrays.asList(cells));
+                    extended.add(mapper.writeValueAsString(checked.findingReview().findings().decisions()));cells=extended.toArray();
                 }
                 appendCsv(csv,cells);
             }
@@ -471,13 +494,47 @@ public class BusinessItemReviewService {
     private BusinessItemReviewEvaluator.Projection projection(InspectionTask task, ConversationInspectionResult result,
             List<SchemeResultEvaluator.ItemResult> original, List<BusinessItemReviewEvaluator.Decision> decisions,
             Set<String> allowed) throws com.fasterxml.jackson.core.JsonProcessingException {
+        return projection(task,result,original,decisions,List.of(),allowed);
+    }
+    private BusinessItemReviewEvaluator.Projection projection(InspectionTask task,ConversationInspectionResult result,
+            List<SchemeResultEvaluator.ItemResult> original,List<BusinessItemReviewEvaluator.Decision> decisions,
+            List<HumanFindingReviewEvaluator.Decision> findingDecisions,Set<String> allowed) throws com.fasterxml.jackson.core.JsonProcessingException {
         var snapshot = mapper.readTree(task.getRuleSnapshotJson());
         if (snapshot.has("pipelineSnapshot")) {
             var release = pipelineRelease(snapshot);
-            var trace = mapper.readValue(result.getExecutionTraceJson(), io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation.class);
+            var trace = findingDecisions.isEmpty()?mapper.readValue(result.getExecutionTraceJson(),io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation.class)
+                    :mapper.readerFor(io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation.class)
+                    .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                    .<io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation>readValue(result.getExecutionTraceJson());
+            if(!findingDecisions.isEmpty()){
+                var input=io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.validatedExecutionInput(task,snapshot,trace,result.getConversationId(),mapper);
+                var reviewAllowed=new java.util.HashSet<String>();input.path("messages").forEach(message->reviewAllowed.add(message.path("id").asText()));
+                var checked=BusinessItemReviewEvaluator.evaluatePipeline(result.getId(),release,trace,original,decisions,reviewAllowed,input.path("businessContext"));
+                var human=HumanFindingReviewEvaluator.evaluatePolicies(result.getId(),release,trace,findingDecisions,decisions,input,mapper);
+                var statuses=human.items().stream().collect(Collectors.toMap(io.github.opensabre.iqc.scoring.InspectionScoring.Decision::itemCode,item->item.status()));
+                var itemOverrides=checked.decisions().stream().collect(Collectors.toMap(BusinessItemReviewEvaluator.Decision::itemCode,item->item));
+                var facts=human.findings().reviewed().stream().collect(Collectors.toMap(io.github.opensabre.iqc.fusion.FindingFusion.Result::code,item->item));
+                var mappings=release.items().stream().collect(Collectors.toMap(io.github.opensabre.iqc.pipelineasset.PipelineRelease.ItemMapping::itemCode,item->item));
+                var items=original.stream().map(item->{
+                    var override=itemOverrides.get(item.itemCode());var fact=facts.get(mappings.get(item.itemCode()).findingCode());
+                    var ids=new java.util.LinkedHashSet<String>();
+                    for(var evidence:fact.evidence()){
+                        if(reviewAllowed.contains(evidence.reference()))ids.add(evidence.reference());
+                        var details=evidence.details();if(details!=null){
+                            if(reviewAllowed.contains(details.path("messageId").asText()))ids.add(details.path("messageId").asText());
+                            if(details.path("messageIds").isArray())details.path("messageIds").forEach(id->{if(id.isTextual()&&reviewAllowed.contains(id.asText()))ids.add(id.asText());});
+                        }
+                    }
+                    return new SchemeResultEvaluator.ItemResult(item.itemCode(),item.name(),item.ruleId(),item.ruleVersionNo(),statuses.get(item.itemCode()),
+                            override==null?List.copyOf(ids):override.evidenceMessageIds());
+                }).toList();
+                return new BusinessItemReviewEvaluator.Projection(result.getId(),checked.original(),
+                        new SchemeResultEvaluator.Evaluation(items,human.scoring()),checked.decisions(),human);
+            }
             return BusinessItemReviewEvaluator.evaluatePipeline(result.getId(), release, trace, original, decisions, allowed,
                     io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.validatedBusinessContext(task,snapshot,trace,result.getConversationId(),mapper));
         }
+        if(!findingDecisions.isEmpty())throw IqcException.invalidArgument("Finding人工修正必须来自冻结流水线结果");
         return BusinessItemReviewEvaluator.evaluate(result.getId(), SchemeResultEvaluator.definition(snapshot, mapper), original, decisions, allowed);
     }
 
@@ -495,7 +552,11 @@ public class BusinessItemReviewService {
         catch (com.fasterxml.jackson.core.JsonProcessingException exception) { throw IqcException.invalidArgument("复核数据无法序列化"); }
     }
     private <T> T read(String json, Class<T> type) {
-        try { return mapper.readValue(json, type); }
+        try {
+            if(type==BusinessItemReviewEvaluator.Projection.class)return mapper.readerFor(type)
+                    .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readValue(json);
+            return mapper.readValue(json,type);
+        }
         catch (Exception exception) { throw IqcException.invalidState("历史复核快照损坏"); }
     }
     private String actor() {

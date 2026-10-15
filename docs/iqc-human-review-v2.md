@@ -34,3 +34,11 @@ backend22842离线skipTests test-compile已terminal exit0；UI44434完整构建�
 此阶段仅内核，尚未接入Service/API/持久投影、评分风险标签重算、候选Gold和UI；不能声称Finding人工编辑已可用。后续须在同一轮复核中保存原/人工Finding及对应决策，继续复用原锁/权限/幂等与历史校验。
 
 人工Finding内核a5aed92离线skipTests test-compile已terminal exit0。后续加入validatedExecutionInput复用原prepare/validateResult取完整冻结manifest；无冻结输入的旧历史拒绝新增证据，不从当前归档合成。evaluatePolicies先沿原BusinessItemReviewEvaluator核对机器融合/项目/评分，再用人工事实调用原PipelineDecisionEvaluator评分、标签投影、风险和Review政策；结果状态复用原助手，V2抽样身份使用原完整冻结input的精确hash。无检测器/Action执行，结果标注为独立PolicyProjection。该入口尚未由复核Service/API调用，不能视作端到端完成。
+
+## Service/API轮次接入
+
+接入沿原`/reviews/{id}/decision`增加可选findingDecisions，保留旧DTO构造/Service入口与无新事实裁决的原指纹算法。每轮保存完整有效Finding修正及项目裁决，先Finding映射再人工项目裁决（项目裁决优先），评分/风险/Review均用最终项目状态；机器评分与原始Trace不变。原Projection增加可空且不序列化的findingReview，历史读取按冻结来源重新计算并比较；跨轮沿用仍明确保留。
+
+新增值树使用局部精确小数解码（检索未发现现成JsonNode精确decoder；不改全局ObjectMapper），Finding历史/原Trace在该路径也精确读取，避免NUMBER/OBJECT的人工值被浮点归一。新增证据和人工项目证据校验以原完整冻结消息ID为准；无冻结输入拒绝新事实修正。CSV追加该轮有效Finding裁决，候选保存人工修正与规范事实/消息证据身份，不携带原检测器payload。标签和风险仅保存人工投影，不触发实际标签更新或任何外部Action。
+
+上述尚待编译/服务API/持久性/权限/浏览器/Gold审核验收；前端Finding编辑与服务上下文读取入口仍待接入，原无Finding人工复核界面保持现有路径。

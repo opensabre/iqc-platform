@@ -14,7 +14,7 @@ public final class HumanFindingReviewEvaluator {
     private HumanFindingReviewEvaluator() { }
     /** Retaining an existing evidence ID and adding a frozen message are explicit separate operations. */
     public record Decision(String sourceResultId,String findingCode,String expectedFindingHash,
-            Finding.State state,JsonNode value,Finding.Severity severity,String reason,
+            Finding.State state,@com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=ExactValueDeserializer.class) JsonNode value,Finding.Severity severity,String reason,
             List<String> retainedEvidenceIds,List<String> addedMessageIds) {
         public Decision {
             value=value==null||value.isNull()?null:value.deepCopy();
@@ -22,6 +22,14 @@ public final class HumanFindingReviewEvaluator {
             addedMessageIds=addedMessageIds==null?null:List.copyOf(addedMessageIds);
         }
         @Override public JsonNode value(){return value==null?null:value.deepCopy();}
+    }
+    /** Scope exact tree decoding to manual values, including numbers nested inside OBJECT findings. */
+    public static final class ExactValueDeserializer extends com.fasterxml.jackson.databind.JsonDeserializer<JsonNode> {
+        @Override public JsonNode deserialize(com.fasterxml.jackson.core.JsonParser parser,com.fasterxml.jackson.databind.DeserializationContext context)
+                throws java.io.IOException {
+            return new ObjectMapper().readerFor(JsonNode.class)
+                    .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readValue(parser);
+        }
     }
     /** Original observations stay available; effective values are explicitly human and not re-fused outputs. */
     public record Projection(List<FindingFusion.Result> original,List<FindingFusion.Result> reviewed,List<Decision> decisions) {
@@ -110,13 +118,19 @@ public final class HumanFindingReviewEvaluator {
             io.github.opensabre.iqc.pipelineasset.PipelineRelease release,
             io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation trace,
             List<Decision> corrections,JsonNode validatedInput,ObjectMapper json) {
+        return evaluatePolicies(sourceResultId,release,trace,corrections,List.of(),validatedInput,json);
+    }
+    public static PolicyProjection evaluatePolicies(String sourceResultId,
+            io.github.opensabre.iqc.pipelineasset.PipelineRelease release,
+            io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation trace,
+            List<Decision> corrections,List<BusinessItemReviewEvaluator.Decision> itemOverrides,JsonNode validatedInput,ObjectMapper json) {
         if(release==null||trace==null||validatedInput==null||!validatedInput.isObject()
                 ||!validatedInput.path("businessContext").isObject()||!validatedInput.path("messages").isArray())
             throw IqcException.invalidArgument("人工事实重算必须指定冻结流水线和执行输入");
         var messages=validatedInput.path("messages");var allowed=new HashSet<String>();
         messages.forEach(message->allowed.add(message.path("id").asText()));
         // Validate the original machine fusion/items/scoring before computing any human alternative.
-        BusinessItemReviewEvaluator.evaluatePipeline(sourceResultId,release,trace,trace.items(),List.of(),allowed,
+        var original=BusinessItemReviewEvaluator.evaluatePipeline(sourceResultId,release,trace,trace.items(),itemOverrides,allowed,
                 validatedInput.path("businessContext"));
         var definitions=new LinkedHashMap<String,FindingDefinition>();
         for(var node:release.pipeline().nodes())try {
@@ -128,10 +142,15 @@ public final class HumanFindingReviewEvaluator {
         var projection=evaluate(sourceResultId,trace.fusion(),definitions,corrections,messages,json);
         var context=validatedInput.path("businessContext");var facts=projection.reviewed();
         var items=io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.decisions(release.items(),facts);
-        var score=io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.evaluate(release,facts,context);
+        var overrides=new LinkedHashMap<String,io.github.opensabre.iqc.scoring.InspectionScoring.ItemStatus>();
+        original.decisions().forEach(item->overrides.put(item.itemCode(),item.finalStatus()));
+        items=items.stream().map(item->new io.github.opensabre.iqc.scoring.InspectionScoring.Decision(item.itemCode(),
+                overrides.getOrDefault(item.itemCode(),item.status()))).toList();
         var inputs=io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.inputContext(release,facts,items,context);
-        var risk=io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.riskDecision(release,facts,score,context);
-        String riskLevel=risk==null?io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.riskLevel(release.items(),facts,score):risk.level();
+        var score=io.github.opensabre.iqc.scoring.InspectionScoring.evaluate(release.scoring(),items,
+                release.scoring().advanced()==null?null:inputs);
+        var risk=io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.riskDecision(release,facts,items,score,context);
+        String riskLevel=risk==null?io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.riskLevel(release.items(),facts,items,score):risk.level();
         var statuses=new LinkedHashMap<String,io.github.opensabre.iqc.scoring.InspectionScoring.ItemStatus>();
         items.forEach(item->statuses.put(item.itemCode(),item.status()));
         var statusItems=trace.items().stream().map(item->new io.github.opensabre.iqc.scheme.SchemeResultEvaluator.ItemResult(
@@ -139,7 +158,7 @@ public final class HumanFindingReviewEvaluator {
         String status=io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.resultStatus(trace.run(),statusItems,score);
         String samplingHash=release.reviewPolicy()!=null&&io.github.opensabre.iqc.pipelineasset.ReviewPolicy.EXACT_SCHEMA.equals(release.reviewPolicy().schemaVersion())
                 ?SelectorAssetService.hash(validatedInput.toString()):null;
-        var review=io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.reviewDecision(release,facts,score,riskLevel,status,
+        var review=io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.reviewDecision(release,facts,items,score,riskLevel,status,
                 trace.inputHash(),context,samplingHash,json);
         return new PolicyProjection(projection,items,score,risk,riskLevel,inputs.labels(),review,status);
     }
