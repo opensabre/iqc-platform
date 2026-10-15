@@ -68,4 +68,10 @@ class SmallModelBenchmarkVariableTest {
         var operation=changed(baseline).put("operation","INTENT");
         assertThatThrownBy(()->compare(baseline,operation,0)).hasMessageContaining("变量之外");
     }
+    @Test void requestHashAlgorithmCannotChangeInsideAssetVariable() throws Exception {
+        var baseline=config(3).put("inputHashAlgorithm","EXACT_JSON_V1");
+        var candidate=changed(baseline).put("inputHashAlgorithm","LEGACY_JSON_V1");
+        assertThatThrownBy(()->compare(baseline,candidate,0)).hasMessageContaining("变量之外");
+    }
+
 }

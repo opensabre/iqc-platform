@@ -59,4 +59,10 @@ class SkillApiBenchmarkVariableTest {
         assertThatThrownBy(()->compare(baseline,anchor,0)).hasMessageContaining("没有实际语义变化");
         assertThatThrownBy(()->compare(baseline,changed(baseline),1)).hasMessageContaining("slot");
     }
+    @Test void requestHashAlgorithmCannotChangeInsideAssetVariable() throws Exception {
+        var baseline=config(3).put("inputHashAlgorithm","EXACT_JSON_V1");
+        var candidate=changed(baseline).put("inputHashAlgorithm","LEGACY_JSON_V1");
+        assertThatThrownBy(()->compare(baseline,candidate,0)).hasMessageContaining("变量之外");
+    }
+
 }
