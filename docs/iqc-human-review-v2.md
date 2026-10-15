@@ -66,3 +66,17 @@ c5d59ff纯内核离线skipTests test-compile已terminal exit0。原Projection增
 原reviews查询增加SCORE_CONTEXT，复用原查看权限/数据范围与REPEATABLE_READ，返回当前复核计算摘要、字符串分数及有效/过期调整。原Controller仅在新scoreAdjustment有值时调用新重载，原消息整数finalScore不接业务覆盖，旧DTO构造/调用保留。
 
 ManualScoreReviewEditor接原父级冻结命令与重试，0..100两位小数字符串、必填原因、服务端基准hash、迟到响应隔离；历史人工分数与计算分数分列，STALE不冒充有效分数。当前业务汇总报表仍按计算分数统计，需下一步新增清楚标记的人工覆盖口径，不能把现有reviewed平均分宣称含人工改分。API/数据库/权限/浏览器/Gold审批与完整PRD继续，未部署。
+
+## 汇总报表复用缺口与扩展（实施前）
+
+只读核查BusinessQualityReportService：现有选择只调用SchemeResultEvaluator.definition，Pipeline任务被当旧消息任务拒绝；reviewed分数只含计算结果。必须扩展原report/Group选择模型，不新增统计API或伪造Scheme/Rule。Pipeline release校验复用BusinessItemReviewService原冻结摘要方法，报表内部仅投影评分政策与itemCode/name，增加明确pipelineId；Scheme字段/旧DTO构造/JSON保留。
+
+计算分数与合格率保持现有算法。新增manualOverrides摘要：有效覆盖数、STALE数、有效覆盖均分、有效数字分数数量及均分（同一复核有APPLIED则用人工数字，否则仅取FINAL计算分数）。覆盖均分分母仅APPLIED；有效数字分母不混入缺失/未定计算分数。人工改数字不使原否决或未确认事实消失，因此不从该均分推断新合格率。仍按冻结政策/来源/精确版本/内容分组，沿原范围/500会话/50000项目约束。
+
+## 汇总扩展当前实现
+
+78755后台人工改分服务与56340前端编辑器原handle均terminal exit0。原BusinessQualityReportService接入Pipeline任务（仍拒绝评测/旧消息任务），复用原pipelineRelease校验，不造Scheme/Rule；内部ReportItem只持有展示代码/名称，Pipeline分组额外带pipelineId，精确JSON摘要区分冻结来源/版本/完整内容，Scheme旧分组算法保留。ScoreSummary/PolicyGroup旧构造保留，新可选字段null不序列化。
+
+reviewed.manualOverrides独立提供appliedCount、staleCount、averageOverrideScore、effectiveNumericCount、averageEffectiveScore。基于每个已验证最近完成复核，一次计数；APPLIED优先数字覆盖，否则仅FINAL计算分数纳入有效数字，缺失/待定/不适用不补零；两个均分都以BigDecimal求和并最后一次两位舍入。原计算评分/合格率和项目分母不改。
+
+前端明确显示流水线身份与人工改分独立区，解释两个均分分母及不推断否决/合格率。真实跨任务/版本/执行去重、API/DB/浏览器与候选Gold尚未端到端验收，本批编译/构建结果待记录，未部署。二审仲裁与完整PRD继续。
