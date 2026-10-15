@@ -206,6 +206,22 @@ class ProcessedConversationPipelineTest {
             assertSame(review,service.decide(review.getId(),1,false,List.of(),List.of(correction),"完成事实复核"));
             verify(reviews,times(1)).updateById(any(io.github.opensabre.iqc.quality.model.ResultReview.class));
             assertEquals(json.writeValueAsString(machine),result.getExecutionTraceJson());
+            String firstSnapshot=review.getReviewedResultJson();
+            when(reviews.selectOne(any())).thenReturn(review);
+            var second=service.request("result",1,"finding-request-0002","二轮核对");
+            when(reviews.selectById(second.getId())).thenReturn(second);when(reviews.selectOne(any())).thenReturn(second,review);
+            var itemOverride=new io.github.opensabre.iqc.quality.BusinessItemReviewEvaluator.Decision("result","offer-check",
+                    InspectionScoring.ItemStatus.PASS,InspectionScoring.ItemStatus.PASS,"项目裁决优先",List.of("agent"));
+            service.decide(second.getId(),2,false,List.of(itemOverride),List.of(),"第二轮完成");
+            var next=json.readTree(second.getReviewedResultJson());
+            assertEquals(firstSnapshot,review.getReviewedResultJson());
+            assertEquals(100,next.at("/reviewed/scoring/finalScore").intValue());
+            assertEquals(1,next.at("/findingReview/findings/decisions").size());
+            assertFalse(next.at("/findingReview/findings/decisions/0/value").booleanValue());
+            assertEquals("PASS",next.at("/reviewed/items/0/status").asText());
+            assertSame(second,service.decide(second.getId(),2,false,List.of(itemOverride),List.of(),"第二轮完成"));
+            verify(reviews,times(2)).updateById(any(io.github.opensabre.iqc.quality.model.ResultReview.class));
+
         }
     }
 
