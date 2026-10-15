@@ -80,3 +80,11 @@ ManualScoreReviewEditor接原父级冻结命令与重试，0..100两位小数字
 reviewed.manualOverrides独立提供appliedCount、staleCount、averageOverrideScore、effectiveNumericCount、averageEffectiveScore。基于每个已验证最近完成复核，一次计数；APPLIED优先数字覆盖，否则仅FINAL计算分数纳入有效数字，缺失/待定/不适用不补零；两个均分都以BigDecimal求和并最后一次两位舍入。原计算评分/合格率和项目分母不改。
 
 前端明确显示流水线身份与人工改分独立区，解释两个均分分母及不推断否决/合格率。真实跨任务/版本/执行去重、API/DB/浏览器与候选Gold尚未端到端验收，本批编译/构建结果待记录，未部署。二审仲裁与完整PRD继续。
+
+## 二审/仲裁复用与流程规则（实施前）
+
+检查原ResultReview轮次、BusinessReviewQueueItem/ResultReviewMapper分页、IqcDataScope及framework文件清单，未发现可直接复用的独立工作流/审批引擎；不新增仲裁表或平行待办。沿原reviewedResultJson保存PENDING阶段元数据，完成后保留于Projection.workflow，原空元数据历史视为INITIAL。复用原review:create/review:decide功能权限及任务数据范围，阶段绑定和审理独立性在Service强制，不能靠前端隐藏按钮。
+
+阶段INITIAL→SECOND_REVIEW→ARBITRATION：升级必须引用同result/sourceHash的最近已完成有效轮次，并冻结其ID、revision和完整裁决精确摘要；拒绝跨来源、跳级或篡改上游。审理人须不同于升级申请人及上游审理人；仲裁须核对两层历史，不能由原审理人自仲裁。仲裁完成后同一结果不得再开普通轮次覆盖终局；新的执行结果拥有独立结果ID。退回仍保留不可变历史，可依原最近有效轮次重新提交合适阶段。
+
+后续原request/decision入口、幂等、Task锁、历史复算、队列阶段投影、前端提交与证据/评分/候选/导出均须接入；不把普通再开轮次称为二审。此段为实施规则，当前尚未提供二审/仲裁完整流程。若后续需要专属角色细分，沿原组织资源扩展，不能从canViewAll推断仲裁权限。
