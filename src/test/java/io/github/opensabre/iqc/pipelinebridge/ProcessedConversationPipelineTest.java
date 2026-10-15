@@ -221,6 +221,13 @@ class ProcessedConversationPipelineTest {
             assertEquals("PASS",next.at("/reviewed/items/0/status").asText());
             assertSame(second,service.decide(second.getId(),2,false,List.of(itemOverride),List.of(),"第二轮完成"));
             verify(reviews,times(2)).updateById(any(io.github.opensabre.iqc.quality.model.ResultReview.class));
+            assertTrue(service.exportCsv(review.getId()).contains("人工Finding裁决JSON"));
+            assertTrue(service.exportCsv(second.getId()).contains("项目裁决优先"));
+            var tampered=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(second.getReviewedResultJson());
+            ((com.fasterxml.jackson.databind.node.ObjectNode)tampered.at("/reviewed/scoring")).put("finalScore",99);
+            second.setReviewedResultJson(tampered.toString());
+            assertThrows(RuntimeException.class,()->service.exportCsv(second.getId()));
+
 
         }
     }
