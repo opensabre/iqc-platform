@@ -88,3 +88,11 @@ reviewed.manualOverrides独立提供appliedCount、staleCount、averageOverrideS
 阶段INITIAL→SECOND_REVIEW→ARBITRATION：升级必须引用同result/sourceHash的最近已完成有效轮次，并冻结其ID、revision和完整裁决精确摘要；拒绝跨来源、跳级或篡改上游。审理人须不同于升级申请人及上游审理人；仲裁须核对两层历史，不能由原审理人自仲裁。仲裁完成后同一结果不得再开普通轮次覆盖终局；新的执行结果拥有独立结果ID。退回仍保留不可变历史，可依原最近有效轮次重新提交合适阶段。
 
 后续原request/decision入口、幂等、Task锁、历史复算、队列阶段投影、前端提交与证据/评分/候选/导出均须接入；不把普通再开轮次称为二审。此段为实施规则，当前尚未提供二审/仲裁完整流程。若后续需要专属角色细分，沿原组织资源扩展，不能从canViewAll推断仲裁权限。
+
+## 二审/仲裁服务接入（阶段一）
+
+ac5b7a9阶段内核离线skipTests test-compile已terminal exit0。原request重载支持stage/parentReviewId，保留普通请求的原指纹和DTO构造；升级请求用精确指纹，Task锁下核对最近有效已完成轮次、原sourceHash、上游完整历史投影及阶段。PENDING用原reviewedResultJson冻结阶段，COMPLETED转入可选Projection.workflow；旧空字段历史不增加JSON字段。拒绝状态保留其阶段申请元数据。
+
+原decide校验最多两层上游revision严格递减/阶段/hash，避免循环；二审/仲裁审理人不能是申请人或上游审核人。升级可空裁决明确认可上游，沿用原有效项目/Finding/改分；仍须原因。历史读取重新校验完整链与独立审理，保存/导出/候选保留阶段及parent摘要，仲裁已完成同结果不能重新开普通轮次覆盖。旧请求重试仍返回原收据。
+
+本阶段尚未队列阶段投影/前端提交/阶段历史可视化及真实API/DB/权限/浏览器验收；纯编译不证明端到端可用。不引入平行工作流、表或消息总分覆盖，完整PRD继续。

@@ -34,12 +34,18 @@ public final class BusinessItemReviewEvaluator {
                              @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
                              HumanFindingReviewEvaluator.PolicyProjection findingReview,
                              @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-                             ManualScoreProjection manualScore) {
+                             ManualScoreProjection manualScore,
+                             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                             ReviewWorkflow workflow) {
         public Projection(String sourceResultId,SchemeResultEvaluator.Evaluation original,SchemeResultEvaluator.Evaluation reviewed,List<Decision> decisions){
-            this(sourceResultId,original,reviewed,decisions,null,null);
+            this(sourceResultId,original,reviewed,decisions,null,null,null);
         }
         public Projection(String sourceResultId,SchemeResultEvaluator.Evaluation original,SchemeResultEvaluator.Evaluation reviewed,List<Decision> decisions,
-                HumanFindingReviewEvaluator.PolicyProjection findingReview){this(sourceResultId,original,reviewed,decisions,findingReview,null);}
+                HumanFindingReviewEvaluator.PolicyProjection findingReview){this(sourceResultId,original,reviewed,decisions,findingReview,null,null);}
+        public Projection(String sourceResultId,SchemeResultEvaluator.Evaluation original,SchemeResultEvaluator.Evaluation reviewed,List<Decision> decisions,
+                HumanFindingReviewEvaluator.PolicyProjection findingReview,ManualScoreProjection manualScore){
+            this(sourceResultId,original,reviewed,decisions,findingReview,manualScore,null);
+        }
     }
 
     public enum ReviewStage {INITIAL,SECOND_REVIEW,ARBITRATION}
@@ -57,7 +63,7 @@ public final class BusinessItemReviewEvaluator {
     public static ReviewWorkflow escalation(String sourceResultId,String sourceHash,ReviewStage stage,
             io.github.opensabre.iqc.quality.model.ResultReview parent,ReviewWorkflow parentWorkflow){
         if(stage==null||stage==ReviewStage.INITIAL)throw IqcException.invalidArgument("必须选择二审或仲裁");
-        if(parent==null||!"BUSINESS".equals(parent.getTargetType())||!java.util.Objects.equals(sourceResultId,parent.getBusinessResultId())
+        if(sourceResultId==null||sourceResultId.isBlank()||parent==null||!"BUSINESS".equals(parent.getTargetType())||!java.util.Objects.equals(sourceResultId,parent.getBusinessResultId())
                 ||sourceHash==null||!sourceHash.equals(parent.getSourceHash())||!"COMPLETED".equals(parent.getStatus())
                 ||parent.getReviewRevision()==null||parent.getReviewRevision()<1||parent.getReviewerId()==null||parent.getReviewerId().isBlank()
                 ||parent.getReviewedTime()==null||parent.getReviewedResultJson()==null||parent.getReviewedResultJson().isBlank())

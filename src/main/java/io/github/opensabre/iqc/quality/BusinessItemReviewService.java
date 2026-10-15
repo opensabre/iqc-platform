@@ -184,12 +184,22 @@ public class BusinessItemReviewService {
     /** Opens the next review round; caller supplies the last observed revision and a stable retry token. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ResultReview request(String resultId, int expectedRevision, String requestId, String reason) {
+        return request(resultId,expectedRevision,requestId,reason,BusinessItemReviewEvaluator.ReviewStage.INITIAL,null);
+    }
+    @Transactional(isolation=Isolation.READ_COMMITTED)
+    public ResultReview request(String resultId,int expectedRevision,String requestId,String reason,
+            BusinessItemReviewEvaluator.ReviewStage stage,String parentReviewId){
+        stage=stage==null?BusinessItemReviewEvaluator.ReviewStage.INITIAL:stage;
+        if(stage==BusinessItemReviewEvaluator.ReviewStage.INITIAL&&parentReviewId!=null
+                ||stage!=BusinessItemReviewEvaluator.ReviewStage.INITIAL&&(parentReviewId==null||parentReviewId.isBlank()||parentReviewId.length()>64))
+            throw IqcException.invalidArgument("复核阶段与上游裁决引用不一致");
         if (requestId == null || !requestId.matches("[A-Za-z0-9_-]{16,64}") || expectedRevision < 0)
             throw IqcException.invalidArgument("复核请求标识或预期修订无效");
         String comment = reason(reason);
         Context context = context(resultId);
         String id = "br-" + hash(List.of(actor(), requestId)).substring(0, 60);
         String fingerprint = hash(List.of(resultId, expectedRevision, comment));
+        if(stage!=BusinessItemReviewEvaluator.ReviewStage.INITIAL)fingerprint=exactHash(List.of(resultId,expectedRevision,comment,stage,parentReviewId));
         ResultReview existing = reviews.selectById(id);
         if (existing != null) {
             if (!"BUSINESS".equals(existing.getTargetType()) || !fingerprint.equals(existing.getRequestFingerprint()))
@@ -201,6 +211,16 @@ public class BusinessItemReviewService {
         int revision = latest == null ? 0 : latest.getReviewRevision();
         if (revision != expectedRevision) throw IqcException.invalidState("复核版本已变化，请刷新");
         if (latest != null && "PENDING".equals(latest.getStatus())) throw IqcException.invalidState("已有待处理复核");
+        var completed=latest(resultId,true);
+        BusinessItemReviewEvaluator.ReviewWorkflow workflow=null;
+        if(completed!=null){
+            var checked=validatedProjection(completed,context.result(),context.task());
+            BusinessItemReviewEvaluator.requireReviewNotFinal(checked.workflow());
+            if(stage!=BusinessItemReviewEvaluator.ReviewStage.INITIAL){
+                if(!completed.getId().equals(parentReviewId))throw IqcException.invalidState("必须引用最近已完成的有效裁决");
+                workflow=BusinessItemReviewEvaluator.escalation(resultId,sourceHash(context),stage,completed,checked.workflow());
+            }
+        }else if(stage!=BusinessItemReviewEvaluator.ReviewStage.INITIAL)throw IqcException.invalidState("没有可升级的已完成复核");
         ResultReview review = new ResultReview();
         review.setId(id); review.setTargetType("BUSINESS"); review.setBusinessResultId(resultId);
         review.setReviewRevision(revision + 1); review.setSourceHash(sourceHash(context));
@@ -208,6 +228,8 @@ public class BusinessItemReviewService {
         review.setOriginalStatus(context.result().getResultStatus()); review.setReviewComment(comment);
         review.setRequestComment(comment);
         review.setOwnerGroupId(context.task().getOwnerGroupId()); review.setCreatedBy(actor());
+        if(workflow!=null){try{review.setReviewedResultJson(mapper.writeValueAsString(workflow));}
+            catch(com.fasterxml.jackson.core.JsonProcessingException invalid){throw IqcException.invalidState("升级阶段无法冻结");}}
         reviews.insert(review);
         return review;
     }
@@ -235,9 +257,10 @@ public class BusinessItemReviewService {
         ResultReview review = reviews.selectById(reviewId); // Re-read after taking the shared task lock.
         String comment = reason(reason);
         String reviewer = actor();
+        var workflow=readWorkflow(review);
         if (decisions == null || decisions.size() > 200 || findingDecisions.size()>1000
                 || rejected && (!decisions.isEmpty()||!findingDecisions.isEmpty()||scoreAdjustment!=null)
-                || !rejected && decisions.isEmpty()&&findingDecisions.isEmpty()&&scoreAdjustment==null)
+                || !rejected && decisions.isEmpty()&&findingDecisions.isEmpty()&&scoreAdjustment==null&&workflow==null)
             throw IqcException.invalidArgument("退回复核不得包含裁决，完成复核必须包含项目或事实裁决");
         String fingerprint = findingDecisions.isEmpty()?hash(List.of(expectedRevision,rejected,decisions,comment,reviewer))
                 :exactHash(List.of(expectedRevision,rejected,decisions,comment,reviewer,findingDecisions));
@@ -250,6 +273,12 @@ public class BusinessItemReviewService {
         requireCurrent(context);
         if (!review.getSourceHash().equals(sourceHash(context))) throw IqcException.invalidState("原始结果已变化，请重新发起复核");
         if (!reviewId.equals(latest(review.getBusinessResultId(), false).getId())) throw IqcException.invalidState("复核版本已变化");
+        if(workflow!=null){
+            var parent=latest(review.getBusinessResultId(),true);
+            if(parent==null||!parent.getId().equals(workflow.parentReviewId()))throw IqcException.invalidState("升级复核上游已变化");
+            var upstream=validateWorkflow(review,context.result(),context.task(),workflow,0);
+            BusinessItemReviewEvaluator.requireIndependentReviewer(workflow,reviewer,review.getCreatedBy(),upstream);
+        }
         if (!rejected) {
             // Each round stores the full effective overlay, while leaving all earlier round records untouched.
             var effective = new LinkedHashMap<String, BusinessItemReviewEvaluator.Decision>();
@@ -258,7 +287,7 @@ public class BusinessItemReviewService {
             ResultReview previous = latest(review.getBusinessResultId(), true);
             if (previous != null) {
                 if (!review.getSourceHash().equals(previous.getSourceHash())) throw IqcException.invalidState("历史复核基准不一致");
-                var projection = read(previous.getReviewedResultJson(), BusinessItemReviewEvaluator.Projection.class);
+                var projection=validatedProjection(previous,context.result(),context.task());
                 projection.decisions().forEach(item -> effective.put(item.itemCode(), item));
                 if(projection.manualScore()!=null)inheritedScore=projection.manualScore().adjustment();
                 if(projection.findingReview()!=null)projection.findingReview().findings().decisions().forEach(item->effectiveFindings.put(item.findingCode(),item));
@@ -281,6 +310,7 @@ public class BusinessItemReviewService {
                 var projection = projection(context.task(), context.result(), original,
                         List.copyOf(effective.values()),List.copyOf(effectiveFindings.values()),allowed);
                 projection=withManualScore(projection,scoreAdjustment==null?inheritedScore:scoreAdjustment,scoreAdjustment!=null);
+                projection=withWorkflow(projection,workflow);
                 review.setReviewedResultJson(mapper.writeValueAsString(projection));
             } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
                 throw IqcException.invalidState("复核基准或结果快照损坏");
@@ -388,6 +418,10 @@ public class BusinessItemReviewService {
 
     /** Domain-internal validation shared by exports/reports; caller must authorize the task and hold a read transaction. */
     BusinessItemReviewEvaluator.Projection validatedProjection(ResultReview review, ConversationInspectionResult result, InspectionTask task) {
+        return validatedProjection(review,result,task,0);
+    }
+    private BusinessItemReviewEvaluator.Projection validatedProjection(ResultReview review,ConversationInspectionResult result,InspectionTask task,int depth){
+        if(depth>2)throw IqcException.invalidState("复核阶段链超出范围");
         if (!"BUSINESS".equals(review.getTargetType()) || !result.getId().equals(review.getBusinessResultId()))
             throw IqcException.invalidState("复核结果来源不一致");
         if (!"COMPLETED".equals(review.getStatus())) throw IqcException.invalidState("只能导出已完成的复核轮次");
@@ -400,7 +434,7 @@ public class BusinessItemReviewService {
             var original = mapper.readValue(result.getBusinessItemResultsJson(), new TypeReference<List<SchemeResultEvaluator.ItemResult>>() { });
             var stored = read(review.getReviewedResultJson(), BusinessItemReviewEvaluator.Projection.class);
             if (stored == null || !result.getId().equals(stored.sourceResultId())) throw IqcException.invalidState("复核结果来源不一致");
-            if (stored.decisions() == null || stored.decisions().isEmpty()&&stored.findingReview()==null&&stored.manualScore()==null)
+            if (stored.decisions() == null || stored.decisions().isEmpty()&&stored.findingReview()==null&&stored.manualScore()==null&&stored.workflow()==null)
                 throw IqcException.invalidState("已完成复核缺少项目裁决");
             Set<String> allowed = messages.selectList(Wrappers.<ConversationMessage>lambdaQuery()
                     .eq(ConversationMessage::getConversationId, result.getConversationId())).stream()
@@ -409,6 +443,11 @@ public class BusinessItemReviewService {
             var checked = projection(task,result,original,stored.decisions(),
                     stored.findingReview()==null?List.of():stored.findingReview().findings().decisions(),allowed);
             checked=withManualScore(checked,stored.manualScore()==null?null:stored.manualScore().adjustment(),false);
+            if(stored.workflow()!=null){
+                var upstream=validateWorkflow(review,result,task,stored.workflow(),depth);
+                BusinessItemReviewEvaluator.requireIndependentReviewer(stored.workflow(),review.getReviewerId(),review.getCreatedBy(),upstream);
+            }
+            checked=withWorkflow(checked,stored.workflow());
             if (!mapper.valueToTree(checked).equals(mapper.valueToTree(stored)))
                 throw IqcException.invalidState("复核项目或评分快照不一致，无法导出");
             return checked;
@@ -466,6 +505,8 @@ public class BusinessItemReviewService {
                 int label=csv.indexOf("人工会话分数");if(label>=0)csv.replace(label,label+"人工会话分数".length(),"复核计算会话分数");
                 csv.setLength(csv.length()-1);csv.append(",人工改分状态,人工覆盖分数（勿按行求和）,人工改分原因,人工改分基准摘要\n");
             }
+            boolean hasWorkflow=checked.workflow()!=null;
+            if(hasWorkflow){csv.setLength(csv.length()-1);csv.append(",复核阶段,上游复核ID,上游裁决精确摘要\n");}
             var machineLines = machineScore.lines().stream().collect(Collectors.toMap(io.github.opensabre.iqc.scoring.InspectionScoring.Line::itemCode, line -> line));
             var reviewedLines = reviewedScore.lines().stream().collect(Collectors.toMap(io.github.opensabre.iqc.scoring.InspectionScoring.Line::itemCode, line -> line));
             for (int index = 0; index < checked.reviewed().items().size(); index++) {
@@ -509,6 +550,9 @@ public class BusinessItemReviewService {
                     extended.add(manual.status());extended.add(manual.effectiveScore()==null?null:manual.effectiveScore().toPlainString());
                     extended.add(manual.adjustment().reason());extended.add(manual.adjustment().expectedScoringHash());cells=extended.toArray();
                 }
+                if(hasWorkflow){var extended=new java.util.ArrayList<Object>(java.util.Arrays.asList(cells));
+                    extended.add(checked.workflow().stage());extended.add(checked.workflow().parentReviewId());
+                    extended.add(checked.workflow().parentDecisionHash());cells=extended.toArray();}
                 appendCsv(csv,cells);
             }
             return csv.toString();
@@ -636,7 +680,35 @@ public class BusinessItemReviewService {
         if(adjustment==null)return calculated;
         var manual=BusinessItemReviewEvaluator.manualScore(calculated.sourceResultId(),calculated.reviewed().scoring(),adjustment,submitted,mapper);
         return new BusinessItemReviewEvaluator.Projection(calculated.sourceResultId(),calculated.original(),calculated.reviewed(),
-                calculated.decisions(),calculated.findingReview(),manual);
+                calculated.decisions(),calculated.findingReview(),manual,calculated.workflow());
+    }
+    private BusinessItemReviewEvaluator.Projection withWorkflow(BusinessItemReviewEvaluator.Projection projection,
+            BusinessItemReviewEvaluator.ReviewWorkflow workflow){
+        if(workflow==null)return projection;
+        return new BusinessItemReviewEvaluator.Projection(projection.sourceResultId(),projection.original(),projection.reviewed(),
+                projection.decisions(),projection.findingReview(),projection.manualScore(),workflow);
+    }
+    private BusinessItemReviewEvaluator.ReviewWorkflow readWorkflow(ResultReview review){
+        if(review.getReviewedResultJson()==null||review.getReviewedResultJson().isBlank())return null;
+        if("COMPLETED".equals(review.getStatus()))return read(review.getReviewedResultJson(),BusinessItemReviewEvaluator.Projection.class).workflow();
+        return read(review.getReviewedResultJson(),BusinessItemReviewEvaluator.ReviewWorkflow.class);
+    }
+    /** Validates at most two immutable ancestors; a parent must precede this round, so cycles cannot be admitted. */
+    private List<String> validateWorkflow(ResultReview review,ConversationInspectionResult result,InspectionTask task,
+            BusinessItemReviewEvaluator.ReviewWorkflow workflow,int depth){
+        if(workflow.stage()==BusinessItemReviewEvaluator.ReviewStage.INITIAL||depth>=2)
+            throw IqcException.invalidState("升级阶段元数据无效");
+        var parent=reviews.selectById(workflow.parentReviewId());
+        if(parent==null||review.getReviewRevision()==null||parent.getReviewRevision()==null
+                ||parent.getReviewRevision()>=review.getReviewRevision()||!result.getId().equals(parent.getBusinessResultId()))
+            throw IqcException.invalidState("升级复核上游轮次损坏");
+        var checked=validatedProjection(parent,result,task,depth+1);
+        var expected=BusinessItemReviewEvaluator.escalation(result.getId(),review.getSourceHash(),workflow.stage(),parent,checked.workflow());
+        if(!expected.equals(workflow))throw IqcException.invalidState("升级复核上游裁决摘要或阶段已变化");
+        if(workflow.stage()==BusinessItemReviewEvaluator.ReviewStage.SECOND_REVIEW)return List.of(parent.getReviewerId());
+        var first=reviews.selectById(checked.workflow().parentReviewId());
+        if(first==null)throw IqcException.invalidState("仲裁初审来源缺失");
+        return List.of(parent.getReviewerId(),first.getReviewerId());
     }
     private String exactHash(Object value){
         try{return io.github.opensabre.iqc.selector.SelectorAssetService.hash(mapper.writeValueAsString(value));}

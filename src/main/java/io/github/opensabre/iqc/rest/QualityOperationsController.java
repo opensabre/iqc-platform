@@ -86,8 +86,10 @@ public class QualityOperationsController {
     public ResultReview requestReview(@PathVariable String resultId, @RequestBody(required=false) ReviewRequest request) {
         if (request != null && business(request.targetType())) {
             if (request.expectedRevision() == null) throw IqcException.invalidArgument("业务复核必须指定预期修订");
+            if(request.stage()!=null||request.parentReviewId()!=null)return businessReviews.request(resultId,request.expectedRevision(),request.requestId(),request.comment(),request.stage(),request.parentReviewId());
             return businessReviews.request(resultId, request.expectedRevision(), request.requestId(), request.comment());
         }
+        if(request!=null&&(request.stage()!=null||request.parentReviewId()!=null))throw IqcException.invalidArgument("消息复核不接受业务阶段升级");
         return service.requestReview(resultId, request == null ? null : request.comment());
     }
     @GetMapping("/reviews")
@@ -176,7 +178,10 @@ public class QualityOperationsController {
 
     public record FeedbackRequest(String feedbackType, String comment, String evidenceJson) { }
     /** Missing targetType preserves the existing message-review HTTP contract. */
-    public record ReviewRequest(String comment, String targetType, Integer expectedRevision, String requestId) { }
+    public record ReviewRequest(String comment,String targetType,Integer expectedRevision,String requestId,
+            BusinessItemReviewEvaluator.ReviewStage stage,String parentReviewId){
+        public ReviewRequest(String comment,String targetType,Integer expectedRevision,String requestId){this(comment,targetType,expectedRevision,requestId,null,null);}
+    }
     public record ReviewDecision(String decision, String finalStatus, Integer finalScore, String finalRiskLevel, String comment,
                                  String targetType, Integer expectedRevision, List<BusinessItemReviewEvaluator.Decision> items,
                                  List<io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.Decision> findingDecisions,
