@@ -258,4 +258,31 @@ class BusinessQualityReportServiceTest {
                 .hasMessageContaining("不属于对应任务");
         verifyNoInteractions(results, reviews);
     }
+    @Test void manualOverrideAveragesUseOnlyAppliedScoresAndExcludePendingNumericResults() {
+        task("a",90,"[\"c1\",\"c2\",\"c3\"]");
+        var result=new ConversationInspectionResult();result.setId("r");
+        when(results.selectLatestForTaskConversation(any(),any())).thenReturn(result);
+        var complete=new io.github.opensabre.iqc.quality.model.ResultReview();complete.setStatus("COMPLETED");
+        when(reviews.latest(any(),eq(true))).thenReturn(complete);
+        var pass=evaluation(InspectionScoring.ItemStatus.PASS);var pending=evaluation(InspectionScoring.ItemStatus.ERROR);
+        when(reviews.validatedMachineEvaluation(any(),any())).thenReturn(pass);
+        var json=new ObjectMapper();
+        var adjustment=new BusinessItemReviewEvaluator.ScoreAdjustment("r",BusinessItemReviewEvaluator.scoringHash("r",pass.scoring(),json),"90.25","reason");
+        var applied=BusinessItemReviewEvaluator.manualScore("r",pass.scoring(),adjustment,true,json);
+        var old=score(InspectionScoring.ItemStatus.FAIL);
+        var previous=new BusinessItemReviewEvaluator.ScoreAdjustment("r",BusinessItemReviewEvaluator.scoringHash("r",old,json),"99","old reason");
+        var stale=BusinessItemReviewEvaluator.manualScore("r",pass.scoring(),previous,false,json);
+        when(reviews.validatedProjection(any(),any(),any())).thenReturn(
+                new BusinessItemReviewEvaluator.Projection("r",pass,pass,List.of(),null,applied),
+                new BusinessItemReviewEvaluator.Projection("r",pass,pass,List.of(),null,stale),
+                new BusinessItemReviewEvaluator.Projection("r",pass,pending,List.of()));
+        var group=service.report(List.of("a")).groups().getFirst();
+        assertThat(group.reviewed().averageScore()).isEqualByComparingTo("100");
+        assertThat(group.reviewed().pendingCount()).isEqualTo(1);
+        var manual=group.reviewed().manualOverrides();
+        assertThat(manual.appliedCount()).isEqualTo(1);assertThat(manual.staleCount()).isEqualTo(1);
+        assertThat(manual.averageOverrideScore()).isEqualByComparingTo("90.25");
+        assertThat(manual.effectiveNumericCount()).isEqualTo(2);assertThat(manual.averageEffectiveScore()).isEqualByComparingTo("95.13");
+    }
+
 }
