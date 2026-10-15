@@ -55,3 +55,9 @@ SKILL选择支持LLM提示槽位和SKILL_API单一引用。独立节点slot为nu
 现有MODEL维度只解析LLM Agent配置，不能覆盖已注册SMALL_MODEL节点。复用MODEL选择、双Task、固定Dataset与报告复算，不新增实验模型/API。专用模型slot仅null/0，因为节点仅冻结一个实际选中模型；不根据Agent主/备用位置推断运行回退。
 
 计划复用SmallModelContract验证冻结协议及Finding类型，核对modelReference与modelSnapshot精确id/version；同Agent id仅允许版本锚点移动。整个modelSnapshot是模型变量：远端收到id/version和安全路由字段，原网关还使用价格/输出限制/部署声明，因此不能只删除模型版本然后声称没有执行变化。仅变量引用、模型快照和Agent版本锚点可变；operation、MCP/tool、schemas、inputMapping、Finding、评分/风险/Review及其它节点不变。模型版本变化本身不证明质量提升，仍需双EID报告；无LLM prompt时prompt hash保持null。
+
+### SmallModel比较已接入代码
+
+MODEL可以选择SMALL_MODEL同名节点，slot只接受null/0；先验证small-model-v1及Finding语义，再验证模型引用id/version与快照一致、Agent版本为正整数。变量为完整modelSnapshot，四个允许路径为modelReference.id/versionNo、modelSnapshot和agentReference.versionNo；后者只解除版本锚点，不允许Agent id变化。所有未列入路径的配置保持不变量，额外引用字段也不删除。两个有效prompt摘要为null，LLM主模型与备用限制保持原逻辑。
+
+前端MODEL列出LLM与SMALL_MODEL，SKILL仍列出LLM与SKILL_API；切换维度会清除不适用节点。此次后端编译16163、前端94760仍运行中，不作为通过证据；前一轮SmallModel来源兼容后台13097与前端67578均已terminal exit0。实际固定Dataset双Task、模型调用、报告/权限/浏览器与完整PRD验收继续。

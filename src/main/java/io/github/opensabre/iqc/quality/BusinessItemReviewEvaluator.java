@@ -18,7 +18,15 @@ public final class BusinessItemReviewEvaluator {
 
     /** Human input contains business decisions and evidence, never an editable total score. */
     public record Decision(String sourceResultId, String itemCode, InspectionScoring.ItemStatus expectedStatus,
-                           InspectionScoring.ItemStatus finalStatus, String reason, List<String> evidenceMessageIds) { }
+                           InspectionScoring.ItemStatus finalStatus, String reason, List<String> evidenceMessageIds,
+                           @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String feedbackCategory) {
+        public Decision(String sourceResultId,String itemCode,InspectionScoring.ItemStatus expectedStatus,
+                InspectionScoring.ItemStatus finalStatus,String reason,List<String> evidenceMessageIds) {
+            this(sourceResultId,itemCode,expectedStatus,finalStatus,reason,evidenceMessageIds,null);
+        }
+    }
+    private static final Set<String> FEEDBACK_CATEGORIES=Set.of("AI_FALSE_POSITIVE","AI_FALSE_NEGATIVE",
+            "EVIDENCE_WRONG","SCORE_POLICY_WRONG","DATA/ASR_ERROR","RULE_ERROR","BUSINESS_STANDARD_CHANGED");
 
     /** Both projections are returned so callers cannot accidentally present a review as a machine result. */
     public record Projection(String sourceResultId, SchemeResultEvaluator.Evaluation original,
@@ -96,9 +104,11 @@ public final class BusinessItemReviewEvaluator {
                 throw IqcException.invalidArgument("人工结论必须是满足、不满足或不适用");
             if (decision.reason() == null || decision.reason().isBlank() || decision.reason().trim().length() > 1000)
                 throw IqcException.invalidArgument("复核原因不能为空且不得超过 1000 字");
+            if(decision.feedbackCategory()!=null && !FEEDBACK_CATEGORIES.contains(decision.feedbackCategory()))
+                throw IqcException.invalidArgument("复核反馈分类无效");
             validateEvidence(decision.evidenceMessageIds(), conversationMessageIds);
             Decision copy = new Decision(sourceResultId, decision.itemCode(), decision.expectedStatus(), decision.finalStatus(),
-                    decision.reason().trim(), List.copyOf(decision.evidenceMessageIds()));
+                    decision.reason().trim(), List.copyOf(decision.evidenceMessageIds()),decision.feedbackCategory());
             if (overrides.putIfAbsent(copy.itemCode(), copy) != null) throw IqcException.invalidArgument("同一质检项不能重复复核");
             normalized.add(copy);
         }

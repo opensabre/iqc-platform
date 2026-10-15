@@ -1,0 +1,36 @@
+# 人工复核 V2 实施边界
+
+## 需求与现有能力
+
+依据工作区《IQC智能质检平台_PRD_V1.0.md》13.2/13.3。当前BusinessItemReviewService使用原iqc_result_review，Task行锁、sourceHash、reviewRevision及request/decisionFingerprint约束轮次与重试；BusinessItemReviewEvaluator保留机器投影并重算业务项目裁决。BusinessReviewSampleService将projection.decisions写入候选expectedJson.humanDecisions。LabelResultReviewService另有标签值复核，不能复制第二套标签持久化。
+
+现有业务项目结论改判不能覆盖Finding值/严重度/证据、评分手改、反馈分类、二审仲裁。以下均为待实施需求，不是验收完成声明。
+
+## 分步实施
+
+1. 项目反馈分类：扩展原Decision可选feedbackCategory，原六参数构造与旧JSON保持；空字段不序列化，避免改变旧幂等摘要/历史投影。仅接受PRD七个精确值：AI_FALSE_POSITIVE、AI_FALSE_NEGATIVE、EVIDENCE_WRONG、SCORE_POLICY_WRONG、DATA/ASR_ERROR、RULE_ERROR、BUSINESS_STANDARD_CHANGED。归一化时保留该字段，复算校验/跨轮累计/候选humanDecisions自然沿用，原原因仍必填。UI编辑和历史展示，导出显式列出；不自动从PASS/FAIL猜分类，不把DATA/ASR_ERROR解释为恢复ASR范围。
+2. Finding人工投影：复用冻结FindingDefinition、原Finding/value/evidence校验与原Pipeline决策映射。机器raw Finding/Trace保持独立；人工修改必须带原Finding身份及预期摘要、原因和属于同一冻结输入的证据。保存原/人工有效Finding和对应评分/风险/标签/Review决策，不能冒充原引擎输出或重跑外部Action。需同步历史复算、报告/导出、候选Gold和前端展示。
+3. 分数手改：原冻结评分计算与人工总分分别保留，显式原因/操作者/时间。评分覆盖不得改写机器score，也不能把手改值伪称冻结政策计算。与自动风险/复核决策关系需要在同一投影中明确并审计。
+4. 二审仲裁：先检查原组织角色、队列/派发和复核轮次是否可扩展；不能把再开普通轮次当作二审完成。需要明确阶段、提交人/审理人、结论状态与不可覆盖历史，复用原权限/数据范围及Task锁。若必须新增列或资源，记录现有模型缺口后提供迁移，执行迁移另按既有发布约束。
+
+## 验收边界
+
+每项需覆盖服务/API/UI、冻结来源复算、旧历史/幂等兼容、候选与导出。编译/构建不替代真实队列、角色、并发、数据库与浏览器验收。当前Root不新增或运行测试；另一位开发者按其授权独立验证，仅集成其已提交产物。
+
+## 反馈分类当前实现
+
+后端475d1ae在原Decision增加可选feedbackCategory，旧六参构造保留且null不序列化；只接受上列七个精确值，原必填原因不放宽。归一化复制保留分类，Service原跨轮effective map和已保存Projection复算自然携带；QualityOperationsController直接接收Decision列表，无另一次丢字段映射。BusinessReviewSampleService原humanDecisions整体序列化保留分类。CSV仅有分类时追加“有效裁决反馈分类（可能沿用前轮）”，保持旧无分类导出列结构。
+
+UI27f48b5提供可清空分类选择、提交时仅有值才增加字段、冻结命令用于重试、成功/切结果清空和历史有效项目分类展示。历史缺少decisions数组按损坏处理。前端合入B d3be2d5事实版本类型修正为1eb3232，无框架修改。
+
+backend22842离线skipTests test-compile已terminal exit0；UI44434完整构建仍运行中。上述为代码/编译证据，不是数据库/API/浏览器/Gold审批端到端验收。Finding编辑、人工总分覆盖和二审仲裁仍未实施。
+
+## Finding人工投影内核（待接入服务）
+
+原FindingFusion只表示机器源融合，不能把人工修正写回rawFinding或伪造HUMAN引擎。新增HumanFindingReviewEvaluator是原复核领域的纯投影校验：保留原融合，人工覆盖仅为reviewed列表；原输入先由调用方的现有trace/source校验确认。精确摘要复用SelectorAssetService.hash，指定结果/事实/预期融合摘要后才可改值。每事实一次，状态仅KNOWN/UNKNOWN，原因必填；冻结FindingDefinition约束类型/枚举/允许证据与高风险证据要求。
+
+证据通过保留原融合证据ID及新增冻结消息ID两列表表达，未保留即删除，不接受客户端自造证据详情。新增CONVERSATION证据只从同一冻结消息manifest取坐标，不读取当前会话；不允许跨事实保留证据。人工投影不选中任何机器raw ID，原raw全部保留为rejected，避免把模型校准置信度借给人工结论。该列表不能作为机器Trace提交或通过机器Fusion复算。
+
+此阶段仅内核，尚未接入Service/API/持久投影、评分风险标签重算、候选Gold和UI；不能声称Finding人工编辑已可用。后续须在同一轮复核中保存原/人工Finding及对应决策，继续复用原锁/权限/幂等与历史校验。
+
+人工Finding内核a5aed92离线skipTests test-compile已terminal exit0。后续加入validatedExecutionInput复用原prepare/validateResult取完整冻结manifest；无冻结输入的旧历史拒绝新增证据，不从当前归档合成。evaluatePolicies先沿原BusinessItemReviewEvaluator核对机器融合/项目/评分，再用人工事实调用原PipelineDecisionEvaluator评分、标签投影、风险和Review政策；结果状态复用原助手，V2抽样身份使用原完整冻结input的精确hash。无检测器/Action执行，结果标注为独立PolicyProjection。该入口尚未由复核Service/API调用，不能视作端到端完成。
