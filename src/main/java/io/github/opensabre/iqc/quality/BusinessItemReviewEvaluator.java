@@ -34,12 +34,58 @@ public final class BusinessItemReviewEvaluator {
                              @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
                              HumanFindingReviewEvaluator.PolicyProjection findingReview,
                              @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-                             ManualScoreProjection manualScore) {
+                             ManualScoreProjection manualScore,
+                             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                             ReviewWorkflow workflow) {
         public Projection(String sourceResultId,SchemeResultEvaluator.Evaluation original,SchemeResultEvaluator.Evaluation reviewed,List<Decision> decisions){
-            this(sourceResultId,original,reviewed,decisions,null,null);
+            this(sourceResultId,original,reviewed,decisions,null,null,null);
         }
         public Projection(String sourceResultId,SchemeResultEvaluator.Evaluation original,SchemeResultEvaluator.Evaluation reviewed,List<Decision> decisions,
-                HumanFindingReviewEvaluator.PolicyProjection findingReview){this(sourceResultId,original,reviewed,decisions,findingReview,null);}
+                HumanFindingReviewEvaluator.PolicyProjection findingReview){this(sourceResultId,original,reviewed,decisions,findingReview,null,null);}
+        public Projection(String sourceResultId,SchemeResultEvaluator.Evaluation original,SchemeResultEvaluator.Evaluation reviewed,List<Decision> decisions,
+                HumanFindingReviewEvaluator.PolicyProjection findingReview,ManualScoreProjection manualScore){
+            this(sourceResultId,original,reviewed,decisions,findingReview,manualScore,null);
+        }
+    }
+
+    public enum ReviewStage {INITIAL,SECOND_REVIEW,ARBITRATION}
+    public record ReviewWorkflow(String schemaVersion,ReviewStage stage,String parentReviewId,Integer parentRevision,String parentDecisionHash){
+        public static final String SCHEMA="iqc-review-workflow-v1";
+        public ReviewWorkflow {
+            if(!SCHEMA.equals(schemaVersion)||stage==null)throw IqcException.invalidArgument("复核阶段协议无效");
+            if(stage==ReviewStage.INITIAL){
+                if(parentReviewId!=null||parentRevision!=null||parentDecisionHash!=null)throw IqcException.invalidArgument("初审不能携带上游裁决");
+            }else if(parentReviewId==null||parentReviewId.isBlank()||parentReviewId.length()>64||parentRevision==null||parentRevision<1
+                    ||parentDecisionHash==null||!parentDecisionHash.matches("[a-f0-9]{64}"))throw IqcException.invalidArgument("升级复核必须绑定完整上游裁决");
+        }
+    }
+    /** Caller first validates and authorizes the immutable parent projection and checks latest-effective revision under the Task lock. */
+    public static ReviewWorkflow escalation(String sourceResultId,String sourceHash,ReviewStage stage,
+            io.github.opensabre.iqc.quality.model.ResultReview parent,ReviewWorkflow parentWorkflow){
+        if(stage==null||stage==ReviewStage.INITIAL)throw IqcException.invalidArgument("必须选择二审或仲裁");
+        if(sourceResultId==null||sourceResultId.isBlank()||parent==null||!"BUSINESS".equals(parent.getTargetType())||!java.util.Objects.equals(sourceResultId,parent.getBusinessResultId())
+                ||sourceHash==null||!sourceHash.equals(parent.getSourceHash())||!"COMPLETED".equals(parent.getStatus())
+                ||parent.getReviewRevision()==null||parent.getReviewRevision()<1||parent.getReviewerId()==null||parent.getReviewerId().isBlank()
+                ||parent.getReviewedTime()==null||parent.getReviewedResultJson()==null||parent.getReviewedResultJson().isBlank())
+            throw IqcException.invalidState("上游复核来源或已完成裁决无效");
+        var previous=parentWorkflow==null?ReviewStage.INITIAL:parentWorkflow.stage();
+        if(stage==ReviewStage.SECOND_REVIEW&&previous!=ReviewStage.INITIAL||stage==ReviewStage.ARBITRATION&&previous!=ReviewStage.SECOND_REVIEW)
+            throw IqcException.invalidState("复核升级不能跳级或重复阶段");
+        return new ReviewWorkflow(ReviewWorkflow.SCHEMA,stage,parent.getId(),parent.getReviewRevision(),
+                io.github.opensabre.iqc.selector.SelectorAssetService.hash(parent.getReviewedResultJson()));
+    }
+    public static void requireIndependentReviewer(ReviewWorkflow workflow,String reviewer,String requester,List<String> upstreamReviewers){
+        if(workflow==null||workflow.stage()==ReviewStage.INITIAL)return;
+        int expected=workflow.stage()==ReviewStage.SECOND_REVIEW?1:2;
+        if(reviewer==null||reviewer.isBlank()||"system".equals(reviewer)||requester==null||requester.isBlank()
+                ||upstreamReviewers==null||upstreamReviewers.size()!=expected
+                ||upstreamReviewers.stream().anyMatch(value->value==null||value.isBlank()||"system".equals(value))
+                ||new java.util.HashSet<>(upstreamReviewers).size()!=expected||reviewer.equals(requester)||upstreamReviewers.contains(reviewer))
+            throw IqcException.accessDenied("二审或仲裁须由独立于申请人和上游裁决的审核人处理");
+    }
+    public static void requireReviewNotFinal(ReviewWorkflow latestCompleted){
+        if(latestCompleted!=null&&latestCompleted.stage()==ReviewStage.ARBITRATION)
+            throw IqcException.invalidState("该结果已完成仲裁，不能再开轮次覆盖终局");
     }
 
     public record ScoreAdjustment(String sourceResultId,String expectedScoringHash,
