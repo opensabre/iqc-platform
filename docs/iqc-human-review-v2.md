@@ -1,0 +1,18 @@
+# 人工复核 V2 实施边界
+
+## 需求与现有能力
+
+依据工作区《IQC智能质检平台_PRD_V1.0.md》13.2/13.3。当前BusinessItemReviewService使用原iqc_result_review，Task行锁、sourceHash、reviewRevision及request/decisionFingerprint约束轮次与重试；BusinessItemReviewEvaluator保留机器投影并重算业务项目裁决。BusinessReviewSampleService将projection.decisions写入候选expectedJson.humanDecisions。LabelResultReviewService另有标签值复核，不能复制第二套标签持久化。
+
+现有业务项目结论改判不能覆盖Finding值/严重度/证据、评分手改、反馈分类、二审仲裁。以下均为待实施需求，不是验收完成声明。
+
+## 分步实施
+
+1. 项目反馈分类：扩展原Decision可选feedbackCategory，原六参数构造与旧JSON保持；空字段不序列化，避免改变旧幂等摘要/历史投影。仅接受PRD七个精确值：AI_FALSE_POSITIVE、AI_FALSE_NEGATIVE、EVIDENCE_WRONG、SCORE_POLICY_WRONG、DATA/ASR_ERROR、RULE_ERROR、BUSINESS_STANDARD_CHANGED。归一化时保留该字段，复算校验/跨轮累计/候选humanDecisions自然沿用，原原因仍必填。UI编辑和历史展示，导出显式列出；不自动从PASS/FAIL猜分类，不把DATA/ASR_ERROR解释为恢复ASR范围。
+2. Finding人工投影：复用冻结FindingDefinition、原Finding/value/evidence校验与原Pipeline决策映射。机器raw Finding/Trace保持独立；人工修改必须带原Finding身份及预期摘要、原因和属于同一冻结输入的证据。保存原/人工有效Finding和对应评分/风险/标签/Review决策，不能冒充原引擎输出或重跑外部Action。需同步历史复算、报告/导出、候选Gold和前端展示。
+3. 分数手改：原冻结评分计算与人工总分分别保留，显式原因/操作者/时间。评分覆盖不得改写机器score，也不能把手改值伪称冻结政策计算。与自动风险/复核决策关系需要在同一投影中明确并审计。
+4. 二审仲裁：先检查原组织角色、队列/派发和复核轮次是否可扩展；不能把再开普通轮次当作二审完成。需要明确阶段、提交人/审理人、结论状态与不可覆盖历史，复用原权限/数据范围及Task锁。若必须新增列或资源，记录现有模型缺口后提供迁移，执行迁移另按既有发布约束。
+
+## 验收边界
+
+每项需覆盖服务/API/UI、冻结来源复算、旧历史/幂等兼容、候选与导出。编译/构建不替代真实队列、角色、并发、数据库与浏览器验收。当前Root不新增或运行测试；另一位开发者按其授权独立验证，仅集成其已提交产物。
