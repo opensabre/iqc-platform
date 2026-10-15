@@ -370,4 +370,15 @@ class BusinessItemReviewServiceTest {
         review.setReviewedResultJson(mapper.writeValueAsString(json));
         assertThatThrownBy(() -> service.exportCsv(review.getId())).hasMessageContaining("当前会话");
     }
+    @Test void findingContextEnforcesScopeAndDoesNotRecaptureLegacyMessages() {
+        when(scope.canView(null,null)).thenReturn(false);
+        assertThatThrownBy(()->service.findingContext("result")).hasMessageContaining("无权");
+        verifyNoInteractions(messages);
+        when(scope.canView(null,null)).thenReturn(true);
+        var context=service.findingContext("result");
+        assertThat(context.available()).isFalse();assertThat(context.sourceResultId()).isEqualTo("result");
+        assertThat(context.findings()).isEmpty();assertThat(context.messages()).isEmpty();
+        verifyNoInteractions(messages);verify(reviews,never()).insert(any(ResultReview.class));
+    }
+
 }

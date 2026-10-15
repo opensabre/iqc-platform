@@ -74,7 +74,7 @@ class BusinessReviewControllerTest {
         verify(business).request("result", 0, "request-token-1234", "申请");
         controller.reviews(null, "BUSINESS", "result", "HISTORY", null, 1, 20); verify(business).history("result");
         controller.decide("review", new QualityOperationsController.ReviewDecision("REJECTED", null, null, null, "退回", "BUSINESS", 1, List.of()));
-        verify(business).decide("review", 1, true, List.of(), "退回");
+        verify(business).decide("review", 1, true, List.of(), null, "退回");
         verifyNoInteractions(legacy);
     }
 
@@ -109,4 +109,17 @@ class BusinessReviewControllerTest {
         assertThatThrownBy(() -> controller.reviews(null, "MESSAGE", null, "QUEUE", null, 1, 20)).hasMessageContaining("只支持业务");
         assertThatThrownBy(() -> controller.reviews(null, "BUSINESS", "result", "QUEUE", null, 1, 20)).hasMessageContaining("不能指定");
     }
+    @Test void findingContextRequiresSingleBusinessResultAndUsesOriginalViewPermission() throws Exception {
+        controller.reviews(null,"BUSINESS","result","FINDING_CONTEXT",null,1,20);
+        verify(business).findingContext("result");
+        for(var target:List.of("MESSAGE","UNKNOWN"))
+            assertThatThrownBy(()->controller.reviews(null,target,"result","FINDING_CONTEXT",null,1,20)).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(()->controller.reviews(null,"BUSINESS",null,"FINDING_CONTEXT",null,1,20)).hasMessageContaining("单一业务结果");
+        assertThatThrownBy(()->controller.reviews("PENDING","BUSINESS","result","FINDING_CONTEXT",null,1,20)).hasMessageContaining("单一业务结果");
+        assertThatThrownBy(()->controller.reviews(null,"BUSINESS","result","FINDING_CONTEXT","task",1,20)).hasMessageContaining("单一业务结果");
+        var method=QualityOperationsController.class.getMethod("reviews",String.class,String.class,String.class,String.class,String.class,int.class,int.class);
+        assertThat(method.getAnnotation(io.github.opensabre.boot.annotations.ResourcePermission.class).code()).isEqualTo("iqc:review:view");
+        verifyNoInteractions(legacy);
+    }
+
 }

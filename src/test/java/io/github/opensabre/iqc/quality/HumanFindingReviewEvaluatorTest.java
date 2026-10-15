@@ -75,4 +75,18 @@ class HumanFindingReviewEvaluatorTest {
   assertThat(projection.original().getFirst().state()).isEqualTo(Finding.State.KNOWN);
  }
 
+ @Test void browserValueJsonPreservesNestedDecimalAndRejectsAmbiguousOrTrailingInput() throws Exception {
+  var command=json.createObjectNode().put("sourceResultId","result").put("findingCode","CHECK").put("expectedFindingHash","hash")
+   .put("state","KNOWN").put("severity","LOW").put("reason","why");
+  command.putArray("retainedEvidenceIds");command.putArray("addedMessageIds");
+  command.put("valueJson","{\"amount\":99.999999999999999999}");
+  var parsed=json.treeToValue(command,HumanFindingReviewEvaluator.Decision.class);
+  assertThat(parsed.value().path("amount").decimalValue()).isEqualByComparingTo("99.999999999999999999");
+  assertThat(parsed.valueJson()).isNull();assertThat(json.valueToTree(parsed).has("valueJson")).isFalse();
+  command.put("value",true);
+  assertThatThrownBy(()->json.treeToValue(command,HumanFindingReviewEvaluator.Decision.class)).isInstanceOf(Exception.class);
+  command.remove("value");command.put("valueJson","true false");
+  assertThatThrownBy(()->json.treeToValue(command,HumanFindingReviewEvaluator.Decision.class)).isInstanceOf(Exception.class);
+ }
+
 }
