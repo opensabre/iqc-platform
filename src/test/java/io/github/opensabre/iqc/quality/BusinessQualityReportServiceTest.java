@@ -285,4 +285,35 @@ class BusinessQualityReportServiceTest {
         assertThat(manual.effectiveNumericCount()).isEqualTo(2);assertThat(manual.averageEffectiveScore()).isEqualByComparingTo("95.13");
     }
 
+    @Test void pipelineVersionsAndSchemeKeepSeparateReportIdentitiesAndValidateFrozenHash() throws Exception {
+        var json=new ObjectMapper();task("scheme",90,"[\"c0\"]");
+        var config=json.createObjectNode();
+        config.set("findingDefinition",json.valueToTree(new io.github.opensabre.iqc.finding.FindingDefinition(
+                io.github.opensabre.iqc.finding.FindingDefinition.SCHEMA,"CHECK","Check","BUSINESS",null,
+                io.github.opensabre.iqc.finding.Finding.ValueType.BOOLEAN,List.of(),io.github.opensabre.iqc.finding.Finding.Severity.LOW,false,List.of())));
+        var node=new io.github.opensabre.iqc.pipeline.PipelineDefinition.Node("node","RULE","Check","v1",List.of(),java.util.Map.of(),config,null,1000,0,
+                io.github.opensabre.iqc.pipeline.PipelineDefinition.OnError.FAIL_PIPELINE,null,null,true);
+        var release=new io.github.opensabre.iqc.pipelineasset.PipelineRelease(io.github.opensabre.iqc.pipelineasset.PipelineRelease.SCHEMA,
+                new io.github.opensabre.iqc.pipeline.PipelineDefinition(io.github.opensabre.iqc.pipeline.PipelineDefinition.SCHEMA,List.of(node)),
+                new io.github.opensabre.iqc.fusion.FusionPolicy("fusion",1,io.github.opensabre.iqc.fusion.FusionPolicy.Method.PRIORITY,java.util.Map.of(),java.util.Map.of(),null,java.util.Set.of()),
+                new InspectionScoring.Policy(InspectionScoring.POLICY_VERSION,InspectionScoring.Mode.DEDUCTION,100,90,List.of(new InspectionScoring.Item("a",100,false))),
+                List.of(new io.github.opensabre.iqc.pipelineasset.PipelineRelease.ItemMapping("a","CHECK",io.github.opensabre.iqc.scheme.SchemeDefinition.HitMeaning.VIOLATION)));
+        var validator=new BusinessItemReviewService(null,null,null,null,null,json);
+        when(reviews.pipelineRelease(any())).thenAnswer(call->validator.pipelineRelease(call.getArgument(0)));
+        for(int version:List.of(1,2)){
+            var pipeline=task("pipe"+version,90,"[\"c"+version+"\"]");var snapshot=json.createObjectNode();
+            var marker=snapshot.putObject("pipelineSnapshot").put("pipelineId","pipeline").put("versionNo",version);
+            marker.set("release",json.valueToTree(release));marker.put("contentHash",io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(json.writeValueAsString(release)));
+            pipeline.setRuleSnapshotJson(snapshot.toString());
+        }
+        var report=service.report(List.of("scheme","pipe1","pipe2"));
+        assertThat(report.groups()).hasSize(3);
+        assertThat(report.groups().stream().filter(group->group.pipelineId()!=null).toList()).hasSize(2)
+                .allSatisfy(group->{assertThat(group.pipelineId()).isEqualTo("pipeline");assertThat(group.schemeId()).isEmpty();});
+        assertThat(report.groups().stream().filter(group->group.pipelineId()!=null).map(BusinessQualityReportService.PolicyGroup::versionNo).toList()).containsExactlyInAnyOrder("1","2");
+        var bad=tasks.selectById("pipe1");var broken=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(bad.getRuleSnapshotJson());
+        ((com.fasterxml.jackson.databind.node.ObjectNode)broken.path("pipelineSnapshot")).put("contentHash","wrong");bad.setRuleSnapshotJson(broken.toString());
+        assertThatThrownBy(()->service.report(List.of("pipe1"))).hasMessageContaining("快照摘要不一致");
+    }
+
 }
