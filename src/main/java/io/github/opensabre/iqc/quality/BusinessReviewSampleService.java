@@ -166,6 +166,7 @@ public class BusinessReviewSampleService {
                 .put("sourceHash", review.getSourceHash()).put("inputHash", hash(input)).put("executionInputHash", executionInputHash);
         expected.set("expected", json.valueToTree(projection.reviewed()));
         expected.set("humanDecisions", json.valueToTree(projection.decisions()));
+        if(projection.manualScore()!=null)expected.set("manualScore",json.valueToTree(projection.manualScore()));
         if(projection.findingReview()!=null){
             expected.set("humanFindingDecisions",json.valueToTree(projection.findingReview().findings().decisions()));
             var reviewedFindings=json.createArrayNode();

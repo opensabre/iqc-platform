@@ -32,10 +32,14 @@ public final class BusinessItemReviewEvaluator {
     public record Projection(String sourceResultId, SchemeResultEvaluator.Evaluation original,
                              SchemeResultEvaluator.Evaluation reviewed, List<Decision> decisions,
                              @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-                             HumanFindingReviewEvaluator.PolicyProjection findingReview) {
+                             HumanFindingReviewEvaluator.PolicyProjection findingReview,
+                             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                             ManualScoreProjection manualScore) {
         public Projection(String sourceResultId,SchemeResultEvaluator.Evaluation original,SchemeResultEvaluator.Evaluation reviewed,List<Decision> decisions){
-            this(sourceResultId,original,reviewed,decisions,null);
+            this(sourceResultId,original,reviewed,decisions,null,null);
         }
+        public Projection(String sourceResultId,SchemeResultEvaluator.Evaluation original,SchemeResultEvaluator.Evaluation reviewed,List<Decision> decisions,
+                HumanFindingReviewEvaluator.PolicyProjection findingReview){this(sourceResultId,original,reviewed,decisions,findingReview,null);}
     }
 
     public record ScoreAdjustment(String sourceResultId,String expectedScoringHash,

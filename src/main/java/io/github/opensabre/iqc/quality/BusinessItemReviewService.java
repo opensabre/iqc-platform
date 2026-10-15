@@ -87,6 +87,19 @@ public class BusinessItemReviewService {
         }catch(com.fasterxml.jackson.core.JsonProcessingException invalid){throw IqcException.invalidState("人工事实复核上下文损坏");}
     }
 
+    public record ScoreContext(String sourceResultId,String sourceHash,String computedScoringHash,String computedScoreStatus,
+            String computedScore,BusinessItemReviewEvaluator.ManualScoreProjection manualScore) { }
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public ScoreContext scoreContext(String resultId){
+        var result=results.selectById(resultId);if(result==null)throw IqcException.notFound("会话质检结果不存在");
+        var task=tasks.selectById(result.getTaskId());authorize(task);
+        var previous=latest(resultId,true);
+        var checked=previous==null?null:validatedProjection(previous,result,task);
+        var calculated=checked==null?validatedMachineEvaluation(result,task).scoring():checked.reviewed().scoring();
+        return new ScoreContext(resultId,sourceHash(new Context(task,result)),BusinessItemReviewEvaluator.scoringHash(resultId,calculated,mapper),
+                calculated.scoreStatus().name(),calculated.finalScore()==null?null:calculated.finalScore().toPlainString(),checked==null?null:checked.manualScore());
+    }
+
     /** Lists cross-task rounds using SQL-level task scope and bounded database pagination. */
     @Transactional(readOnly = true)
     public io.github.opensabre.iqc.shared.IqcPage<io.github.opensabre.iqc.quality.model.BusinessReviewQueueItem> queue(
@@ -208,6 +221,12 @@ public class BusinessItemReviewService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ResultReview decide(String reviewId,int expectedRevision,boolean rejected,
             List<BusinessItemReviewEvaluator.Decision> decisions,List<HumanFindingReviewEvaluator.Decision> findingDecisions,String reason) {
+        return decide(reviewId,expectedRevision,rejected,decisions,findingDecisions,null,reason);
+    }
+    @Transactional(isolation=Isolation.READ_COMMITTED)
+    public ResultReview decide(String reviewId,int expectedRevision,boolean rejected,
+            List<BusinessItemReviewEvaluator.Decision> decisions,List<HumanFindingReviewEvaluator.Decision> findingDecisions,
+            BusinessItemReviewEvaluator.ScoreAdjustment scoreAdjustment,String reason) {
         findingDecisions=findingDecisions==null?List.of():findingDecisions;
         if(findingDecisions.stream().anyMatch(java.util.Objects::isNull))throw IqcException.invalidArgument("事实裁决不能为空");
         ResultReview initial = reviews.selectById(reviewId);
@@ -217,10 +236,12 @@ public class BusinessItemReviewService {
         String comment = reason(reason);
         String reviewer = actor();
         if (decisions == null || decisions.size() > 200 || findingDecisions.size()>1000
-                || rejected && (!decisions.isEmpty()||!findingDecisions.isEmpty()) || !rejected && decisions.isEmpty()&&findingDecisions.isEmpty())
+                || rejected && (!decisions.isEmpty()||!findingDecisions.isEmpty()||scoreAdjustment!=null)
+                || !rejected && decisions.isEmpty()&&findingDecisions.isEmpty()&&scoreAdjustment==null)
             throw IqcException.invalidArgument("退回复核不得包含裁决，完成复核必须包含项目或事实裁决");
         String fingerprint = findingDecisions.isEmpty()?hash(List.of(expectedRevision,rejected,decisions,comment,reviewer))
                 :exactHash(List.of(expectedRevision,rejected,decisions,comment,reviewer,findingDecisions));
+        if(scoreAdjustment!=null)fingerprint=exactHash(List.of(expectedRevision,rejected,decisions,comment,reviewer,findingDecisions,scoreAdjustment));
         if (!Objects.equals(review.getReviewRevision(), expectedRevision)) throw IqcException.invalidState("复核版本已变化");
         if (!"PENDING".equals(review.getStatus())) {
             if (fingerprint.equals(review.getDecisionFingerprint())) return review;
@@ -233,11 +254,13 @@ public class BusinessItemReviewService {
             // Each round stores the full effective overlay, while leaving all earlier round records untouched.
             var effective = new LinkedHashMap<String, BusinessItemReviewEvaluator.Decision>();
             var effectiveFindings=new LinkedHashMap<String,HumanFindingReviewEvaluator.Decision>();
+            BusinessItemReviewEvaluator.ScoreAdjustment inheritedScore=null;
             ResultReview previous = latest(review.getBusinessResultId(), true);
             if (previous != null) {
                 if (!review.getSourceHash().equals(previous.getSourceHash())) throw IqcException.invalidState("历史复核基准不一致");
                 var projection = read(previous.getReviewedResultJson(), BusinessItemReviewEvaluator.Projection.class);
                 projection.decisions().forEach(item -> effective.put(item.itemCode(), item));
+                if(projection.manualScore()!=null)inheritedScore=projection.manualScore().adjustment();
                 if(projection.findingReview()!=null)projection.findingReview().findings().decisions().forEach(item->effectiveFindings.put(item.findingCode(),item));
             }
             Set<String> submitted = new java.util.HashSet<>();
@@ -257,6 +280,7 @@ public class BusinessItemReviewService {
                         .map(ConversationMessage::getId).collect(Collectors.toSet());
                 var projection = projection(context.task(), context.result(), original,
                         List.copyOf(effective.values()),List.copyOf(effectiveFindings.values()),allowed);
+                projection=withManualScore(projection,scoreAdjustment==null?inheritedScore:scoreAdjustment,scoreAdjustment!=null);
                 review.setReviewedResultJson(mapper.writeValueAsString(projection));
             } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
                 throw IqcException.invalidState("复核基准或结果快照损坏");
@@ -376,7 +400,7 @@ public class BusinessItemReviewService {
             var original = mapper.readValue(result.getBusinessItemResultsJson(), new TypeReference<List<SchemeResultEvaluator.ItemResult>>() { });
             var stored = read(review.getReviewedResultJson(), BusinessItemReviewEvaluator.Projection.class);
             if (stored == null || !result.getId().equals(stored.sourceResultId())) throw IqcException.invalidState("复核结果来源不一致");
-            if (stored.decisions() == null || stored.decisions().isEmpty()&&stored.findingReview()==null)
+            if (stored.decisions() == null || stored.decisions().isEmpty()&&stored.findingReview()==null&&stored.manualScore()==null)
                 throw IqcException.invalidState("已完成复核缺少项目裁决");
             Set<String> allowed = messages.selectList(Wrappers.<ConversationMessage>lambdaQuery()
                     .eq(ConversationMessage::getConversationId, result.getConversationId())).stream()
@@ -384,6 +408,7 @@ public class BusinessItemReviewService {
             // Revalidate the saved overlay against the frozen policy; reject corruption instead of repairing it on export.
             var checked = projection(task,result,original,stored.decisions(),
                     stored.findingReview()==null?List.of():stored.findingReview().findings().decisions(),allowed);
+            checked=withManualScore(checked,stored.manualScore()==null?null:stored.manualScore().adjustment(),false);
             if (!mapper.valueToTree(checked).equals(mapper.valueToTree(stored)))
                 throw IqcException.invalidState("复核项目或评分快照不一致，无法导出");
             return checked;
@@ -436,6 +461,11 @@ public class BusinessItemReviewService {
             if(hasFeedback){csv.setLength(csv.length()-1);csv.append(",有效裁决反馈分类（可能沿用前轮）\n");}
             boolean hasFindingReview=checked.findingReview()!=null;
             if(hasFindingReview){csv.setLength(csv.length()-1);csv.append(",人工Finding裁决JSON（本轮有效）\n");}
+            boolean hasManualScore=checked.manualScore()!=null;
+            if(hasManualScore){
+                int label=csv.indexOf("人工会话分数");if(label>=0)csv.replace(label,label+"人工会话分数".length(),"复核计算会话分数");
+                csv.setLength(csv.length()-1);csv.append(",人工改分状态,人工覆盖分数（勿按行求和）,人工改分原因,人工改分基准摘要\n");
+            }
             var machineLines = machineScore.lines().stream().collect(Collectors.toMap(io.github.opensabre.iqc.scoring.InspectionScoring.Line::itemCode, line -> line));
             var reviewedLines = reviewedScore.lines().stream().collect(Collectors.toMap(io.github.opensabre.iqc.scoring.InspectionScoring.Line::itemCode, line -> line));
             for (int index = 0; index < checked.reviewed().items().size(); index++) {
@@ -473,6 +503,11 @@ public class BusinessItemReviewService {
                 if(hasFindingReview){
                     var extended=new java.util.ArrayList<Object>(java.util.Arrays.asList(cells));
                     extended.add(mapper.writeValueAsString(checked.findingReview().findings().decisions()));cells=extended.toArray();
+                }
+                if(hasManualScore){
+                    var extended=new java.util.ArrayList<Object>(java.util.Arrays.asList(cells));var manual=checked.manualScore();
+                    extended.add(manual.status());extended.add(manual.effectiveScore()==null?null:manual.effectiveScore().toPlainString());
+                    extended.add(manual.adjustment().reason());extended.add(manual.adjustment().expectedScoringHash());cells=extended.toArray();
                 }
                 appendCsv(csv,cells);
             }
@@ -595,6 +630,13 @@ public class BusinessItemReviewService {
         } catch (com.fasterxml.jackson.core.JsonProcessingException ex) { throw IqcException.invalidState("复核政策快照损坏"); }
         return hash(java.util.Arrays.asList(context.task().getRuleSnapshotJson(), context.result().getId(),
                 context.result().getBusinessItemResultsJson(), context.result().getScoringResultJson()));
+    }
+    private BusinessItemReviewEvaluator.Projection withManualScore(BusinessItemReviewEvaluator.Projection calculated,
+            BusinessItemReviewEvaluator.ScoreAdjustment adjustment,boolean submitted){
+        if(adjustment==null)return calculated;
+        var manual=BusinessItemReviewEvaluator.manualScore(calculated.sourceResultId(),calculated.reviewed().scoring(),adjustment,submitted,mapper);
+        return new BusinessItemReviewEvaluator.Projection(calculated.sourceResultId(),calculated.original(),calculated.reviewed(),
+                calculated.decisions(),calculated.findingReview(),manual);
     }
     private String exactHash(Object value){
         try{return io.github.opensabre.iqc.selector.SelectorAssetService.hash(mapper.writeValueAsString(value));}
