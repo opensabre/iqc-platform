@@ -49,3 +49,9 @@ SKILL选择支持LLM提示槽位和SKILL_API单一引用。独立节点slot为nu
 独立调用不使用有效LLM提示，两个prompt hash为null；原LLM Skill仍保留有效prompt差异与8000字截断约束，不以能力版本更名冒充提示变化。独立Skill整个请求快照变化不能证明质量提升，报告仍用原固定Dataset双Task/双EID实际结果。原其它LLM节点的工具限制不放松；SmallModel单变量及工具混合LLM对照仍待独立接入。
 
 前端按维度过滤变量节点，SKILL可选独立Skill/API，自动省略其槽位；切换维度/资产时清除不再有效节点选择。26525 backend离线skipTests test-compile已terminal exit0，6361 UI构建仍在运行；不新增运行测试/SQL/模型或MCP调用/部署，实际双任务、权限、历史报告/发布门禁/浏览器仍待。
+
+## SmallModel模型对照的实施前复用缺口
+
+现有MODEL维度只解析LLM Agent配置，不能覆盖已注册SMALL_MODEL节点。复用MODEL选择、双Task、固定Dataset与报告复算，不新增实验模型/API。专用模型slot仅null/0，因为节点仅冻结一个实际选中模型；不根据Agent主/备用位置推断运行回退。
+
+计划复用SmallModelContract验证冻结协议及Finding类型，核对modelReference与modelSnapshot精确id/version；同Agent id仅允许版本锚点移动。整个modelSnapshot是模型变量：远端收到id/version和安全路由字段，原网关还使用价格/输出限制/部署声明，因此不能只删除模型版本然后声称没有执行变化。仅变量引用、模型快照和Agent版本锚点可变；operation、MCP/tool、schemas、inputMapping、Finding、评分/风险/Review及其它节点不变。模型版本变化本身不证明质量提升，仍需双EID报告；无LLM prompt时prompt hash保持null。

@@ -63,6 +63,7 @@ public final class BenchmarkVariableComparator {
         }
         if(index<0)throw invalid("变量节点不存在");
         if(selection.dimension()==Dimension.SKILL && "SKILL_API".equals(nodes.get(index).path("type").asText()))return skillApiProjection(root,nodes,index,selection,mapper);
+        if(selection.dimension()==Dimension.MODEL && "SMALL_MODEL".equals(nodes.get(index).path("type").asText()))return smallModelProjection(root,nodes,index,selection,mapper);
         if(!"LLM".equals(nodes.get(index).path("type").asText()))throw invalid("该变量维度不支持此节点类型");
         ObjectNode node = (ObjectNode) nodes.get(index), config = (ObjectNode) node.get("config");
         ObjectNode agent = (ObjectNode) config.get("agentSnapshot"), agentConfig = configuration(node, mapper);
@@ -125,6 +126,30 @@ public final class BenchmarkVariableComparator {
         ((ObjectNode)config).put("skillSnapshot","__BENCHMARK_VARIABLE__");((ObjectNode)agent).put("versionNo","__BENCHMARK_ANCHOR__");
         String prefix="/pipeline/nodes/"+index+"/config";
         return new Projection(root,variable,null,List.of(prefix+"/skillReference/id",prefix+"/skillReference/versionNo",prefix+"/skillSnapshot",prefix+"/agentReference/versionNo"));
+    }
+
+    /** The selected frozen inference model changes, while its protocol and route remain invariant. */
+    private static Projection smallModelProjection(ObjectNode root,ArrayNode nodes,int index,Selection selection,ObjectMapper mapper) {
+        if(selection.slot()!=null && selection.slot()!=0)throw invalid("专用模型节点只有一个实际选中模型，slot须为0或留空");
+        var node=nodes.get(index);var config=node.path("config");
+        try {
+            io.github.opensabre.iqc.pipelinebridge.SmallModelContract.validateConfiguration(node.path("version").asText(),config,
+                    mapper.treeToValue(config.path("findingDefinition"),io.github.opensabre.iqc.finding.FindingDefinition.class));
+        } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException invalidContract) {
+            throw invalid("专用模型冻结协议无效");
+        }
+        var reference=config.path("modelReference");var model=config.path("modelSnapshot");var agent=config.path("agentReference");
+        if(!reference.isObject() || !reference.path("id").isTextual() || !reference.path("id").asText().equals(model.path("id").asText())
+                || !reference.path("versionNo").isIntegralNumber() || !reference.path("versionNo").canConvertToInt()
+                || reference.path("versionNo").intValue()!=model.path("versionNo").intValue()
+                || !agent.isObject() || !agent.path("id").isTextual() || agent.path("id").asText().isBlank()
+                || !agent.path("versionNo").isIntegralNumber() || !agent.path("versionNo").canConvertToInt() || agent.path("versionNo").intValue()<1)
+            throw invalid("专用模型引用与冻结版本或Agent锚点不一致");
+        var variable=mapper.createObjectNode();variable.set("model",model.deepCopy());
+        ((ObjectNode)reference).put("id","__BENCHMARK_VARIABLE__");((ObjectNode)reference).put("versionNo","__BENCHMARK_VARIABLE__");
+        ((ObjectNode)config).put("modelSnapshot","__BENCHMARK_VARIABLE__");((ObjectNode)agent).put("versionNo","__BENCHMARK_ANCHOR__");
+        String prefix="/pipeline/nodes/"+index+"/config";
+        return new Projection(root,variable,null,List.of(prefix+"/modelReference/id",prefix+"/modelReference/versionNo",prefix+"/modelSnapshot",prefix+"/agentReference/versionNo"));
     }
 
     private static ObjectNode configuration(JsonNode node, ObjectMapper mapper) {
