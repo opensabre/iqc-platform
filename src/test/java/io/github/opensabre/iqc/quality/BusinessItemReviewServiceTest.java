@@ -428,6 +428,15 @@ class BusinessItemReviewServiceTest {
         when(scope.owner()).thenReturn("first");
         assertThatThrownBy(()->service.decide(second.getId(),2,false,List.of(),"认可上游")).hasMessageContaining("独立");
         when(scope.owner()).thenReturn("second");
+        first.setReviewedResultJson(preserved.replace("核对会话确认满足","补充证据确认满足"));
+        assertThatThrownBy(()->service.decide(second.getId(),2,false,List.of(),"二审认可上游")).hasMessageContaining("摘要或阶段已变化");
+        first.setReviewedResultJson(preserved);
+        first.setBusinessResultId("other-result");
+        assertThatThrownBy(()->service.decide(second.getId(),2,false,List.of(),"二审认可上游")).hasMessageContaining("上游轮次损坏");
+        first.setBusinessResultId("result");
+        first.setReviewRevision(2);
+        assertThatThrownBy(()->service.decide(second.getId(),2,false,List.of(),"二审认可上游")).isInstanceOf(io.github.opensabre.iqc.governance.IqcException.class);
+        first.setReviewRevision(1);
         service.decide(second.getId(),2,false,List.of(),"二审认可上游");
         var checked=mapper.readValue(second.getReviewedResultJson(),BusinessItemReviewEvaluator.Projection.class);
         assertThat(checked.workflow().stage()).isEqualTo(BusinessItemReviewEvaluator.ReviewStage.SECOND_REVIEW);

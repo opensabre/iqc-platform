@@ -122,4 +122,14 @@ class BusinessReviewControllerTest {
         verifyNoInteractions(legacy);
     }
 
+    @Test void stagedBusinessRequestsUseOriginalEndpointAndMessageRequestsRejectStageMetadata() {
+        var stage=io.github.opensabre.iqc.quality.BusinessItemReviewEvaluator.ReviewStage.SECOND_REVIEW;
+        controller.requestReview("result",new QualityOperationsController.ReviewRequest("申请二审","BUSINESS",1,"stage-request-1234",stage,"parent"));
+        verify(business).request("result",1,"stage-request-1234","申请二审",stage,"parent");
+        for(var target:java.util.Arrays.asList("MESSAGE",null))
+            assertThatThrownBy(()->controller.requestReview("message",new QualityOperationsController.ReviewRequest("申请",target,1,"stage-request-5678",stage,"parent")))
+                .hasMessageContaining("消息复核不接受业务阶段升级");
+        verifyNoInteractions(legacy);
+    }
+
 }
