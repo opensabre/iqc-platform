@@ -15,13 +15,43 @@ public final class HumanFindingReviewEvaluator {
     /** Retaining an existing evidence ID and adding a frozen message are explicit separate operations. */
     public record Decision(String sourceResultId,String findingCode,String expectedFindingHash,
             Finding.State state,@com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=ExactValueDeserializer.class) JsonNode value,Finding.Severity severity,String reason,
-            List<String> retainedEvidenceIds,List<String> addedMessageIds) {
+            List<String> retainedEvidenceIds,List<String> addedMessageIds,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String valueJson) {
+        public Decision(String sourceResultId,String findingCode,String expectedFindingHash,Finding.State state,JsonNode value,
+                Finding.Severity severity,String reason,List<String> retainedEvidenceIds,List<String> addedMessageIds){
+            this(sourceResultId,findingCode,expectedFindingHash,state,value,severity,reason,retainedEvidenceIds,addedMessageIds,null);
+        }
         public Decision {
+            if(valueJson!=null){
+                if(value!=null&&!value.isNull()||valueJson.length()>100000)throw new IllegalArgumentException("人工事实值须使用单一且有界的JSON输入");
+                try{value=new ObjectMapper().readerFor(JsonNode.class)
+                        .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                        .with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readValue(valueJson);}
+                catch(java.io.IOException invalid){throw new IllegalArgumentException("人工事实JSON值无效",invalid);}
+                valueJson=null;
+            }
+            validateManualValue(value,0,new int[2]);
             value=value==null||value.isNull()?null:value.deepCopy();
             retainedEvidenceIds=retainedEvidenceIds==null?null:List.copyOf(retainedEvidenceIds);
             addedMessageIds=addedMessageIds==null?null:List.copyOf(addedMessageIds);
         }
         @Override public JsonNode value(){return value==null?null:value.deepCopy();}
+    }
+    private static void validateManualValue(JsonNode value,int depth,int[] budget){
+        if(value==null||value.isNull())return;
+        if(depth>32||++budget[0]>10000)throw new IllegalArgumentException("人工事实值嵌套或节点数量过大");
+        if(value.isNumber()){
+            var decimal=value.decimalValue();
+            if(Math.abs((long)decimal.scale())>64)throw new IllegalArgumentException("人工数值超出精确范围");
+            new io.github.opensabre.iqc.pipelineasset.PipelineRelease.NumericPredicate(
+                    io.github.opensabre.iqc.pipeline.PipelineDefinition.Operator.EQUALS,decimal.toPlainString());
+        }
+        if(value.isTextual())budget[1]+=value.textValue().length();
+        if(value.isObject())for(var property:value.properties()){
+            budget[1]+=property.getKey().length();validateManualValue(property.getValue(),depth+1,budget);
+        }
+        else if(value.isArray())for(var child:value)validateManualValue(child,depth+1,budget);
+        if(budget[1]>100000)throw new IllegalArgumentException("人工事实文本过大");
     }
     /** Scope exact tree decoding to manual values, including numbers nested inside OBJECT findings. */
     public static final class ExactValueDeserializer extends com.fasterxml.jackson.databind.JsonDeserializer<JsonNode> {

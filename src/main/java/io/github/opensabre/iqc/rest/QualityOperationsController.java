@@ -99,6 +99,11 @@ public class QualityOperationsController {
                                       @RequestParam(required=false) String taskId,
                                       @RequestParam(defaultValue="1") int current,
                                       @RequestParam(defaultValue="20") int size) {
+        if("FINDING_CONTEXT".equals(view)){
+            if(!business(targetType)||resultId==null||resultId.isBlank()||status!=null||taskId!=null)
+                throw IqcException.invalidArgument("事实复核上下文必须指定单一业务结果");
+            return businessReviews.findingContext(resultId);
+        }
         if ("QUEUE".equals(view)) {
             if (!business(targetType) || resultId != null) throw IqcException.invalidArgument("待办视图只支持业务复核，不能指定单结果历史");
             return businessReviews.queue(status, taskId, current, size);
