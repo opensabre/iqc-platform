@@ -366,6 +366,8 @@ public class BusinessItemReviewService {
                 int reviewedColumn=csv.indexOf("人工计分贡献");csv.replace(reviewedColumn,reviewedColumn+"人工计分贡献".length(),"人工配置贡献（未加权）");
                 csv.setLength(csv.length()-1);csv.append(",机器等级,人工等级,机器复杂评分JSON,人工复杂评分JSON\n");
             }
+            boolean hasFeedback=checked.decisions().stream().anyMatch(decision->decision.feedbackCategory()!=null);
+            if(hasFeedback){csv.setLength(csv.length()-1);csv.append(",有效裁决反馈分类（可能沿用前轮）\n");}
             var machineLines = machineScore.lines().stream().collect(Collectors.toMap(io.github.opensabre.iqc.scoring.InspectionScoring.Line::itemCode, line -> line));
             var reviewedLines = reviewedScore.lines().stream().collect(Collectors.toMap(io.github.opensabre.iqc.scoring.InspectionScoring.Line::itemCode, line -> line));
             for (int index = 0; index < checked.reviewed().items().size(); index++) {
@@ -395,6 +397,10 @@ public class BusinessItemReviewService {
                     extended.add(machineScore.advanced()==null?null:mapper.writeValueAsString(machineScore.advanced()));
                     extended.add(reviewedScore.advanced()==null?null:mapper.writeValueAsString(reviewedScore.advanced()));
                     cells=extended.toArray();
+                }
+                if(hasFeedback){
+                    var extended=new java.util.ArrayList<Object>(java.util.Arrays.asList(cells));
+                    extended.add(decision==null?null:decision.feedbackCategory());cells=extended.toArray();
                 }
                 appendCsv(csv,cells);
             }
