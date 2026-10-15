@@ -66,7 +66,13 @@ public final class PipelineDecisionEvaluator {
     public static io.github.opensabre.iqc.pipelineasset.RiskPolicy.Decision riskDecision(PipelineRelease release,
             List<FindingFusion.Result> facts,InspectionScoring.Result score,com.fasterxml.jackson.databind.JsonNode businessContext) {
         if(release.riskPolicy()==null)return null;
-        var inputs=inputContext(release,facts,decisions(release.items(),facts),businessContext);
+        return riskDecision(release,facts,decisions(release.items(),facts),score,businessContext);
+    }
+    public static io.github.opensabre.iqc.pipelineasset.RiskPolicy.Decision riskDecision(PipelineRelease release,
+            List<FindingFusion.Result> facts,List<InspectionScoring.Decision> items,InspectionScoring.Result score,
+            com.fasterxml.jackson.databind.JsonNode businessContext) {
+        if(release.riskPolicy()==null)return null;
+        var inputs=inputContext(release,facts,items,businessContext);
         return release.riskPolicy().evaluate(new io.github.opensabre.iqc.action.ActionPolicy.Context(inputs.findings(),inputs.items(),score.scoreStatus(),score.finalScore(),null,null,inputs.labels(),businessContext));
     }
     public static String resultStatus(io.github.opensabre.iqc.pipeline.PipelineRuntime.Run run,
@@ -83,7 +89,14 @@ public final class PipelineDecisionEvaluator {
             List<FindingFusion.Result> facts,InspectionScoring.Result score,String risk,String resultStatus,String inputHash,
             com.fasterxml.jackson.databind.JsonNode businessContext,String samplingInputHash,com.fasterxml.jackson.databind.ObjectMapper json) {
         if(release.reviewPolicy()==null)return null;
-        var inputs=inputContext(release,facts,decisions(release.items(),facts),businessContext);
+        return reviewDecision(release,facts,decisions(release.items(),facts),score,risk,resultStatus,inputHash,businessContext,samplingInputHash,json);
+    }
+    public static io.github.opensabre.iqc.pipelineasset.ReviewPolicy.Decision reviewDecision(PipelineRelease release,
+            List<FindingFusion.Result> facts,List<InspectionScoring.Decision> items,InspectionScoring.Result score,String risk,
+            String resultStatus,String inputHash,com.fasterxml.jackson.databind.JsonNode businessContext,String samplingInputHash,
+            com.fasterxml.jackson.databind.ObjectMapper json) {
+        if(release.reviewPolicy()==null)return null;
+        var inputs=inputContext(release,facts,items,businessContext);
         var context=new io.github.opensabre.iqc.action.ActionPolicy.Context(inputs.findings(),inputs.items(),score.scoreStatus(),score.finalScore(),risk,resultStatus,inputs.labels(),businessContext);
         return release.reviewPolicy().evaluate(context,release.fusion(),inputHash,samplingInputHash,json);
     }
@@ -97,9 +110,14 @@ public final class PipelineDecisionEvaluator {
     }
     /** Compatibility projection for releases without an independent risk policy. */
     public static String riskLevel(List<PipelineRelease.ItemMapping> mappings,List<FindingFusion.Result> facts,InspectionScoring.Result score) {
+        if(score.scoreStatus()==InspectionScoring.ScoreStatus.PENDING)return "UNKNOWN";
+        return riskLevel(mappings,facts,decisions(mappings,facts),score);
+    }
+    public static String riskLevel(List<PipelineRelease.ItemMapping> mappings,List<FindingFusion.Result> facts,
+            List<InspectionScoring.Decision> items,InspectionScoring.Result score) {
         if(score.scoreStatus()==InspectionScoring.ScoreStatus.PENDING) return "UNKNOWN";
         var byCode=new HashMap<String,FindingFusion.Result>(); facts.forEach(fact->byCode.put(fact.code(),fact));
-        var statuses=new HashMap<String,InspectionScoring.ItemStatus>(); decisions(mappings,facts).forEach(d->statuses.put(d.itemCode(),d.status()));
+        var statuses=new HashMap<String,InspectionScoring.ItemStatus>(); items.forEach(d->statuses.put(d.itemCode(),d.status()));
         Finding.Severity highest=Finding.Severity.NONE;
         for(var mapping:mappings) {
             var fact=byCode.get(mapping.findingCode());
