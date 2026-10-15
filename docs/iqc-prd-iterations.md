@@ -352,3 +352,8 @@ CREATE_RISK_EVENT v1引用原冻结生产结果/动作账本，稳定幂等事�
 - 新V2复用Selector精确JSON hash与原完整executionInput，全消息/冻结业务字段生成samplingInputHash，原inputHash及V1盐/桶保持。实际生产/评测/来源/重算共享该入口，不改全局Hash/框架/输入存储。
 - 历史无完整输入时非确定概率选择/桶为null并保留UNKNOWN，概率0/1仍可确认；不读当前档案冒充旧输入、不重跑/发送。界面默认V2并支持显式升级旧V1而保留规则。
 - 21035最终backend skipTests test-compile退出0，25081首轮UI通过、16763最终UI待终态；无新增运行测试/SQL/部署，真实精度/队列/历史/权限/完整其它要求继续。
+
+## 2026-10-15 独立Skill/API单变量对照
+
+- 复用原SKILL维度/固定Dataset双Task/报告复算，新增SKILL_API单引用投影及实际请求快照变量；原LLM提示槽位逻辑保留。仅同Agent版本锚点和选中Skill可变化，工具/schema/其它节点与所有决策政策保持不变量；不新实验模型。
+- 配置界面可选独立节点并省略槽位，prompt hash不伪造。26525 backend skipTests test-compile已通过，6361 UI build待终态。真实双任务/SQL/API/角色/历史/报告及SmallModel等所有其它PRD继续，未新增运行测试/SQL/部署。

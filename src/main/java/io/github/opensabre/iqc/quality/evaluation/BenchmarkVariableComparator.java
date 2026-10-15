@@ -34,7 +34,7 @@ public final class BenchmarkVariableComparator {
         String leftPrompt = left.prompt() == null ? null : hash(mapper.getNodeFactory().textNode(left.prompt()), mapper);
         String rightPrompt = right.prompt() == null ? null : hash(mapper.getNodeFactory().textNode(right.prompt()), mapper);
         if ((selection.dimension() == Dimension.PROMPT || selection.dimension() == Dimension.SKILL)
-                && leftPrompt.equals(rightPrompt)) throw invalid("Benchmark 变量未改变实际有效提示");
+                && leftPrompt!=null && leftPrompt.equals(rightPrompt)) throw invalid("Benchmark 变量未改变实际有效提示");
         return new Comparison(selection, left.paths(), hash(left.invariant(), mapper), leftVariable, rightVariable,
                 hash(releaseProjection(baseline,mapper), mapper), hash(releaseProjection(candidate,mapper), mapper), leftPrompt, rightPrompt);
     }
@@ -56,12 +56,14 @@ public final class BenchmarkVariableComparator {
             }
             return new Projection(root, variable, null, List.of("/" + field));
         }
-        if (selection.nodeId() == null || selection.nodeId().isBlank()) throw invalid("必须指定单个 LLM 节点");
+        if (selection.nodeId() == null || selection.nodeId().isBlank()) throw invalid("必须指定单个变量节点");
         int index = -1;
         for (int i = 0; i < nodes.size(); i++) if (selection.nodeId().equals(nodes.get(i).path("nodeId").asText())) {
             if (index >= 0) throw invalid("节点标识重复"); index = i;
         }
-        if (index < 0 || !"LLM".equals(nodes.get(index).path("type").asText())) throw invalid("变量节点必须存在且为 LLM");
+        if(index<0)throw invalid("变量节点不存在");
+        if(selection.dimension()==Dimension.SKILL && "SKILL_API".equals(nodes.get(index).path("type").asText()))return skillApiProjection(root,nodes,index,selection,mapper);
+        if(!"LLM".equals(nodes.get(index).path("type").asText()))throw invalid("该变量维度不支持此节点类型");
         ObjectNode node = (ObjectNode) nodes.get(index), config = (ObjectNode) node.get("config");
         ObjectNode agent = (ObjectNode) config.get("agentSnapshot"), agentConfig = configuration(node, mapper);
         String prompt = effectivePrompt(agentConfig);
@@ -103,6 +105,26 @@ public final class BenchmarkVariableComparator {
         ((ObjectNode) config.path("agentReference")).remove("versionNo");
         agent.set("configJson", agentConfig);
         return new Projection(root, variable, prompt, paths);
+    }
+
+    /** One actual Skill request contract changes; its tool route and all other policies remain invariant. */
+    private static Projection skillApiProjection(ObjectNode root,ArrayNode nodes,int index,Selection selection,ObjectMapper mapper) {
+        if(selection.slot()!=null && selection.slot()!=0)throw invalid("独立Skill/API只有一个Skill引用，slot须为0或留空");
+        var node=nodes.get(index);var config=node.path("config");
+        try {io.github.opensabre.iqc.pipelinebridge.SkillApiDetectorEngine.validateConfiguration(node.path("version").asText(),config);}
+        catch(IllegalArgumentException invalidContract){throw invalid("独立Skill/API冻结协议无效");}
+        var reference=config.path("skillReference");var skill=config.path("skillSnapshot");var agent=config.path("agentReference");
+        if(!reference.isObject() || !reference.path("id").isTextual() || !reference.path("id").asText().equals(skill.path("id").asText())
+                || !reference.path("versionNo").isIntegralNumber() || !reference.path("versionNo").canConvertToInt()
+                || reference.path("versionNo").intValue()!=skill.path("versionNo").intValue()
+                || !agent.isObject() || !agent.path("id").isTextual() || agent.path("id").asText().isBlank()
+                || !agent.path("versionNo").isIntegralNumber() || !agent.path("versionNo").canConvertToInt() || agent.path("versionNo").intValue()<1)
+            throw invalid("独立Skill引用与冻结版本或Agent锚点不一致");
+        var variable=mapper.createObjectNode();variable.set("skill",skill.deepCopy());
+        ((ObjectNode)reference).put("id","__BENCHMARK_VARIABLE__");((ObjectNode)reference).put("versionNo","__BENCHMARK_VARIABLE__");
+        ((ObjectNode)config).put("skillSnapshot","__BENCHMARK_VARIABLE__");((ObjectNode)agent).put("versionNo","__BENCHMARK_ANCHOR__");
+        String prefix="/pipeline/nodes/"+index+"/config";
+        return new Projection(root,variable,null,List.of(prefix+"/skillReference/id",prefix+"/skillReference/versionNo",prefix+"/skillSnapshot",prefix+"/agentReference/versionNo"));
     }
 
     private static ObjectNode configuration(JsonNode node, ObjectMapper mapper) {

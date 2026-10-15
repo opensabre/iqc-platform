@@ -37,3 +37,15 @@ V20261004_10新增3个资源与按钮900198–900200；MENU900197使评测任务
 ## 验证与后续
 
 最终后端 `mvn -o -q -DskipTests test-compile` 成功（含最新主源码与既有测试源码，仅编译），前端 `npm run build`（vue-tsc+Vite）成功，临时依赖软链已移除。没有新增或执行测试。发布门禁、管理员例外原因/审计、完整各层指标及I4–I7仍待继续；本批没有推送、合并、部署或数据库写入。
+
+## 独立Skill/API比较的实施前复用缺口
+
+原比较器仅支持LLM节点中提示Skill数组；不能把独立SKILL_API版本比较当作已覆盖。沿原SKILL维度/双Task/报告增加独立节点投影。协议验证复用SkillApiDetectorEngine.validateConfiguration，核对冻结引用。Skill快照整体实际发送到远端，id/version/instructions/schema等属于该操作契约；Agent引用只可在相同id下换版本锚点，MCP/工具/参数/schema/其它政策与节点保持。无独立有效prompt，报告prompt hash为null；原LLM Skill仍必须改变有效提示。原无限定节点/多变量/纯显示配置变化规则保持现有边界。
+
+### 独立Skill已接入代码
+
+SKILL选择支持LLM提示槽位和SKILL_API单一引用。独立节点slot为null/0，比较器复用原引擎配置验证、显式核对skillReference与snapshot同id/version及正整数Agent版本；完整Skill快照是实际请求的一部分（含操作版本），对应变量hash。只mask指定引用id/version、快照和同Agent的版本锚点，未知额外字段仍为不变量。Agent id、MCP/工具/schema、输入输出映射、Finding/评分/标签/风险/Review及其它节点都保留在不变量中；候选改变其中任何字段即拒绝。两节点ID/类型与路径也须一致。
+
+独立调用不使用有效LLM提示，两个prompt hash为null；原LLM Skill仍保留有效prompt差异与8000字截断约束，不以能力版本更名冒充提示变化。独立Skill整个请求快照变化不能证明质量提升，报告仍用原固定Dataset双Task/双EID实际结果。原其它LLM节点的工具限制不放松；SmallModel单变量及工具混合LLM对照仍待独立接入。
+
+前端按维度过滤变量节点，SKILL可选独立Skill/API，自动省略其槽位；切换维度/资产时清除不再有效节点选择。26525 backend离线skipTests test-compile已terminal exit0，6361 UI构建仍在运行；不新增运行测试/SQL/模型或MCP调用/部署，实际双任务、权限、历史报告/发布门禁/浏览器仍待。
