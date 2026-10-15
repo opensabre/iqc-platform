@@ -7,7 +7,6 @@ import io.github.opensabre.iqc.result.BatchResultQueryService;
 import io.github.opensabre.iqc.result.dao.ConversationInspectionResultMapper;
 import io.github.opensabre.iqc.result.model.ConversationInspectionResult;
 import io.github.opensabre.iqc.scheme.InspectionSchemeService;
-import io.github.opensabre.iqc.scheme.SchemeDefinition;
 import io.github.opensabre.iqc.scheme.SchemeResultEvaluator;
 import io.github.opensabre.iqc.scoring.InspectionScoring;
 import io.github.opensabre.iqc.shared.IqcDataScope;
@@ -38,8 +37,15 @@ public class BusinessQualityReportService {
     private final ObjectMapper mapper;
     private final TaskExecutionMapper executions;
 
+    public record ManualScoreSummary(int appliedCount,int staleCount,BigDecimal averageOverrideScore,
+                                     int effectiveNumericCount,BigDecimal averageEffectiveScore) { }
     public record ScoreSummary(int resultCount, int finalCount, int pendingCount, int notApplicableCount,
-                               int qualifiedCount, BigDecimal averageScore, BigDecimal qualifiedRate) { }
+                               int qualifiedCount, BigDecimal averageScore, BigDecimal qualifiedRate,
+                               @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                               ManualScoreSummary manualOverrides) {
+        public ScoreSummary(int resultCount,int finalCount,int pendingCount,int notApplicableCount,int qualifiedCount,
+                BigDecimal averageScore,BigDecimal qualifiedRate){this(resultCount,finalCount,pendingCount,notApplicableCount,qualifiedCount,averageScore,qualifiedRate,null);}
+    }
     /** Failure rate uses only resolved applicable decisions; unresolved and absent results are never passes. */
     public record ItemSummary(int resultCount, int passCount, int failCount, int notApplicableCount,
                               int notEvaluatedCount, int reviewRequiredCount, int errorCount, BigDecimal failureRate) { }
@@ -48,7 +54,16 @@ public class BusinessQualityReportService {
     public record PolicyGroup(String groupKey, String schemeId, String versionNo, String draftRevision, String kind,
                               String mode, int baseScore, int passingScore, List<String> taskIds, int conversationCount,
                               List<String> executionIds, int missingResultCount, int missingReviewCount, int pendingReviewCount,
-                              ScoreSummary machine, ScoreSummary reviewed, List<ItemGroup> items) { }
+                              ScoreSummary machine, ScoreSummary reviewed, List<ItemGroup> items,
+                              @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                              String pipelineId) {
+        public PolicyGroup(String groupKey,String schemeId,String versionNo,String draftRevision,String kind,String mode,int baseScore,int passingScore,
+                List<String> taskIds,int conversationCount,List<String> executionIds,int missingResultCount,int missingReviewCount,int pendingReviewCount,
+                ScoreSummary machine,ScoreSummary reviewed,List<ItemGroup> items){
+            this(groupKey,schemeId,versionNo,draftRevision,kind,mode,baseScore,passingScore,taskIds,conversationCount,executionIds,
+                    missingResultCount,missingReviewCount,pendingReviewCount,machine,reviewed,items,null);
+        }
+    }
     public record Report(String scope, String runPolicy, int taskCount, int conversationCount, List<PolicyGroup> groups) { }
     public enum RunPolicy { SELECTED_RUNS, FIRST_PER_CONVERSATION, LATEST_PER_CONVERSATION }
 
@@ -82,17 +97,26 @@ public class BusinessQualityReportService {
                 if (execution == null || !id.equals(execution.getTaskId())) throw IqcException.invalidArgument("所选执行实例不属于对应任务");
             } else executionId = null;
             try {
-                var snapshot = mapper.readTree(task.getRuleSnapshotJson());
-                var definition = SchemeResultEvaluator.definition(snapshot, mapper);
-                if (definition == null) throw IqcException.invalidArgument("业务统计不支持旧消息任务");
-                var conversations = BatchResultQueryService.exportConversationIds(task, mapper);
-                count += conversations.size(); itemCount += (long) conversations.size() * definition.items().size();
-                if (count > 500 || itemCount > 50_000) throw IqcException.invalidArgument("业务统计最多 500 个任务会话、50000 个质检项");
-                var marker = snapshot.path("schemeSnapshot");
-                // Conservative grouping: frozen release content, identity and trial/published version must all agree.
-                String key = InspectionSchemeService.contentHash(mapper.writeValueAsString(List.of(
-                        marker.path("schemeId"), marker.path("versionNo"), marker.path("draftRevision"), marker.path("kind"), marker.path("release"))));
-                selected.add(new Selection(task, conversations, definition, marker, key, executionId));
+                var snapshot = mapper.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readTree(task.getRuleSnapshotJson());
+                io.github.opensabre.iqc.scoring.InspectionScoring.Policy scoring;
+                List<ReportItem> items;JsonNode marker;String key;
+                if(snapshot.has("pipelineSnapshot")){
+                    var release=reviews.pipelineRelease(snapshot);scoring=release.scoring();
+                    items=release.items().stream().map(item->new ReportItem(item.itemCode(),item.itemCode())).toList();marker=snapshot.path("pipelineSnapshot");
+                    key=io.github.opensabre.iqc.selector.SelectorAssetService.hash(mapper.writeValueAsString(List.of("PIPELINE",marker.path("pipelineId"),
+                            marker.path("versionNo"),marker.path("draftRevision"),marker.path("trial"),marker.path("release"))));
+                }else{
+                    var definition=SchemeResultEvaluator.definition(snapshot,mapper);
+                    if(definition==null)throw IqcException.invalidArgument("业务统计不支持旧消息任务");
+                    scoring=definition.scoring();items=definition.items().stream().map(item->new ReportItem(item.itemCode(),item.name())).toList();
+                    marker=snapshot.path("schemeSnapshot");
+                    key=InspectionSchemeService.contentHash(mapper.writeValueAsString(List.of(marker.path("schemeId"),marker.path("versionNo"),
+                            marker.path("draftRevision"),marker.path("kind"),marker.path("release"))));
+                }
+                var conversations=BatchResultQueryService.exportConversationIds(task,mapper);
+                count+=conversations.size();itemCount+=(long)conversations.size()*items.size();
+                if(count>500||itemCount>50_000)throw IqcException.invalidArgument("业务统计最多 500 个任务会话、50000 个质检项");
+                selected.add(new Selection(task,conversations,scoring,items,marker,key,executionId));
             } catch (com.fasterxml.jackson.core.JsonProcessingException exception) { throw IqcException.invalidState("任务方案快照损坏"); }
         }
         var candidates = new ArrayList<RunCandidate>();
@@ -135,7 +159,8 @@ public class BusinessQualityReportService {
             if (latest != null && "PENDING".equals(latest.getStatus())) group.pendingReview++;
             if (completed == null) group.missingReview++;
             else {
-                var reviewed = reviews.validatedProjection(completed, result, selection.task()).reviewed();
+                var projection=reviews.validatedProjection(completed,result,selection.task());
+                var reviewed=projection.reviewed();group.addManualScores(projection);
                 group.reviewed.add(reviewed.scoring());
                 group.addItems(reviewed, true);
             }
@@ -197,8 +222,9 @@ public class BusinessQualityReportService {
                 left.result() == null ? null : left.result().getId(), right.result() == null ? null : right.result().getId());
     }
 
-    private record Selection(InspectionTask task, List<String> conversations, SchemeDefinition definition,
-                             JsonNode marker, String key, String executionId) { }
+    private record ReportItem(String itemCode,String name) { }
+    private record Selection(InspectionTask task,List<String> conversations,InspectionScoring.Policy scoring,List<ReportItem> items,
+                             JsonNode marker,String key,String executionId) { }
     private record RunCandidate(Selection selection, String conversationId, ConversationInspectionResult result,
                                 java.util.Date effectiveTime) { }
     private static final class Group {
@@ -207,9 +233,23 @@ public class BusinessQualityReportService {
         final Scores machine = new Scores(), reviewed = new Scores();
         final java.util.Map<String, ItemCounts> machineItems = new LinkedHashMap<>(), reviewedItems = new LinkedHashMap<>();
         int conversations, missingResult, missingReview, pendingReview;
+        int manualApplied,manualStale,effectiveNumericCount;BigDecimal manualSum=BigDecimal.ZERO,effectiveSum=BigDecimal.ZERO;
+        void addManualScores(BusinessItemReviewEvaluator.Projection projection){
+            var manual=projection.manualScore();BigDecimal numeric=null;
+            if(manual!=null&&"APPLIED".equals(manual.status())){manualApplied++;numeric=manual.effectiveScore();manualSum=manualSum.add(numeric);}
+            else {if(manual!=null)manualStale++;if(projection.reviewed().scoring().scoreStatus()==InspectionScoring.ScoreStatus.FINAL)numeric=projection.reviewed().scoring().finalScore();}
+            if(numeric!=null){effectiveNumericCount++;effectiveSum=effectiveSum.add(numeric);}
+        }
+        ScoreSummary reviewedSummary(){
+            var calculated=reviewed.view();if(manualApplied+manualStale==0)return calculated;
+            var manual=new ManualScoreSummary(manualApplied,manualStale,manualApplied==0?null:manualSum.divide(BigDecimal.valueOf(manualApplied),2,RoundingMode.HALF_UP),
+                    effectiveNumericCount,effectiveNumericCount==0?null:effectiveSum.divide(BigDecimal.valueOf(effectiveNumericCount),2,RoundingMode.HALF_UP));
+            return new ScoreSummary(calculated.resultCount(),calculated.finalCount(),calculated.pendingCount(),calculated.notApplicableCount(),calculated.qualifiedCount(),
+                    calculated.averageScore(),calculated.qualifiedRate(),manual);
+        }
         Group(Selection selection) {
             this.selection = selection;
-            selection.definition().items().forEach(item -> {
+            selection.items().forEach(item -> {
                 machineItems.put(item.itemCode(), new ItemCounts());
                 reviewedItems.put(item.itemCode(), new ItemCounts());
             });
@@ -219,18 +259,18 @@ public class BusinessQualityReportService {
             evaluation.items().forEach(item -> counts.get(item.itemCode()).add(item.status()));
         }
         PolicyGroup view() {
-            var marker = selection.marker(); var policy = selection.definition().scoring();
+            var marker = selection.marker(); var policy = selection.scoring();
             return new PolicyGroup(selection.key(), marker.path("schemeId").asText(""), marker.path("versionNo").asText(""),
-                    marker.path("draftRevision").asText(""), marker.path("kind").asText(""), policy.mode().name(),
+                    marker.path("draftRevision").asText(""),marker.has("pipelineId")?(marker.path("trial").asBoolean()?"DRAFT_TRIAL":"PUBLISHED"):marker.path("kind").asText(""),policy.mode().name(),
                     policy.baseScore(), policy.passingScore(),
                     List.copyOf(new java.util.LinkedHashSet<>(taskIds)), conversations, List.copyOf(executionIds),
-                    missingResult, missingReview, pendingReview, machine.view(), reviewed.view(),
-                    selection.definition().items().stream().map(item -> {
+                    missingResult, missingReview, pendingReview, machine.view(),reviewedSummary(),
+                    selection.items().stream().map(item -> {
                         var scoring = policy.items().stream().filter(value -> value.itemCode().equals(item.itemCode())).findFirst().orElse(null);
                         return new ItemGroup(item.itemCode(), item.name(), scoring != null,
                                 scoring == null ? null : scoring.points(), scoring != null && scoring.veto(),
                                 machineItems.get(item.itemCode()).view(), reviewedItems.get(item.itemCode()).view());
-                    }).toList());
+                    }).toList(),marker.has("pipelineId")?marker.path("pipelineId").asText():null);
         }
     }
     private static final class ItemCounts {

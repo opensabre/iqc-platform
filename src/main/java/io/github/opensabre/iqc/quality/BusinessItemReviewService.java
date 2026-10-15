@@ -565,7 +565,7 @@ public class BusinessItemReviewService {
                 .orderByDesc(ResultReview::getReviewRevision).last("LIMIT 1"));
     }
 
-    private io.github.opensabre.iqc.pipelineasset.PipelineRelease pipelineRelease(com.fasterxml.jackson.databind.JsonNode snapshot)
+    io.github.opensabre.iqc.pipelineasset.PipelineRelease pipelineRelease(com.fasterxml.jackson.databind.JsonNode snapshot)
             throws com.fasterxml.jackson.core.JsonProcessingException {
         var marker = snapshot.path("pipelineSnapshot");
         var release = mapper.treeToValue(marker.path("release"), io.github.opensabre.iqc.pipelineasset.PipelineRelease.class);
