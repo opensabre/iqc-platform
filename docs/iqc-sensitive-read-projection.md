@@ -18,4 +18,4 @@
 5. 普通审计日志禁录敏感请求/响应payload；只保留操作人、来源ID、hash及变更身份。Prompt与模型原文日志单独权限，业务PII权限不自动授权Prompt。
 6. 复用框架规则无法覆盖的已记录需求再讨论应用扩展；任何framework源码修改须先说明影响并获得用户明确批准。本调查未修改framework。
 
-本页为实施调查，不代表敏感权限/脱敏已实现。Wiki access-control页为seeded；本地raw目录当前仅README可枚举（链接材料不可用），以上判断以owning源码、注解与原权限实现为依据。完整I1–I7、真实权限/数据库/API/浏览器验收继续。
+本页为实施调查，不代表敏感权限/脱敏已实现。Wiki access-control页为seeded，已继续读取raw/project-docs/base-organization/modules/organization-and-access.md（目录为指向owning docs的符号链接；普通rg --files不会跟随，不能据此判断资料缺失）。以上判断同时参考owning源码、注解与原权限实现。完整I1–I7、真实权限/数据库/API/浏览器验收继续。
