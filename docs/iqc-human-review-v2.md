@@ -56,3 +56,5 @@ backend22842离线skipTests test-compile已terminal exit0；UI44434完整构建�
 已检查QualityOperationsService.decideReview：既有消息复核支持0..100整数finalScore，ResultReview同一表已有审核人/时间/原因；业务复核是独立小数投影，不能把人工小数截断写回旧整数字段。扩展原BusinessItemReviewEvaluator/Projection与同一ResultReview JSON，复用原轮次、权限和审计，不新增评分表或第二套记录。
 
 人工改分命令须包含sourceResultId、当前计算评分的精确摘要、0..100且最多2位小数的字符串、必填原因。保留机器分数、项目/Finding重算分数及人工数字覆盖三者身份。新提交基准不匹配拒绝；沿用的人工改分遇到后续项目/Finding变化则标为STALE并停止生效，待重新确认，不能静默移植到新计算结果。原计算明细、一票否决和未确认事实保留，单纯改数字不能伪装成公式重算或证据确认。后续需同步Service/API、导出/报告/候选与UI，明确人工分数与计算分数显示；此段为设计边界，尚未实现人工改分流程。
+
+人工改分纯校验已加入原BusinessItemReviewEvaluator（未新增评分类/表）：ScoreAdjustment/ManualScoreProjection保存字符串分数、必填原因与计算摘要，scoringHash复用Selector精确摘要并绑定resultId。新命令基准不符拒绝，继承命令基准不符返回STALE/effectiveScore=null；APPLIED单独提供人工数字，不修改原InspectionScoring.Result、明细、否决或事实完整性。此阶段尚未接Service/API/报告/候选/UI，不能宣称人工改分已可用；仍须显式展示计算与人工分数并完成后续接入。
