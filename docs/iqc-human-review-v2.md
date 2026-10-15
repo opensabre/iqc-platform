@@ -42,3 +42,11 @@ backend22842离线skipTests test-compile已terminal exit0；UI44434完整构建�
 新增值树使用局部精确小数解码（检索未发现现成JsonNode精确decoder；不改全局ObjectMapper），Finding历史/原Trace在该路径也精确读取，避免NUMBER/OBJECT的人工值被浮点归一。新增证据和人工项目证据校验以原完整冻结消息ID为准；无冻结输入拒绝新事实修正。CSV追加该轮有效Finding裁决，候选保存人工修正与规范事实/消息证据身份，不携带原检测器payload。标签和风险仅保存人工投影，不触发实际标签更新或任何外部Action。
 
 上述尚待编译/服务API/持久性/权限/浏览器/Gold审核验收；前端Finding编辑与服务上下文读取入口仍待接入，原无Finding人工复核界面保持现有路径。
+
+## 编辑上下文与精确值提交
+
+2e6a207服务/API轮次接入离线skipTests test-compile已terminal exit0。现沿原reviews查询增加`view=FINDING_CONTEXT,targetType=BUSINESS,resultId=...`，复用iqc:review:view与原数据范围，REPEATABLE_READ无写锁；返回服务器计算的原事实摘要、冻结消息、原证据身份及最近有效Finding修正。非流水线或无生产冻结输入返回available=false，损坏来源仍拒绝，不读当前消息合成上下文。
+
+新findingDecisions请求指纹改用原Selector精确摘要，旧无Finding请求继续原算法。客户端可用valueJson原文提交，服务端精确解析后归一为value，拒绝双值与尾随JSON；旧原生value与构造仍兼容。复用NumericPredicate的38位/18小数范围限制，拒绝异常指数；人工OBJECT最多32层、10000节点和100000字符，避免精确摘要展开异常数值或无限文本。不修改全局JSON或全局hash。
+
+前端独立HumanFindingReviewEditor接原BusinessReviewPanel命令冻结/重试，支持KNOWN/UNKNOWN、JSON原文、严重度、保留/删除原证据、补充冻结消息、必填原因；当前值由服务端以字符串返回，浏览器不重新序列化小数。历史提供原保存JSON全文以保留精确值，原机器与人工项目/分数分列仍保留。以上待本轮构建、API/DB/浏览器验收，未部署；人工总分与二审仲裁继续。

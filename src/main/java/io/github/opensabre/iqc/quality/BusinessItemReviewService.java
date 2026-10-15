@@ -38,6 +38,55 @@ public class BusinessItemReviewService {
     private final IqcDataScope scope;
     private final ObjectMapper mapper;
 
+    public record FindingEvidence(String id,String type,String reference) { }
+    public record FindingEntry(String code,String valueType,String state,String valueJson,String severity,String expectedFindingHash,
+            List<String> allowedValues,List<String> allowedEvidenceTypes,boolean evidenceRequired,List<FindingEvidence> evidence,
+            List<String> retainedEvidenceIds,List<String> addedMessageIds) { }
+    public record FindingContext(String sourceResultId,String sourceHash,boolean available,String message,List<FindingEntry> findings,
+            com.fasterxml.jackson.databind.JsonNode messages) { }
+    /** The existing review read permission and data scope apply; never acquires a mutation lock or captures current messages. */
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public FindingContext findingContext(String resultId){
+        var result=results.selectById(resultId);if(result==null)throw IqcException.notFound("会话质检结果不存在");
+        var task=tasks.selectById(result.getTaskId());authorize(task);
+        var source=new Context(task,result);String sourceHash=sourceHash(source);
+        try{
+            var snapshot=mapper.readTree(task.getRuleSnapshotJson());
+            if(!snapshot.has("pipelineSnapshot")||!io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.hasSnapshot(snapshot))
+                return new FindingContext(resultId,sourceHash,false,"该历史结果缺少冻结流水线或会话输入",List.of(),mapper.createArrayNode());
+            var release=pipelineRelease(snapshot);
+            var trace=mapper.readerFor(io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation.class)
+                    .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                    .<io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation>readValue(result.getExecutionTraceJson());
+            var input=io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.validatedExecutionInput(task,snapshot,trace,result.getConversationId(),mapper);
+            var allowed=new java.util.HashSet<String>();input.path("messages").forEach(message->allowed.add(message.path("id").asText()));
+            BusinessItemReviewEvaluator.evaluatePipeline(resultId,release,trace,trace.items(),List.of(),allowed,input.path("businessContext"));
+            var effective=new LinkedHashMap<String,HumanFindingReviewEvaluator.Decision>();
+            var previous=latest(resultId,true);
+            if(previous!=null){var checked=validatedProjection(previous,result,task);
+                if(checked.findingReview()!=null)checked.findingReview().findings().decisions().forEach(decision->effective.put(decision.findingCode(),decision));}
+            var definitions=new LinkedHashMap<String,io.github.opensabre.iqc.finding.FindingDefinition>();
+            for(var node:release.pipeline().nodes()){
+                var definition=mapper.treeToValue(node.config().path("findingDefinition"),io.github.opensabre.iqc.finding.FindingDefinition.class);
+                var old=definitions.putIfAbsent(definition.code(),definition);
+                if(old!=null&&!old.equals(definition))throw IqcException.invalidState("同名事实冻结定义不一致");
+            }
+            var entries=new java.util.ArrayList<FindingEntry>();
+            for(var fact:trace.fusion()){
+                var definition=definitions.get(fact.code());var decision=effective.get(fact.code());
+                entries.add(new FindingEntry(fact.code(),fact.valueType().name(),decision==null?fact.state().name():decision.state().name(),
+                        mapper.writeValueAsString(decision==null?fact.value():decision.value()),decision==null?fact.severity().name():decision.severity().name(),
+                        HumanFindingReviewEvaluator.findingHash(fact,mapper),definition.allowedValues(),definition.evidenceTypes().stream().map(Enum::name).toList(),
+                        definition.evidenceRequired(),fact.evidence().stream().map(evidence->new FindingEvidence(evidence.id(),evidence.type().name(),evidence.reference())).toList(),
+                        decision==null?fact.evidence().stream().map(io.github.opensabre.iqc.finding.Finding.Evidence::id).toList():decision.retainedEvidenceIds(),
+                        decision==null?List.of():decision.addedMessageIds()));
+            }
+            var messages=mapper.createArrayNode();for(var message:input.path("messages")){
+                var selected=mapper.createObjectNode();for(String field:List.of("id","sequenceNo","speakerRole","content"))selected.set(field,message.path(field));messages.add(selected);}
+            return new FindingContext(resultId,sourceHash,true,null,List.copyOf(entries),messages);
+        }catch(com.fasterxml.jackson.core.JsonProcessingException invalid){throw IqcException.invalidState("人工事实复核上下文损坏");}
+    }
+
     /** Lists cross-task rounds using SQL-level task scope and bounded database pagination. */
     @Transactional(readOnly = true)
     public io.github.opensabre.iqc.shared.IqcPage<io.github.opensabre.iqc.quality.model.BusinessReviewQueueItem> queue(
@@ -171,7 +220,7 @@ public class BusinessItemReviewService {
                 || rejected && (!decisions.isEmpty()||!findingDecisions.isEmpty()) || !rejected && decisions.isEmpty()&&findingDecisions.isEmpty())
             throw IqcException.invalidArgument("退回复核不得包含裁决，完成复核必须包含项目或事实裁决");
         String fingerprint = findingDecisions.isEmpty()?hash(List.of(expectedRevision,rejected,decisions,comment,reviewer))
-                :hash(List.of(expectedRevision,rejected,decisions,comment,reviewer,findingDecisions));
+                :exactHash(List.of(expectedRevision,rejected,decisions,comment,reviewer,findingDecisions));
         if (!Objects.equals(review.getReviewRevision(), expectedRevision)) throw IqcException.invalidState("复核版本已变化");
         if (!"PENDING".equals(review.getStatus())) {
             if (fingerprint.equals(review.getDecisionFingerprint())) return review;
@@ -546,6 +595,10 @@ public class BusinessItemReviewService {
         } catch (com.fasterxml.jackson.core.JsonProcessingException ex) { throw IqcException.invalidState("复核政策快照损坏"); }
         return hash(java.util.Arrays.asList(context.task().getRuleSnapshotJson(), context.result().getId(),
                 context.result().getBusinessItemResultsJson(), context.result().getScoringResultJson()));
+    }
+    private String exactHash(Object value){
+        try{return io.github.opensabre.iqc.selector.SelectorAssetService.hash(mapper.writeValueAsString(value));}
+        catch(com.fasterxml.jackson.core.JsonProcessingException invalid){throw IqcException.invalidArgument("人工复核数据无法序列化");}
     }
     private String hash(Object value) {
         try { return InspectionSchemeService.contentHash(mapper.writeValueAsString(value)); }
