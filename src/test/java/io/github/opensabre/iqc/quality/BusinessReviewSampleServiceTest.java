@@ -138,4 +138,27 @@ class BusinessReviewSampleServiceTest {
         when(scope.canView(null,"group")).thenReturn(false); assertThatThrownBy(this::create).hasMessageContaining("无权");
         verify(samples,never()).insert(any(QualitySample.class));
     }
+    @Test void candidateKeepsHumanFindingValuesAndMessageIdsWithoutDetectorPayload() throws Exception {
+        var base=business.validatedProjection(review,result,task);
+        var details=json.createObjectNode().put("messageId","m2").put("privatePayload","DO_NOT_CAPTURE");
+        var evidence=new io.github.opensabre.iqc.finding.Finding.Evidence("evidence",io.github.opensabre.iqc.finding.Finding.EvidenceType.EXTERNAL_RESULT,"external:call",details);
+        var raw=new io.github.opensabre.iqc.finding.Finding("raw","CHECK","BUSINESS",io.github.opensabre.iqc.finding.Finding.ValueType.BOOLEAN,
+                json.getNodeFactory().booleanNode(false),io.github.opensabre.iqc.finding.Finding.State.KNOWN,null,
+                io.github.opensabre.iqc.finding.Finding.Severity.LOW,"DO_NOT_CAPTURE",List.of(evidence),
+                new io.github.opensabre.iqc.finding.Finding.Source("node","SMALL_MODEL","small-model-v1",1,"hash"));
+        var fact=new io.github.opensabre.iqc.fusion.FindingFusion.Result("CHECK",raw.valueType(),raw.state(),json.getNodeFactory().booleanNode(true),
+                raw.severity(),List.of(raw),List.of(),List.of("raw"),List.of(evidence),"human","policy",1);
+        var decision=new HumanFindingReviewEvaluator.Decision("result","CHECK","expected-hash",fact.state(),fact.value(),fact.severity(),
+                "manual correction",List.of("evidence"),List.of());
+        var findings=new HumanFindingReviewEvaluator.Projection(List.of(fact),List.of(fact),List.of(decision));
+        var policy=new HumanFindingReviewEvaluator.PolicyProjection(findings,List.of(),base.reviewed().scoring(),null,"LOW",java.util.Map.of(),null,"PASS");
+        when(business.validatedProjection(review,result,task)).thenReturn(new BusinessItemReviewEvaluator.Projection("result",base.original(),base.reviewed(),base.decisions(),policy));
+        var sample=create();var expected=json.readTree(sample.getExpectedJson());
+        assertThat(expected.at("/humanFindingDecisions/0/reason").asText()).isEqualTo("manual correction");
+        assertThat(expected.at("/humanReviewedFindings/0/value").booleanValue()).isTrue();
+        assertThat(expected.at("/humanReviewedFindings/0/evidenceMessageIds/0").asText()).isEqualTo("m2");
+        assertThat(sample.getExpectedJson()).doesNotContain("DO_NOT_CAPTURE","privatePayload","rawFindings");
+        assertThat(sample.getStatus()).isEqualTo("CANDIDATE");
+    }
+
 }

@@ -147,4 +147,22 @@ class BusinessItemReviewEvaluatorTest {
         assertThat(projection.reviewed().items().getFirst().ruleVersionNo()).isZero();
         assertThat(projection.reviewed().items().getFirst().matchedMessageIds()).containsExactly("m1");
     }
+    @Test void classifiedFeedbackSurvivesNormalizationAndOldCommandsKeepTheirJsonShape() throws Exception {
+        var json=new com.fasterxml.jackson.databind.ObjectMapper();
+        var legacy=decision("a",FAIL,PASS);
+        assertThat(json.valueToTree(legacy).has("feedbackCategory")).isFalse();
+        for(String category:List.of("AI_FALSE_POSITIVE","AI_FALSE_NEGATIVE","EVIDENCE_WRONG","SCORE_POLICY_WRONG",
+                "DATA/ASR_ERROR","RULE_ERROR","BUSINESS_STANDARD_CHANGED")) {
+            var change=new BusinessItemReviewEvaluator.Decision("result-1","a",FAIL,PASS," reason ",List.of("m1"),category);
+            var result=BusinessItemReviewEvaluator.evaluate("result-1",definition(InspectionScoring.Mode.DEDUCTION,false),
+                    items(FAIL,PASS),List.of(change),Set.of("m1"));
+            assertThat(result.decisions().getFirst().feedbackCategory()).isEqualTo(category);
+            assertThat(result.decisions().getFirst().reason()).isEqualTo("reason");
+            assertThat(json.treeToValue(json.valueToTree(result.decisions().getFirst()),BusinessItemReviewEvaluator.Decision.class).feedbackCategory()).isEqualTo(category);
+        }
+        assertThatThrownBy(()->BusinessItemReviewEvaluator.evaluate("result-1",definition(InspectionScoring.Mode.DEDUCTION,false),
+                items(FAIL,PASS),List.of(new BusinessItemReviewEvaluator.Decision("result-1","a",FAIL,PASS,"reason",List.of(),"OTHER")),Set.of("m1")))
+                .isInstanceOf(RuntimeException.class);
+    }
+
 }

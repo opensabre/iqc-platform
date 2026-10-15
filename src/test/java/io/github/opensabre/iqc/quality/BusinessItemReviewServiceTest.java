@@ -146,6 +146,7 @@ class BusinessItemReviewServiceTest {
         assertThatThrownBy(() -> service.request("result", 1, "request-token-0002", "原因")).hasMessageContaining("待处理");
         service.decide(review.getId(), 1, true, List.of(), "退回补充证据");
         assertThat(review.getStatus()).isEqualTo("REJECTED"); assertThat(review.getReviewedResultJson()).isNull();
+        when(reviews.selectOne(any())).thenReturn(review, null);
         assertThat(service.request("result", 1, "request-token-0002", "再次申请").getReviewRevision()).isEqualTo(2);
     }
 
@@ -370,4 +371,87 @@ class BusinessItemReviewServiceTest {
         review.setReviewedResultJson(mapper.writeValueAsString(json));
         assertThatThrownBy(() -> service.exportCsv(review.getId())).hasMessageContaining("当前会话");
     }
+    @Test void findingContextEnforcesScopeAndDoesNotRecaptureLegacyMessages() {
+        when(scope.canView(null,null)).thenReturn(false);
+        assertThatThrownBy(()->service.findingContext("result")).hasMessageContaining("无权");
+        verifyNoInteractions(messages);
+        when(scope.canView(null,null)).thenReturn(true);
+        var context=service.findingContext("result");
+        assertThat(context.available()).isFalse();assertThat(context.sourceResultId()).isEqualTo("result");
+        assertThat(context.findings()).isEmpty();assertThat(context.messages()).isEmpty();
+        verifyNoInteractions(messages);verify(reviews,never()).insert(any(ResultReview.class));
+    }
+
+    @Test void scoreOnlyRoundPreservesComputedScoreAndInheritedAdjustmentBecomesStale() throws Exception {
+        var first=request();when(reviews.selectOne(any())).thenReturn(first,null);
+        var policy=new InspectionScoring.Policy(InspectionScoring.POLICY_VERSION,InspectionScoring.Mode.DEDUCTION,100,60,
+                List.of(new InspectionScoring.Item("a",20,false)));
+        var computed=InspectionScoring.evaluate(policy,List.of(new InspectionScoring.Decision("a",InspectionScoring.ItemStatus.FAIL)));
+        var adjustment=new BusinessItemReviewEvaluator.ScoreAdjustment("result",BusinessItemReviewEvaluator.scoringHash("result",computed,mapper),"90.25","核对后调整");
+        service.decide(first.getId(),1,false,List.of(),List.of(),adjustment,"人工分数裁决");
+        var projection=mapper.readTree(first.getReviewedResultJson());
+        assertThat(projection.at("/reviewed/scoring/finalScore").intValue()).isEqualTo(80);
+        assertThat(projection.at("/manualScore/effectiveScore").decimalValue()).isEqualByComparingTo("90.25");
+        assertThat(service.decide(first.getId(),1,false,List.of(),List.of(),adjustment,"人工分数裁决")).isSameAs(first);
+        verify(reviews,times(1)).updateById(any(ResultReview.class));
+        String firstSnapshot=first.getReviewedResultJson();when(reviews.selectOne(any())).thenReturn(first);
+        var context=service.scoreContext("result");
+        assertThat(new java.math.BigDecimal(context.computedScore())).isEqualByComparingTo("80");assertThat(context.manualScore().effectiveScore()).isEqualByComparingTo("90.25");
+        var second=service.request("result",1,"manual-score-round-2","再次核对");
+        when(reviews.selectById(second.getId())).thenReturn(second);when(reviews.selectOne(any())).thenReturn(second,first);
+        service.decide(second.getId(),2,false,decisions(),"项目改判");
+        var next=mapper.readTree(second.getReviewedResultJson());
+        assertThat(next.at("/reviewed/scoring/finalScore").intValue()).isEqualTo(100);
+        assertThat(next.at("/manualScore/status").asText()).isEqualTo("STALE");assertThat(next.at("/manualScore/effectiveScore").isNull()).isTrue();
+        assertThat(first.getReviewedResultJson()).isEqualTo(firstSnapshot);
+        assertThat(service.exportCsv(second.getId())).contains("人工覆盖分数","STALE");
+    }
+
+    @Test void stagedReviewInheritsVerdictAndArbitrationClosesFurtherRounds() throws Exception {
+        var ledger=new java.util.LinkedHashMap<String,ResultReview>();
+        when(reviews.selectById(any())).thenAnswer(call->ledger.get(call.getArgument(0)));
+        when(reviews.insert(any(ResultReview.class))).thenAnswer(call->{ResultReview row=call.getArgument(0);ledger.put(row.getId(),row);return 1;});
+        when(reviews.selectOne(any())).thenAnswer(call->{
+            var query=(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ResultReview>)call.getArgument(0);
+            query.getSqlSegment();boolean completed=query.getParamNameValuePairs().containsValue("COMPLETED");
+            return ledger.values().stream().filter(row->!completed||"COMPLETED".equals(row.getStatus()))
+                .max(java.util.Comparator.comparing(ResultReview::getReviewRevision)).orElse(null);
+        });
+        when(scope.owner()).thenReturn("first");
+        var first=service.request("result",0,"workflow-initial-01","初审申请");
+        service.decide(first.getId(),1,false,decisions(),"初审确认满足");
+        String preserved=first.getReviewedResultJson();
+        when(scope.owner()).thenReturn("applicant");
+        var second=service.request("result",1,"workflow-second-01","申请二审",BusinessItemReviewEvaluator.ReviewStage.SECOND_REVIEW,first.getId());
+        assertThat(service.request("result",1,"workflow-second-01","申请二审",BusinessItemReviewEvaluator.ReviewStage.SECOND_REVIEW,first.getId())).isSameAs(second);
+        assertThatThrownBy(()->service.decide(second.getId(),2,false,List.of(),"认可上游")).hasMessageContaining("独立");
+        when(scope.owner()).thenReturn("first");
+        assertThatThrownBy(()->service.decide(second.getId(),2,false,List.of(),"认可上游")).hasMessageContaining("独立");
+        when(scope.owner()).thenReturn("second");
+        first.setReviewedResultJson(preserved.replace("核对会话确认满足","补充证据确认满足"));
+        assertThatThrownBy(()->service.decide(second.getId(),2,false,List.of(),"二审认可上游")).hasMessageContaining("摘要或阶段已变化");
+        first.setReviewedResultJson(preserved);
+        first.setBusinessResultId("other-result");
+        assertThatThrownBy(()->service.decide(second.getId(),2,false,List.of(),"二审认可上游")).hasMessageContaining("上游轮次损坏");
+        first.setBusinessResultId("result");
+        first.setReviewRevision(2);
+        assertThatThrownBy(()->service.decide(second.getId(),2,false,List.of(),"二审认可上游")).isInstanceOf(io.github.opensabre.iqc.governance.IqcException.class);
+        first.setReviewRevision(1);
+        service.decide(second.getId(),2,false,List.of(),"二审认可上游");
+        var checked=mapper.readValue(second.getReviewedResultJson(),BusinessItemReviewEvaluator.Projection.class);
+        assertThat(checked.workflow().stage()).isEqualTo(BusinessItemReviewEvaluator.ReviewStage.SECOND_REVIEW);
+        assertThat(checked.reviewed().scoring().finalScore()).isEqualByComparingTo("100");
+        assertThat(checked.decisions()).hasSize(1);
+        when(scope.owner()).thenReturn("applicant");
+        var arbitration=service.request("result",2,"workflow-arbitrate-01","申请仲裁",BusinessItemReviewEvaluator.ReviewStage.ARBITRATION,second.getId());
+        when(scope.owner()).thenReturn("second");
+        assertThatThrownBy(()->service.decide(arbitration.getId(),3,false,List.of(),"仲裁确认")).hasMessageContaining("独立");
+        when(scope.owner()).thenReturn("arbiter");
+        service.decide(arbitration.getId(),3,false,List.of(),"仲裁确认上游");
+        assertThat(service.exportCsv(arbitration.getId())).contains("ARBITRATION",second.getId());
+        assertThat(first.getReviewedResultJson()).isEqualTo(preserved);
+        assertThatThrownBy(()->service.request("result",3,"workflow-reopen-01","重新申请")).hasMessageContaining("终局");
+        verify(reviews,times(3)).updateById(any(ResultReview.class));
+    }
+
 }
