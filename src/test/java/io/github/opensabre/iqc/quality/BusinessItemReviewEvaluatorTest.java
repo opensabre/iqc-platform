@@ -122,4 +122,29 @@ class BusinessItemReviewEvaluatorTest {
         assertThat(projected.decisions().getFirst().evidenceMessageIds()).containsExactly("m1");
         assertThatThrownBy(() -> projected.reviewed().items().clear()).isInstanceOf(UnsupportedOperationException.class);
     }
+    @org.junit.jupiter.api.Test
+    void dedicatedModelSourceKeepsOriginalNodeAndExactProtocolWithoutInventingRule() {
+        org.assertj.core.api.Assertions.assertThat(new BusinessItemReviewEvaluator.ItemContract("item","Item","",0,
+                "classifier","SMALL_MODEL","small-model-v1").validSource()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(new BusinessItemReviewEvaluator.ItemContract("item","Item","",0,
+                "classifier","SMALL_MODEL","unknown").validSource()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(new BusinessItemReviewEvaluator.ItemContract("item","Item","",0,
+                "","SMALL_MODEL","small-model-v1").validSource()).isFalse();
+    }
+    @Test
+    void dedicatedModelReviewRecalculatesOriginalPolicyAndKeepsMachineOutcome() {
+        var policy=new InspectionScoring.Policy(InspectionScoring.POLICY_VERSION,InspectionScoring.Mode.DEDUCTION,100,60,
+                List.of(new InspectionScoring.Item("model-item",20,false)));
+        var contracts=List.of(new BusinessItemReviewEvaluator.ItemContract("model-item","Classifier","",0,
+                "classifier","SMALL_MODEL","small-model-v1"));
+        var machine=List.of(new SchemeResultEvaluator.ItemResult("model-item","Classifier","",0,FAIL,List.of()));
+        var human=new BusinessItemReviewEvaluator.Decision("result-1","model-item",FAIL,PASS,"核对已处理会话",List.of("m1"));
+        var projection=BusinessItemReviewEvaluator.evaluateFrozen("result-1",policy,contracts,machine,List.of(human),Set.of("m1"));
+        assertThat(projection.original().scoring().finalScore()).isEqualByComparingTo("80");
+        assertThat(projection.reviewed().scoring().finalScore()).isEqualByComparingTo("100");
+        assertThat(machine.getFirst().status()).isEqualTo(FAIL);
+        assertThat(projection.reviewed().items().getFirst().ruleId()).isEmpty();
+        assertThat(projection.reviewed().items().getFirst().ruleVersionNo()).isZero();
+        assertThat(projection.reviewed().items().getFirst().matchedMessageIds()).containsExactly("m1");
+    }
 }

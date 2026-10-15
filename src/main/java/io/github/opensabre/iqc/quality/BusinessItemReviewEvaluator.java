@@ -46,8 +46,9 @@ public final class BusinessItemReviewEvaluator {
         boolean validSource() {
             if(ruleId==null)return false;
             if(!ruleId.isBlank() && ruleVersionNo>0)return true;
+            if("SMALL_MODEL".equals(detectorType) && !io.github.opensabre.iqc.pipelinebridge.SmallModelContract.VERSION.equals(detectorVersion))return false;
             return ruleId.isEmpty() && ruleVersionNo==0 && detectorNodeId!=null && !detectorNodeId.isBlank()
-                    && Set.of("METRIC","LLM","SKILL_API").contains(java.util.Objects.toString(detectorType,"")) && detectorVersion!=null && !detectorVersion.isBlank();
+                    && Set.of("METRIC","LLM","SKILL_API","SMALL_MODEL").contains(java.util.Objects.toString(detectorType,"")) && detectorVersion!=null && !detectorVersion.isBlank();
         }
     }
 
