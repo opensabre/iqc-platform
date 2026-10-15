@@ -38,6 +38,36 @@ public final class BusinessItemReviewEvaluator {
         }
     }
 
+    public record ScoreAdjustment(String sourceResultId,String expectedScoringHash,
+            @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.DecimalThresholdDeserializer.class)
+            String finalScore,String reason) { }
+    /** Numeric human override stays separate from all calculated lines, vetoes and fact completeness. */
+    public record ManualScoreProjection(ScoreAdjustment adjustment,String status,String computedScoringHash,
+            java.math.BigDecimal effectiveScore) { }
+    public static String scoringHash(String sourceResultId,InspectionScoring.Result calculated,com.fasterxml.jackson.databind.ObjectMapper json){
+        if(sourceResultId==null||sourceResultId.isBlank()||calculated==null||json==null)
+            throw IqcException.invalidArgument("人工改分必须指定计算基准");
+        try{return io.github.opensabre.iqc.selector.SelectorAssetService.hash(json.writeValueAsString(List.of(sourceResultId,calculated)));}
+        catch(com.fasterxml.jackson.core.JsonProcessingException invalid){throw IqcException.invalidState("人工改分基准摘要无效");}
+    }
+    /** New commands require the current base; an inherited command becomes visibly stale when that base changes. */
+    public static ManualScoreProjection manualScore(String sourceResultId,InspectionScoring.Result calculated,
+            ScoreAdjustment adjustment,boolean submitted,com.fasterxml.jackson.databind.ObjectMapper json){
+        if(adjustment==null)return null;
+        if(!java.util.Objects.equals(sourceResultId,adjustment.sourceResultId())||adjustment.expectedScoringHash()==null
+                ||!adjustment.expectedScoringHash().matches("[a-f0-9]{64}")||adjustment.finalScore()==null
+                ||!adjustment.finalScore().matches("(?:0|[1-9][0-9]{0,2})(?:\\.[0-9]{1,2})?")
+                ||adjustment.reason()==null||adjustment.reason().isBlank()||adjustment.reason().trim().length()>1000)
+            throw IqcException.invalidArgument("人工改分必须包含原始结果、评分摘要、0到100的精确分数及原因");
+        var value=new java.math.BigDecimal(adjustment.finalScore());
+        if(value.compareTo(java.math.BigDecimal.valueOf(100))>0)throw IqcException.invalidArgument("人工分数不得超过100");
+        String current=scoringHash(sourceResultId,calculated,json);
+        boolean matches=current.equals(adjustment.expectedScoringHash());
+        if(submitted&&!matches)throw IqcException.invalidState("计算评分已变化，请刷新后确认人工改分");
+        var normalized=new ScoreAdjustment(sourceResultId,adjustment.expectedScoringHash(),value.stripTrailingZeros().toPlainString(),adjustment.reason().trim());
+        return new ManualScoreProjection(normalized,matches?"APPLIED":"STALE",current,matches?value:null);
+    }
+
     /**
      * Applies one effective decision per item to a specific canonical result, not to a mutable task pointer.
      * The caller must authorize/lock that result and supply its frozen definition and conversation message IDs.
