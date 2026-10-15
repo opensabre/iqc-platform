@@ -55,4 +55,24 @@ class HumanFindingReviewEvaluatorTest {
    new HumanFindingReviewEvaluator.Decision("result","CHECK",HumanFindingReviewEvaluator.findingHash(fact,json),Finding.State.UNKNOWN,json.getNodeFactory().booleanNode(true),Finding.Severity.LOW,"why",List.of(),List.of())))
    assertThatThrownBy(()->evaluate(fact,List.of(d))).isInstanceOf(RuntimeException.class);
  }
+ @Test void highRiskEvidenceRequirementsAndFrozenConversationBoundaryAreEnforced(){
+  var fact=fact();
+  var definition=new FindingDefinition(FindingDefinition.SCHEMA,"CHECK","Check","BUSINESS",null,Finding.ValueType.BOOLEAN,List.of(),Finding.Severity.LOW,false,List.of(Finding.EvidenceType.CONVERSATION));
+  var high=new HumanFindingReviewEvaluator.Decision("result","CHECK",HumanFindingReviewEvaluator.findingHash(fact,json),Finding.State.KNOWN,
+   json.getNodeFactory().booleanNode(true),Finding.Severity.HIGH,"why",List.of(),List.of());
+  assertThatThrownBy(()->HumanFindingReviewEvaluator.evaluate("result",List.of(fact),Map.of("CHECK",definition),List.of(high),messages(),json))
+   .hasMessageContaining("冻结定义");
+  var mixed=messages();((com.fasterxml.jackson.databind.node.ObjectNode)mixed.get(1)).put("conversationId","other");
+  assertThatThrownBy(()->HumanFindingReviewEvaluator.evaluate("result",List.of(fact),Map.of("CHECK",definition),List.of(),mixed,json))
+   .hasMessageContaining("跨会话");
+ }
+ @Test void unknownWithoutCanonicalValueIsValidAndDoesNotChangeOriginal(){
+  var fact=fact();var unknown=new HumanFindingReviewEvaluator.Decision("result","CHECK",HumanFindingReviewEvaluator.findingHash(fact,json),
+   Finding.State.UNKNOWN,null,Finding.Severity.LOW,"insufficient evidence",List.of(),List.of());
+  var projection=evaluate(fact,List.of(unknown));
+  assertThat(projection.reviewed().getFirst().state()).isEqualTo(Finding.State.UNKNOWN);
+  assertThat(projection.reviewed().getFirst().value()).isNull();
+  assertThat(projection.original().getFirst().state()).isEqualTo(Finding.State.KNOWN);
+ }
+
 }

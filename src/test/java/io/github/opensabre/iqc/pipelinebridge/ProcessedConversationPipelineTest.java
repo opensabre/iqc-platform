@@ -138,4 +138,27 @@ class ProcessedConversationPipelineTest {
             assertEquals(InspectionScoring.ItemStatus.REVIEW_REQUIRED,result.items().getFirst().status());
         }
     }
+    @Test void humanFindingCorrectionRecalculatesFrozenScoreWithoutExecutingAnotherNode() throws Exception {
+        var messages=List.of(message("customer",1,"customer","question",0,100),message("agent",2,"agent","offer offer",200,300));
+        var context=json.createObjectNode().put("businessType","processed");
+        try(var runtime=new PipelineRuntime(List.of(new TranscriptMetricEngine(json),new SessionAggregationEngine(json)),2,4)){
+            var evaluator=evaluator(runtime);var release=release();
+            var machine=evaluator.evaluate(task(),release,messages,PipelineRuntime.Mode.EVALUATION,context);
+            var fact=machine.fusion().stream().filter(value->value.code().equals("OFFER")).findFirst().orElseThrow();
+            var correction=new io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.Decision("result","OFFER",
+                    io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.findingHash(fact,json),Finding.State.KNOWN,
+                    json.getNodeFactory().booleanNode(false),Finding.Severity.LOW,"核对处理后会话",
+                    fact.evidence().stream().map(Finding.Evidence::id).toList(),List.of());
+            var projection=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.evaluatePolicies("result",release,machine,
+                    List.of(correction),evaluator.executionInput(messages,context),json);
+            assertEquals(0,machine.scoring().finalScore().compareTo(new java.math.BigDecimal("100")));
+            assertEquals(0,projection.scoring().finalScore().compareTo(new java.math.BigDecimal("90")));
+            assertEquals(InspectionScoring.ItemStatus.FAIL,projection.items().getFirst().status());
+            assertEquals(InspectionScoring.ItemStatus.PASS,machine.items().getFirst().status());
+            assertEquals(machine.fusion(),projection.findings().original());
+            assertEquals(2,machine.run().trace().size());
+            assertTrue(projection.findings().reviewed().stream().filter(value->value.code().equals("OFFER")).findFirst().orElseThrow().selectedIds().isEmpty());
+        }
+    }
+
 }
