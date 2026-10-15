@@ -1,0 +1,105 @@
+package io.github.opensabre.iqc.quality;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.opensabre.iqc.finding.Finding;
+import io.github.opensabre.iqc.finding.FindingDefinition;
+import io.github.opensabre.iqc.fusion.FindingFusion;
+import io.github.opensabre.iqc.governance.IqcException;
+import io.github.opensabre.iqc.selector.SelectorAssetService;
+import java.util.*;
+
+/** Human projections over validated frozen fusion; no detector calls, writes or action execution. */
+public final class HumanFindingReviewEvaluator {
+    private HumanFindingReviewEvaluator() { }
+    /** Retaining an existing evidence ID and adding a frozen message are explicit separate operations. */
+    public record Decision(String sourceResultId,String findingCode,String expectedFindingHash,
+            Finding.State state,JsonNode value,Finding.Severity severity,String reason,
+            List<String> retainedEvidenceIds,List<String> addedMessageIds) {
+        public Decision {
+            value=value==null||value.isNull()?null:value.deepCopy();
+            retainedEvidenceIds=retainedEvidenceIds==null?null:List.copyOf(retainedEvidenceIds);
+            addedMessageIds=addedMessageIds==null?null:List.copyOf(addedMessageIds);
+        }
+        @Override public JsonNode value(){return value==null?null:value.deepCopy();}
+    }
+    /** Original observations stay available; effective values are explicitly human and not re-fused outputs. */
+    public record Projection(List<FindingFusion.Result> original,List<FindingFusion.Result> reviewed,List<Decision> decisions) {
+        public Projection {original=List.copyOf(original);reviewed=List.copyOf(reviewed);decisions=List.copyOf(decisions);}
+    }
+    public static String findingHash(FindingFusion.Result finding,ObjectMapper json) {
+        try{return SelectorAssetService.hash(json.writeValueAsString(finding));}
+        catch(com.fasterxml.jackson.core.JsonProcessingException invalid){throw IqcException.invalidState("复核事实摘要无法生成");}
+    }
+    /** Caller validates the machine trace and authorizes/locks its source before providing frozen inputs. */
+    public static Projection evaluate(String sourceResultId,List<FindingFusion.Result> original,
+            Map<String,FindingDefinition> definitions,List<Decision> decisions,JsonNode frozenMessages,ObjectMapper json) {
+        if(sourceResultId==null||sourceResultId.isBlank()||original==null||definitions==null||decisions==null||json==null
+                ||original.size()>1000||decisions.size()>1000||frozenMessages==null||!frozenMessages.isArray()
+                ||frozenMessages.isEmpty()||frozenMessages.size()>10000)
+            throw IqcException.invalidArgument("人工事实复核必须指定冻结来源和完整消息");
+        var messages=new LinkedHashMap<String,JsonNode>();String conversation=null;
+        for(var message:frozenMessages){
+            if(!message.isObject()||!message.path("id").isTextual()||message.path("id").asText().isBlank()
+                    ||!message.path("conversationId").isTextual()||message.path("conversationId").asText().isBlank()
+                    ||!message.path("sequenceNo").isIntegralNumber()||!message.path("sequenceNo").canConvertToInt()
+                    ||message.path("sequenceNo").intValue()<0
+                    ||messages.putIfAbsent(message.path("id").asText(),message)!=null)
+                throw IqcException.invalidState("冻结会话消息身份无效或重复");
+            if(conversation==null)conversation=message.path("conversationId").asText();
+            else if(!conversation.equals(message.path("conversationId").asText()))throw IqcException.invalidState("冻结消息跨会话");
+        }
+        var facts=new LinkedHashMap<String,FindingFusion.Result>();
+        for(var fact:original){
+            if(fact==null||facts.putIfAbsent(fact.code(),fact)!=null||!definitions.containsKey(fact.code())
+                    ||fact.rawFindings().isEmpty()||definitions.get(fact.code())==null||definitions.get(fact.code()).valueType()!=fact.valueType())
+                throw IqcException.invalidState("冻结事实定义或融合身份损坏");
+        }
+        var overrides=new LinkedHashMap<String,FindingFusion.Result>();var normalized=new ArrayList<Decision>();
+        for(var decision:decisions){
+            if(decision==null||!sourceResultId.equals(decision.sourceResultId()))throw IqcException.invalidArgument("人工事实来源不一致");
+            var fact=facts.get(decision.findingCode());
+            if(fact==null||!findingHash(fact,json).equals(decision.expectedFindingHash())||overrides.containsKey(fact.code()))
+                throw IqcException.invalidArgument("人工事实基准已变化、未知或重复");
+            if(decision.state()!=Finding.State.KNOWN&&decision.state()!=Finding.State.UNKNOWN
+                    ||decision.severity()==null||decision.reason()==null||decision.reason().isBlank()||decision.reason().trim().length()>1000)
+                throw IqcException.invalidArgument("人工事实须明确已知或未知状态、严重度和原因");
+            unique(decision.retainedEvidenceIds());unique(decision.addedMessageIds());
+            if(decision.retainedEvidenceIds().size()+decision.addedMessageIds().size()>100)
+                throw IqcException.invalidArgument("人工事实证据最多100条");
+            var oldEvidence=new LinkedHashMap<String,Finding.Evidence>();
+            for(var evidence:fact.evidence())if(oldEvidence.putIfAbsent(evidence.id(),evidence)!=null)
+                throw IqcException.invalidState("原始融合证据身份重复");
+            var evidence=new ArrayList<Finding.Evidence>();
+            for(var id:decision.retainedEvidenceIds()){
+                var retained=oldEvidence.get(id);if(retained==null)throw IqcException.invalidArgument("不可引用其它事实证据");evidence.add(retained);
+            }
+            for(var id:decision.addedMessageIds()){
+                var message=messages.get(id);if(message==null)throw IqcException.invalidArgument("新增证据必须引用冻结会话消息");
+                var details=json.createObjectNode().put("messageId",id).put("sequenceNo",message.path("sequenceNo").intValue());
+                for(String field:List.of("startMs","endMs"))if(message.hasNonNull(field))details.set(field,message.get(field));
+                String identity=SelectorAssetService.hash(json.valueToTree(List.of(sourceResultId,fact.code(),id)).toString());
+                evidence.add(new Finding.Evidence("human-"+identity,Finding.EvidenceType.CONVERSATION,id,details));
+            }
+            // Reuse canonical value/evidence validation; this temporary object is never returned as an engine observation.
+            var anchor=fact.rawFindings().getFirst();var definition=definitions.get(fact.code());
+            try {
+                var validated=new Finding(anchor.id(),fact.code(),definition.category(),fact.valueType(),decision.value(),decision.state(),
+                        null,decision.severity(),decision.reason().trim(),evidence,anchor.source());
+                definition.validate(validated);
+            } catch(IllegalArgumentException invalid){throw IqcException.invalidArgument("人工事实值、严重度或证据与冻结定义不一致");}
+            // No machine source wins the human conclusion: confidence gates must not inherit machine calibration.
+            var reviewed=new FindingFusion.Result(fact.code(),fact.valueType(),decision.state(),decision.value(),decision.severity(),
+                    fact.rawFindings(),List.of(),fact.rawFindings().stream().map(Finding::id).toList(),evidence,
+                    decision.reason().trim(),fact.policyId(),fact.policyVersion());
+            overrides.put(fact.code(),reviewed);
+            normalized.add(new Decision(sourceResultId,fact.code(),decision.expectedFindingHash(),decision.state(),decision.value(),
+                    decision.severity(),decision.reason().trim(),decision.retainedEvidenceIds(),decision.addedMessageIds()));
+        }
+        return new Projection(original,original.stream().map(fact->overrides.getOrDefault(fact.code(),fact)).toList(),normalized);
+    }
+    private static void unique(List<String> ids){
+        if(ids==null||ids.size()>100||ids.stream().anyMatch(id->id==null||id.isBlank())||new HashSet<>(ids).size()!=ids.size())
+            throw IqcException.invalidArgument("人工证据引用不能为空或重复");
+    }
+}

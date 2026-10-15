@@ -24,3 +24,11 @@
 UI27f48b5提供可清空分类选择、提交时仅有值才增加字段、冻结命令用于重试、成功/切结果清空和历史有效项目分类展示。历史缺少decisions数组按损坏处理。前端合入B d3be2d5事实版本类型修正为1eb3232，无框架修改。
 
 backend22842离线skipTests test-compile已terminal exit0；UI44434完整构建仍运行中。上述为代码/编译证据，不是数据库/API/浏览器/Gold审批端到端验收。Finding编辑、人工总分覆盖和二审仲裁仍未实施。
+
+## Finding人工投影内核（待接入服务）
+
+原FindingFusion只表示机器源融合，不能把人工修正写回rawFinding或伪造HUMAN引擎。新增HumanFindingReviewEvaluator是原复核领域的纯投影校验：保留原融合，人工覆盖仅为reviewed列表；原输入先由调用方的现有trace/source校验确认。精确摘要复用SelectorAssetService.hash，指定结果/事实/预期融合摘要后才可改值。每事实一次，状态仅KNOWN/UNKNOWN，原因必填；冻结FindingDefinition约束类型/枚举/允许证据与高风险证据要求。
+
+证据通过保留原融合证据ID及新增冻结消息ID两列表表达，未保留即删除，不接受客户端自造证据详情。新增CONVERSATION证据只从同一冻结消息manifest取坐标，不读取当前会话；不允许跨事实保留证据。人工投影不选中任何机器raw ID，原raw全部保留为rejected，避免把模型校准置信度借给人工结论。该列表不能作为机器Trace提交或通过机器Fusion复算。
+
+此阶段仅内核，尚未接入Service/API/持久投影、评分风险标签重算、候选Gold和UI；不能声称Finding人工编辑已可用。后续须在同一轮复核中保存原/人工Finding及对应决策，继续复用原锁/权限/幂等与历史校验。
