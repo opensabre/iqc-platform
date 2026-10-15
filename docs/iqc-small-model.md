@@ -15,3 +15,7 @@ PRD8.2要求分类、NER、情绪、意图和语义匹配的专用模型。原Mo
 `iqc-small-model-response-v1`须回显modelId、精确整数modelVersion、modelName、deploymentRef、operation和inputHash，提供原Finding所需state/value/reason/evidence/confidence。可选usage的token字段必须为精确整数；缺失用量沿原网关MISSING处理，不伪造零用量。外部拥有方对这些声明真实性的保障仍需要真实模型协议验收。
 
 发布从明确已发布Agent版本的primaryModel或fallbackModels和mcpServers选择唯一id/version，覆盖请求携带的snapshot。运行时复用原网关与当前资产enabled校验，历史读取沿原冻结恢复入口。注册和单元回归不等于实际数据库预算、权限、历史重算、真实模型部署或浏览器流程验收通过。
+
+## 请求摘要精度缺口（实施取舍）
+
+原PipelineAssetService.hash沿浮点JSON读取，不能保证高精度会话/业务值的请求身份区分；改变全局算法会影响原历史快照。专用工具请求须复用SelectorAssetService的精确JSON摘要，以inputHashAlgorithm=EXACT_JSON_V1显式冻结到新发布配置；无标记历史配置继续原算法，显式LEGACY_JSON_V1可保持原摘要。工具仍回显opaque inputHash，不另建hash实现。已在原发布冻结与两adapter接入上述版本分派，前端重发布保留显式算法标记。专项回归正在运行，尚无精度/发布/历史兼容通过结论；不改变全局Pipeline摘要。

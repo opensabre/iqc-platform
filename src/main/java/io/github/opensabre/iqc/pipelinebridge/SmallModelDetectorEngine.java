@@ -37,7 +37,7 @@ public final class SmallModelDetectorEngine implements EngineAdapter {
             if(model.hasNonNull(field))safeModel.set(field,model.get(field));
         var request=json.createObjectNode().put("schemaVersion","iqc-small-model-request-v1").put("operation",config.path("operation").asText());
         request.set("model",safeModel);request.set("input",input);request.set("messages",messages);
-        String hash=PipelineAssetService.hash(json.writeValueAsString(List.of(request,messages)));
+        String hash=StructuredToolInputHash.hash(json,config,request,messages);
         request.put("inputHash",hash);
         var identity=new GatewayCallService.ModelIdentity(model.path("provider").asText(),model.path("endpoint").asText(),model.path("modelName").asText(),
                 FrozenModelGatewayMetadata.price(model,true),FrozenModelGatewayMetadata.outputConstraint(model,true),FrozenModelGatewayMetadata.deployment(model));

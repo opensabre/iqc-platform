@@ -20,6 +20,7 @@ public final class SkillApiDetectorEngine implements EngineAdapter {
         if(!VERSION.equals(version) || config==null || !config.isObject())throw new IllegalArgumentException("Frozen Skill/API configuration required");
         for(String field:List.of("skillSnapshot","mcpSnapshot","toolInputSchema","toolOutputSchema","findingDefinition"))
             if(!config.path(field).isObject())throw new IllegalArgumentException("Missing Skill/API frozen contract: "+field);
+        StructuredToolInputHash.validate(config);
         var skill=config.path("skillSnapshot");
         for(String field:List.of("id","code","instructions","inputSchemaJson","outputSchemaJson"))
             if(!skill.path(field).isTextual() || skill.path(field).asText().isBlank())throw new IllegalArgumentException("Skill requires versioned instructions and schemas");
@@ -42,7 +43,7 @@ public final class SkillApiDetectorEngine implements EngineAdapter {
             throw new IllegalArgumentException("Trusted Skill execution identity required");
         var request=json.createObjectNode().put("schemaVersion","iqc-skill-request-v1");
         request.set("skill",skill);request.set("input",input);
-        String hash=PipelineAssetService.hash(json.writeValueAsString(List.of(request,manifest)));
+        String hash=StructuredToolInputHash.hash(json,config,request,manifest);
         request.put("inputHash",hash);
         JsonNode output=StructuredToolTransport.invoke(json,tools,config,request);
         ValueSchema.checkData(config.path("toolOutputSchema"),output);ValueSchema.checkData(outputSchema,output);
