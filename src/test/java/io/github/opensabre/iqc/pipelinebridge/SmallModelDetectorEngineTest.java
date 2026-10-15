@@ -45,7 +45,8 @@ class SmallModelDetectorEngineTest {
         return new NodeContext(node,json.createObjectNode(),Map.of("__messages",messages,
                 "__task",json.createObjectNode().put("id","task").put("currentExecutionId","execution").put("createdBy","owner")),Map.of(),PipelineRuntime.Mode.EVALUATION,1);
     }
-    private void response(boolean wrongDeployment){
+    private void response(boolean wrongDeployment){response(wrongDeployment,"CLASSIFICATION",true);}
+    private void response(boolean wrongDeployment,String operation,Object value){
         when(client.callTool(any())).thenAnswer(invocation->{
             var request=invocation.getArgument(0,McpSchema.CallToolRequest.class);
             assertThat(((Map<?,?>)request.arguments().get("model")).containsKey("secretRef")).isFalse();
@@ -55,8 +56,8 @@ class SmallModelDetectorEngineTest {
             var output=new HashMap<String,Object>();
             output.put("schemaVersion","iqc-small-model-response-v1");output.put("inputHash",request.arguments().get("inputHash"));
             output.put("modelId","model");output.put("modelVersion",3);output.put("modelName","classifier");
-            output.put("deploymentRef",wrongDeployment?"other":"classifier-v3");output.put("operation","CLASSIFICATION");
-            output.put("state","KNOWN");output.put("value",true);output.put("reason","Classified");
+            output.put("deploymentRef",wrongDeployment?"other":"classifier-v3");output.put("operation",operation);
+            output.put("state","KNOWN");output.put("value",value);output.put("reason","Classified");
             output.put("evidence",List.of(Map.of("reference","inference:1")));
             output.put("usage",Map.of("inputTokens",10,"outputTokens",2,"totalTokens",12));
             return new McpSchema.CallToolResult(List.of(),false,output,null);
@@ -78,5 +79,19 @@ class SmallModelDetectorEngineTest {
         var engine=engine();doThrow(new IllegalStateException("capacity denied")).when(gateway).invoke(any(),any(),any(),any());
         assertThatThrownBy(()->engine.execute(context())).hasMessageContaining("capacity denied");
         verify(client,never()).initialize();verify(client,never()).callTool(any());
+    }
+    @Test void dedicatedOperationsPreserveTheirStructuredValueTypes() throws Exception {
+        for(var entry:List.of(new Object[]{"CLASSIFICATION","ENUM","positive"},new Object[]{"NER","OBJECT",Map.of("entities",List.of("Acme"))},
+                new Object[]{"EMOTION","STRING","positive"},new Object[]{"INTENT","ENUM","positive"},new Object[]{"SEMANTIC_MATCHING","NUMBER",0.75})) {
+            reset(client,gateway);
+            var engine=engine();var context=context();var config=(ObjectNode)context.node().config();config.put("operation",(String)entry[0]);
+            var definition=(ObjectNode)config.path("findingDefinition");definition.put("valueType",(String)entry[1]);
+            if("ENUM".equals(entry[1]))definition.putArray("allowedValues").add("positive").add("negative");
+            var node=context.node();var configured=new PipelineDefinition.Node(node.nodeId(),node.type(),node.name(),node.version(),node.dependsOn(),node.inputMapping(),
+                    config,node.condition(),node.timeoutMs(),node.retries(),node.onError(),node.fallbackNodeId(),node.outputSchema(),node.enabled());
+            response(false,(String)entry[0],entry[2]);var result=engine.execute(new NodeContext(configured,context.input(),context.variables(),context.upstream(),context.mode(),context.attempt()));
+            assertThat(result.findings().getFirst().value()).isEqualTo(json.valueToTree(entry[2]));
+            assertThat(result.findings().getFirst().valueType().name()).isEqualTo(entry[1]);
+        }
     }
 }

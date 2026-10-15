@@ -16,6 +16,7 @@ public final class SmallModelContract {
     public static void validateConfiguration(String version,JsonNode config,FindingDefinition definition) {
         if(!VERSION.equals(version)||config==null||!config.isObject()||definition==null)
             throw new IllegalArgumentException("Frozen small model contract required");
+        StructuredToolInputHash.validate(config);
         if(!config.path("operation").isTextual())throw new IllegalArgumentException("Dedicated inference operation required");
         var operation=Operation.valueOf(config.path("operation").asText());
         var model=config.path("modelSnapshot");

@@ -402,10 +402,12 @@ public class PipelineAssetService {
     private void freezeSkillApi(ObjectNode config,String version) {freezeStructuredTool(config,version,false);}
     private void freezeStructuredTool(ObjectNode config,String version,boolean inference) {
         var allowed=new java.util.HashSet<>(Set.of("agentReference","skillReference","mcpReference","findingReference","toolName",
-                "toolInputSchema","toolOutputSchema","skillSnapshot","mcpSnapshot","findingDefinition"));
+                "toolInputSchema","toolOutputSchema","skillSnapshot","mcpSnapshot","findingDefinition","inputHashAlgorithm"));
         if(inference){allowed.remove("skillReference");allowed.remove("skillSnapshot");
             allowed.addAll(Set.of("modelReference","modelSnapshot","operation","inputSchema","outputSchema"));}
         for(var field:config.properties())if(!allowed.contains(field.getKey()))throw IqcException.invalidArgument("Skill/API不支持该配置字段");
+        if(!config.has("inputHashAlgorithm"))config.put("inputHashAlgorithm",io.github.opensabre.iqc.pipelinebridge.StructuredToolInputHash.EXACT);
+        io.github.opensabre.iqc.pipelinebridge.StructuredToolInputHash.validate(config);
         var agentRef=config.path("agentReference");validateReference(agentRef);
         var current=agents.selectById(agentRef.path("id").asText());
         var published=agentVersions.selectOne(Wrappers.<io.github.opensabre.iqc.agent.model.QualityAgentVersion>lambdaQuery()

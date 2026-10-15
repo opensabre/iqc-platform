@@ -46,6 +46,7 @@ class SkillApiPublicationFreezeTest {
         fixture("{\"type\":\"object\"}");var config=config();
         config.set("skillSnapshot",json.createObjectNode().put("instructions","Spoofed latest"));
         freeze(config);
+        assertThat(config.path("inputHashAlgorithm").asText()).isEqualTo("EXACT_JSON_V1");
         assertThat(config.path("skillSnapshot").path("instructions").asText()).isEqualTo("Frozen instruction");
         assertThat(config.path("skillSnapshot").path("versionNo").intValue()).isEqualTo(3);
         assertThat(config.path("mcpSnapshot").path("versionNo").intValue()).isEqualTo(4);
@@ -61,4 +62,13 @@ class SkillApiPublicationFreezeTest {
         fixture("{\"type\":\"object\",\"oneOf\":[]}");var config=config();
         assertThatThrownBy(()->freeze(config)).hasMessageContaining("结构化协议无效");
     }
+    @Test void explicitLegacyHashIsRetainedAndUnknownAlgorithmIsRejected() throws Exception {
+        fixture("{\"type\":\"object\"}");
+        var legacy=config().put("inputHashAlgorithm","LEGACY_JSON_V1");
+        freeze(legacy);
+        assertThat(legacy.path("inputHashAlgorithm").asText()).isEqualTo("LEGACY_JSON_V1");
+        assertThatThrownBy(()->freeze(config().put("inputHashAlgorithm","UNKNOWN")))
+                .hasMessageContaining("Unsupported structured tool input hash algorithm");
+    }
+
 }

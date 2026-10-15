@@ -46,6 +46,7 @@ class SmallModelPublicationFreezeTest {
         fixture("{\"type\":\"object\"}");var config=config();
         config.set("modelSnapshot",json.createObjectNode().put("deploymentRef","spoofed-latest"));
         freeze(config);
+        assertThat(config.path("inputHashAlgorithm").asText()).isEqualTo("EXACT_JSON_V1");
         assertThat(config.path("modelSnapshot").path("deploymentRef").asText()).isEqualTo("classifier-v3");
         assertThat(config.path("modelSnapshot").path("versionNo").intValue()).isEqualTo(3);
         assertThat(config.path("mcpSnapshot").path("versionNo").intValue()).isEqualTo(4);
@@ -72,4 +73,13 @@ class SmallModelPublicationFreezeTest {
         freeze(config);assertThat(config.path("modelSnapshot").path("id").asText()).isEqualTo("fallback");
         verify(capabilities).validateInferenceCapabilities("fallback","server");
     }
+    @Test void explicitLegacyHashIsRetainedAndUnknownAlgorithmIsRejected() throws Exception {
+        fixture("unused");
+        var legacy=config().put("inputHashAlgorithm","LEGACY_JSON_V1");
+        freeze(legacy);
+        assertThat(legacy.path("inputHashAlgorithm").asText()).isEqualTo("LEGACY_JSON_V1");
+        assertThatThrownBy(()->freeze(config().put("inputHashAlgorithm","UNKNOWN")))
+                .hasMessageContaining("Unsupported structured tool input hash algorithm");
+    }
+
 }
