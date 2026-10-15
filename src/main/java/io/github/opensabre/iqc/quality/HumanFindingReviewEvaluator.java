@@ -98,6 +98,51 @@ public final class HumanFindingReviewEvaluator {
         }
         return new Projection(original,original.stream().map(fact->overrides.getOrDefault(fact.code(),fact)).toList(),normalized);
     }
+    public record PolicyProjection(Projection findings,List<io.github.opensabre.iqc.scoring.InspectionScoring.Decision> items,
+            io.github.opensabre.iqc.scoring.InspectionScoring.Result scoring,
+            io.github.opensabre.iqc.pipelineasset.RiskPolicy.Decision riskDecision,String riskLevel,
+            Map<String,io.github.opensabre.iqc.label.FindingLabelProjection.Projection> labels,
+            io.github.opensabre.iqc.pipelineasset.ReviewPolicy.Decision reviewDecision,String resultStatus) {
+        public PolicyProjection {items=List.copyOf(items);labels=Collections.unmodifiableMap(new LinkedHashMap<>(labels));}
+    }
+    /** Uses original decision policies over explicitly reviewed facts; never dispatches resulting actions. */
+    public static PolicyProjection evaluatePolicies(String sourceResultId,
+            io.github.opensabre.iqc.pipelineasset.PipelineRelease release,
+            io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation trace,
+            List<Decision> corrections,JsonNode validatedInput,ObjectMapper json) {
+        if(release==null||trace==null||validatedInput==null||!validatedInput.isObject()
+                ||!validatedInput.path("businessContext").isObject()||!validatedInput.path("messages").isArray())
+            throw IqcException.invalidArgument("人工事实重算必须指定冻结流水线和执行输入");
+        var messages=validatedInput.path("messages");var allowed=new HashSet<String>();
+        messages.forEach(message->allowed.add(message.path("id").asText()));
+        // Validate the original machine fusion/items/scoring before computing any human alternative.
+        BusinessItemReviewEvaluator.evaluatePipeline(sourceResultId,release,trace,trace.items(),List.of(),allowed,
+                validatedInput.path("businessContext"));
+        var definitions=new LinkedHashMap<String,FindingDefinition>();
+        for(var node:release.pipeline().nodes())try {
+            var definition=json.treeToValue(node.config().path("findingDefinition"),FindingDefinition.class);
+            if(definition==null)throw IqcException.invalidState("冻结事实定义缺失");
+            var existing=definitions.putIfAbsent(definition.code(),definition);
+            if(existing!=null&&!existing.equals(definition))throw IqcException.invalidState("同名事实的冻结语义不一致");
+        }catch(com.fasterxml.jackson.core.JsonProcessingException invalid){throw IqcException.invalidState("冻结事实定义损坏");}
+        var projection=evaluate(sourceResultId,trace.fusion(),definitions,corrections,messages,json);
+        var context=validatedInput.path("businessContext");var facts=projection.reviewed();
+        var items=io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.decisions(release.items(),facts);
+        var score=io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.evaluate(release,facts,context);
+        var inputs=io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.inputContext(release,facts,items,context);
+        var risk=io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.riskDecision(release,facts,score,context);
+        String riskLevel=risk==null?io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.riskLevel(release.items(),facts,score):risk.level();
+        var statuses=new LinkedHashMap<String,io.github.opensabre.iqc.scoring.InspectionScoring.ItemStatus>();
+        items.forEach(item->statuses.put(item.itemCode(),item.status()));
+        var statusItems=trace.items().stream().map(item->new io.github.opensabre.iqc.scheme.SchemeResultEvaluator.ItemResult(
+                item.itemCode(),item.name(),item.ruleId(),item.ruleVersionNo(),statuses.get(item.itemCode()),item.matchedMessageIds())).toList();
+        String status=io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.resultStatus(trace.run(),statusItems,score);
+        String samplingHash=release.reviewPolicy()!=null&&io.github.opensabre.iqc.pipelineasset.ReviewPolicy.EXACT_SCHEMA.equals(release.reviewPolicy().schemaVersion())
+                ?SelectorAssetService.hash(validatedInput.toString()):null;
+        var review=io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.reviewDecision(release,facts,score,riskLevel,status,
+                trace.inputHash(),context,samplingHash,json);
+        return new PolicyProjection(projection,items,score,risk,riskLevel,inputs.labels(),review,status);
+    }
     private static void unique(List<String> ids){
         if(ids==null||ids.size()>100||ids.stream().anyMatch(id->id==null||id.isBlank())||new HashSet<>(ids).size()!=ids.size())
             throw IqcException.invalidArgument("人工证据引用不能为空或重复");

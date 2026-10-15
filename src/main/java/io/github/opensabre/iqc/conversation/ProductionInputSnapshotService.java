@@ -174,6 +174,17 @@ public class ProductionInputSnapshotService {
         validator.validateResult(task,snapshot,prepared.messages().get(conversationId),trace,prepared);
         return prepared.businessContext(conversationId);
     }
+    /** Full frozen input for human evidence edits; no current archive lookup or synthetic legacy capture. */
+    public static JsonNode validatedExecutionInput(InspectionTask task,JsonNode snapshot,
+            io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation trace,String conversationId,ObjectMapper json) {
+        var validator=new ProductionInputSnapshotService(null,null,null,json);
+        var prepared=validator.prepare(task,snapshot);
+        if(prepared==null)throw IqcException.invalidState("该历史执行缺少冻结输入，不能新增人工事实证据");
+        var frozen=prepared.originalMessages(conversationId);
+        validator.validateResult(task,snapshot,frozen,trace,prepared);
+        var input=json.createObjectNode();input.set("messages",json.valueToTree(frozen));
+        input.set("businessContext",prepared.businessContext(conversationId));return input;
+    }
     public Prepared prepare(InspectionTask task,JsonNode snapshot){
         if(!hasSnapshot(snapshot))return null;
         if(task==null)throw IqcException.invalidState("生产冻结输入缺少任务");
