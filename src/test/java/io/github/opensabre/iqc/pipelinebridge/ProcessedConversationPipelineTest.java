@@ -161,4 +161,52 @@ class ProcessedConversationPipelineTest {
         }
     }
 
+    @Test void frozenProductionResultSupportsFindingOnlyReviewAndIdempotentRetry() throws Exception {
+        var messages=List.of(message("customer",1,"customer","question",0,100),message("agent",2,"agent","offer offer",200,300));
+        var context=json.createObjectNode().put("businessType","processed");var task=task();
+        task.setTaskType("PIPELINE");task.setConversationIdsJson("[\"conversation\"]");task.setTotalMessages(2);
+        var release=release();var snapshot=json.createObjectNode();snapshot.putObject("executionStrategy").put("mode","PIPELINE");
+        var marker=snapshot.putObject("pipelineSnapshot").put("pipelineId","pipeline").put("versionNo",1);
+        marker.set("release",json.valueToTree(release));marker.put("contentHash",PipelineAssetService.hash(json.writeValueAsString(release)));
+        var frozenMessages=messages.stream().map(row->new io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Message(
+                row.getId(),row.getSequenceNo(),row.getSpeakerRole(),row.getContent(),row.getRelativeTime(),row.getStartMs(),row.getEndMs(),null)).toList();
+        var inputs=json.valueToTree(List.of(new io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Input("conversation","source",context,frozenMessages)));
+        var envelope=snapshot.putObject("productionInputs").put("schemaVersion",io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.ALIGNED_SCHEMA)
+                .put("hashAlgorithm","selector-decimal-sha256-v1").put("contentHash",io.github.opensabre.iqc.selector.SelectorAssetService.hash(inputs.toString()));
+        envelope.set("conversations",inputs);task.setRuleSnapshotJson(snapshot.toString());
+        var frozen=new io.github.opensabre.iqc.conversation.ProductionInputSnapshotService(null,null,null,json).prepare(task,snapshot);
+        try(var runtime=new PipelineRuntime(List.of(new TranscriptMetricEngine(json),new SessionAggregationEngine(json)),2,4)){
+            var evaluator=evaluator(runtime);var machine=evaluator.evaluate(task,release,frozen.messages().get("conversation"),PipelineRuntime.Mode.PRODUCTION,context);
+            task.setStatus("SUCCEEDED");
+            var result=new io.github.opensabre.iqc.result.model.ConversationInspectionResult();result.setId("result");result.setTaskId("task");
+            result.setConversationId("conversation");result.setExecutionId("execution");result.setResultStatus("PASS");
+            result.setBusinessItemResultsJson(json.writeValueAsString(machine.items()));result.setScoringResultJson(json.writeValueAsString(machine.scoring()));
+            result.setExecutionTraceJson(json.writeValueAsString(machine));result.setScoreStatus("FINAL");result.setFinalScore(machine.scoring().finalScore());
+            var reviews=mock(io.github.opensabre.iqc.quality.dao.ResultReviewMapper.class);
+            var results=mock(io.github.opensabre.iqc.result.dao.ConversationInspectionResultMapper.class);
+            var tasks=mock(InspectionTaskMapper.class);var archived=mock(io.github.opensabre.iqc.conversation.dao.ConversationMessageMapper.class);
+            var scope=mock(io.github.opensabre.iqc.shared.IqcDataScope.class);
+            for(Class<?> type:List.of(io.github.opensabre.iqc.quality.model.ResultReview.class,io.github.opensabre.iqc.result.model.ConversationInspectionResult.class,ConversationMessage.class))
+                TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(),type.getSimpleName()),type);
+            when(results.selectById("result")).thenReturn(result);when(results.selectLatestForTaskConversation(any(),any())).thenReturn(result);
+            when(tasks.selectById("task")).thenReturn(task);when(tasks.selectOne(any())).thenReturn(task);
+            when(archived.selectList(any())).thenReturn(frozen.messages().get("conversation"));when(scope.canView(null,null)).thenReturn(true);when(scope.owner()).thenReturn("reviewer");
+            var service=new io.github.opensabre.iqc.quality.BusinessItemReviewService(reviews,results,tasks,archived,scope,json);
+            var review=service.request("result",0,"finding-request-0001","核对原会话");
+            when(reviews.selectById(review.getId())).thenReturn(review);when(reviews.selectOne(any())).thenReturn(review,null);
+            var fact=machine.fusion().stream().filter(value->value.code().equals("OFFER")).findFirst().orElseThrow();
+            var correction=new io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.Decision("result","OFFER",
+                    io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.findingHash(fact,json),Finding.State.KNOWN,
+                    json.getNodeFactory().booleanNode(false),Finding.Severity.LOW,"人工事实修正",fact.evidence().stream().map(Finding.Evidence::id).toList(),List.of());
+            service.decide(review.getId(),1,false,List.of(),List.of(correction),"完成事实复核");
+            var projection=json.readTree(review.getReviewedResultJson());
+            assertEquals("COMPLETED",review.getStatus());assertEquals(90,projection.at("/reviewed/scoring/finalScore").intValue());
+            assertEquals(100,projection.at("/original/scoring/finalScore").intValue());
+            assertEquals(1,projection.at("/findingReview/findings/decisions").size());assertTrue(projection.path("decisions").isEmpty());
+            assertSame(review,service.decide(review.getId(),1,false,List.of(),List.of(correction),"完成事实复核"));
+            verify(reviews,times(1)).updateById(any(io.github.opensabre.iqc.quality.model.ResultReview.class));
+            assertEquals(json.writeValueAsString(machine),result.getExecutionTraceJson());
+        }
+    }
+
 }
