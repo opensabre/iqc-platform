@@ -381,4 +381,29 @@ class BusinessItemReviewServiceTest {
         verifyNoInteractions(messages);verify(reviews,never()).insert(any(ResultReview.class));
     }
 
+    @Test void scoreOnlyRoundPreservesComputedScoreAndInheritedAdjustmentBecomesStale() throws Exception {
+        var first=request();when(reviews.selectOne(any())).thenReturn(first,null);
+        var policy=new InspectionScoring.Policy(InspectionScoring.POLICY_VERSION,InspectionScoring.Mode.DEDUCTION,100,60,
+                List.of(new InspectionScoring.Item("a",20,false)));
+        var computed=InspectionScoring.evaluate(policy,List.of(new InspectionScoring.Decision("a",InspectionScoring.ItemStatus.FAIL)));
+        var adjustment=new BusinessItemReviewEvaluator.ScoreAdjustment("result",BusinessItemReviewEvaluator.scoringHash("result",computed,mapper),"90.25","核对后调整");
+        service.decide(first.getId(),1,false,List.of(),List.of(),adjustment,"人工分数裁决");
+        var projection=mapper.readTree(first.getReviewedResultJson());
+        assertThat(projection.at("/reviewed/scoring/finalScore").intValue()).isEqualTo(80);
+        assertThat(projection.at("/manualScore/effectiveScore").decimalValue()).isEqualByComparingTo("90.25");
+        assertThat(service.decide(first.getId(),1,false,List.of(),List.of(),adjustment,"人工分数裁决")).isSameAs(first);
+        verify(reviews,times(1)).updateById(any(ResultReview.class));
+        String firstSnapshot=first.getReviewedResultJson();when(reviews.selectOne(any())).thenReturn(first);
+        var context=service.scoreContext("result");
+        assertThat(new java.math.BigDecimal(context.computedScore())).isEqualByComparingTo("80");assertThat(context.manualScore().effectiveScore()).isEqualByComparingTo("90.25");
+        var second=service.request("result",1,"manual-score-round-2","再次核对");
+        when(reviews.selectById(second.getId())).thenReturn(second);when(reviews.selectOne(any())).thenReturn(second,first);
+        service.decide(second.getId(),2,false,decisions(),"项目改判");
+        var next=mapper.readTree(second.getReviewedResultJson());
+        assertThat(next.at("/reviewed/scoring/finalScore").intValue()).isEqualTo(100);
+        assertThat(next.at("/manualScore/status").asText()).isEqualTo("STALE");assertThat(next.at("/manualScore/effectiveScore").isNull()).isTrue();
+        assertThat(first.getReviewedResultJson()).isEqualTo(firstSnapshot);
+        assertThat(service.exportCsv(second.getId())).contains("人工覆盖分数","STALE");
+    }
+
 }
