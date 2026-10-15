@@ -104,3 +104,11 @@ ac5b7a9阶段内核离线skipTests test-compile已terminal exit0。原request重
 前端普通/二审/仲裁阶段选择只引用最近已完成轮次；普通请求不增加阶段字段，升级冻结stage/parent ID。待办与详情展示阶段和上游，升级支持明确认可上游（原因仍必填）；前端说明独立审核要求，最终权限与链校验在服务端。已完成仲裁隐藏再开入口；损坏阶段显示错误并阻止修改，旧无workflow历史仍正常展示。原项目/Finding/改分裁决与命令重试沿用。
 
 本批待前后端构建；阶段SQL实际MySQL/权限/多账号/队列/浏览器/历史链/Gold端到端仍待，不能以组件代码代替验收。无框架改动/SQL执行/部署，完整PRD继续。
+
+## 队列JSON方言回归修复
+
+协作者原BusinessReviewQueueSqlTest真实H2 Mapper复现`Function "JSON_VALID" not found`，同轮候选9/改分5通过，队列1项报错。三种候选原因中，首先证实MySQL函数依赖；原H2夹具亦无reviewed_result_json，不能通过删除原scope/分页用例或伪造函数绕过。
+
+现原授权分页SQL恢复跨方言查询，只给DTO提供INITIAL中间值；Service在同一REPEATABLE_READ事务内仅批取当前授权页（≤100）的review ID/目标/状态/revision/JSON字段，核对ID/来源/状态一致后由Java计算最终stage。不另扫队列、不先抓全量后过滤、不扩大scope、不改变total/order。COMPLETED只流式读取workflow并skip其他大字段，原业务JSON不返回待办；旧空INITIAL、损坏协议/重复key/尾随JSON/不递减parent轮次INVALID。
+
+当前为修复代码，Root仅编译；原真实H2作用域/分页回归及新Service阶段投影须由B原授权专项反馈，尚未称通过。未改测试夹具/框架/数据库函数，不运行Root测试/SQL/部署。
