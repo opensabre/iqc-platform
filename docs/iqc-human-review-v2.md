@@ -66,3 +66,9 @@ c5d59ff纯内核离线skipTests test-compile已terminal exit0。原Projection增
 原reviews查询增加SCORE_CONTEXT，复用原查看权限/数据范围与REPEATABLE_READ，返回当前复核计算摘要、字符串分数及有效/过期调整。原Controller仅在新scoreAdjustment有值时调用新重载，原消息整数finalScore不接业务覆盖，旧DTO构造/调用保留。
 
 ManualScoreReviewEditor接原父级冻结命令与重试，0..100两位小数字符串、必填原因、服务端基准hash、迟到响应隔离；历史人工分数与计算分数分列，STALE不冒充有效分数。当前业务汇总报表仍按计算分数统计，需下一步新增清楚标记的人工覆盖口径，不能把现有reviewed平均分宣称含人工改分。API/数据库/权限/浏览器/Gold审批与完整PRD继续，未部署。
+
+## 汇总报表复用缺口与扩展（实施前）
+
+只读核查BusinessQualityReportService：现有选择只调用SchemeResultEvaluator.definition，Pipeline任务被当旧消息任务拒绝；reviewed分数只含计算结果。必须扩展原report/Group选择模型，不新增统计API或伪造Scheme/Rule。Pipeline release校验复用BusinessItemReviewService原冻结摘要方法，报表内部仅投影评分政策与itemCode/name，增加明确pipelineId；Scheme字段/旧DTO构造/JSON保留。
+
+计算分数与合格率保持现有算法。新增manualOverrides摘要：有效覆盖数、STALE数、有效覆盖均分、有效数字分数数量及均分（同一复核有APPLIED则用人工数字，否则仅取FINAL计算分数）。覆盖均分分母仅APPLIED；有效数字分母不混入缺失/未定计算分数。人工改数字不使原否决或未确认事实消失，因此不从该均分推断新合格率。仍按冻结政策/来源/精确版本/内容分组，沿原范围/500会话/50000项目约束。
