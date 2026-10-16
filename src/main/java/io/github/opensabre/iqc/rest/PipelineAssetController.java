@@ -25,11 +25,11 @@ public class PipelineAssetController {
     public PipelineAsset get(@PathVariable String id) { return assets.get(id); }
     @PostMapping
     @ResourcePermission(code="iqc:pipeline:manage",name="创建流水线",type="iqc",description="创建流水线草稿")
-    @Audit(operationType=OperationType.CREATE,description="创建流水线",module="IQC_PIPELINE")
+    @Audit(operationType=OperationType.CREATE,description="创建流水线",module="IQC_PIPELINE", request=false, response=false)
     public PipelineAsset create(@RequestBody Create body) { return assets.create(body.code(),body.name(),body.release()); }
     @PutMapping("/{id}")
     @ResourcePermission(code="iqc:pipeline:update",name="更新流水线",type="iqc",description="按修订更新流水线草稿")
-    @Audit(operationType=OperationType.UPDATE,description="更新流水线",module="IQC_PIPELINE")
+    @Audit(operationType=OperationType.UPDATE,description="更新流水线",module="IQC_PIPELINE", request=false, response=false, key="#id")
     public PipelineAsset update(@PathVariable String id,@RequestBody Update body) { return assets.update(id,body.expectedRevision(),body.name(),body.release()); }
     @PostMapping("/{id}/availability")
     @ResourcePermission(code="iqc:pipeline:availability",name="设置流水线可用性",type="iqc",description="启停流水线")
@@ -46,7 +46,7 @@ public class PipelineAssetController {
     }
     @PostMapping("/{id}/publish")
     @ResourcePermission(code="iqc:pipeline:publish",name="发布流水线",type="iqc",description="经真实试跑确认发布流水线版本")
-    @Audit(operationType=OperationType.UPDATE,description="发布流水线",module="IQC_PIPELINE",response=true,key="#id")
+    @Audit(operationType=OperationType.UPDATE,description="发布流水线",module="IQC_PIPELINE",response=false,key="#id", request=false)
     public PipelineAssetVersion publish(@PathVariable String id,@RequestBody Publish body) {
         if(body.qualityEvidence()==null && body.regressionEvidence()==null && body.forceReason()==null)
             return assets.publish(id,body.expectedRevision(),body.trialTaskId(),body.resultsReviewed());
@@ -62,7 +62,7 @@ public class PipelineAssetController {
     }
     @PostMapping("/{id}/force-publish")
     @ResourcePermission(code="iqc:pipeline:force:publish",name="管理员例外发布流水线",type="iqc",description="保留未通过门禁及管理员原因")
-    @Audit(operationType=OperationType.UPDATE,description="管理员例外发布流水线",module="IQC_PIPELINE",response=true,key="#id")
+    @Audit(operationType=OperationType.UPDATE,description="管理员例外发布流水线",module="IQC_PIPELINE",response=false,key="#id", request=false)
     public PipelineAssetVersion forcePublish(@PathVariable String id,@RequestBody Publish body) {
         return assets.publishMeasured(id,body.expectedRevision(),body.trialTaskId(),body.resultsReviewed(),body.qualityEvidence(),body.regressionEvidence(),true,body.forceReason());
     }

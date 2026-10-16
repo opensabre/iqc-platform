@@ -24,13 +24,13 @@ public class IqcSkillController {
 
     @PostMapping
     @ResourcePermission(code = "iqc:skill:manage", name = "管理 Skill", type = "iqc", description = "创建 Agent Skill 资产")
-    @Audit(operationType = OperationType.CREATE, description = "创建 IQC Skill", module = "IQC_SKILL")
+    @Audit(operationType = OperationType.CREATE, description = "创建 IQC Skill", module = "IQC_SKILL", request=false, response=false)
     @RateLimit(sceneCode = "iqc-skill-create", maxCount = 20, period = 60)
     public IqcSkill create(@RequestBody SkillRequest request) { return service.create(request.name(), request.code(), request.description(), request.instructions(), request.inputSchemaJson(), request.outputSchemaJson()); }
 
     @PutMapping("/{id}")
     @ResourcePermission(code = "iqc:skill:manage", name = "管理 Skill", type = "iqc", description = "修改 Agent Skill 资产")
-    @Audit(operationType = OperationType.UPDATE, description = "修改 IQC Skill", module = "IQC_SKILL")
+    @Audit(operationType = OperationType.UPDATE, description = "修改 IQC Skill", module = "IQC_SKILL", request=false, response=false, key="#id")
     public IqcSkill update(@PathVariable String id, @RequestBody SkillRequest request) { return service.update(id, request.name(), request.description(), request.instructions(), request.inputSchemaJson(), request.outputSchemaJson()); }
 
     @PostMapping("/{id}/enable")
