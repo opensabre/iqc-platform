@@ -39,6 +39,8 @@ public class InspectionResultController {
     private final LabelResultQueryService labelResultQueryService;
     private final LabelInsightExportService labelInsightExportService;
     private final io.github.opensabre.iqc.quality.BusinessItemReviewService businessReviews;
+    private final io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive;
+    private final io.github.opensabre.iqc.privacy.ResultReadProjection resultProjection;
 
     public InspectionResultController(InspectionExecutionService executionService, UsageCounterRecorder usageCounterRecorder,
                                       BatchResultQueryService batchResultQueryService,
@@ -46,11 +48,50 @@ public class InspectionResultController {
                                       LabelResultQueryService labelResultQueryService,
                                       LabelInsightExportService labelInsightExportService,
                                       io.github.opensabre.iqc.quality.BusinessItemReviewService businessReviews) {
+        this(executionService, usageCounterRecorder, batchResultQueryService, hierarchicalResultService,
+                labelResultQueryService, labelInsightExportService, businessReviews, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public InspectionResultController(InspectionExecutionService executionService, UsageCounterRecorder usageCounterRecorder,
+                                      BatchResultQueryService batchResultQueryService,
+                                      HierarchicalResultService hierarchicalResultService,
+                                      LabelResultQueryService labelResultQueryService,
+                                      LabelInsightExportService labelInsightExportService,
+                                      io.github.opensabre.iqc.quality.BusinessItemReviewService businessReviews,
+                                      io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive,
+                                      io.github.opensabre.iqc.privacy.ResultReadProjection resultProjection) {
         this.executionService = executionService; this.usageCounterRecorder = usageCounterRecorder;
         this.batchResultQueryService = batchResultQueryService; this.hierarchicalResultService = hierarchicalResultService;
         this.labelResultQueryService = labelResultQueryService;
         this.labelInsightExportService = labelInsightExportService;
         this.businessReviews = businessReviews;
+        this.sensitive = sensitive; this.resultProjection = resultProjection;
+    }
+
+    private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access resultReadAccess() {
+        if (sensitive == null || resultProjection == null)
+            throw io.github.opensabre.iqc.governance.IqcException.invalidState("结果敏感读取授权组件不可用");
+        var access = sensitive.current(java.util.Set.of("iqc:result:view"));
+        var attributes = org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        if (attributes instanceof org.springframework.web.context.request.ServletRequestAttributes servlet && servlet.getResponse() != null) {
+            servlet.getResponse().setHeader("Cache-Control", "private, no-store");
+            servlet.getResponse().setHeader("X-Content-Type-Options", "nosniff");
+        }
+        return access;
+    }
+
+    private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access resultExportAccess() {
+        if (sensitive == null)
+            throw io.github.opensabre.iqc.governance.IqcException.invalidState("结果导出敏感读取授权组件不可用");
+        var access = sensitive.current(java.util.Set.of("iqc:result:export"));
+        access.requireFullConversation(); access.requirePii();
+        var attributes = org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        if (attributes instanceof org.springframework.web.context.request.ServletRequestAttributes servlet && servlet.getResponse() != null) {
+            servlet.getResponse().setHeader("Cache-Control", "private, no-store");
+            servlet.getResponse().setHeader("X-Content-Type-Options", "nosniff");
+        }
+        return access;
     }
 
     @PostMapping("/tasks/{id}/run")
@@ -77,6 +118,7 @@ public class InspectionResultController {
 
     @GetMapping("/results")
     @ResourcePermission(code = "iqc:result:view", name = "查看质检结果", type = "iqc", description = "查询质检结果")
+    @io.github.opensabre.governance.audit.annotations.Audit(operationType = OperationType.QUERY, description = "读取质检结果列表", module = "IQC_PRIVACY", request = false, response = false, key = "#taskId")
     @RateLimit(sceneCode = "iqc-result-query", maxCount = 60, period = 60)
     public IqcPage<InspectionResult> results(@RequestParam(defaultValue = "1") long current,
                                           @RequestParam(defaultValue = "20") long size,
@@ -89,12 +131,19 @@ public class InspectionResultController {
                                           @RequestParam(required = false) Integer maxScore,
                                           @RequestParam(required = false) String speakerRole,
                                           @RequestParam(required = false) String riskLevel) {
-        return executionService.page(current, size, taskId, agentId, ownerId, groupId, status, minScore, maxScore, speakerRole, riskLevel);
+        var access = resultReadAccess();
+        var page = executionService.page(current, size, taskId, agentId, ownerId, groupId, status, minScore, maxScore, speakerRole, riskLevel);
+        return new IqcPage<>(page.records().stream().map(row -> resultProjection.result(row, access)).toList(),
+                page.current(), page.size(), page.total());
     }
 
     @GetMapping("/results/{id}")
     @ResourcePermission(code = "iqc:result:view", name = "查看质检结果详情", type = "iqc", description = "查看质检结果详情")
-    public Map<String, Object> resultDetail(@PathVariable String id) { return executionService.detail(id); }
+    @io.github.opensabre.governance.audit.annotations.Audit(operationType = OperationType.QUERY, description = "读取单条质检结果", module = "IQC_PRIVACY", request = false, response = false, key = "#id")
+    public Map<String, Object> resultDetail(@PathVariable String id) {
+        var access = resultReadAccess();
+        return resultProjection.detail(executionService.detail(id), access);
+    }
 
     /** Current business conversation results; message filters and legacy scores have a separate endpoint. */
     @GetMapping("/results/business")
@@ -114,8 +163,10 @@ public class InspectionResultController {
 
     @GetMapping("/tasks/{id}/label-results")
     @ResourcePermission(code = "iqc:result:view", name = "查看标签洞察结果", type = "iqc", description = "查看任务生成的业务标签命中结果")
-    public List<LabelResultQueryService.LabelResultView> labelResults(@PathVariable String id) {
-        return labelResultQueryService.listByTask(id);
+    @Audit(operationType = OperationType.QUERY, description = "读取标签质检结果", module = "IQC_PRIVACY", request = false, response = false, key = "#id")
+    public List<Map<String, Object>> labelResults(@PathVariable String id) {
+        var access = resultReadAccess();
+        return resultProjection.labelResults(labelResultQueryService.listByTask(id), access);
     }
 
     @GetMapping("/tasks/{id}/label-insights")
@@ -126,8 +177,9 @@ public class InspectionResultController {
 
     @GetMapping(value = "/tasks/{id}/label-results/export", produces = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     @ResourcePermission(code = "iqc:result:export", name = "导出标签洞察结果", type = "iqc", description = "导出任务标签结果 XLSX")
-    @Audit(operationType = OperationType.EXPORT, description = "导出 IQC 标签洞察结果", module = "IQC_RESULT")
+    @Audit(operationType = OperationType.EXPORT, description = "导出 IQC 标签洞察结果", module = "IQC_RESULT", request = false, response = false, key = "#id")
     public ResponseEntity<byte[]> exportLabelResults(@PathVariable String id) {
+        resultExportAccess();
         return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=iqc-label-results.xlsx")
                 .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
                 .body(labelInsightExportService.exportTask(id));
@@ -135,26 +187,33 @@ public class InspectionResultController {
 
     @GetMapping("/tasks/{id}/conversations/{conversationId}/result-detail")
     @ResourcePermission(code = "iqc:result:view", name = "查看会话质检明细", type = "iqc", description = "查看批次内会话记录和质检标注")
-    public ConversationResultDetail conversationResultDetail(@PathVariable String id, @PathVariable String conversationId) {
-        return batchResultQueryService.conversationDetail(id, conversationId);
+    @io.github.opensabre.governance.audit.annotations.Audit(operationType = OperationType.QUERY, description = "读取会话质检明细", module = "IQC_PRIVACY", request = false, response = false, key = "#conversationId")
+    public Map<String, Object> conversationResultDetail(@PathVariable String id, @PathVariable String conversationId) {
+        var access = resultReadAccess();
+        return resultProjection.conversationDetail(batchResultQueryService.conversationDetail(id, conversationId), access);
     }
 
     @GetMapping("/tasks/{id}/conversations/{conversationId}/result-hierarchy")
     @ResourcePermission(code = "iqc:result:view", name = "查看分层质检结果", type = "iqc", description = "按会话、规则和消息证据查询质检结果")
-    public Optional<HierarchicalResultService.ResultHierarchy> resultHierarchy(@PathVariable String id, @PathVariable String conversationId) {
+    @io.github.opensabre.governance.audit.annotations.Audit(operationType = OperationType.QUERY, description = "读取分层质检结果", module = "IQC_PRIVACY", request = false, response = false, key = "#conversationId")
+    public Optional<Map<String, Object>> resultHierarchy(@PathVariable String id, @PathVariable String conversationId) {
+        var access = resultReadAccess();
         batchResultQueryService.conversationDetail(id, conversationId);
-        return Optional.ofNullable(hierarchicalResultService.hierarchy(id, conversationId));
+        return Optional.ofNullable(hierarchicalResultService.hierarchy(id, conversationId))
+                .map(hierarchy -> resultProjection.hierarchy(hierarchy, access));
     }
 
     @GetMapping("/conversations/{conversationId}/result-detail")
     @ResourcePermission(code = "iqc:result:view", name = "查看会话质检明细", type = "iqc", description = "查看会话全部质检结果和标注")
-    public ConversationResultDetail conversationResultDetail(@PathVariable String conversationId) {
-        return batchResultQueryService.conversationDetail(conversationId);
+    @io.github.opensabre.governance.audit.annotations.Audit(operationType = OperationType.QUERY, description = "读取会话质检明细", module = "IQC_PRIVACY", request = false, response = false, key = "#conversationId")
+    public Map<String, Object> conversationResultDetail(@PathVariable String conversationId) {
+        var access = resultReadAccess();
+        return resultProjection.conversationDetail(batchResultQueryService.conversationDetail(conversationId), access);
     }
 
     @GetMapping(value = "/results/export", produces = {"text/csv", "application/zip"})
     @ResourcePermission(code = "iqc:result:export", name = "导出质检结果", type = "iqc", description = "导出质检结果")
-    @Audit(operationType = OperationType.EXPORT, description = "导出 IQC 质检结果", module = "IQC_RESULT")
+    @Audit(operationType = OperationType.EXPORT, description = "导出 IQC 质检结果", module = "IQC_RESULT", request = false, response = false)
     @RateLimit(sceneCode = "iqc-result-export", maxCount = 10, period = 60)
     public ResponseEntity<byte[]> export(@RequestParam(required = false) String taskId,
                                          @RequestParam(required = false) String agentId,
@@ -167,6 +226,7 @@ public class InspectionResultController {
                                          @RequestParam(required = false) String riskLevel,
                                          @RequestParam(defaultValue = "MESSAGE") String view,
                                          @RequestParam(required = false) String reviewId) {
+        resultExportAccess();
         if ("BUSINESS_REVIEW_TASK".equals(view)) {
             if (reviewId != null || agentId != null || ownerId != null || groupId != null || status != null
                     || minScore != null || maxScore != null || speakerRole != null || riskLevel != null)

@@ -674,17 +674,9 @@ public class InspectionExecutionService {
             throw IqcException.accessDenied("无权查看该质检结果");
         }
         Map<String, Object> detail = new LinkedHashMap<>();
-        result.setReason(LlmTextSanitizer.sanitize(result.getReason()));
-        result.setEvidence(LlmTextSanitizer.sanitize(result.getEvidence()));
-        result.setEvidenceJson(LlmTextSanitizer.sanitize(result.getEvidenceJson()));
-        result.setFindingJson(LlmTextSanitizer.sanitize(result.getFindingJson()));
-        result.setSuggestionJson(LlmTextSanitizer.sanitize(result.getSuggestionJson()));
-        result.setRuleBreakdownJson(LlmTextSanitizer.sanitize(result.getRuleBreakdownJson()));
+        // Return source values to the owning REST projection. Pre-sanitizing here changes evidence
+        // string lengths and makes stored start/end coordinates point at the wrong characters.
         ConversationMessage message = messageMapper.selectById(result.getMessageId());
-        if (message != null) {
-            message.setContent(LlmTextSanitizer.sanitize(message.getContent()));
-            message.setRawLine(LlmTextSanitizer.sanitize(message.getRawLine()));
-        }
         detail.put("result", result);
         detail.put("message", message);
         detail.put("task", task);

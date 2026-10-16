@@ -50,11 +50,16 @@ class InspectionResultControllerTest {
 
     @Test
     void returnsJsonNullWhenHierarchyHasNotBeenGenerated() throws Exception {
+        var sensitive = mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
+        when(sensitive.current(java.util.Set.of("iqc:result:view"))).thenReturn(
+                new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test", false, false, false, java.time.Instant.now()));
+        var batch = mock(BatchResultQueryService.class);
         InspectionResultController controller = new InspectionResultController(
                 mock(InspectionExecutionService.class), mock(UsageCounterRecorder.class),
-                mock(BatchResultQueryService.class), mock(HierarchicalResultService.class),
+                batch, mock(HierarchicalResultService.class),
                 mock(LabelResultQueryService.class), mock(LabelInsightExportService.class),
-                mock(io.github.opensabre.iqc.quality.BusinessItemReviewService.class));
+                mock(io.github.opensabre.iqc.quality.BusinessItemReviewService.class), sensitive,
+                new io.github.opensabre.iqc.privacy.ResultReadProjection(new com.fasterxml.jackson.databind.ObjectMapper()));
         MockMvc mvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new RestResponseBodyAdvice())
                 .build();

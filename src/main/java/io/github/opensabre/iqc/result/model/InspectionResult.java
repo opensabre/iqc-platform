@@ -33,4 +33,7 @@ public class InspectionResult extends BasePo {
     @TableField(exist = false)
     @com.fasterxml.jackson.annotation.JsonIgnore
     private String detectorMetricsJson;
+    /** Response-only disclosure status; never persisted with the canonical result. */
+    @TableField(exist = false)
+    private java.util.Map<String, Object> privacy;
 }

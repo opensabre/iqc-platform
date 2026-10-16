@@ -1,0 +1,215 @@
+package io.github.opensabre.iqc.privacy;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.opensabre.iqc.conversation.model.Conversation;
+import io.github.opensabre.iqc.conversation.model.ConversationMessage;
+import io.github.opensabre.iqc.result.BatchResultQueryService;
+import io.github.opensabre.iqc.result.BatchResultQueryService.ConversationResultDetail;
+import io.github.opensabre.iqc.result.HierarchicalResultService.ResultHierarchy;
+import io.github.opensabre.iqc.result.model.ConversationInspectionResult;
+import io.github.opensabre.iqc.result.model.InspectionEvidence;
+import io.github.opensabre.iqc.result.model.InspectionResult;
+import io.github.opensabre.iqc.result.model.RuleInspectionResult;
+import io.github.opensabre.iqc.label.LabelResultQueryService.LabelResultView;
+import io.github.opensabre.iqc.task.model.InspectionTask;
+import java.util.*;
+import org.springframework.beans.BeanUtils;
+
+/** Read-only response projection for result APIs; never mutates persisted scoring or evidence records. */
+@org.springframework.stereotype.Component
+public final class ResultReadProjection {
+    private static final Set<String> STRUCTURAL_TEXT = Set.of("id", "reference", "type", "schemaVersion", "status",
+            "state", "code", "category", "ruleId", "messageId", "conversationId", "executionId", "taskId",
+            "inputHash", "sourceId", "valueType", "engineType", "engineVersion", "nodeId", "phase", "inputScope",
+            "upstreamNodeId", "executionStatus", "resultStatus", "factState", "severity", "speakerRole", "evidenceId",
+            "ruleResultId", "conversationResultId", "runId", "attemptId", "messageIds", "quoteId", "labelId",
+            "agentId", "businessItemId", "metricId", "reviewId", "sampleId", "valueCode");
+    private static final int PREVIEW_MESSAGE_COUNT = 3;
+    private static final int PREVIEW_TEXT_LENGTH = 200;
+    private final ObjectMapper json;
+
+    public ResultReadProjection(ObjectMapper json) { this.json = Objects.requireNonNull(json); }
+
+    public Map<String, Object> conversationDetail(ConversationResultDetail source, SensitiveReadAccessService.Access access) {
+        Objects.requireNonNull(source); Objects.requireNonNull(access);
+        boolean full = access.fullConversation();
+        boolean revealPii = full && access.pii();
+        var messages = new ArrayList<ConversationMessage>(source.messages().size());
+        for (int index = 0; index < source.messages().size(); index++) {
+            ConversationMessage row = source.messages().get(index);
+            var copy = new ConversationMessage(); BeanUtils.copyProperties(row, copy);
+            if (full) copy.setContent(text(row.getContent(), revealPii));
+            else if (index < PREVIEW_MESSAGE_COUNT) copy.setContent(limit(text(row.getContent(), access.pii()), PREVIEW_TEXT_LENGTH));
+            else copy.setContent(null);
+            copy.setRawLine(null);
+            messages.add(copy);
+        }
+        var results = source.results().stream().map(row -> projectResult(row, revealPii)).toList();
+        Conversation conversation = ConversationReadProjection.summary(source.conversation(), revealPii);
+        InspectionTask task = task(source.task(), access);
+        var result = new LinkedHashMap<String, Object>();
+        result.put("conversation", conversation); result.put("task", task); result.put("summary", summary(source.summary(), revealPii));
+        result.put("messages", List.copyOf(messages)); result.put("results", results);
+        var withheld = new ArrayList<>(List.of("rawLine", "agentSnapshotJson", "ruleSnapshotJson", "labelScopeSnapshotJson", "triggerRequestJson"));
+        if (!full && source.messages().size() > PREVIEW_MESSAGE_COUNT) withheld.add("messageContentAfterPreview");
+        result.put("privacy", privacy(access, messages.size(), source.messages().size(), !full, withheld));
+        return result;
+    }
+
+    public Map<String, Object> hierarchy(ResultHierarchy source, SensitiveReadAccessService.Access access) {
+        Objects.requireNonNull(source); Objects.requireNonNull(access);
+        boolean revealPii = access.fullConversation() && access.pii();
+        ConversationInspectionResult conversation = new ConversationInspectionResult();
+        BeanUtils.copyProperties(source.conversation(), conversation);
+        conversation.setReason(text(conversation.getReason(), revealPii));
+        conversation.setScoringResultJson(jsonText(conversation.getScoringResultJson(), revealPii));
+        conversation.setBusinessItemResultsJson(jsonText(conversation.getBusinessItemResultsJson(), revealPii));
+        conversation.setExecutionTraceJson(jsonText(conversation.getExecutionTraceJson(), revealPii));
+        List<RuleInspectionResult> rules = source.rules().stream().map(row -> {
+            var copy = new RuleInspectionResult(); BeanUtils.copyProperties(row, copy);
+            copy.setReason(text(copy.getReason(), revealPii)); copy.setFindingJson(jsonText(copy.getFindingJson(), revealPii));
+            return copy;
+        }).toList();
+        Map<String, List<InspectionEvidence>> evidence = new LinkedHashMap<>();
+        source.evidenceByRuleResult().forEach((key, rows) -> evidence.put(key, rows.stream().map(row -> {
+            var copy = new InspectionEvidence(); BeanUtils.copyProperties(row, copy);
+            copy.setMatchedText(text(copy.getMatchedText(), revealPii));
+            copy.setInternalDefinition(text(copy.getInternalDefinition(), revealPii));
+            return copy;
+        }).toList()));
+        var result = new LinkedHashMap<String, Object>();
+        result.put("conversation", conversation); result.put("rules", rules); result.put("evidenceByRuleResult", evidence);
+        result.put("privacy", privacy(access, 0, 0, false,
+                List.of("agentSnapshotJson", "ruleSnapshotJson", "labelScopeSnapshotJson")));
+        return result;
+    }
+
+    public InspectionResult result(InspectionResult source, SensitiveReadAccessService.Access access) {
+        var copy = projectResult(source, access.fullConversation() && access.pii());
+        copy.setPrivacy(Map.of("policyVersion", "iqc-result-read-v1", "piiMasked", !(access.fullConversation() && access.pii()),
+                "canReadFull", access.fullConversation(), "canReadPii", access.pii(),
+                "withheldFields", List.of("detectorMetricsJson")));
+        return copy;
+    }
+
+    public List<Map<String, Object>> labelResults(List<LabelResultView> source, SensitiveReadAccessService.Access access) {
+        boolean revealPii = access.fullConversation() && access.pii();
+        return source.stream().map(row -> {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            copy.put("id", row.id()); copy.put("conversationId", row.conversationId()); copy.put("sourceFileName", text(row.sourceFileName(), revealPii));
+            copy.put("labelId", row.labelId()); copy.put("labelName", text(row.labelName(), revealPii));
+            copy.put("labelCode", text(row.labelCode(), revealPii)); copy.put("labelPath", text(row.labelPath(), revealPii));
+            copy.put("labelVersionNo", row.labelVersionNo()); copy.put("valueCode", row.valueCode());
+            copy.put("valueJson", jsonText(row.valueJson(), revealPii)); copy.put("confidence", row.confidence());
+            copy.put("generationSource", row.generationSource()); copy.put("sourceRuleResultId", row.sourceRuleResultId());
+            copy.put("evidenceJson", jsonText(row.evidenceJson(), revealPii)); copy.put("status", row.status());
+            copy.put("reviewOverlay", review(row.reviewOverlay(), revealPii)); copy.put("findingSource", row.findingSource());
+            copy.put("privacy", Map.of("policyVersion", "iqc-result-read-v1", "piiMasked", !revealPii,
+                    "canReadFull", access.fullConversation(), "canReadPii", access.pii()));
+            return copy;
+        }).toList();
+    }
+
+    private Object review(io.github.opensabre.iqc.label.LabelResultReviewService.ReviewOverlay source, boolean revealPii) {
+        if (source == null) return null;
+        var copy = new LinkedHashMap<String, Object>();
+        copy.put("latestRevision", source.latestRevision()); copy.put("latestStatus", source.latestStatus());
+        copy.put("effectiveReviewId", source.effectiveReviewId()); copy.put("effectiveRevision", source.effectiveRevision());
+        copy.put("effectiveStatus", source.effectiveStatus());
+        copy.put("effectiveValue", source.effectiveValue() == null ? null : project(source.effectiveValue(), revealPii));
+        copy.put("evidenceMessageIds", source.evidenceMessageIds()); return copy;
+    }
+
+    private InspectionResult projectResult(InspectionResult source, boolean revealPii) {
+        var copy = new InspectionResult(); BeanUtils.copyProperties(source, copy);
+        copy.setReason(text(copy.getReason(), revealPii)); copy.setEvidence(text(copy.getEvidence(), revealPii));
+        copy.setFindingJson(jsonText(copy.getFindingJson(), revealPii));
+        copy.setEvidenceJson(jsonText(copy.getEvidenceJson(), revealPii));
+        copy.setSuggestionJson(jsonText(copy.getSuggestionJson(), revealPii));
+        copy.setRuleBreakdownJson(jsonText(copy.getRuleBreakdownJson(), revealPii));
+        copy.setDetectorMetricsJson(null);
+        return copy;
+    }
+
+    public Map<String, Object> detail(Map<String, Object> source, SensitiveReadAccessService.Access access) {
+        var result = new LinkedHashMap<String, Object>();
+        Object original = source.get("result"), message = source.get("message"), task = source.get("task"), execution = source.get("execution");
+        result.put("result", original instanceof InspectionResult row ? result(row, access) : null);
+        if (message instanceof ConversationMessage row) {
+            var copy = new ConversationMessage(); BeanUtils.copyProperties(row, copy);
+            String content = text(copy.getContent(), access.pii());
+            copy.setContent(access.fullConversation() ? content : limit(content, PREVIEW_TEXT_LENGTH));
+            copy.setRawLine(null); message = copy;
+        }
+        result.put("message", message);
+        result.put("task", task instanceof InspectionTask row ? task(row, access) : task);
+        if (execution instanceof io.github.opensabre.iqc.task.model.TaskExecution row) {
+            var copy = new io.github.opensabre.iqc.task.model.TaskExecution(); BeanUtils.copyProperties(row, copy);
+            copy.setErrorMessage(text(copy.getErrorMessage(), false)); execution = copy;
+        }
+        result.put("execution", execution);
+        result.put("privacy", privacy(access, message == null ? 0 : 1, message == null ? 0 : 1,
+                message != null && !access.fullConversation(),
+                List.of("rawLine", "agentSnapshotJson", "ruleSnapshotJson", "labelScopeSnapshotJson", "triggerRequestJson")));
+        return result;
+    }
+
+    private InspectionTask task(InspectionTask source, SensitiveReadAccessService.Access access) {
+        if (source == null) return null;
+        var copy = new InspectionTask(); BeanUtils.copyProperties(source, copy);
+        copy.setAgentSnapshotJson(access.prompt() ? jsonText(copy.getAgentSnapshotJson(), access.fullConversation() && access.pii()) : null);
+        copy.setRuleSnapshotJson(access.prompt() ? jsonText(copy.getRuleSnapshotJson(), access.fullConversation() && access.pii()) : null);
+        copy.setLabelScopeSnapshotJson(null); copy.setTriggerRequestJson(null); copy.setAutoExpandPrompt(null);
+        copy.setRetryError(text(copy.getRetryError(), false)); copy.setTriggerError(text(copy.getTriggerError(), false));
+        return copy;
+    }
+
+    private BatchResultQueryService.ConversationResultSummary summary(
+            BatchResultQueryService.ConversationResultSummary source, boolean revealPii) {
+        if (source == null) return null;
+        return new BatchResultQueryService.ConversationResultSummary(source.conversationId(),
+                text(source.sourceFileName(), revealPii), source.messageCount(), source.resultCount(), source.averageScore(),
+                source.hitCount(), source.highRiskCount(), source.errorCount(), source.scoreStatus());
+    }
+
+    private Map<String, Object> privacy(SensitiveReadAccessService.Access access, int visible, int total,
+                                        boolean contentLimited, List<String> withheld) {
+        var metadata = new LinkedHashMap<String, Object>();
+        metadata.put("policyVersion", "iqc-result-read-v1"); metadata.put("piiMasked", !(access.fullConversation() && access.pii()));
+        metadata.put("contentLimited", contentLimited); metadata.put("visibleMessageCount", visible); metadata.put("totalMessageCount", total);
+        metadata.put("messageContentCount", contentLimited ? Math.min(PREVIEW_MESSAGE_COUNT, total) : total);
+        int unmasked = access.pii() ? (contentLimited ? Math.min(PREVIEW_MESSAGE_COUNT, total) : total) : 0;
+        metadata.put("messageContentPiiMasked", unmasked == 0);
+        metadata.put("piiUnmaskedMessageCount", unmasked);
+        metadata.put("piiUnmaskedFields", unmasked == 0 ? List.of() : List.of("messages[].content"));
+        metadata.put("canReadFull", access.fullConversation()); metadata.put("canReadPii", access.pii());
+        metadata.put("withheldFields", List.copyOf(withheld)); return metadata;
+    }
+
+    private String text(String value, boolean revealPii) { return value == null || revealPii ? value : SensitiveTextProjection.mask(value).text(); }
+    private String jsonText(String value, boolean revealPii) {
+        if (value == null || value.isBlank() || revealPii) return value;
+        try { return project(json.readTree(value), revealPii).toString(); }
+        catch (Exception malformed) { return "{\"privacyProjection\":\"WITHHELD_INVALID_JSON\"}"; }
+    }
+    private JsonNode project(JsonNode source, boolean revealPii) {
+        if (source == null || source.isNull()) return source;
+        if (revealPii) return source.deepCopy();
+        if (source.isTextual()) return json.getNodeFactory().textNode(SensitiveTextProjection.mask(source.textValue()).text());
+        if (source.isArray()) { ArrayNode copy = json.createArrayNode(); source.forEach(value -> copy.add(project(value, false))); return copy; }
+        if (source.isObject()) {
+            ObjectNode copy = json.createObjectNode(); source.properties().forEach(entry -> copy.set(entry.getKey(),
+                    STRUCTURAL_TEXT.contains(entry.getKey()) || entry.getKey().endsWith("Hash")
+                            ? entry.getValue().deepCopy() : project(entry.getValue(), false))); return copy;
+        }
+        return source.deepCopy();
+    }
+    private String limit(String value, int max) {
+        if (value == null || value.length() <= max) return value;
+        int end = max; if (Character.isHighSurrogate(value.charAt(end - 1)) && Character.isLowSurrogate(value.charAt(end))) end--;
+        return value.substring(0, end);
+    }
+}

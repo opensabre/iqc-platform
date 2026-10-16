@@ -60,10 +60,22 @@ ConversationReadProjection不改原实体：字段已知姓名/账号/联系方�
 
 两个敏感入口audit request/response=false、目标key=id；成功读取Cache-Control=private,no-store。Controller生产构造强制注入敏感授权适配，旧单参数嵌入构造在敏感读取时fail-closed，不以测试兼容绕过授权。详情抽屉默认预览，展示条数/模式并按当前服务端flags提供全文/PII动作，切换仍丢弃迟到响应；API其他消费者保持可选privacy字段兼容。
 
-组织资源/角色迁移尚待：实际路由已确定，可注册两代码并沿原角色/按钮模型赋权，不造Prompt假URL。建议全文脱敏授权管理员/主管/质检员，PII仅管理员/主管；最终按原组织能力配置且不隐式授予SYSTEM ADMIN。结果/复核/Gold/导出/Prompt等副本尚未接入，不能声称跨所有入口已保护，也未部署。
+组织资源/角色迁移尚待：实际路由已确定，可注册两代码并沿原角色/按钮模型赋权，不造Prompt假URL。建议全文脱敏授权管理员/主管/质检员，PII仅管理员/主管；最终按原组织能力配置且不隐式授予SYSTEM ADMIN。结果页/导出后续接入见本页“结果页读取投影”；复核/Gold/Prompt等其他副本仍待处理，不能声称跨所有入口已保护，也未部署。
 
 ## 会话双权限边界补齐
 
 首批17430 backend/11729 UI原handle均terminal exit0。PII预览没有全文grant时，businessFieldsJson/tagsJson同样withheld，只有完整且PII模式才可返回这些未分类JSON；防止其中夹带不受预览条数限制的全文。两个敏感Controller在调用service.detail前显式require对应flag，复用同一授权判定，不依赖下游投影才拒绝；旧current(required)原本已校验基础资源。
 
-列表说明明确默认脱敏，完整内容/PII在详情按权限查看，避免用户把星号当原始存储值。新的编译/构建与B回归待记录；其他响应面、角色迁移和真实权限/数据库/浏览器仍未验收，未部署。
+列表说明明确默认脱敏，完整内容/PII在详情按权限查看，避免用户把星号当原始存储值；后续各批接口和测试状态见下面的专门章节。其他响应面、角色迁移和真实权限/数据库/浏览器仍未验收，未部署。
+
+## 结果页读取投影
+
+InspectionResultController当前`/results`、`/results/{id}`、两种`result-detail`、`result-hierarchy`及`/tasks/{id}/label-results`先通过原`ScheduledActorAccessService`当前解析器核验`iqc:result:view`，再查询数据；读取端点关闭审计请求/响应正文并设置`Cache-Control: private, no-store`和`X-Content-Type-Options: nosniff`。输出由`ResultReadProjection`复制实体/JSON，不写回结果、Finding、证据、hash或坐标。结构ID、消息ID、序号、状态和偏移保留；可解析 JSON 的自由文本叶子复用`SensitiveTextProjection`等长遮罩，格式损坏的 opaque JSON 在受限模式下替换成显式 WITHHELD 标记。
+
+结果明细始终保留全部消息行和结果状态。无全文权限时只有前三条消息正文可见且每条限200 UTF-16字符，其余行仍保留消息ID/序号但正文为空；PII权限单独可显示这三条正文，Full单独可显示全部脱敏正文，只有两种权限同时具备才显示全部原文。`privacy`元数据标明正文行数、脱敏与 withheld 字段，避免把预览当作完整会话或无命中。Prompt快照不随质检权限返回；只有独立Prompt grant才投影Agent/规则快照。
+
+质检结果 CSV、业务/复核 ZIP、标签 XLSX 导出当前在服务查询前要求当前`iqc:result:export`、完整会话和PII三个授权；审计正文关闭并设置no-store。单条结果读取原有`LlmTextSanitizer`的变长替换已移到接口投影之外，避免破坏证据偏移；结果投影改为使用长度不变的PII规则。
+
+`ResultReadProjectionTest`六项、`InspectionResultSensitiveControllerTest`一项、`InspectionResultControllerTest`两项、`InspectionResultExportTest`八项，共17项通过，覆盖PII/FULL独立与组合、末条消息命中定位、JSON/Finding/标签证据文本脱敏、ID/序号/坐标/原对象不变、授权拒绝先于查询和导出权限门禁。它们是本地单元/MockMvc契约证据；当前组织资源实际授权、登录HTTP、MySQL、外部导出下载验收尚未完成。
+
+结果级编辑/复核写入回放、业务结果聚合、复核/样本/Gold/评测读取与多种附件/导出仍需单独核验和接入；当前实现不等于I7完成，也不覆盖规则未识别的任意PII。未改framework、未执行共享SQL/部署；输入仍是处理好的会话。
