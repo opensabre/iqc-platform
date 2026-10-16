@@ -61,3 +61,9 @@ ConversationReadProjection不改原实体：字段已知姓名/账号/联系方�
 两个敏感入口audit request/response=false、目标key=id；成功读取Cache-Control=private,no-store。Controller生产构造强制注入敏感授权适配，旧单参数嵌入构造在敏感读取时fail-closed，不以测试兼容绕过授权。详情抽屉默认预览，展示条数/模式并按当前服务端flags提供全文/PII动作，切换仍丢弃迟到响应；API其他消费者保持可选privacy字段兼容。
 
 组织资源/角色迁移尚待：实际路由已确定，可注册两代码并沿原角色/按钮模型赋权，不造Prompt假URL。建议全文脱敏授权管理员/主管/质检员，PII仅管理员/主管；最终按原组织能力配置且不隐式授予SYSTEM ADMIN。结果/复核/Gold/导出/Prompt等副本尚未接入，不能声称跨所有入口已保护，也未部署。
+
+## 会话双权限边界补齐
+
+首批17430 backend/11729 UI原handle均terminal exit0。PII预览没有全文grant时，businessFieldsJson/tagsJson同样withheld，只有完整且PII模式才可返回这些未分类JSON；防止其中夹带不受预览条数限制的全文。两个敏感Controller在调用service.detail前显式require对应flag，复用同一授权判定，不依赖下游投影才拒绝；旧current(required)原本已校验基础资源。
+
+列表说明明确默认脱敏，完整内容/PII在详情按权限查看，避免用户把星号当原始存储值。新的编译/构建与B回归待记录；其他响应面、角色迁移和真实权限/数据库/浏览器仍未验收，未部署。

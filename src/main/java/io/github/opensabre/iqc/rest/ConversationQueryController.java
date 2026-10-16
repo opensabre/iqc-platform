@@ -56,6 +56,7 @@ public class ConversationQueryController {
     @io.github.opensabre.governance.audit.annotations.Audit(operationType=io.github.opensabre.governance.audit.annotations.OperationType.QUERY,description="读取完整会话内容",module="IQC_PRIVACY",request=false,response=false,key="#id")
     public Map<String,Object> fullContent(@PathVariable String id){
         var grant=access("iqc:conversation:view",io.github.opensabre.iqc.privacy.SensitiveReadAccessService.FULL_CONVERSATION);
+        grant.requireFullConversation();
         return io.github.opensabre.iqc.privacy.ConversationReadProjection.detail(service.detail(id),grant,io.github.opensabre.iqc.privacy.ConversationReadProjection.Mode.FULL);
     }
     @GetMapping("/{id}/pii-content")
@@ -63,6 +64,7 @@ public class ConversationQueryController {
     @io.github.opensabre.governance.audit.annotations.Audit(operationType=io.github.opensabre.governance.audit.annotations.OperationType.QUERY,description="读取会话客户PII",module="IQC_PRIVACY",request=false,response=false,key="#id")
     public Map<String,Object> piiContent(@PathVariable String id){
         var grant=access("iqc:conversation:view",io.github.opensabre.iqc.privacy.SensitiveReadAccessService.PII);
+        grant.requirePii();
         return io.github.opensabre.iqc.privacy.ConversationReadProjection.detail(service.detail(id),grant,io.github.opensabre.iqc.privacy.ConversationReadProjection.Mode.PII);
     }
 

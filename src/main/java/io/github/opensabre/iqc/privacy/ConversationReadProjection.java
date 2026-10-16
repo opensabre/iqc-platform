@@ -45,8 +45,9 @@ public final class ConversationReadProjection {
         var metadata=new LinkedHashMap<String,Object>();metadata.put("policyVersion","iqc-conversation-read-v1");metadata.put("mode",mode.name());
         metadata.put("contentLimited",!full);metadata.put("piiMasked",!pii);metadata.put("visibleMessageCount",messages.size());metadata.put("totalMessageCount",source.size());
         metadata.put("canReadFull",access.fullConversation());metadata.put("canReadPii",access.pii());
-        var withheld=new ArrayList<String>();if(!pii){withheld.add("businessFieldsJson");withheld.add("tagsJson");}if(!full||!pii)withheld.add("rawLine");metadata.put("withheldFields",List.copyOf(withheld));
-        var result=new LinkedHashMap<String,Object>();result.put("conversation",summary(conversation,pii));result.put("messages",List.copyOf(messages));result.put("privacy",metadata);return result;
+        var withheld=new ArrayList<String>();if(!pii||!full){withheld.add("businessFieldsJson");withheld.add("tagsJson");}if(!full||!pii)withheld.add("rawLine");metadata.put("withheldFields",List.copyOf(withheld));
+        var presented=summary(conversation,pii);if(!full){presented.setBusinessFieldsJson(null);presented.setTagsJson(null);}
+        var result=new LinkedHashMap<String,Object>();result.put("conversation",presented);result.put("messages",List.copyOf(messages));result.put("privacy",metadata);return result;
     }
     private static String text(String value,Conversation source){
         if(value==null)return null;
