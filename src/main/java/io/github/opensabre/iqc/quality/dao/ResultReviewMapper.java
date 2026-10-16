@@ -19,7 +19,7 @@ import io.github.opensabre.iqc.quality.model.BusinessReviewQueueItem;
                    LEFT JOIN iqc_task_execution e ON e.id = n.execution_id AND e.task_id = n.task_id
                    WHERE n.task_id = t.id AND n.conversation_id = c.conversation_id
                    ORDER BY COALESCE(e.attempt_no, 0) DESC, n.created_time DESC, n.id DESC LIMIT 1) THEN TRUE ELSE FALSE END AS currentResult,
-               'INITIAL' AS stage
+               'INITIAL' AS stage, r.reviewed_result_json AS workflowMetadata
         FROM iqc_result_review r
         JOIN iqc_inspection_conversation_result c ON c.id = r.business_result_id
         JOIN iqc_inspection_task t ON t.id = c.task_id

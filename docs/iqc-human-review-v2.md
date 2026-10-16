@@ -112,3 +112,17 @@ ac5b7a9阶段内核离线skipTests test-compile已terminal exit0。原request重
 现原授权分页SQL恢复跨方言查询，只给DTO提供INITIAL中间值；Service在同一REPEATABLE_READ事务内仅批取当前授权页（≤100）的review ID/目标/状态/revision/JSON字段，核对ID/来源/状态一致后由Java计算最终stage。不另扫队列、不先抓全量后过滤、不扩大scope、不改变total/order。COMPLETED只流式读取workflow并skip其他大字段，原业务JSON不返回待办；旧空INITIAL、损坏协议/重复key/尾随JSON/不递减parent轮次INVALID。
 
 当前为修复代码，Root仅编译；原真实H2作用域/分页回归及新Service阶段投影须由B原授权专项反馈，尚未称通过。未改测试夹具/框架/数据库函数，不运行Root测试/SQL/部署。
+
+## 队列阶段投影的数据库兼容修复
+
+2026-10-16：真实H2 Mapper回归确认原JSON_VALID等MySQL函数不可用，最终采用单查询投影，不保留并行的Service页后批取方案。原SQL只增加固定INITIAL及reviewed_result_json作为workflowMetadata输入，scope/count/分页/排序不变；原已有字段不需要迁移。
+
+BusinessReviewQueueItem的14参canonical由MyBatis映射，仅有原始metadata时解析阶段，随后立即清空该输入；该字段@JsonIgnore，响应与record toString不保留原快照。12参旧构造与13参已投影stage构造兼容，JSON往返不重新解释stage。旧空/完成无workflow历史为INITIAL，未知协议或损坏JSON为INVALID，原始输入超过100万字符保守标INVALID；阶段展示不替代服务端的完整来源链/独立审理校验。
+
+本地原handle23676 terminal exit0：Service23、候选9、真实H2 Mapper及DTO往返2共34通过。SQL测试保留权限、分页和执行实例断言，外部连接修改fixture后显式清理MyBatis会话缓存。此结果不证明真实MySQL、网关、浏览器或多账号验收完成；完整PRD继续。
+
+## 队列最终集成选择（2026-10-16）
+
+采用B9765fce已通过34项回归的单查询投影，移除A临时cb8be79的Service页后批取和queueStage；上文该批取段仅为历史尝试，非当前实现。原SQL固定INITIAL中间stage并以独立workflowMetadata列输入14参DTO，canonical只对非null metadata解析，随后强制清空且@JsonIgnore；13参投影stage/12参旧调用与JSON往返保持，原数据不进入响应或toString。原scope/count/分页不变，不使用数据库JSON函数，也不新增二次查询。原Service单查询queue恢复，审计f85e1d9保留。
+
+B23676的真实H2 Mapper/Service/候选34项已通过，Root17762首批审计编译通过；以上不是合并后实际MySQL/API/浏览器验收。合并后编译待记录，全PRD继续。

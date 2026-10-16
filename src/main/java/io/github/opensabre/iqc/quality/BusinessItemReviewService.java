@@ -101,7 +101,7 @@ public class BusinessItemReviewService {
     }
 
     /** Lists cross-task rounds using SQL-level task scope and bounded database pagination. */
-    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    @Transactional(readOnly = true)
     public io.github.opensabre.iqc.shared.IqcPage<io.github.opensabre.iqc.quality.model.BusinessReviewQueueItem> queue(
             String status, String taskId, int current, int size) {
         String selected = status == null ? "PENDING" : status;
@@ -110,54 +110,8 @@ public class BusinessItemReviewService {
         if (taskId != null && (taskId.isBlank() || taskId.length() > 64)) throw IqcException.invalidArgument("任务筛选无效");
         boolean all = scope.canViewAll();
         var page = new com.baomidou.mybatisplus.extension.plugins.pagination.Page<io.github.opensabre.iqc.quality.model.BusinessReviewQueueItem>(current, size);
-        var authorized=reviews.selectBusinessQueue(page,"ALL".equals(selected)?null:selected,taskId,all,scope.owner(),all?null:scope.groupId());
-        var records=authorized.getRecords();
-        if(records.isEmpty())return io.github.opensabre.iqc.shared.IqcPage.from(authorized);
-        if(records.size()>size)throw IqcException.invalidState("复核分页记录超出范围");
-        var ids=records.stream().map(io.github.opensabre.iqc.quality.model.BusinessReviewQueueItem::reviewId).toList();
-        if(new java.util.HashSet<>(ids).size()!=ids.size())throw IqcException.invalidState("复核分页身份重复");
-        // Enrich only this already-authorized page; no dialect JSON functions or unbounded second queue scan.
-        var sources=reviews.selectList(Wrappers.<ResultReview>lambdaQuery().select(ResultReview::getId,ResultReview::getTargetType,
-                ResultReview::getBusinessResultId,ResultReview::getReviewRevision,ResultReview::getStatus,ResultReview::getReviewedResultJson)
-                .in(ResultReview::getId,ids));
-        if(sources==null||sources.size()!=records.size())throw IqcException.invalidState("复核阶段来源缺失");
-        var byId=new LinkedHashMap<String,ResultReview>();
-        for(var source:sources)if(source==null||!ids.contains(source.getId())||byId.putIfAbsent(source.getId(),source)!=null)
-            throw IqcException.invalidState("复核阶段来源身份损坏");
-        var enriched=records.stream().map(row->{var source=byId.get(row.reviewId());
-            if(source==null||!"BUSINESS".equals(source.getTargetType())||!Objects.equals(row.resultId(),source.getBusinessResultId())
-                    ||!Objects.equals(row.reviewRevision(),source.getReviewRevision())||!Objects.equals(row.status(),source.getStatus()))
-                throw IqcException.invalidState("复核阶段来源与分页记录不一致");
-            return new io.github.opensabre.iqc.quality.model.BusinessReviewQueueItem(row.reviewId(),row.resultId(),row.taskId(),row.taskName(),row.conversationId(),
-                    row.reviewRevision(),row.status(),row.requestComment(),row.createdBy(),row.createdTime(),row.taskStatus(),row.currentResult(),queueStage(source));
-        }).toList();
-        return new io.github.opensabre.iqc.shared.IqcPage<>(enriched,authorized.getCurrent(),authorized.getSize(),authorized.getTotal());
-    }
-
-    /** Stage display only: full canonical chain validation remains in the detail/decision path. */
-    private String queueStage(ResultReview review){
-        String raw=review.getReviewedResultJson();if(raw==null||raw.isBlank())return "INITIAL";
-        try(var parser=mapper.getFactory().createParser(raw)){
-            parser.enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-            var first=parser.nextToken();if(first==com.fasterxml.jackson.core.JsonToken.VALUE_NULL)return parser.nextToken()==null?"INITIAL":"INVALID";
-            if(first!=com.fasterxml.jackson.core.JsonToken.START_OBJECT)return "INVALID";
-            com.fasterxml.jackson.databind.JsonNode metadata;
-            if("COMPLETED".equals(review.getStatus())){
-                metadata=null;
-                while(parser.nextToken()!=com.fasterxml.jackson.core.JsonToken.END_OBJECT){
-                    if(parser.currentToken()!=com.fasterxml.jackson.core.JsonToken.FIELD_NAME)return "INVALID";
-                    String field=parser.currentName();parser.nextToken();
-                    if("workflow".equals(field))metadata=mapper.readTree(parser);else parser.skipChildren();
-                }
-                if(parser.nextToken()!=null)return "INVALID";
-                if(metadata==null||metadata.isNull())return "INITIAL";
-            }else{metadata=mapper.readTree(parser);if(parser.nextToken()!=null)return "INVALID";}
-            if(!metadata.path("parentRevision").isIntegralNumber())return "INVALID";
-            var workflow=mapper.treeToValue(metadata,BusinessItemReviewEvaluator.ReviewWorkflow.class);
-            if(workflow.stage()==BusinessItemReviewEvaluator.ReviewStage.INITIAL||review.getReviewRevision()==null
-                    ||workflow.parentRevision()>=review.getReviewRevision())return "INVALID";
-            return workflow.stage().name();
-        }catch(Exception invalid){return "INVALID";}
+        return io.github.opensabre.iqc.shared.IqcPage.from(reviews.selectBusinessQueue(page,
+                "ALL".equals(selected) ? null : selected, taskId, all, scope.owner(), all ? null : scope.groupId()));
     }
 
     /** Looks up the immutable first request without opening a round or requiring the current EID. */

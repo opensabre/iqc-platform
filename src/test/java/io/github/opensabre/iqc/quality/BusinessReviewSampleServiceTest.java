@@ -161,4 +161,27 @@ class BusinessReviewSampleServiceTest {
         assertThat(sample.getStatus()).isEqualTo("CANDIDATE");
     }
 
+    @Test void candidatePreservesArbitrationBindingAndSeparateManualScoreOnFirstCapture() throws Exception {
+        var base=business.validatedProjection(review,result,task);
+        var workflow=new BusinessItemReviewEvaluator.ReviewWorkflow(
+                BusinessItemReviewEvaluator.ReviewWorkflow.SCHEMA,BusinessItemReviewEvaluator.ReviewStage.ARBITRATION,
+                "second-review",2,"a".repeat(64));
+        var adjustment=new BusinessItemReviewEvaluator.ScoreAdjustment("result",
+                BusinessItemReviewEvaluator.scoringHash("result",base.reviewed().scoring(),json),"90.25","仲裁人工调整");
+        var manual=BusinessItemReviewEvaluator.manualScore("result",base.reviewed().scoring(),adjustment,true,json);
+        when(business.validatedProjection(review,result,task)).thenReturn(new BusinessItemReviewEvaluator.Projection(
+                "result",base.original(),base.reviewed(),base.decisions(),null,manual,workflow));
+        review.setReviewRevision(3);
+        var sample=create();var expected=json.readTree(sample.getExpectedJson());
+        assertThat(expected.path("reviewWorkflow")).isEqualTo(json.valueToTree(workflow));
+        assertThat(expected.path("reviewRevision").asInt()).isEqualTo(3);
+        assertThat(expected.at("/expected/scoring/finalScore").decimalValue()).isEqualByComparingTo("100");
+        assertThat(expected.at("/manualScore/status").asText()).isEqualTo("APPLIED");
+        assertThat(expected.at("/manualScore/effectiveScore").decimalValue()).isEqualByComparingTo("90.25");
+        String captured=sample.getExpectedJson();when(samples.selectById(sample.getId())).thenReturn(sample);
+        when(business.validatedProjection(review,result,task)).thenThrow(new IllegalStateException("must not recapture"));
+        assertThat(create()).isSameAs(sample);assertThat(sample.getExpectedJson()).isEqualTo(captured);
+        verify(samples,times(1)).insert(any(QualitySample.class));
+    }
+
 }
