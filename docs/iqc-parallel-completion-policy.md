@@ -1,6 +1,6 @@
 # 并行提前满足策略实施契约
 
-状态：设计已核实，尚未实现。对应 PRD 8.3 Parallel 和 Short Circuit；不替代完整 I1–I7。
+状态：独立分支后端首批已编码并编译通过，界面及运行验收待完成。对应 PRD 8.3 Parallel 和 Short Circuit；不替代完整 I1–I7。
 
 ## 已有能力与缺口
 
@@ -22,3 +22,23 @@ PipelineAssetService 在冻结时两处用二参数构造重建 PipelineDefiniti
 需覆盖资产冻结/发布、Task 恢复、Evaluation、原生产及源证明/政策重算兼容；新政策成为原不可变快照/hash的一部分。UI 仍复用 PipelineReleaseEditor，不与 B 的图事件修改并行写同文件，先交接字段契约再集成。
 
 完成证据须包括慢首节点/快后节点的真实完成顺序、未启动节点、取消竞争、超时/重试/Fallback、条件未知/撤销满足、预算等待、所有 progress 收尾、旧 schema hash、冻结不丢政策及实际任务/评测。Root 当前不新增或执行测试；编译和 B 独立授权的验证分别记录。未实现前不宣称提前满足可用。
+
+
+## 首批实现（2026-10-16）
+
+显式 schema `iqc-pipeline-parallel-v2`，`completionPolicy` 形如：
+
+```json
+{"requiredNodes":["risk_detector"],"condition":{"pointer":"/variables/risk_detector_value","operator":"EQUALS","value":true}}
+```
+
+condition 可空，表示 requiredNodes 全部成功即满足；有条件时必须明确成立。requiredNodes 必须非空、唯一且属于启用节点。条件只能引用原 input，或 requiredNodes 声明生产的 variables/upstream 具体键，不能引用未完成节点或保留初始变量。旧 sequential/parallel-v1 禁止携带政策，缺字段仍保持旧行为和省略 JSON。
+
+复用原有界 executor，用 FutureTask.done 通知调用线程，按实际完成或期限事件观察；重试和 Fallback 各自仍有原次数/期限。停止后取消/观察活动尝试并为未提交节点记录 SKIPPED。竞争中已经完成的成功事实保留；技术失败与 deferral 不被满足策略抹去。
+
+Run 新增可空 completionReason=POLICY_SATISFIED，旧五参数构造和 null 省略保留。仅带该运行标记且具有协调器明确原因的计划取消，事实投影才为 NOT_EVALUATED；其它取消仍保持原技术状态。Fusion/评分/风险/Review继续用原纯投影，不新增决策模型。进度回调中断在下一次提交/重试前终止。
+
+PipelineAssetService 两处重建 Definition 都保留 completionPolicy。第一轮82070离线 `-DskipTests test-compile` 已退出0；事实投影/租约检查修正的第二轮94451也已退出0（日志 `/tmp/iqc-parallel-completion-policy-facts-compile.log`）。未新增或执行测试、SQL或部署。UI配置、真实完成顺序/取消竞争/发布任务评测和历史hash验证尚待完成，不能声明完整高级编排可用。
+
+
+源码审阅确认 Fusion.PRIORITY 使用冻结 nodePriority 的最大值，CONFIDENCE 使用显式校准及最大值，OVERRIDE 按声明来源，VOTING 要求严格多数；不会把完成顺序隐式当成来源优先级。Trace继续记录实际观察/完成与取消，事实未评估状态仍参与原融合的未知/缺失规则。此为源码证据，不是实际并发验收。

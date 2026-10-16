@@ -5,7 +5,15 @@ import java.util.List;
 import java.util.Map;
 
 /** Frozen sequential/conditional or explicit parallel graph; JSON pointers address input, variables and upstream. */
-public record PipelineDefinition(String schemaVersion, List<Node> nodes) {
+public record PipelineDefinition(String schemaVersion, List<Node> nodes,
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        CompletionPolicy completionPolicy) {
+    public PipelineDefinition(String schemaVersion, List<Node> nodes) { this(schemaVersion, nodes, null); }
+    /** Explicit opt-in; historical parallel-v1 keeps ALL and its serialized representation. */
+    public static final String PARALLEL_POLICY_SCHEMA = "iqc-pipeline-parallel-v2";
+    public record CompletionPolicy(List<String> requiredNodes, Condition condition) {
+        public CompletionPolicy { requiredNodes = List.copyOf(requiredNodes == null ? List.of() : requiredNodes); }
+    }
     public static final String SCHEMA = "iqc-pipeline-v1";
     public static final String PARALLEL_SCHEMA = "iqc-pipeline-parallel-v1";
     public enum OnError { FAIL_PIPELINE, CONTINUE, MARK_REVIEW, FALLBACK }
