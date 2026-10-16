@@ -36,7 +36,7 @@ public class QualityOperationsController {
     /** Label reviews use the same permission family and audit stream without overloading message/business IDs. */
     @PostMapping("/label-results/{labelResultId}/reviews")
     @ResourcePermission(code="iqc:review:label:create", name="发起标签值复核", type="iqc", description="为冻结标签值发起复核")
-    @Audit(operationType=OperationType.CREATE, description="发起 IQC 标签值复核", module="IQC_REVIEW")
+    @Audit(operationType=OperationType.CREATE, description="发起 IQC 标签值复核", module="IQC_REVIEW", request=false, response=false, key="#labelResultId")
     public ResultReview requestLabelReview(@PathVariable String labelResultId, @RequestBody LabelReviewRequest request) {
         if (request == null || request.expectedRevision() == null)
             throw IqcException.invalidArgument("标签复核必须指定预期修订");
@@ -60,7 +60,7 @@ public class QualityOperationsController {
 
     @PostMapping("/label-reviews/{reviewId}/decision")
     @ResourcePermission(code="iqc:review:label:decide", name="处理标签值复核", type="iqc", description="修正或退回标签值复核")
-    @Audit(operationType=OperationType.UPDATE, description="处理 IQC 标签值复核", module="IQC_REVIEW")
+    @Audit(operationType=OperationType.UPDATE, description="处理 IQC 标签值复核", module="IQC_REVIEW", request=false, response=false, key="#reviewId")
     public ResultReview decideLabelReview(@PathVariable String reviewId, @RequestBody LabelReviewDecision request) {
         if (request == null || request.expectedRevision() == null
                 || (!"COMPLETED".equals(request.decision()) && !"REJECTED".equals(request.decision())))
@@ -71,7 +71,7 @@ public class QualityOperationsController {
 
     @PostMapping("/results/{resultId}/feedback")
     @ResourcePermission(code="iqc:result:feedback", name="标注质检结果", type="iqc", description="标记正确、误判或漏判")
-    @Audit(operationType=OperationType.UPDATE, description="标注 IQC 质检结果", module="IQC_RESULT")
+    @Audit(operationType=OperationType.UPDATE, description="标注 IQC 质检结果", module="IQC_RESULT", request=false, response=false, key="#resultId")
     @RateLimit(sceneCode="iqc-result-feedback", maxCount=60, period=60)
     public ResultFeedback feedback(@PathVariable String resultId, @RequestBody FeedbackRequest request) {
         return service.feedback(resultId, request.feedbackType(), request.comment(), request.evidenceJson());
@@ -82,7 +82,7 @@ public class QualityOperationsController {
 
     @PostMapping("/results/{resultId}/reviews")
     @ResourcePermission(code="iqc:review:create", name="发起人工复核", type="iqc", description="为质检结果发起复核")
-    @Audit(operationType=OperationType.CREATE, description="发起 IQC 人工复核", module="IQC_REVIEW")
+    @Audit(operationType=OperationType.CREATE, description="发起 IQC 人工复核", module="IQC_REVIEW", request=false, response=false, key="#resultId")
     public ResultReview requestReview(@PathVariable String resultId, @RequestBody(required=false) ReviewRequest request) {
         if (request != null && business(request.targetType())) {
             if (request.expectedRevision() == null) throw IqcException.invalidArgument("业务复核必须指定预期修订");
@@ -125,7 +125,7 @@ public class QualityOperationsController {
     }
     @PostMapping("/reviews/{reviewId}/decision")
     @ResourcePermission(code="iqc:review:decide", name="处理人工复核", type="iqc", description="通过、修正或退回复核")
-    @Audit(operationType=OperationType.UPDATE, description="处理 IQC 人工复核", module="IQC_REVIEW")
+    @Audit(operationType=OperationType.UPDATE, description="处理 IQC 人工复核", module="IQC_REVIEW", request=false, response=false, key="#reviewId")
     public ResultReview decide(@PathVariable String reviewId, @RequestBody ReviewDecision request) {
         if (business(request.targetType())) {
             if (request.expectedRevision() == null || (!"COMPLETED".equals(request.decision()) && !"REJECTED".equals(request.decision())))
@@ -143,7 +143,7 @@ public class QualityOperationsController {
 
     @PostMapping("/results/{resultId}/samples")
     @ResourcePermission(code="iqc:sample:manage", name="管理质检样本", type="iqc", description="从质检结果沉淀样本")
-    @Audit(operationType=OperationType.CREATE, description="创建 IQC 质检样本", module="IQC_SAMPLE")
+    @Audit(operationType=OperationType.CREATE, description="创建 IQC 质检样本", module="IQC_SAMPLE", request=false, response=false, key="#resultId")
     public QualitySample createSample(@PathVariable String resultId, @RequestBody SampleRequest request) {
         if (request == null) throw IqcException.invalidArgument("样本请求不能为空");
         if (business(request.targetType())) {

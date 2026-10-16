@@ -22,14 +22,14 @@ public class GoldSampleController {
 
     @PutMapping
     @ResourcePermission(code="iqc:gold:annotate", name="标注金标样本", type="iqc", description="冻结输入并标注期望事实与业务结论")
-    @Audit(operationType=OperationType.UPDATE, description="标注 IQC 金标样本", module="IQC_SAMPLE")
+    @Audit(operationType=OperationType.UPDATE, description="标注 IQC 金标样本", module="IQC_SAMPLE", request=false, response=false, key="#sampleId")
     public QualitySample annotate(@PathVariable String sampleId, @RequestBody GoldSampleService.Annotation request) {
         return service.annotate(sampleId, request);
     }
 
     @PostMapping("/reviews")
     @ResourcePermission(code="iqc:gold:review", name="审核金标样本", type="iqc", description="独立审核精确金标修订并保存不可变决定")
-    @Audit(operationType=OperationType.CREATE, description="审核 IQC 金标样本", module="IQC_SAMPLE")
+    @Audit(operationType=OperationType.CREATE, description="审核 IQC 金标样本", module="IQC_SAMPLE", request=false, response=false, key="#sampleId")
     public QualitySampleVersion review(@PathVariable String sampleId, @RequestBody Review request) {
         if (request == null || request.expectedRevision() == null || request.approve() == null)
             throw IqcException.invalidArgument("审核必须指定修订与批准或退回决定");

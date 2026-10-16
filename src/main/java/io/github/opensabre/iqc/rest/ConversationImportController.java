@@ -149,7 +149,7 @@ public class ConversationImportController {
     /** Accepts one conversation from an upstream system using a JSON contract. */
     @PostMapping(value = "/ingest", consumes = MediaType.APPLICATION_JSON_VALUE)
     @ResourcePermission(code = "iqc:conversation:upload", name = "接口接入会话", type = "iqc", description = "通过接口传入单条会话")
-    @Audit(operationType = OperationType.CREATE, description = "接口接入 IQC 会话", module = "IQC_CONVERSATION")
+    @Audit(operationType = OperationType.CREATE, description = "接口接入 IQC 会话", module = "IQC_CONVERSATION", request = false, response = false)
     @RateLimit(sceneCode = "iqc-conversation-ingest", maxCount = 120, period = 60)
     public Map<String, Object> ingest(@RequestBody ConversationIngestRequest request) {
         return ingestOne(request, null);
@@ -158,7 +158,7 @@ public class ConversationImportController {
     /** Accepts several complete conversations while isolating validation failures per item. */
     @PostMapping(value = "/ingest-batch", consumes = MediaType.APPLICATION_JSON_VALUE)
     @ResourcePermission(code = "iqc:conversation:upload", name = "批量接口接入会话", type = "iqc", description = "通过接口批量传入会话")
-    @Audit(operationType = OperationType.CREATE, description = "批量接口接入 IQC 会话", module = "IQC_CONVERSATION")
+    @Audit(operationType = OperationType.CREATE, description = "批量接口接入 IQC 会话", module = "IQC_CONVERSATION", request = false, response = false)
     @RateLimit(sceneCode = "iqc-conversation-ingest-batch", maxCount = 30, period = 60)
     public Map<String, Object> ingestBatch(@RequestBody ConversationIngestBatchRequest request) {
         if (request == null || request.conversations() == null || request.conversations().isEmpty()) {
