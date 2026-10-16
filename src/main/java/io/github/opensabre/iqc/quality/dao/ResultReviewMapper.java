@@ -19,18 +19,7 @@ import io.github.opensabre.iqc.quality.model.BusinessReviewQueueItem;
                    LEFT JOIN iqc_task_execution e ON e.id = n.execution_id AND e.task_id = n.task_id
                    WHERE n.task_id = t.id AND n.conversation_id = c.conversation_id
                    ORDER BY COALESCE(e.attempt_no, 0) DESC, n.created_time DESC, n.id DESC LIMIT 1) THEN TRUE ELSE FALSE END AS currentResult,
-               CASE WHEN r.reviewed_result_json IS NULL THEN 'INITIAL'
-                    WHEN JSON_VALID(r.reviewed_result_json) = 0 THEN 'INVALID'
-                    WHEN JSON_TYPE(r.reviewed_result_json) = 'NULL' THEN 'INITIAL'
-                    WHEN r.status = 'COMPLETED' AND (JSON_EXTRACT(r.reviewed_result_json, '$.workflow') IS NULL
-                         OR JSON_TYPE(JSON_EXTRACT(r.reviewed_result_json, '$.workflow')) = 'NULL') THEN 'INITIAL'
-                    WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(r.reviewed_result_json, '$.workflow.schemaVersion')),
-                                  JSON_UNQUOTE(JSON_EXTRACT(r.reviewed_result_json, '$.schemaVersion'))) = 'iqc-review-workflow-v1'
-                         AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(r.reviewed_result_json, '$.workflow.stage')),
-                                      JSON_UNQUOTE(JSON_EXTRACT(r.reviewed_result_json, '$.stage'))) IN ('SECOND_REVIEW', 'ARBITRATION')
-                    THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(r.reviewed_result_json, '$.workflow.stage')),
-                                  JSON_UNQUOTE(JSON_EXTRACT(r.reviewed_result_json, '$.stage')))
-                    ELSE 'INVALID' END AS stage
+               'INITIAL' AS stage, r.reviewed_result_json AS workflowMetadata
         FROM iqc_result_review r
         JOIN iqc_inspection_conversation_result c ON c.id = r.business_result_id
         JOIN iqc_inspection_task t ON t.id = c.task_id

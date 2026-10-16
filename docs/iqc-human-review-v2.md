@@ -104,3 +104,12 @@ ac5b7a9阶段内核离线skipTests test-compile已terminal exit0。原request重
 前端普通/二审/仲裁阶段选择只引用最近已完成轮次；普通请求不增加阶段字段，升级冻结stage/parent ID。待办与详情展示阶段和上游，升级支持明确认可上游（原因仍必填）；前端说明独立审核要求，最终权限与链校验在服务端。已完成仲裁隐藏再开入口；损坏阶段显示错误并阻止修改，旧无workflow历史仍正常展示。原项目/Finding/改分裁决与命令重试沿用。
 
 本批待前后端构建；阶段SQL实际MySQL/权限/多账号/队列/浏览器/历史链/Gold端到端仍待，不能以组件代码代替验收。无框架改动/SQL执行/部署，完整PRD继续。
+
+
+## 队列阶段投影的数据库兼容修复
+
+2026-10-16：真实H2 Mapper回归确认原JSON_VALID等MySQL函数不可用，最终采用单查询投影，不保留并行的Service页后批取方案。原SQL只增加固定INITIAL及reviewed_result_json作为workflowMetadata输入，scope/count/分页/排序不变；原已有字段不需要迁移。
+
+BusinessReviewQueueItem的14参canonical由MyBatis映射，仅有原始metadata时解析阶段，随后立即清空该输入；该字段@JsonIgnore，响应与record toString不保留原快照。12参旧构造与13参已投影stage构造兼容，JSON往返不重新解释stage。旧空/完成无workflow历史为INITIAL，未知协议或损坏JSON为INVALID，原始输入超过100万字符保守标INVALID；阶段展示不替代服务端的完整来源链/独立审理校验。
+
+本地原handle23676 terminal exit0：Service23、候选9、真实H2 Mapper及DTO往返2共34通过。SQL测试保留权限、分页和执行实例断言，外部连接修改fixture后显式清理MyBatis会话缓存。此结果不证明真实MySQL、网关、浏览器或多账号验收完成；完整PRD继续。
