@@ -80,6 +80,23 @@ class GoldSampleReviewTest {
     }
 
     @Test
+    void frozenCandidateMetadataKeepsItsExactNumbersDuringAnnotation() throws Exception {
+        var request=annotation(json.nullNode());
+        String decimal="0.12345678901234567890123456789";
+        String input=sample.getContentSnapshot();
+        input=input.substring(0,input.length()-1)+",\"businessContext\":{\"amount\":"+decimal+",\"count\":9007199254740993}}";
+        sample.setContentSnapshot(input);
+        var lineage=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(sample.getExpectedJson());
+        lineage.put("inputHash",io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(input));
+        sample.setExpectedJson(lineage.toString());
+        service.annotate("sample",request);
+        var draft=service.read(sample.getGoldDraftJson(),GoldDraft.class);
+        assertThat(draft.businessContext().at("/conversation/businessContext/amount").decimalValue()).isEqualByComparingTo(decimal);
+        assertThat(draft.businessContext().at("/conversation/businessContext/count").bigIntegerValue().toString()).isEqualTo("9007199254740993");
+        assertThat(sample.getContentSnapshot()).isEqualTo(input);
+    }
+
+    @Test
     void independentApprovalCreatesFrozenVersionAndIdenticalRetryReturnsIt() {
         var version = service.review("sample", 1, true, "checked");
         assertThat(version.getDecision()).isEqualTo("APPROVED");
