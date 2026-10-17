@@ -30,12 +30,14 @@ public final class ResultReadProjection {
     private static final int PREVIEW_MESSAGE_COUNT = 3;
     private static final int PREVIEW_TEXT_LENGTH = 200;
     private final ObjectMapper json;
+    private final GoldSampleReadProjection gold;
 
     public ResultReadProjection(ObjectMapper json) {
         // Response-local exact tree parsing, following the existing Selector snapshot convention.
         this.json = Objects.requireNonNull(json).copy()
                 .enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
                 .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));
+        this.gold = new GoldSampleReadProjection(this.json);
     }
 
     /** Copy feedback before masking; every evidence key is untrusted user payload. */
@@ -302,5 +304,23 @@ public final class ResultReadProjection {
         if (value == null || value.length() <= max) return value;
         int end = max; if (Character.isHighSurrogate(value.charAt(end - 1)) && Character.isLowSurrogate(value.charAt(end))) end--;
         return value.substring(0, end);
+    }
+    public io.github.opensabre.iqc.quality.model.QualitySample sample(io.github.opensabre.iqc.quality.model.QualitySample source,
+            SensitiveReadAccessService.Access access) { return gold.sample(source, access, false); }
+    public List<io.github.opensabre.iqc.quality.model.QualitySample> samples(List<io.github.opensabre.iqc.quality.model.QualitySample> source,
+            SensitiveReadAccessService.Access access) { return source.stream().map(row -> gold.sample(row, access, false)).toList(); }
+    public io.github.opensabre.iqc.quality.model.QualitySample goldSample(io.github.opensabre.iqc.quality.model.QualitySample source,
+            SensitiveReadAccessService.Access access) { return gold.sample(source,access,true); }
+    public io.github.opensabre.iqc.quality.model.QualitySample sampleMetadata(io.github.opensabre.iqc.quality.model.QualitySample source,
+            SensitiveReadAccessService.Access access) { return gold.sampleMetadata(source,access); }
+    public io.github.opensabre.iqc.quality.model.QualitySampleVersion sampleVersionMetadata(io.github.opensabre.iqc.quality.model.QualitySampleVersion source,
+            SensitiveReadAccessService.Access access) { return gold.versionMetadata(source,access); }
+    public io.github.opensabre.iqc.quality.model.QualitySampleVersion sampleVersion(io.github.opensabre.iqc.quality.model.QualitySampleVersion source,
+            SensitiveReadAccessService.Access access) { return gold.version(source, access); }
+    public io.github.opensabre.iqc.shared.IqcPage<io.github.opensabre.iqc.quality.model.QualitySampleVersion> sampleHistory(
+            io.github.opensabre.iqc.shared.IqcPage<io.github.opensabre.iqc.quality.model.QualitySampleVersion> source,
+            SensitiveReadAccessService.Access access) {
+        return new io.github.opensabre.iqc.shared.IqcPage<>(source.records().stream().map(row -> gold.versionMetadata(row, access)).toList(),
+                source.current(), source.size(), source.total());
     }
 }
