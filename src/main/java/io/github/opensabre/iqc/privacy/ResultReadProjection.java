@@ -323,4 +323,44 @@ public final class ResultReadProjection {
         return new io.github.opensabre.iqc.shared.IqcPage<>(source.records().stream().map(row -> gold.versionMetadata(row, access)).toList(),
                 source.current(), source.size(), source.total());
     }
+    /** HTTP copy only: history and write receipts never include embedded gold. */
+    public io.github.opensabre.iqc.quality.model.EvaluationDatasetVersion datasetVersion(
+            io.github.opensabre.iqc.quality.model.EvaluationDatasetVersion source,
+            SensitiveReadAccessService.Access access, boolean dedicatedRead) {
+        Objects.requireNonNull(access); if (source == null) return null;
+        var copy = new io.github.opensabre.iqc.quality.model.EvaluationDatasetVersion();
+        BeanUtils.copyProperties(source, copy);
+        boolean canonical = dedicatedRead && access.fullConversation() && access.pii();
+        var metadata = new LinkedHashMap<String,Object>();
+        metadata.put("policyVersion", "iqc-dataset-read-v1");
+        metadata.put("canonicalPayloadVisible", canonical);
+        metadata.put("canReadFull", access.fullConversation()); metadata.put("canReadPii", access.pii());
+        metadata.put("withheldFields", canonical ? List.of() : List.of("snapshotJson"));
+        if (!canonical) {
+            copy.setSnapshotJson(null);
+            metadata.put("previewState", dedicatedRead ? "NOT_INCLUDED" : "SUMMARY_ONLY");
+            if (dedicatedRead && source.getSnapshotJson() != null) {
+                try {
+                    if (source.getSnapshotJson().length() > 64 * 1024 * 1024) throw new IllegalArgumentException();
+                    var frozen = json.readValue(source.getSnapshotJson(), io.github.opensabre.iqc.quality.evaluation.DatasetSnapshot.class);
+                    if (!Objects.equals(source.getDatasetId(), frozen.datasetId())) throw new IllegalArgumentException();
+                    var previews = new ArrayList<Map<String,Object>>();
+                    for (var member : frozen.members()) {
+                        var version = new io.github.opensabre.iqc.quality.model.QualitySampleVersion();
+                        version.setSampleId(member.sampleId()); version.setSnapshotJson(json.writeValueAsString(member.gold()));
+                        var shown = gold.version(version, access);
+                        var item = new LinkedHashMap<String,Object>();
+                        item.put("sampleId", member.sampleId()); item.put("versionNo", member.versionNo());
+                        item.put("contentHash", member.contentHash()); item.put("privacy", shown.getPrivacy());
+                        previews.add(item);
+                    }
+                    metadata.put("members", previews); metadata.put("previewState", "AVAILABLE");
+                } catch (java.io.IOException | RuntimeException invalid) {
+                    metadata.put("previewState", "INVALID_DATASET");
+                }
+            }
+        }
+        copy.setPrivacy(metadata); return copy;
+    }
+
 }
