@@ -200,3 +200,9 @@ GoldSampleHttpContractTest通过默认MockMvc路由/转换器执行GET样本与G
 ### 数据集与离线评测写操作审计
 
 EvaluationDatasetController创建、更新、冻结、可用性四个写操作及PipelineEvaluationController创建评测均显式关闭审计请求与响应正文。已核对框架Audit默认request=true、response=false：本次实际关闭数据集草稿、名称等请求正文，显式保留响应关闭；冻结响应含完整金标snapshotJson、评测创建响应含冻结任务配置，继续禁止其进入审计正文；更新/冻结/可用性保留路径id目标，创建不使用未生成ID作审计键。沿用既有Audit事件及权限和领域调用，不新增日志表，不改变冻结内容或hash。此处仅减少审计正文；原HTTP数据集和评测返回值仍须另行实施读取投影与实际权限验收。
+
+### 冻结数据集版本展示边界
+
+版本GET、历史GET及freeze POST分别在领域调用前刷新原dataset:version:view、dataset:versions:view、dataset:freeze；缺敏感组件拒绝，原服务数据范围与完整性/hash校验保持，成功no-store/nosniff。两个查询Audit仅目标元数据。版本专用读取仅FULL+PII双grant返回原snapshotJson；限制模式不返回原opaque正文，解析原冻结DatasetSnapshot并验证datasetId，逐成员复用GoldSampleReadProjection获得完整脱敏或3条/200字符会话预览和无值Finding元数据，保留样本/版本/hash引用。损坏、来源不匹配或超限明确INVALID_DATASET，不回退原文、不查询当前会话。
+
+历史与冻结写回执无论敏感grant均只给版本摘要，不含snapshotJson或预览，避免用写/历史权限绕过专用读取。新增privacy仅exist=false且null不序列化，不改持久化和冻结hash。UI未知策略不显示正文，受限预览明确非原始金标；每次版本读取先清旧内容并用现有generation拒绝迟到响应，完整快照原文本展示，不经JSON.parse/数字舍入。数据集草稿的名称/说明、评测结果actualJson及其它副本仍待，不以本批声明I7完成。仅构建检查，行为、浏览器、真实组织与数据库验收仍待协作验证。
