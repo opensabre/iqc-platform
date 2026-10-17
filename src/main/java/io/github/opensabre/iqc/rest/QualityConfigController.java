@@ -44,28 +44,28 @@ public class QualityConfigController {
 
     @PostMapping("/agents")
     @ResourcePermission(code = "iqc:agent:manage", name = "管理 Agent", type = "iqc", description = "创建 Agent")
-    @Audit(operationType = OperationType.CREATE, description = "创建 IQC Agent", module = "IQC_AGENT")
+    @Audit(operationType = OperationType.CREATE, description = "创建 IQC Agent", module = "IQC_AGENT", request = false, response = false)
     @RateLimit(sceneCode = "iqc-agent-create", maxCount = 20, period = 60)
     public QualityAgent createAgent(@RequestBody AgentRequest request) { return agentService.create(request.name(), request.code(), request.description(), request.configJson()); }
 
     @PostMapping("/agents/{id}/submit")
     @ResourcePermission(code = "iqc:agent:submit", name = "提交 Agent 审批", type = "iqc", description = "提交 Agent 审批")
-    @Audit(operationType = OperationType.UPDATE, description = "提交 IQC Agent 审批", module = "IQC_AGENT")
+    @Audit(operationType = OperationType.UPDATE, description = "提交 IQC Agent 审批", module = "IQC_AGENT", request = false, response = false, key = "#id")
     public QualityAgent submitAgent(@PathVariable String id) { return agentService.submit(id); }
 
     @PostMapping("/agents/{id}/approve")
     @ResourcePermission(code = "iqc:agent:approve", name = "审批 Agent", type = "iqc", description = "审批通过 Agent")
-    @Audit(operationType = OperationType.UPDATE, description = "审批通过 IQC Agent", module = "IQC_AGENT")
+    @Audit(operationType = OperationType.UPDATE, description = "审批通过 IQC Agent", module = "IQC_AGENT", request = false, response = false, key = "#id")
     public QualityAgent publishAgent(@PathVariable String id) { return agentService.publish(id); }
 
     @PostMapping("/agents/{id}/reject")
     @ResourcePermission(code = "iqc:agent:approve", name = "驳回 Agent", type = "iqc", description = "驳回 Agent")
-    @Audit(operationType = OperationType.UPDATE, description = "驳回 IQC Agent", module = "IQC_AGENT")
+    @Audit(operationType = OperationType.UPDATE, description = "驳回 IQC Agent", module = "IQC_AGENT", request = false, response = false, key = "#id")
     public QualityAgent rejectAgent(@PathVariable String id) { return agentService.reject(id); }
 
     @PostMapping("/agents/{id}/disable")
     @ResourcePermission(code = "iqc:agent:disable", name = "停用 Agent", type = "iqc", description = "停用已发布 Agent")
-    @Audit(operationType = OperationType.UPDATE, description = "停用 IQC Agent", module = "IQC_AGENT")
+    @Audit(operationType = OperationType.UPDATE, description = "停用 IQC Agent", module = "IQC_AGENT", request = false, response = false, key = "#id")
     public QualityAgent disableAgent(@PathVariable String id) { return agentService.disable(id); }
 
     @GetMapping("/agents/{id}/versions")
@@ -74,12 +74,12 @@ public class QualityConfigController {
 
     @PostMapping("/agents/{id}/versions")
     @ResourcePermission(code = "iqc:agent:version:manage", name = "创建 Agent 版本", type = "iqc", description = "创建 Agent 版本")
-    @Audit(operationType = OperationType.CREATE, description = "创建 IQC Agent 版本", module = "IQC_AGENT")
+    @Audit(operationType = OperationType.CREATE, description = "创建 IQC Agent 版本", module = "IQC_AGENT", request = false, response = false, key = "#id")
     public QualityAgentVersion createAgentVersion(@PathVariable String id, @RequestBody AgentRequest request) { return agentService.createVersion(id, request.name(), request.code(), request.description(), request.configJson()); }
 
     @PostMapping("/agents/{id}/versions/{versionNo}/rollback")
     @ResourcePermission(code = "iqc:agent:version:rollback", name = "回滚 Agent 版本", type = "iqc", description = "基于历史版本创建新草稿")
-    @Audit(operationType = OperationType.UPDATE, description = "回滚 IQC Agent 版本", module = "IQC_AGENT")
+    @Audit(operationType = OperationType.UPDATE, description = "回滚 IQC Agent 版本", module = "IQC_AGENT", request = false, response = false, key = "#id + ':' + #versionNo")
     public QualityAgentVersion rollbackAgent(@PathVariable String id, @PathVariable int versionNo) { return agentService.rollback(id, versionNo); }
 
     @GetMapping("/agents/{id}/versions/compare")
@@ -101,14 +101,14 @@ public class QualityConfigController {
 
     @PostMapping("/rules")
     @ResourcePermission(code = "iqc:rule:manage", name = "管理规则", type = "iqc", description = "创建质检规则")
-    @Audit(operationType = OperationType.CREATE, description = "创建 IQC 规则", module = "IQC_RULE")
+    @Audit(operationType = OperationType.CREATE, description = "创建 IQC 规则", module = "IQC_RULE", request = false, response = false)
     @RateLimit(sceneCode = "iqc-rule-create", maxCount = 30, period = 60)
     public QualityRule createRule(@RequestBody RuleRequest request) { return ruleService.create(request.name(), request.code(), request.category(), request.ruleType(), request.targetRole(), request.expression(), request.description(), request.deduction(), request.riskLevel(), request.veto()); }
 
     /** Validates an XLSX DLS workbook and optionally creates one draft rule per populated sheet. */
     @PostMapping(value = "/rules/import-dls", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResourcePermission(code = "iqc:rule:import", name = "导入 DLS 规则", type = "iqc", description = "预检并导入 DLS Excel 规则库")
-    @Audit(operationType = OperationType.IMPORT, description = "导入 IQC DLS 规则", module = "IQC_RULE", request = false)
+    @Audit(operationType = OperationType.IMPORT, description = "导入 IQC DLS 规则", module = "IQC_RULE", request = false, response = false)
     @RateLimit(sceneCode = "iqc-dls-rule-import", maxCount = 10, period = 60)
     public DlsImportService.ImportResult importDls(@RequestPart("file") MultipartFile file,
                                                    @RequestParam(defaultValue = "true") boolean excludeTests,
@@ -119,17 +119,17 @@ public class QualityConfigController {
 
     @PostMapping("/rules/{id}/submit")
     @ResourcePermission(code = "iqc:rule:manage", name = "提交规则审批", type = "iqc", description = "提交规则审批")
-    @Audit(operationType = OperationType.UPDATE, description = "提交 IQC 规则审批", module = "IQC_RULE")
+    @Audit(operationType = OperationType.UPDATE, description = "提交 IQC 规则审批", module = "IQC_RULE", request = false, response = false, key = "#id")
     public QualityRule submitRule(@PathVariable String id) { return ruleService.submit(id); }
 
     @PostMapping("/rules/{id}/approve")
     @ResourcePermission(code = "iqc:rule:approve", name = "审批规则", type = "iqc", description = "审批通过规则")
-    @Audit(operationType = OperationType.UPDATE, description = "审批通过 IQC 规则", module = "IQC_RULE")
+    @Audit(operationType = OperationType.UPDATE, description = "审批通过 IQC 规则", module = "IQC_RULE", request = false, response = false, key = "#id")
     public QualityRule publishRule(@PathVariable String id) { return ruleService.publish(id); }
 
     @PostMapping("/rules/{id}/reject")
     @ResourcePermission(code = "iqc:rule:approve", name = "驳回规则", type = "iqc", description = "驳回规则")
-    @Audit(operationType = OperationType.UPDATE, description = "驳回 IQC 规则", module = "IQC_RULE")
+    @Audit(operationType = OperationType.UPDATE, description = "驳回 IQC 规则", module = "IQC_RULE", request = false, response = false, key = "#id")
     public QualityRule rejectRule(@PathVariable String id) { return ruleService.reject(id); }
 
     @GetMapping("/rules/{id}/versions")
@@ -138,7 +138,7 @@ public class QualityConfigController {
 
     @PostMapping("/rules/{id}/versions")
     @ResourcePermission(code = "iqc:rule:manage", name = "创建规则版本", type = "iqc", description = "创建规则版本")
-    @Audit(operationType = OperationType.CREATE, description = "创建 IQC 规则版本", module = "IQC_RULE")
+    @Audit(operationType = OperationType.CREATE, description = "创建 IQC 规则版本", module = "IQC_RULE", request = false, response = false, key = "#id")
     public QualityRuleVersion createRuleVersion(@PathVariable String id, @RequestBody RuleRequest request) { return ruleService.createVersion(id, request.name(), request.code(), request.category(), request.ruleType(), request.targetRole(), request.expression(), request.description(), request.deduction(), request.riskLevel(), request.veto()); }
 
     @PostMapping("/rules/{id}/test")
@@ -157,7 +157,7 @@ public class QualityConfigController {
 
     @PostMapping("/rule-sets")
     @ResourcePermission(code = "iqc:rule:manage", name = "管理规则集", type = "iqc", description = "创建质检规则集")
-    @Audit(operationType = OperationType.CREATE, description = "创建 IQC 规则集", module = "IQC_RULE")
+    @Audit(operationType = OperationType.CREATE, description = "创建 IQC 规则集", module = "IQC_RULE", request = false, response = false)
     public QualityRuleSet createRuleSet(@RequestBody RuleSetRequest request) { return ruleSetService.create(request.name(), request.code(), request.description(), request.ruleIds(), request.aggregationMode()); }
 
     @GetMapping("/rule-sets/{id}/versions")
@@ -166,18 +166,22 @@ public class QualityConfigController {
 
     @PostMapping("/rule-sets/{id}/versions")
     @ResourcePermission(code = "iqc:rule:manage", name = "创建规则集版本", type = "iqc", description = "创建规则集版本")
+    @Audit(operationType = OperationType.CREATE, description = "创建 IQC 规则集版本", module = "IQC_RULE", request = false, response = false, key = "#id")
     public QualityRuleSetVersion createRuleSetVersion(@PathVariable String id, @RequestBody RuleSetRequest request) { return ruleSetService.createVersion(id, request.name(), request.description(), request.ruleIds(), request.aggregationMode()); }
 
     @PostMapping("/rule-sets/{id}/submit")
     @ResourcePermission(code = "iqc:rule:manage", name = "提交规则集审批", type = "iqc", description = "提交规则集审批")
+    @Audit(operationType = OperationType.UPDATE, description = "提交 IQC 规则集审批", module = "IQC_RULE", request = false, response = false, key = "#id")
     public QualityRuleSet submitRuleSet(@PathVariable String id) { return ruleSetService.submit(id); }
 
     @PostMapping("/rule-sets/{id}/approve")
     @ResourcePermission(code = "iqc:rule:approve", name = "审批规则集", type = "iqc", description = "审批发布规则集")
+    @Audit(operationType = OperationType.UPDATE, description = "审批通过 IQC 规则集", module = "IQC_RULE", request = false, response = false, key = "#id")
     public QualityRuleSet publishRuleSet(@PathVariable String id) { return ruleSetService.publish(id); }
 
     @PostMapping("/rule-sets/{id}/reject")
     @ResourcePermission(code = "iqc:rule:approve", name = "驳回规则集", type = "iqc", description = "驳回规则集")
+    @Audit(operationType = OperationType.UPDATE, description = "驳回 IQC 规则集", module = "IQC_RULE", request = false, response = false, key = "#id")
     public QualityRuleSet rejectRuleSet(@PathVariable String id) { return ruleSetService.reject(id); }
 
     public record AgentRequest(String name, String code, String description, String configJson) { }
