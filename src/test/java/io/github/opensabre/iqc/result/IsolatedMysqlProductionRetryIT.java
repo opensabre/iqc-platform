@@ -119,6 +119,51 @@ class IsolatedMysqlProductionRetryIT {
     }
 
     @Test
+    void retryPersistsParallelV2PolicyAndFrozenInputsWithoutRebuildingOrReadingLiveMessages() throws Exception {
+        var root = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(snapshot);
+        var release = json.readTree("""
+                {"schemaVersion":"iqc-pipeline-release-v1","pipeline":{
+                  "schemaVersion":"iqc-pipeline-parallel-v2","nodes":[
+                    {"nodeId":"metric","type":"METRIC","name":"Timing","version":"transcript-timing-v1",
+                     "dependsOn":[],"inputMapping":{},"config":{"metric":"TRANSCRIPT_GAP_MS","agentRole":"agent","customerRole":"customer"},"condition":null,"timeoutMs":3000,
+                     "retries":0,"onError":"FAIL_PIPELINE","fallbackNodeId":null,
+                     "outputSchema":{"type":"object","additionalProperties":false,"properties":{"metric_value":{"type":"number"},"metric_state":{"type":"string"}}},"enabled":true}],
+                  "completionPolicy":{"requiredNodes":["metric"],"condition":{"pointer":"/variables/metric_value","operator":"LESS_OR_EQUAL","value":100}}},
+                 "fusion":{"id":"priority","version":1,"method":"PRIORITY","nodePriority":{},"overrideNodeByCode":{},"calibratedNodeIds":[]},
+                 "scoring":{"version":"iqc-score-v2","mode":"DEDUCTION","baseScore":100,"passingScore":60,"items":[]},"items":[]}
+                """);
+        var definition = new io.github.opensabre.iqc.finding.FindingDefinition(
+                io.github.opensabre.iqc.finding.FindingDefinition.SCHEMA, "GAP_MS", "Gap", "TIMING", null,
+                io.github.opensabre.iqc.finding.Finding.ValueType.NUMBER, List.of(),
+                io.github.opensabre.iqc.finding.Finding.Severity.LOW, true,
+                List.of(io.github.opensabre.iqc.finding.Finding.EvidenceType.METRIC));
+        ((com.fasterxml.jackson.databind.node.ObjectNode) release.path("pipeline").path("nodes").get(0).path("config"))
+                .set("findingDefinition", json.valueToTree(definition));
+        var typed = json.treeToValue(release, io.github.opensabre.iqc.pipelineasset.PipelineRelease.class);
+        try (var runtime = new io.github.opensabre.iqc.pipeline.PipelineRuntime(
+                List.of(new io.github.opensabre.iqc.pipelinebridge.TranscriptMetricEngine(json)), 1, 4)) {
+            runtime.validate(typed.pipeline());
+        }
+        var marker = root.putObject("pipelineSnapshot").put("pipelineId", "pipeline-v2").put("versionNo", 1);
+        marker.set("release", release);
+        String hash = io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(json.writeValueAsString(release));
+        marker.put("contentHash", hash);
+        String frozen = json.writeValueAsString(root);
+        jdbc.update("UPDATE iqc_inspection_task SET rule_snapshot_json=? WHERE id='retry-task'", frozen);
+
+        var queued = queue.queueRetrySystem("retry-task", "failed-eid", 1);
+        var stored = jdbc.queryForObject("SELECT rule_snapshot_json FROM iqc_inspection_task WHERE id='retry-task'", String.class);
+        assertThat(queued.getRuleSnapshotJson()).isEqualTo(frozen);
+        assertThat(stored).isEqualTo(frozen);
+        assertThat(json.readTree(stored).path("pipelineSnapshot").path("release").path("pipeline").path("completionPolicy"))
+                .isEqualTo(release.path("pipeline").path("completionPolicy"));
+        assertThat(json.readTree(stored).path("pipelineSnapshot").path("contentHash").asText()).isEqualTo(hash);
+        assertThat(json.readTree(stored).path("productionInputs")).isEqualTo(root.path("productionInputs"));
+        assertManifest(queued.getCurrentExecutionId());
+        verifyNoInteractions(context.getBean(ConversationMessageMapper.class));
+    }
+
+    @Test
     void concurrentObserversCreateExactlyOneNewGeneration() throws Exception {
         var ready = new CountDownLatch(2);
         var go = new CountDownLatch(1);
