@@ -16,4 +16,8 @@ public class QualitySampleVersion extends BasePo {
     private String reason;
     private String snapshotJson;
     private String contentHash;
+    /** HTTP-only display metadata; never persisted or used to rebuild canonical gold. */
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private java.util.Map<String, Object> privacy;
 }

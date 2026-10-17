@@ -22,4 +22,8 @@ public class QualitySample extends BasePo {
     private Integer goldDraftRevision = 0;
     private String goldStatus = "UNLABELLED";
     private Integer goldReviewVersion = 0;
+    /** HTTP-only display metadata; never persisted or used to rebuild canonical gold. */
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private java.util.Map<String, Object> privacy;
 }

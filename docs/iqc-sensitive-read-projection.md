@@ -136,3 +136,16 @@ QualityConfigController的18个配置审计入口（Agent七项、规则/导入�
 新增3项真实Controller+Service+AuditAspect覆盖REGEX/STRUCTURED/DLS错误，正则cause实际包含canary证明风险输入确实触发底层解析消息；事件和外层异常均无canary，无DAO写入。最终93384原handle exit0，Audit47项+原QualityRuleService9项合计56 run、0 failures/errors/skipped；日志/tmp/iqc-config-audit-validation-compatible.log。11838首轮仅原结构化诊断类别断言失败，补回固定安全类别后原测试保持通过，未恢复解析正文。原26066的44项也exit0。
 
 其它Prompt/配置读取面、任意服务异常、日志保留、真实权限/HTTP/审计落库及完整I1–I7仍待，不据此声明I7完成。
+
+
+## 金标HTTP展示与独立功能权限
+
+GoldSampleController的草稿、版本、历史、标注和审核在原service前刷新各自原有固定基础权限；原样本/版本数据范围继续由服务验证。GET审计关闭正文，写接口沿原无正文审计，成功响应no-store/nosniff；旧单依赖嵌入构造缺敏感组件时fail-closed。
+
+金标专用读取只有完整+PII双grant才返回未经投影的原goldDraftJson及版本snapshotJson；其它模式不返回可误当原始输入的opaque字段。独立GoldSampleReadProjection复用既有ConversationReadProjection，从原冻结GoldDraft/GoldConversation构建完整脱敏或前三条/200字符预览；只显示Finding code/type/state/证据ID元数据，值和业务上下文不返回。样本及会话身份必须与快照绑定，损坏/缺省快照仅返回明确状态，不能视作无事实。没有读取当前会话替换旧输入；候选policySource已核实仅公共版本身份，不含节点配置/Prompt。
+
+泛样本sample/samples投影可按原sample:view+双grant展示候选内容，但始终不附带完整goldDraftJson，需独立Gold读取功能权限；没有双grant时源contentSnapshot/expectedJson/tagsJson也withheld。审核历史只给原版本摘要，始终不附snapshotJson，不能绕过独立gold:version:view；无完整权限时审核原因也withheld，防止其复制全文，完整但无PII时沿原文本规则处理原因。原ID、修订、状态、hash、分页及操作者身份保留。
+
+标注/审核写响应仅返回身份、修订、状态等回执，不把写权限当作完整读取权限；原写命令与角色、独立审核、CAS和原始存储不改变。编辑器保存后另走已授权GET重新取得草稿，失败明确提示已保存但加载失败并清除旧展示；受限预览不能回写或被当原始金标审核。QualitySample/Version的privacy为exist=false且null不序列化，不改原领域JSON或冻结hash；预览永不重算原hash。
+
+其它样本列表/创建入口由协作开发者接同一sample/samples/sampleMetadata投影，未接入前仍是已知旁路；候选、数据集、评测和其它副本仍需逐项核验。当前是HTTP读取/回执投影，不声明完整I7、任意无标签PII识别、真实角色/数据库/浏览器验收完成。Root未新增或执行测试、SQL或部署。
