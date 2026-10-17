@@ -86,6 +86,8 @@ InspectionResultController当前`/results`、`/results/{id}`、两种`result-det
 
 `JointLabelMaterializationTransactionTest`49项通过，使用本机H2、真实Spring事务与随机端口HTTP；测试身份没有令牌grants捷径，组织服务夹具每次返回新鲜的当前`iqc:result:view`，不赋予全文或PII权限。断言脱敏标志及另一账号即使具备基础结果权限也不能读取他人任务。此证据不替代真实组织服务、MySQL、网关或浏览器验收；默认全量测试另记终态。
 
+随后在`471337a`源码上运行默认全量`mvn -o -q test`（显式传入本机已安装的ByteBuddy agent），进程退出0。149份当前Surefire报告合计1067项，失败/错误/跳过均0；报告修改时间覆盖本轮2026-10-17 14:42:50至14:47:59，包含之前失败的联合事务与标签HTTP测试。结果仅证明默认本地测试覆盖范围，不将其泛化为整个I1–I7或真实环境验收完成。日志`/tmp/iqc-full-integrated-regression.log`。
+
 
 ## 不含Prompt的任务展示元数据（独立修复分支）
 
