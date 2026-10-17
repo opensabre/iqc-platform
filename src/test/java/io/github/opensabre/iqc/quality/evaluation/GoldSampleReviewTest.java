@@ -34,6 +34,52 @@ class GoldSampleReviewTest {
         when(scope.owner()).thenReturn("reviewer");
     }
     @Test
+    void exactAnnotationSurvivesApprovalDatasetFreezeAndHistoricalRoundTrip() throws Exception {
+        annotation(json.nullNode()); // Establish the frozen candidate lineage through the existing fixture.
+        String decimal = "0.12345678901234567890123456789";
+        String requestJson = """
+                {"expectedRevision":1,"findings":[
+                  {"code":"NUMBER_FACT","valueType":"NUMBER","state":"KNOWN","value":%s,"evidenceMessageIds":["message"]},
+                  {"code":"OBJECT_FACT","valueType":"OBJECT","state":"KNOWN","value":{"nested":[%s,9007199254740993]},"evidenceMessageIds":[]}],
+                 "businessContext":{"amount":%s},"tags":[],"difficulty":"BASIC",
+                 "decision":{"score":99.1234567890123456789,"scoreStatus":"FINAL","labels":{"VALUE":{"nested":%s}},"risk":"LOW"}}
+                """.formatted(decimal,decimal,decimal,decimal);
+        var request = json.readValue(requestJson, GoldSampleService.Annotation.class);
+        assertThat(request.findings().getFirst().value().decimalValue()).isEqualByComparingTo(decimal);
+        assertThat(request.findings().get(1).value().at("/nested/1").bigIntegerValue().toString()).isEqualTo("9007199254740993");
+        assertThat(request.businessContext().get("amount").decimalValue()).isEqualByComparingTo(decimal);
+        assertThat(request.decision().labels().get("VALUE").get("nested").decimalValue()).isEqualByComparingTo(decimal);
+        when(scope.owner()).thenReturn("annotator");
+        service.annotate("sample",request);
+        String savedDraft=sample.getGoldDraftJson();
+        when(scope.owner()).thenReturn("reviewer");
+        var approved=service.review("sample",2,true,"exact values checked");
+        when(versions.selectOne(any())).thenReturn(approved);
+        var gold=service.read(approved.getSnapshotJson(),GoldConversation.class);
+        assertThat(gold.findings().getFirst().value().decimalValue()).isEqualByComparingTo(decimal);
+        assertThat(gold.businessContext().at("/annotation/amount").decimalValue()).isEqualByComparingTo(decimal);
+        assertThat(gold.decision().labels().get("VALUE").get("nested").decimalValue()).isEqualByComparingTo(decimal);
+        assertThat(json.writeValueAsString(gold)).isEqualTo(approved.getSnapshotJson());
+        assertThat(sample.getGoldDraftJson()).isEqualTo(savedDraft);
+        var datasetMapper=mock(io.github.opensabre.iqc.quality.dao.EvaluationDatasetMapper.class);
+        var datasetVersions=mock(io.github.opensabre.iqc.quality.dao.EvaluationDatasetVersionMapper.class);
+        var dataset=new io.github.opensabre.iqc.quality.model.EvaluationDataset();
+        dataset.setId("dataset");dataset.setName("Exact gold");dataset.setStatus("ACTIVE");
+        dataset.setCreatedBy("owner");dataset.setOwnerGroupId("group");dataset.setDraftRevision(1);
+        dataset.setDraftConfigJson(json.writeValueAsString(new DatasetDraft(DatasetDraft.SCHEMA,DatasetDraft.Type.REGRESSION,null,
+                List.of(new DatasetDraft.Member("sample",1)))));
+        when(datasetMapper.selectOne(any())).thenReturn(dataset);
+        var datasets=new EvaluationDatasetService(datasetMapper,datasetVersions,service,scope,json);
+        var frozen=datasets.freeze("dataset",1);
+        var snapshot=datasets.read(frozen.getSnapshotJson(),DatasetSnapshot.class);
+        assertThat(snapshot.members().getFirst().gold().findings().getFirst().value().decimalValue()).isEqualByComparingTo(decimal);
+        assertThat(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(json.writeValueAsString(snapshot.members().getFirst().gold())))
+                .isEqualTo(approved.getContentHash());
+        assertThat(json.writeValueAsString(snapshot)).isEqualTo(frozen.getSnapshotJson());
+        assertThat(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(frozen.getSnapshotJson())).isEqualTo(frozen.getContentHash());
+    }
+
+    @Test
     void independentApprovalCreatesFrozenVersionAndIdenticalRetryReturnsIt() {
         var version = service.review("sample", 1, true, "checked");
         assertThat(version.getDecision()).isEqualTo("APPROVED");

@@ -144,3 +144,7 @@ QualityConfigController的18个配置审计入口（Agent七项、规则/导入�
 金标原始值和完整输入不可因脱敏展示或浏览器浮点改变。GoldFinding.value、GoldDecision.labels及Gold草稿/审核/标注的businessContext复用现有人工复核ExactValueDeserializer，仅为这些JsonNode入口启用精确树，不改全局mapper/数据模型/协议。GoldDecision.score原BigDecimal绑定保留。
 
 金标编辑器对已有无法由浏览器无损表示的草稿保持原JSON只读，历史快照不经浮点美化；新NUMBER/业务分数先保留用户输入文本，保存前复用精度检查，OBJECT/业务上下文/高级标签JSON亦检查。不能精确表示的值明确拒绝表单保存，不悄悄舍入；后端原标注接口可接收原始精确JSON。更完整的精确可视化编辑与金标隐私投影/回放防护仍待，不以这个前置保护宣称完成Gold/I7。
+
+### 金标精确值生命周期回归
+
+集成86609ac等价8aa3b99字段级解码，不修改全局Jackson。GoldSampleReviewTest新增一条真实GoldSampleService标注、独立审核和EvaluationDatasetService冻结的贯穿用例：默认ObjectMapper解码Annotation的高精度NUMBER、嵌套OBJECT、大整数、补充context和labels，断言精确数值；读取审批GoldConversation和冻结DatasetSnapshot后再次断言精确值，逐字序列化保持，成员金标hash及数据集外层hash一致，标注草稿未因审核被改写。DAO为mock，不代表事务/数据库或HTTP与UI验收。原78610终态exit0，日志/tmp/iqc-gold-exact-lifecycle.log；原金标审核和数据集历史/防篡改回归同轮通过，数量见协作记录。样本/金标读取隐私与前端精确编辑仍需独立交付。
