@@ -59,6 +59,54 @@ class ProcessedConversationPipelineTest {
         return new PipelineConversationEvaluator(runtime,json,tasks);
     }
     private InspectionTask task(){var task=new InspectionTask();task.setId("task");task.setCurrentExecutionId("execution");task.setStatus("RUNNING");return task;}
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(PipelineRuntime.Mode.class)
+    void plannedCancellationRemainsUnevaluatedAndCannotProducePassingBusinessScore(PipelineRuntime.Mode mode) throws Exception {
+        var base=release();
+        var pipeline=new PipelineDefinition(PipelineDefinition.PARALLEL_POLICY_SCHEMA,
+                List.of(base.pipeline().nodes().get(1),base.pipeline().nodes().get(0)),
+                new PipelineDefinition.CompletionPolicy(List.of("timing"),null));
+        var policy=new PipelineRelease(base.schemaVersion(),pipeline,base.fusion(),base.scoring(),base.items());
+        var started=new java.util.concurrent.CountDownLatch(1);
+        var interrupted=new java.util.concurrent.CountDownLatch(1);
+        var release=new java.util.concurrent.CountDownLatch(1);
+        EngineAdapter session=new EngineAdapter(){
+            public String type(){return "SESSION";}
+            public NodeResult execute(NodeContext context) throws Exception {
+                started.countDown();
+                try{release.await();}
+                catch(InterruptedException cancelled){interrupted.countDown();throw cancelled;}
+                throw new AssertionError("cancelled session must not report success");
+            }
+        };
+        EngineAdapter metric=new EngineAdapter(){
+            private final TranscriptMetricEngine delegate=new TranscriptMetricEngine(json);
+            public String type(){return "METRIC";}
+            public NodeResult execute(NodeContext context) throws Exception {
+                assertTrue(started.await(3,java.util.concurrent.TimeUnit.SECONDS));
+                return delegate.execute(context);
+            }
+        };
+        try(var runtime=new PipelineRuntime(List.of(session,metric),2,4)){
+            var result=evaluator(runtime).evaluate(task(),policy,
+                    List.of(message("customer",1,"customer","question",0,100),message("agent",2,"agent","offer",200,300)),
+                    mode,json.createObjectNode());
+            assertEquals(PipelineRuntime.Status.SUCCESS,result.run().status());
+            assertEquals(PipelineRuntime.CompletionReason.POLICY_SATISFIED,result.run().completionReason());
+            assertTrue(interrupted.await(3,java.util.concurrent.TimeUnit.SECONDS));
+            var missing=result.fusion().stream().filter(f->f.code().equals("OFFER")).findFirst().orElseThrow();
+            assertEquals(Finding.State.NOT_EVALUATED,missing.state());
+            assertNull(missing.value());
+            assertTrue(missing.rawFindings().stream().allMatch(f->f.state()==Finding.State.NOT_EVALUATED));
+            assertEquals(InspectionScoring.ScoreStatus.PENDING,result.scoring().scoreStatus());
+            assertNull(result.scoring().finalScore());
+            assertEquals(InspectionScoring.ItemStatus.NOT_EVALUATED,result.items().getFirst().status());
+            assertEquals(100,result.run().variables().get("timing_value").intValue());
+            var recalculated=PipelineDecisionEvaluator.evaluate(policy.scoring(),policy.items(),result.fusion());
+            assertEquals(InspectionScoring.ScoreStatus.PENDING,recalculated.scoreStatus());
+            assertNull(recalculated.finalScore());
+        }finally{release.countDown();}
+    }
     @Test void productionAndEvaluationShareParallelFactsFusionAndBusinessScore() throws Exception {
         var messages=List.of(message("customer",1,"customer","question",0,100),message("agent",2,"agent","offer offer",200,300));
         var context=json.createObjectNode().put("businessType","processed");

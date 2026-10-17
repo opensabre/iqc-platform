@@ -48,3 +48,13 @@ PipelineAssetService 两处重建 Definition 都保留 completionPolicy。第一
 在组合基线afd88be的独立验证树运行ParallelCompletionPolicyRuntimeTest与ParallelPipelineRuntimeTest，原Maven handle66720终态exit0，8项测试、0失败/错误/跳过。新增4项覆盖：真实双worker慢首/快后满足后取消及依赖节点未提交；缺失条件值不提前结束；五种非法策略在调用引擎前拒绝；旧构造序列化省略新字段且定义JSON往返不变。原ALL四项并发/依赖/超时/中断回归保持通过。
 
 适配器完全本地，不调用供应商或共享数据库。日志/tmp/iqc-parallel-policy-b-regression.log。本批未覆盖取消完成竞争、重试/备用、预算等待、进度异常、资产冻结及真实Task/Evaluation/重算、历史固定hash和浏览器；JSON往返不是历史固定hash证明，不代表I6或完整I1–I7完成。输入仅为处理好的会话数据。
+
+## 生命周期、冻结与会话决策组合验证（2026-10-17）
+
+最终原handle88003 terminal exit0，四类26项，0失败/错误/跳过：ParallelCompletionPolicyRuntimeTest10、ParallelPipelineRuntimeTest4、ParallelCompletionPolicyFreezeTest1、ProcessedConversationPipelineTest11。日志/tmp/iqc-parallel-policy-b-integration-final.log。
+
+新增验证保留重试失败及成功两次Trace；备用输出可满足原必需节点的政策；必需节点失败不满足；progress中断不得继续重试；progress异常取消活动兄弟且收尾异常保留suppressed；真实预算等待异常原样传播，不重试或切换备用。资产服务原freeze路径解析已发布Metric定义，保留v2与完整政策，不修改输入，JSON恢复保留政策，修改政策影响Hash（不是历史固定hash验收）。
+
+处理好会话的生产/评测两种Mode均经原Evaluator、真实Metric、原融合/评分和纯政策重算验证：被策略取消的Session事实及业务项目保持NOT_EVALUATED，总分PENDING且无finalScore，已完成的指标仍为100ms。任务租约持久化仅mock，取消Session为确定性本地适配器；不冒称实际队列、数据库、模型或外部Session运行。首轮62160仅两项测试误将NOT_EVALUATED期望写成REVIEW_REQUIRED，核对原Decision契约后修正，未为测试改生产行为。
+
+剩余验收仍含取消完成竞争、排队期限/超时、固定历史hash、实际发布门禁与Task/Evaluation持久化、来源证明/重算存储、浏览器及完整I1–I7。原1067项全量属于先前隐私基线，本26项不能替代组合代码全量或真实环境验收。
