@@ -208,12 +208,15 @@ class JointLabelMaterializationTransactionTest {
                   ended_time timestamp, business_type varchar(64), business_no varchar(128), tags_json clob,
                   source_file_name varchar(255), source_fingerprint varchar(128), message_count int,
                   error_count int, ignored_blank_lines int, status varchar(32), owner_group_id varchar(64),
+                  audio_sha256 varchar(64), audio_size_bytes bigint, audio_media_type varchar(128),
+                  audio_duration_ms bigint,
                   created_by varchar(128), created_time timestamp, updated_by varchar(128), updated_time timestamp)
                 """);
         jdbc.execute("""
                 CREATE TABLE iqc_conversation_message (
                   id varchar(64) PRIMARY KEY, conversation_id varchar(64), sequence_no int,
                   speaker_role varchar(32), relative_time time, content clob, raw_line clob, line_number int,
+                  start_ms bigint, end_ms bigint, confidence decimal(6,5),
                   created_by varchar(128), created_time timestamp, updated_by varchar(128), updated_time timestamp)
                 """);
         jdbc.execute("""
@@ -287,6 +290,8 @@ class JointLabelMaterializationTransactionTest {
                   id varchar(64) PRIMARY KEY, conversation_result_id varchar(64), label_id varchar(64),
                   label_version_no int, value_code varchar(64), value_json clob, confidence decimal(5,4),
                   source_rule_result_id varchar(64), generation_source varchar(32),
+                  source_finding_code varchar(128), source_action_execution_id varchar(64),
+                  source_input_hash varchar(128), source_projection_hash varchar(128),
                   created_by varchar(128), created_time timestamp, updated_by varchar(128), updated_time timestamp,
                   UNIQUE (conversation_result_id, label_id, value_code))
                 """);
@@ -582,7 +587,9 @@ class JointLabelMaterializationTransactionTest {
 
     private String signedHttpIdentity(String username) {
         return internalTokens.issue(new InternalTokenRequest(
-                "iqc-platform", username, username, "iqc-platform", List.of(), List.of(), List.of(),
+                "iqc-platform", username, username, "iqc-platform", List.of(), List.of(),
+                List.of("iqc:result:view", "iqc:result:business:view", "iqc:sensitive:conversation:read",
+                        "iqc:sensitive:pii:read"),
                 0, null, null, Map.of()));
     }
 
