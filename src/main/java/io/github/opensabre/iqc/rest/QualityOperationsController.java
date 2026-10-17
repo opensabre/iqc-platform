@@ -27,6 +27,30 @@ public class QualityOperationsController {
     private final LabelResultReviewService labelReviews;
     private final io.github.opensabre.iqc.quality.BusinessReviewSampleService businessSamples;
 
+    private final io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive;
+    private final io.github.opensabre.iqc.privacy.ResultReadProjection resultProjection;
+
+    /** Preserve embedded callers; feedback endpoints require the complete authorization wiring. */
+    public QualityOperationsController(QualityOperationsService service, BusinessItemReviewService businessReviews,
+            BusinessQualityReportService businessReports, LabelResultReviewService labelReviews,
+            io.github.opensabre.iqc.quality.BusinessReviewSampleService businessSamples) {
+        this(service, businessReviews, businessReports, labelReviews, businessSamples, null, null);
+    }
+
+    /** Refresh fixed grants before reading or writing feedback. */
+    private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access feedbackAccess(String resource) {
+        if (sensitive == null || resultProjection == null)
+            throw IqcException.invalidState("反馈敏感读取授权组件不可用");
+        var access = sensitive.current(java.util.Set.of(resource));
+        if (org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()
+                instanceof org.springframework.web.context.request.ServletRequestAttributes servlet
+                && servlet.getResponse() != null) {
+            servlet.getResponse().setHeader("Cache-Control", "private, no-store");
+            servlet.getResponse().setHeader("X-Content-Type-Options", "nosniff");
+        }
+        return access;
+    }
+
     /** Preserves embedded callers that only create legacy message samples. */
     public QualityOperationsController(QualityOperationsService service, BusinessItemReviewService businessReviews,
             BusinessQualityReportService businessReports, LabelResultReviewService labelReviews) {
@@ -74,11 +98,16 @@ public class QualityOperationsController {
     @Audit(operationType=OperationType.UPDATE, description="标注 IQC 质检结果", module="IQC_RESULT", request=false, response=false, key="#resultId")
     @RateLimit(sceneCode="iqc-result-feedback", maxCount=60, period=60)
     public ResultFeedback feedback(@PathVariable String resultId, @RequestBody FeedbackRequest request) {
-        return service.feedback(resultId, request.feedbackType(), request.comment(), request.evidenceJson());
+        var access = feedbackAccess("iqc:result:feedback");
+        return resultProjection.feedback(service.feedback(resultId, request.feedbackType(), request.comment(), request.evidenceJson()), access);
     }
     @GetMapping("/feedback")
     @ResourcePermission(code="iqc:result:view", name="查看质检反馈", type="iqc", description="查询误判漏判反馈")
-    public List<ResultFeedback> feedbacks(@RequestParam(required=false) String resultId, @RequestParam(required=false) String type) { return service.feedbacks(resultId, type); }
+    @Audit(operationType=OperationType.QUERY, description="查询 IQC 质检反馈", module="IQC_RESULT", request=false, response=false)
+    public List<ResultFeedback> feedbacks(@RequestParam(required=false) String resultId, @RequestParam(required=false) String type) {
+        var access = feedbackAccess("iqc:result:view");
+        return service.feedbacks(resultId, type).stream().map(row -> resultProjection.feedback(row, access)).toList();
+    }
 
     @PostMapping("/results/{resultId}/reviews")
     @ResourcePermission(code="iqc:review:create", name="发起人工复核", type="iqc", description="为质检结果发起复核")

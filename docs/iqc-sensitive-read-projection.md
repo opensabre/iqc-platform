@@ -122,3 +122,9 @@ QualityConfigController的18个配置审计入口（Agent七项、规则/导入�
 新增3项真实Controller+Service+AuditAspect覆盖REGEX/STRUCTURED/DLS错误，正则cause实际包含canary证明风险输入确实触发底层解析消息；事件和外层异常均无canary，无DAO写入。最终93384原handle exit0，Audit47项+原QualityRuleService9项合计56 run、0 failures/errors/skipped；日志/tmp/iqc-config-audit-validation-compatible.log。11838首轮仅原结构化诊断类别断言失败，补回固定安全类别后原测试保持通过，未恢复解析正文。原26066的44项也exit0。
 
 其它Prompt/配置读取面、任意服务异常、日志保留、真实权限/HTTP/审计落库及完整I1–I7仍待，不据此声明I7完成。
+
+### 反馈响应副本保护
+
+反馈列表与提交返回值复用SensitiveReadAccessService和ResultReadProjection；分别刷新既有result:view、result:feedback基础权限后才调用领域服务，缺少接线直接拒绝。原结果归属和数据范围校验保留。两个响应均private,no-store与nosniff，查询审计不记录正文。
+
+反馈comment和evidenceJson仅完整会话与PII双授权可返回原文；其它组合按原自由文本规则遮罩。证据全部视为用户payload，id等结构形似键不豁免；非法JSON返回既有withheld标识。所有操作在响应副本进行，原始反馈保存值及精确数字不改。本批不覆盖复核/样本/Gold等其它入口，也不保证识别任意无标签PII。验证结果以协作记录的终态为准。

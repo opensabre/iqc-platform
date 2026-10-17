@@ -38,6 +38,17 @@ public final class ResultReadProjection {
                 .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));
     }
 
+    /** Copy feedback before masking; every evidence key is untrusted user payload. */
+    public io.github.opensabre.iqc.quality.model.ResultFeedback feedback(
+            io.github.opensabre.iqc.quality.model.ResultFeedback source, SensitiveReadAccessService.Access access) {
+        var copy = new io.github.opensabre.iqc.quality.model.ResultFeedback();
+        BeanUtils.copyProperties(source, copy);
+        boolean reveal = access.fullConversation() && access.pii();
+        copy.setComment(text(source.getComment(), reveal));
+        copy.setEvidenceJson(jsonText(source.getEvidenceJson(), reveal, true));
+        return copy;
+    }
+
     public Map<String, Object> conversationDetail(ConversationResultDetail source, SensitiveReadAccessService.Access access) {
         Objects.requireNonNull(source); Objects.requireNonNull(access);
         boolean full = access.fullConversation();
