@@ -42,3 +42,29 @@ PipelineAssetService 两处重建 Definition 都保留 completionPolicy。第一
 
 
 源码审阅确认 Fusion.PRIORITY 使用冻结 nodePriority 的最大值，CONFIDENCE 使用显式校准及最大值，OVERRIDE 按声明来源，VOTING 要求严格多数；不会把完成顺序隐式当成来源优先级。Trace继续记录实际观察/完成与取消，事实未评估状态仍参与原融合的未知/缺失规则。此为源码证据，不是实际并发验收。
+
+## 独立组合运行回归（2026-10-17）
+
+在组合基线afd88be的独立验证树运行ParallelCompletionPolicyRuntimeTest与ParallelPipelineRuntimeTest，原Maven handle66720终态exit0，8项测试、0失败/错误/跳过。新增4项覆盖：真实双worker慢首/快后满足后取消及依赖节点未提交；缺失条件值不提前结束；五种非法策略在调用引擎前拒绝；旧构造序列化省略新字段且定义JSON往返不变。原ALL四项并发/依赖/超时/中断回归保持通过。
+
+适配器完全本地，不调用供应商或共享数据库。日志/tmp/iqc-parallel-policy-b-regression.log。本批未覆盖取消完成竞争、重试/备用、预算等待、进度异常、资产冻结及真实Task/Evaluation/重算、历史固定hash和浏览器；JSON往返不是历史固定hash证明，不代表I6或完整I1–I7完成。输入仅为处理好的会话数据。
+
+## 生命周期、冻结与会话决策组合验证（2026-10-17）
+
+最终原handle88003 terminal exit0，四类26项，0失败/错误/跳过：ParallelCompletionPolicyRuntimeTest10、ParallelPipelineRuntimeTest4、ParallelCompletionPolicyFreezeTest1、ProcessedConversationPipelineTest11。日志/tmp/iqc-parallel-policy-b-integration-final.log。
+
+新增验证保留重试失败及成功两次Trace；备用输出可满足原必需节点的政策；必需节点失败不满足；progress中断不得继续重试；progress异常取消活动兄弟且收尾异常保留suppressed；真实预算等待异常原样传播，不重试或切换备用。资产服务原freeze路径解析已发布Metric定义，保留v2与完整政策，不修改输入，JSON恢复保留政策，修改政策影响Hash（不是历史固定hash验收）。
+
+处理好会话的生产/评测两种Mode均经原Evaluator、真实Metric、原融合/评分和纯政策重算验证：被策略取消的Session事实及业务项目保持NOT_EVALUATED，总分PENDING且无finalScore，已完成的指标仍为100ms。任务租约持久化仅mock，取消Session为确定性本地适配器；不冒称实际队列、数据库、模型或外部Session运行。首轮62160仅两项测试误将NOT_EVALUATED期望写成REVIEW_REQUIRED，核对原Decision契约后修正，未为测试改生产行为。
+
+剩余验收仍含取消完成竞争、排队期限/超时、固定历史hash、实际发布门禁与Task/Evaluation持久化、来源证明/重算存储、浏览器及完整I1–I7。原1067项全量属于先前隐私基线，本26项不能替代组合代码全量或真实环境验收。
+
+## 过期收尾缺陷修复与竞争验证（2026-10-17）
+
+新增真实复现：慢兄弟已启动，必需节点成功后progress回调跨过兄弟deadline；旧finally直接cancel把过期尝试记成计划CANCELLED，运行错误返回SUCCESS。原72638终态exit1，12项中该项expected FAILED actual SUCCESS，其余11项通过，日志/tmp/iqc-parallel-policy-deadline-repro.log。
+
+v2收尾仅对未完成且尚未到期的future执行计划取消；已完成或已过期通过原awaitParallel核验实际结果、输出schema和完成期限。已过期未完成尝试保持TIMEOUT，FAIL_PIPELINE继续使总状态FAILED，已成功必需节点变量不丢；completionReason仍描述策略满足的停止原因，不覆盖实际运行失败。旧ALL实现不变。
+
+最终原32565终态exit0，四类30项0失败/错误/跳过（Runtime14、ALL4、Freeze1、ProcessedConversation11），日志/tmp/iqc-parallel-policy-deadline-fixed.log。新四项覆盖过期收尾、同一有界executor被另一调用占用时排队期限/超时不重试且适配器不执行，以及双worker屏障强制progress期间兄弟真实完成的成功/失败两种竞争。成功变量与失败Trace均保留，失败不被策略满足覆盖。
+
+测试不调用模型或共享数据库；不代表实际供应商取消可回滚。固定历史hash、真实任务/评测持久化、发布门禁、来源证明/重算存储与浏览器及其余I1–I7仍待验收。

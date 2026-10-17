@@ -360,7 +360,10 @@ public final class PipelineRuntime implements AutoCloseable {
         finally {
             for(var pending:active.values()) {
                 var attempt=pending.attempt();NodeResult abandoned;
-                if(attempt.future()!=null && !attempt.future().isDone() && attempt.future().cancel(true))
+                // A slow progress callback must not turn an already expired attempt into planned cancellation.
+                // Observe completed/expired attempts through the same deadline and output checks as normal work.
+                if(attempt.future()!=null && !attempt.future().isDone()
+                        && System.nanoTime()-deadline(attempt)<0 && attempt.future().cancel(true))
                     abandoned=NodeResult.failure(NodeResult.Status.CANCELLED,satisfied?POLICY_SATISFIED_REASON:"Parallel execution stopped");
                 else {
                     try {abandoned=awaitParallel(attempt);}
