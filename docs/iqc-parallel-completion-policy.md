@@ -42,3 +42,9 @@ PipelineAssetService 两处重建 Definition 都保留 completionPolicy。第一
 
 
 源码审阅确认 Fusion.PRIORITY 使用冻结 nodePriority 的最大值，CONFIDENCE 使用显式校准及最大值，OVERRIDE 按声明来源，VOTING 要求严格多数；不会把完成顺序隐式当成来源优先级。Trace继续记录实际观察/完成与取消，事实未评估状态仍参与原融合的未知/缺失规则。此为源码证据，不是实际并发验收。
+
+## 独立组合运行回归（2026-10-17）
+
+在组合基线afd88be的独立验证树运行ParallelCompletionPolicyRuntimeTest与ParallelPipelineRuntimeTest，原Maven handle66720终态exit0，8项测试、0失败/错误/跳过。新增4项覆盖：真实双worker慢首/快后满足后取消及依赖节点未提交；缺失条件值不提前结束；五种非法策略在调用引擎前拒绝；旧构造序列化省略新字段且定义JSON往返不变。原ALL四项并发/依赖/超时/中断回归保持通过。
+
+适配器完全本地，不调用供应商或共享数据库。日志/tmp/iqc-parallel-policy-b-regression.log。本批未覆盖取消完成竞争、重试/备用、预算等待、进度异常、资产冻结及真实Task/Evaluation/重算、历史固定hash和浏览器；JSON往返不是历史固定hash证明，不代表I6或完整I1–I7完成。输入仅为处理好的会话数据。
