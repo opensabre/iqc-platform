@@ -80,6 +80,12 @@ InspectionResultController当前`/results`、`/results/{id}`、两种`result-det
 
 结果级编辑/复核写入回放、业务结果聚合、复核/样本/Gold/评测读取与多种附件/导出仍需单独核验和接入；当前实现不等于I7完成，也不覆盖规则未识别的任意PII。未改framework、未执行共享SQL/部署；输入仍是处理好的会话。
 
+### 集成回归（2026-10-17）
+
+集成安全任务展示元数据与精确 JSON/嵌套载荷修复后，七个测试类共81项通过，无失败、错误或跳过。新增`TaskPresentationProjectionTest`的12组历史快照分别检查两种详情响应：隐藏Prompt后仍返回有限任务类型/labelOnly信息，未知与冲突历史不推断为未命中，原任务快照不变。`ResultPayloadProjectionTest`三项检查嵌套结构字段名不能绕过PII遮罩、长小数与大整数不损失精度且共享ObjectMapper不变，以及文件名与标签业务值的双授权边界。
+
+`JointLabelMaterializationTransactionTest`49项通过，使用本机H2、真实Spring事务与随机端口HTTP；测试身份没有令牌grants捷径，组织服务夹具每次返回新鲜的当前`iqc:result:view`，不赋予全文或PII权限。断言脱敏标志及另一账号即使具备基础结果权限也不能读取他人任务。此证据不替代真实组织服务、MySQL、网关或浏览器验收；默认全量测试另记终态。
+
 
 ## 不含Prompt的任务展示元数据（独立修复分支）
 
