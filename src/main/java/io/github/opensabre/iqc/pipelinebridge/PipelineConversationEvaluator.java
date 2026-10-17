@@ -72,7 +72,7 @@ public class PipelineConversationEvaluator {
             boolean produced=observations.stream().anyMatch(value->node.nodeId().equals(value.source().nodeId()));
             if(produced) continue;
             var trace=run.trace().stream().filter(value->node.nodeId().equals(value.nodeId())).reduce((a,b)->b).orElse(null);
-            var state=trace==null || trace.result().status()==NodeResult.Status.SKIPPED?Finding.State.NOT_EVALUATED:Finding.State.ERROR;
+            var state=trace==null || trace.result().status()==NodeResult.Status.SKIPPED || PipelineRuntime.policySkipped(run,trace)?Finding.State.NOT_EVALUATED:Finding.State.ERROR;
             FindingDefinition definition;
             try { definition=json.treeToValue(node.config().path("findingDefinition"),FindingDefinition.class); }
             catch(Exception ex) { throw new IllegalStateException("Frozen finding definition is invalid",ex); }

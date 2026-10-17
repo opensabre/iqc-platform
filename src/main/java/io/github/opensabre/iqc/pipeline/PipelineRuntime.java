@@ -12,9 +12,16 @@ import java.util.concurrent.*;
 public final class PipelineRuntime implements AutoCloseable {
     public enum Mode { PRODUCTION, EVALUATION }
     public enum Status { SUCCESS, PARTIAL_SUCCESS, FAILED, CANCELLED }
+    public enum CompletionReason { POLICY_SATISFIED }
+    private static final String POLICY_SATISFIED_REASON = "Completion policy satisfied";
     public record Trace(String nodeId, int attempt, Instant startedAt, long durationMs, NodeResult result) { }
     public record Run(Status status, List<Trace> trace, List<Finding> findings,
-                      Map<String,JsonNode> variables, boolean reviewRequired) {
+                      Map<String,JsonNode> variables, boolean reviewRequired,
+                      @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                      CompletionReason completionReason) {
+        public Run(Status status,List<Trace> trace,List<Finding> findings,Map<String,JsonNode> variables,boolean reviewRequired) {
+            this(status,trace,findings,variables,reviewRequired,null);
+        }
         public Run { trace=List.copyOf(trace); findings=List.copyOf(findings); var visible=new LinkedHashMap<String,JsonNode>();
             variables.forEach((key,value)->{if(!key.startsWith("__")) visible.put(key,value);});
             variables=NodeContext.snapshot(visible); }
@@ -39,7 +46,7 @@ public final class PipelineRuntime implements AutoCloseable {
     /** Historical snapshots retain graph/contract checks without requiring today's engine registry. */
     public void validateStructure(PipelineDefinition definition) { validateDefinition(definition,false); }
     private void validateDefinition(PipelineDefinition definition,boolean requireCurrentEngines) {
-        if(!(PipelineDefinition.SCHEMA.equals(definition.schemaVersion()) || PipelineDefinition.PARALLEL_SCHEMA.equals(definition.schemaVersion())) || definition.nodes().isEmpty() || definition.nodes().size()>200)
+        if(!(PipelineDefinition.SCHEMA.equals(definition.schemaVersion()) || PipelineDefinition.PARALLEL_SCHEMA.equals(definition.schemaVersion()) || PipelineDefinition.PARALLEL_POLICY_SCHEMA.equals(definition.schemaVersion())) || definition.nodes().isEmpty() || definition.nodes().size()>200)
             throw new IllegalArgumentException("Unsupported pipeline schema or node count");
         var preceding=new HashSet<String>();
         var indexed=new HashMap<String,PipelineDefinition.Node>();
@@ -68,7 +75,10 @@ public final class PipelineRuntime implements AutoCloseable {
                 throw new IllegalArgumentException("Fallback must reference a disabled non-recursive node");
             if(!node.dependsOn().containsAll(fallback.dependsOn())) throw new IllegalArgumentException("Fallback dependencies must be available to source node");
         }
-        if(PipelineDefinition.PARALLEL_SCHEMA.equals(definition.schemaVersion()))parallelContract(definition);
+        if(PipelineDefinition.PARALLEL_SCHEMA.equals(definition.schemaVersion()) || PipelineDefinition.PARALLEL_POLICY_SCHEMA.equals(definition.schemaVersion())) {
+            var contract=parallelContract(definition);
+            validateCompletionPolicy(definition,indexed,contract);
+        } else if(definition.completionPolicy()!=null) throw new IllegalArgumentException("Completion policy requires parallel-v2");
     }
     public Run execute(PipelineDefinition definition, JsonNode input, Map<String,JsonNode> initialVariables, Mode mode) {
         return execute(definition,input,initialVariables,mode,trace -> { });
@@ -77,6 +87,8 @@ public final class PipelineRuntime implements AutoCloseable {
                        java.util.function.Consumer<Trace> progress) {
         Objects.requireNonNull(progress);
         validate(definition); Objects.requireNonNull(input); Objects.requireNonNull(mode);
+        if(PipelineDefinition.PARALLEL_POLICY_SCHEMA.equals(definition.schemaVersion()))
+            return executeParallelPolicy(definition,input,initialVariables,mode,progress);
         if(PipelineDefinition.PARALLEL_SCHEMA.equals(definition.schemaVersion()))
             return executeParallel(definition,input,initialVariables,mode,progress);
         var vars=new LinkedHashMap<>(NodeContext.snapshot(initialVariables==null?Map.of():initialVariables));
@@ -153,9 +165,44 @@ public final class PipelineRuntime implements AutoCloseable {
             if(producer!=null && !ancestors.contains(producer))throw new IllegalArgumentException("Parallel read requires an explicit ancestor dependency: "+pointer);
         }
     }
+    private static void validateCompletionPolicy(PipelineDefinition definition,Map<String,PipelineDefinition.Node> indexed,ParallelContract contract) {
+        var policy=definition.completionPolicy();
+        if(!PipelineDefinition.PARALLEL_POLICY_SCHEMA.equals(definition.schemaVersion())) {
+            if(policy!=null)throw new IllegalArgumentException("Completion policy requires parallel-v2");
+            return;
+        }
+        if(policy==null || policy.requiredNodes().isEmpty() || policy.requiredNodes().size()>200
+                || new HashSet<>(policy.requiredNodes()).size()!=policy.requiredNodes().size())
+            throw new IllegalArgumentException("Completion policy requires distinct enabled nodes");
+        for(var id:policy.requiredNodes())if(!indexed.containsKey(id) || !indexed.get(id).enabled())
+            throw new IllegalArgumentException("Completion policy references an unavailable node");
+        var condition=policy.condition();if(condition==null)return;
+        validatePointer(condition.pointer());Objects.requireNonNull(condition.operator());
+        if(condition.operator()!=PipelineDefinition.Operator.EXISTS && condition.value()==null)
+            throw new IllegalArgumentException("Completion comparison requires a value");
+        if(Set.of(PipelineDefinition.Operator.GREATER_OR_EQUAL,PipelineDefinition.Operator.LESS_OR_EQUAL,
+                PipelineDefinition.Operator.GREATER_THAN,PipelineDefinition.Operator.LESS_THAN).contains(condition.operator())
+                && !condition.value().isNumber())throw new IllegalArgumentException("Completion numeric comparison requires a number");
+        var path=com.fasterxml.jackson.core.JsonPointer.compile(condition.pointer());var root=path.getMatchingProperty();
+        if("input".equals(root))return;
+        if((!"variables".equals(root) && !"upstream".equals(root)) || path.tail().matches())
+            throw new IllegalArgumentException("Completion condition requires a declared input or completed output");
+        String key=path.tail().getMatchingProperty();String producer="upstream".equals(root)?key:contract.owners().get(key);
+        if(producer==null || !policy.requiredNodes().contains(producer))
+            throw new IllegalArgumentException("Completion condition must reference a required completed node");
+    }
+    private static boolean completionSatisfied(PipelineDefinition.CompletionPolicy policy,JsonNode input,
+            Map<String,JsonNode> vars,Map<String,NodeResult> upstream) {
+        return policy.requiredNodes().stream().allMatch(id->upstream.containsKey(id)
+                && upstream.get(id).status()==NodeResult.Status.SUCCESS) && matches(policy.condition(),context(input,vars,upstream));
+    }
     private record TimedOutcome(NodeResult result,Exception failure,long finished) { }
     private record Attempt(PipelineDefinition.Node node,int number,Instant start,long tick,java.util.concurrent.atomic.AtomicLong finished,Future<TimedOutcome> future,NodeResult early) { }
     private Attempt beginParallel(PipelineDefinition.Node node,int number,JsonNode input,Map<String,JsonNode> vars,Map<String,NodeResult> upstream,Mode mode) {
+        return beginParallel(node,number,input,vars,upstream,mode,null);
+    }
+    private Attempt beginParallel(PipelineDefinition.Node node,int number,JsonNode input,Map<String,JsonNode> vars,
+            Map<String,NodeResult> upstream,Mode mode,BlockingQueue<String> completions) {
         Instant start=Instant.now();long tick=System.nanoTime();var finished=new java.util.concurrent.atomic.AtomicLong();
         try {
             var adapter=adapters.get(node.type());if(adapter.sideEffecting())throw new IllegalArgumentException("Detection cannot execute side effects");
@@ -169,12 +216,15 @@ public final class PipelineRuntime implements AutoCloseable {
                 mapped=object;
             }
             var request=new NodeContext(node,mapped,vars,upstream,mode,number);
-            var future=executor.submit(()->{
+            var future=new FutureTask<TimedOutcome>(()->{
                 try {
                     try {return new TimedOutcome(Objects.requireNonNull(adapter.execute(request)),null,System.nanoTime());}
                     catch(Exception failure){return new TimedOutcome(null,failure,System.nanoTime());}
                 } finally {finished.set(System.nanoTime());}
-            });
+            }) {
+                @Override protected void done() { if(completions!=null)completions.offer(node.nodeId()); }
+            };
+            executor.execute(future);
             return new Attempt(node,number,start,tick,finished,future,null);
         } catch(Exception failure) {
             finished.set(System.nanoTime());
@@ -218,6 +268,145 @@ public final class PipelineRuntime implements AutoCloseable {
                     || attempt.number()>attempt.node().retries())return result;
             attempt=beginParallel(attempt.node(),attempt.number()+1,input,vars,upstream,mode);outstanding.add(attempt);
         }
+    }
+    private record PolicyAttempt(String sourceId,Attempt attempt,Map<String,JsonNode> variables,
+                                 Map<String,NodeResult> upstream,boolean fallback) { }
+    /** Caller-thread coordinator; the existing executor alone runs adapters. */
+    private Run executeParallelPolicy(PipelineDefinition definition,JsonNode input,Map<String,JsonNode> initialVariables,Mode mode,
+            java.util.function.Consumer<Trace> progress) {
+        var contract=parallelContract(definition);var initial=NodeContext.snapshot(initialVariables==null?Map.of():initialVariables);
+        for(var key:contract.owners().keySet())if(initial.containsKey(key))throw new IllegalArgumentException("Parallel exports cannot overwrite initial variables");
+        var vars=new LinkedHashMap<>(initial);var upstream=new LinkedHashMap<String,NodeResult>();
+        var trace=new ArrayList<Trace>();var findings=new ArrayList<Finding>();
+        var nodes=new LinkedHashMap<String,PipelineDefinition.Node>();definition.nodes().forEach(node->nodes.put(node.nodeId(),node));
+        var remaining=new LinkedHashSet<String>();definition.nodes().stream().filter(PipelineDefinition.Node::enabled).forEach(node->remaining.add(node.nodeId()));
+        var active=new LinkedHashMap<String,PolicyAttempt>();
+        // At most 200 sources, four attempts each and one four-attempt fallback per source.
+        BlockingQueue<String> completions=new LinkedBlockingQueue<>(1600);
+        boolean partial=false,review=false,satisfied=false;Status finalStatus=null;RuntimeException executionFailure=null;
+        try {
+            execution: while(!remaining.isEmpty() || !active.isEmpty()) {
+                if(Thread.currentThread().isInterrupted()){finalStatus=Status.CANCELLED;break;}
+                // Observe completed work before filling a newly vacant slot: satisfaction must prevent new calls.
+                PolicyAttempt observed=readyPolicyAttempt(active.values());
+                if(observed==null) {
+                    boolean advanced=false;
+                    for(var iterator=remaining.iterator();iterator.hasNext() && active.size()<executor.getMaximumPoolSize();) {
+                        if(Thread.currentThread().isInterrupted()){finalStatus=Status.CANCELLED;break execution;}
+                        String id=iterator.next();var node=nodes.get(id);
+                        if(!upstream.keySet().containsAll(node.dependsOn()))continue;
+                        iterator.remove();advanced=true;
+                        var scopedVars=new LinkedHashMap<>(initial);var scopedUpstream=new LinkedHashMap<String,NodeResult>();
+                        for(var ancestor:contract.ancestors().get(id)) {
+                            var prior=upstream.get(ancestor);
+                            if(prior!=null){scopedUpstream.put(ancestor,prior);if(prior.status()==NodeResult.Status.SUCCESS)scopedVars.putAll(prior.variables());}
+                        }
+                        NodeResult skipped=null;
+                        if(node.dependsOn().stream().anyMatch(dependency->upstream.get(dependency).status()!=NodeResult.Status.SUCCESS)) {
+                            skipped=NodeResult.failure(NodeResult.Status.SKIPPED,"Dependency unavailable");partial=true;review=true;
+                        } else if(!matches(node.condition(),context(input,scopedVars,scopedUpstream)))
+                            skipped=NodeResult.failure(NodeResult.Status.SKIPPED,"Condition not met");
+                        if(skipped!=null){upstream.put(id,skipped);record(trace,new Trace(id,0,Instant.now(),0,skipped),progress);}
+                        else {
+                            var attempt=beginParallel(node,1,input,scopedVars,scopedUpstream,mode,completions);
+                            active.put(id,new PolicyAttempt(id,attempt,NodeContext.snapshot(scopedVars),Map.copyOf(scopedUpstream),false));
+                        }
+                        // A fast adapter may complete during submission; inspect it before launching another node.
+                        if(readyPolicyAttempt(active.values())!=null)break;
+                    }
+                    observed=readyPolicyAttempt(active.values());
+                    if(observed==null) {
+                        if(active.isEmpty()) {
+                            if(!remaining.isEmpty() && !advanced)throw new IllegalStateException("Parallel DAG cannot make progress");
+                            continue;
+                        }
+                        long wait=Long.MAX_VALUE;
+                        for(var pending:active.values())wait=Math.min(wait,deadline(pending.attempt())-System.nanoTime());
+                        try {completions.poll(Math.max(1,wait),TimeUnit.NANOSECONDS);}
+                        catch(InterruptedException interrupted){Thread.currentThread().interrupt();finalStatus=Status.CANCELLED;break;}
+                        continue;
+                    }
+                }
+                var attempt=observed.attempt();var result=awaitParallel(attempt);
+                active.remove(observed.sourceId());
+                var item=new Trace(attempt.node().nodeId(),attempt.number(),attempt.start(),parallelDuration(attempt,result),result);
+                trace.add(item);
+                // Preserve successful facts even when the caller's lease/progress callback throws.
+                if(result.status()==NodeResult.Status.SUCCESS) {
+                    upstream.put(observed.sourceId(),result);findings.addAll(result.findings());vars.putAll(result.variables());
+                }
+                progress.accept(item);
+                if(Thread.currentThread().isInterrupted()){finalStatus=Status.CANCELLED;break;}
+                if(result.status()==NodeResult.Status.CANCELLED){finalStatus=Status.CANCELLED;break;}
+                if(result.status()!=NodeResult.Status.SUCCESS) {
+                    if(result.status()!=NodeResult.Status.TIMEOUT && attempt.number()<=attempt.node().retries()) {
+                        var retry=beginParallel(attempt.node(),attempt.number()+1,input,observed.variables(),observed.upstream(),mode,completions);
+                        active.put(observed.sourceId(),new PolicyAttempt(observed.sourceId(),retry,observed.variables(),observed.upstream(),observed.fallback()));
+                        continue;
+                    }
+                    var source=nodes.get(observed.sourceId());
+                    if(!observed.fallback() && source.onError()==PipelineDefinition.OnError.FALLBACK) {
+                        var fallback=beginParallel(nodes.get(source.fallbackNodeId()),1,input,observed.variables(),observed.upstream(),mode,completions);
+                        active.put(observed.sourceId(),new PolicyAttempt(observed.sourceId(),fallback,observed.variables(),observed.upstream(),true));
+                        continue;
+                    }
+                    upstream.put(observed.sourceId(),result);partial=true;
+                    review|=source.onError()==PipelineDefinition.OnError.MARK_REVIEW || source.onError()==PipelineDefinition.OnError.FALLBACK;
+                    if(source.onError()==PipelineDefinition.OnError.FAIL_PIPELINE){finalStatus=Status.FAILED;break execution;}
+                }
+                if(completionSatisfied(definition.completionPolicy(),input,vars,upstream)){satisfied=true;break;}
+            }
+        } catch(RuntimeException failure){executionFailure=failure;}
+        finally {
+            for(var pending:active.values()) {
+                var attempt=pending.attempt();NodeResult abandoned;
+                if(attempt.future()!=null && !attempt.future().isDone() && attempt.future().cancel(true))
+                    abandoned=NodeResult.failure(NodeResult.Status.CANCELLED,satisfied?POLICY_SATISFIED_REASON:"Parallel execution stopped");
+                else {
+                    try {abandoned=awaitParallel(attempt);}
+                    catch(RuntimeException failure) {
+                        if(executionFailure==null)executionFailure=failure;else if(executionFailure!=failure)executionFailure.addSuppressed(failure);
+                        abandoned=NodeResult.failure(NodeResult.Status.ERROR,"Attempt interrupted by execution deferral");
+                    }
+                }
+                var item=new Trace(attempt.node().nodeId(),attempt.number(),attempt.start(),parallelDuration(attempt,abandoned),abandoned);
+                trace.add(item);
+                if(abandoned.status()==NodeResult.Status.SUCCESS){findings.addAll(abandoned.findings());vars.putAll(abandoned.variables());}
+                else if(abandoned.status()!=NodeResult.Status.CANCELLED) {
+                    partial=true;var source=nodes.get(pending.sourceId());
+                    review|=source.onError()==PipelineDefinition.OnError.MARK_REVIEW || source.onError()==PipelineDefinition.OnError.FALLBACK;
+                    if(source.onError()==PipelineDefinition.OnError.FAIL_PIPELINE)finalStatus=Status.FAILED;
+                }
+                try {progress.accept(item);}
+                catch(RuntimeException failure){if(executionFailure==null)executionFailure=failure;else if(executionFailure!=failure)executionFailure.addSuppressed(failure);}
+            }
+            if(satisfied)for(String id:remaining) {
+                var item=new Trace(id,0,Instant.now(),0,NodeResult.failure(NodeResult.Status.SKIPPED,POLICY_SATISFIED_REASON));
+                trace.add(item);
+                try {progress.accept(item);}
+                catch(RuntimeException failure){if(executionFailure==null)executionFailure=failure;else if(executionFailure!=failure)executionFailure.addSuppressed(failure);}
+            }
+        }
+        if(executionFailure!=null)throw executionFailure;
+        if(Thread.currentThread().isInterrupted() && finalStatus!=Status.FAILED)finalStatus=Status.CANCELLED;
+        return new Run(finalStatus!=null?finalStatus:partial?Status.PARTIAL_SUCCESS:Status.SUCCESS,trace,findings,vars,review,
+                satisfied?CompletionReason.POLICY_SATISFIED:null);
+    }
+    /** Planned policy cancellation retains its trace while leaving the missing fact unevaluated. */
+    public static boolean policySkipped(Run run,Trace trace) {
+        return run.completionReason()==CompletionReason.POLICY_SATISFIED && trace!=null
+                && trace.result().status()==NodeResult.Status.CANCELLED && POLICY_SATISFIED_REASON.equals(trace.result().error());
+    }
+    private static long deadline(Attempt attempt) {return attempt.tick()+TimeUnit.MILLISECONDS.toNanos(attempt.node().timeoutMs());}
+    private static PolicyAttempt readyPolicyAttempt(Collection<PolicyAttempt> active) {
+        long now=System.nanoTime();PolicyAttempt selected=null;long first=Long.MAX_VALUE;
+        for(var pending:active) {
+            var attempt=pending.attempt();boolean done=attempt.early()!=null || attempt.future().isDone();
+            if(!done && now-deadline(attempt)<0)continue;
+            long event=done && attempt.finished().get()!=0?Math.min(attempt.finished().get(),deadline(attempt)):deadline(attempt);
+            if(selected==null || event<first){selected=pending;first=event;}
+        }
+        return selected;
     }
     private Run executeParallel(PipelineDefinition definition,JsonNode input,Map<String,JsonNode> initialVariables,Mode mode,
             java.util.function.Consumer<Trace> progress) {

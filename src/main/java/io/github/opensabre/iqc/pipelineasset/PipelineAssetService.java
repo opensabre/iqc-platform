@@ -291,7 +291,7 @@ public class PipelineAssetService {
             nodes.add(new PipelineDefinition.Node(node.nodeId(),node.type(),node.name(),session?io.github.opensabre.iqc.pipelinebridge.SessionAggregationEngine.VERSION:String.valueOf(number),node.dependsOn(),
                     node.inputMapping(),config,node.condition(),node.timeoutMs(),node.retries(),node.onError(),node.fallbackNodeId(),node.outputSchema(),node.enabled()));
         }
-        var findingTypes=labelFindingTypes(new PipelineDefinition(release.pipeline().schemaVersion(),nodes));
+        var findingTypes=labelFindingTypes(new PipelineDefinition(release.pipeline().schemaVersion(),nodes,release.pipeline().completionPolicy()));
         try {release.validateFindingTypes(findingTypes);}
         catch(IllegalArgumentException invalid){throw IqcException.invalidArgument("业务项目与适用条件的谓词必须匹配事实类型：布尔直接判断，数值需要明确阈值");}
         for(var item:release.items()) if(!codes.contains(item.findingCode())
@@ -311,7 +311,7 @@ public class PipelineAssetService {
         if(release.reviewPolicy()!=null)release.reviewPolicy().validateReferences(codes,release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()),labelPolicy,release.actionPolicy());
         release.scoring().validateReferences(codes,release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()),labelPolicy);
         io.github.opensabre.iqc.label.FindingLabelActionConfiguration.validateDeclaredActions(release.actionPolicy(),labelPolicy);
-        var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes),release.fusion(),release.scoring(),release.items(),release.publicationGate(),release.actionPolicy(),labelPolicy,release.riskPolicy(),release.reviewPolicy());
+        var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes,release.pipeline().completionPolicy()),release.fusion(),release.scoring(),release.items(),release.publicationGate(),release.actionPolicy(),labelPolicy,release.riskPolicy(),release.reviewPolicy());
         runtime.validate(frozen.pipeline()); return frozen;
     }
     private static Map<String,Finding.ValueType> labelFindingTypes(PipelineDefinition pipeline) {
