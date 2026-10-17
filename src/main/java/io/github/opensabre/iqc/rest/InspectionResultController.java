@@ -70,9 +70,12 @@ public class InspectionResultController {
     }
 
     private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access resultReadAccess() {
+        return resultReadAccess(java.util.Set.of("iqc:result:view"));
+    }
+    private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access resultReadAccess(java.util.Set<String> required) {
         if (sensitive == null || resultProjection == null)
             throw io.github.opensabre.iqc.governance.IqcException.invalidState("结果敏感读取授权组件不可用");
-        var access = sensitive.current(java.util.Set.of("iqc:result:view"));
+        var access = sensitive.current(required);
         var attributes = org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
         if (attributes instanceof org.springframework.web.context.request.ServletRequestAttributes servlet && servlet.getResponse() != null) {
             servlet.getResponse().setHeader("Cache-Control", "private, no-store");
@@ -149,17 +152,23 @@ public class InspectionResultController {
     @GetMapping("/results/business")
     @ResourcePermission(code = "iqc:result:business:view", name = "查看业务会话结果", type = "iqc", description = "按当前会话业务结果分页查询")
     @RateLimit(sceneCode = "iqc-result-query", maxCount = 60, period = 60)
+    @Audit(operationType = OperationType.QUERY, description = "读取业务会话结果分页", module = "IQC_PRIVACY", request = false, response = false, key = "#taskId")
     public IqcPage<BatchResultQueryService.BusinessConversationRow> businessResults(
             @RequestParam(defaultValue = "1") long current, @RequestParam(defaultValue = "20") long size,
             @RequestParam(required = false) String taskId, @RequestParam(required = false) String scoreStatus,
             @RequestParam(required = false) String riskLevel, @RequestParam(required = false) java.math.BigDecimal minScore,
             @RequestParam(required = false) java.math.BigDecimal maxScore) {
-        return batchResultQueryService.businessPage(current, size, taskId, scoreStatus, riskLevel, minScore, maxScore);
+        var access = resultReadAccess(java.util.Set.of("iqc:result:business:view"));
+        return resultProjection.businessPage(batchResultQueryService.businessPage(current, size, taskId, scoreStatus, riskLevel, minScore, maxScore), access);
     }
 
     @GetMapping("/tasks/{id}/result-summary")
     @ResourcePermission(code = "iqc:result:view", name = "查看批次质检结果", type = "iqc", description = "查看质检批次及会话汇总结果")
-    public BatchResultSummary batchSummary(@PathVariable String id) { return batchResultQueryService.summary(id); }
+    @Audit(operationType = OperationType.QUERY, description = "读取批次质检汇总", module = "IQC_PRIVACY", request = false, response = false, key = "#id")
+    public BatchResultSummary batchSummary(@PathVariable String id) {
+        var access = resultReadAccess();
+        return resultProjection.batchSummary(batchResultQueryService.summary(id), access);
+    }
 
     @GetMapping("/tasks/{id}/label-results")
     @ResourcePermission(code = "iqc:result:view", name = "查看标签洞察结果", type = "iqc", description = "查看任务生成的业务标签命中结果")

@@ -49,6 +49,27 @@ public final class ResultReadProjection {
         return copy;
     }
 
+    public io.github.opensabre.iqc.shared.IqcPage<BatchResultQueryService.BusinessConversationRow> businessPage(
+            io.github.opensabre.iqc.shared.IqcPage<BatchResultQueryService.BusinessConversationRow> source,
+            SensitiveReadAccessService.Access access) {
+        Objects.requireNonNull(source); Objects.requireNonNull(access);
+        boolean revealPii = access.fullConversation() && access.pii();
+        var rows = source.records().stream().map(row -> new BatchResultQueryService.BusinessConversationRow(
+                row.id(), row.taskId(), text(row.taskName(), revealPii), row.conversationId(), fileName(row.sourceFileName(), revealPii),
+                row.executionId(), row.scoreStatus(), row.finalScore(), row.itemCount(), row.failureCount(), row.errorCount(), row.riskLevel())).toList();
+        return new io.github.opensabre.iqc.shared.IqcPage<>(rows, source.current(), source.size(), source.total());
+    }
+
+    public BatchResultQueryService.BatchResultSummary batchSummary(BatchResultQueryService.BatchResultSummary source,
+            SensitiveReadAccessService.Access access) {
+        Objects.requireNonNull(access);
+        if (source == null) return null;
+        boolean revealPii = access.fullConversation() && access.pii();
+        return new BatchResultQueryService.BatchResultSummary(source.taskId(), source.status(), source.conversationCount(),
+                source.totalMessages(), source.processedMessages(), source.failedMessages(), source.averageScore(), source.hitCount(),
+                source.highRiskCount(), source.conversations().stream().map(row -> summary(row, revealPii)).toList());
+    }
+
     public Map<String, Object> conversationDetail(ConversationResultDetail source, SensitiveReadAccessService.Access access) {
         Objects.requireNonNull(source); Objects.requireNonNull(access);
         boolean full = access.fullConversation();

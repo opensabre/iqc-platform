@@ -128,3 +128,9 @@ QualityConfigController的18个配置审计入口（Agent七项、规则/导入�
 反馈列表与提交返回值复用SensitiveReadAccessService和ResultReadProjection；分别刷新既有result:view、result:feedback基础权限后才调用领域服务，缺少接线直接拒绝。原结果归属和数据范围校验保留。两个响应均private,no-store与nosniff，查询审计不记录正文。
 
 反馈comment和evidenceJson仅完整会话与PII双授权可返回原文；其它组合按原自由文本规则遮罩。证据全部视为用户payload，id等结构形似键不豁免；非法JSON返回既有withheld标识。所有操作在响应副本进行，原始反馈保存值及精确数字不改。本批不覆盖复核/样本/Gold等其它入口，也不保证识别任意无标签PII。验证结果以协作记录的终态为准。
+
+## 业务结果分页与批次汇总副本
+
+原/results/business与/tasks/{id}/result-summary也返回归档文件名，不能绕过详情投影。现复用ResultReadProjection复制原BusinessConversationRow/IqcPage和BatchResultSummary/ConversationResultSummary；文件名沿原CUSTOM字段规则，任务名沿原自由文本规则，只有完整+PII双授权返回原展示文本。ID、状态、原BigDecimal分数（含0/null）、分页current/size/total、会话及各类统计保持，不重新计算或修改原对象。
+
+两个入口在原service查询前刷新固定基础授权：业务分页只要求其已有iqc:result:business:view，不额外误要求legacy result:view；批次汇总仍result:view。保留原Task数据范围，不新增资源或路由；成功返回no-store/nosniff。查询Audit只记录目标/元数据，不含请求/响应正文；缺敏感组件的嵌入构造fail-closed。标签聚合等其他副本仍待独立核验，不以本批声明全读取面已保护。Root未新增或执行测试，构建及B验证以协作记录为准。
