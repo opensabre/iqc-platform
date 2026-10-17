@@ -16,7 +16,7 @@ public class PipelineEvaluationController {
     private final PipelineEvaluationService service;
     @PostMapping
     @ResourcePermission(code="iqc:evaluation:task:create", name="创建冻结数据集评测任务", type="iqc", description="使用精确数据集与流水线版本创建离线评测")
-    @Audit(operationType=OperationType.CREATE, description="创建 IQC 冻结数据集评测", module="IQC_EVALUATION")
+    @Audit(operationType=OperationType.CREATE, description="创建 IQC 冻结数据集评测", module="IQC_EVALUATION", request=false, response=false)
     public InspectionTask create(@RequestBody Create request) {
         if (request == null || request.datasetVersion() == null) throw IqcException.invalidArgument("必须选择精确数据集版本");
         return service.create(request.datasetId(), request.datasetVersion(), request.pipelineId(), request.pipelineVersion(),
