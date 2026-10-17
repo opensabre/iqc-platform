@@ -103,3 +103,12 @@ InspectionResultController当前`/results`、`/results/{id}`、两种`result-det
 结果投影采用响应本地的ObjectMapper副本，沿现有Selector精确树读取配置保留BigDecimal数值，不改变全局Jackson或冻结JSON。结构白名单只适用于结构文本及明确的messageIds文本数组；同名对象/异常容器必须继续递归，不能整棵deepCopy。Finding的value、标签valueJson/人工有效值以及变量/输入/业务载荷内部不继承外层ID或Hash字段豁免；Hash豁免限64位十六进制文本。已知证据的结构ID、序号、偏移与数值事实仍按原类型保留，不以字符串重写数字。
 
 结果行、会话摘要及标签结果的sourceFileName复用ConversationReadProjection的原字段级CUSTOM规则，避免只依赖自由文本匹配漏掉文件名中的无标签身份。没有完整+PII授权时遮罩副本，原档案和存储文件名不改。自由文本规则仍不保证识别任意无标签PII；未知JSON和所有响应面尚需逐项验收，不据本批宣称I7完成。Root未新增或执行测试，编译状态见协作记录。
+
+
+## Agent、规则及模型配置的审计正文边界
+
+源码核对GatewayCall、GatewayCallService.CallView及ModelGateway：当前调用账本仅保存身份、部署版本、用量、费用、状态和安全错误类型，不保存Prompt或原始供应商响应；不为此增加第二套调用日志表。模型调用正文是否可配置落盘及其他读取面仍单列验收，不能将metadata账本当作正文日志。
+
+QualityConfigController的18个配置审计入口（Agent七项、规则/导入六项、规则集五项）与IqcModelProfileController原四个模型变更入口统一request=false、response=false。具有路径ID的变更以固定#id作为目标，Agent回滚包含versionNo；创建及批量导入保留原操作/URL身份，不从配置正文取审计key。规则集版本创建、提交、审批、驳回补原Audit注解，覆盖此前未记录的配置操作。
+
+这样保留原操作者、时间、模块、操作类型、路径目标与结果，避免完整Prompt/表达式/模型配置被复制到未具独立敏感授权的通用审计载荷。原服务、角色权限、审批与不可变版本继续执行；没有关闭原领域配置/冻结输入存储，没有修改framework或发起实际审计发送。预算配置原显式审计及已冻结发布原因不在本批改动，亦不由此推断其它端点安全完成。构建和独立回归状态见协作记录。
