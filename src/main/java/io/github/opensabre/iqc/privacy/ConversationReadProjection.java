@@ -22,7 +22,7 @@ public final class ConversationReadProjection {
             copy.setEmployeeId(field(DefaultSensitiveRule.ACCOUNT_NO,source.getEmployeeId()));
             copy.setBusinessNo(field(DefaultSensitiveRule.ACCOUNT_NO,source.getBusinessNo()));
             copy.setCustomerContactMasked(field(DefaultSensitiveRule.MOBILE,source.getCustomerContactMasked()));
-            copy.setSourceFileName(field(DefaultSensitiveRule.CUSTOM,source.getSourceFileName()));
+            copy.setSourceFileName(maskedSourceFileName(source.getSourceFileName()));
             // Unknown business JSON cannot be presented as safely classified PII by a text regex.
             copy.setBusinessFieldsJson(null);copy.setTagsJson(null);
         }
@@ -62,6 +62,7 @@ public final class ConversationReadProjection {
     private static void add(List<Map.Entry<String,String>> entries,String value,DefaultSensitiveRule rule){
         if(value!=null&&!value.isEmpty())entries.add(Map.entry(value,field(rule,value)));
     }
+    static String maskedSourceFileName(String value){return field(DefaultSensitiveRule.CUSTOM,value);}
     private static String field(DefaultSensitiveRule rule,String value){
         if(value==null||value.isEmpty())return value;String masked;
         try{masked=rule.replace(value);}catch(RuntimeException invalidRange){masked=null;}
