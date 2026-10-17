@@ -112,3 +112,10 @@ InspectionResultController当前`/results`、`/results/{id}`、两种`result-det
 QualityConfigController的18个配置审计入口（Agent七项、规则/导入六项、规则集五项）与IqcModelProfileController原四个模型变更入口统一request=false、response=false。具有路径ID的变更以固定#id作为目标，Agent回滚包含versionNo；创建及批量导入保留原操作/URL身份，不从配置正文取审计key。规则集版本创建、提交、审批、驳回补原Audit注解，覆盖此前未记录的配置操作。
 
 这样保留原操作者、时间、模块、操作类型、路径目标与结果，避免完整Prompt/表达式/模型配置被复制到未具独立敏感授权的通用审计载荷。原服务、角色权限、审批与不可变版本继续执行；没有关闭原领域配置/冻结输入存储，没有修改framework或发起实际审计发送。预算配置原显式审计及已冻结发布原因不在本批改动，亦不由此推断其它端点安全完成。构建和独立回归状态见协作记录。
+
+
+## 业务结果分页与批次汇总副本
+
+原/results/business与/tasks/{id}/result-summary也返回归档文件名，不能绕过详情投影。现复用ResultReadProjection复制原BusinessConversationRow/IqcPage和BatchResultSummary/ConversationResultSummary；文件名沿原CUSTOM字段规则，任务名沿原自由文本规则，只有完整+PII双授权返回原展示文本。ID、状态、原BigDecimal分数（含0/null）、分页current/size/total、会话及各类统计保持，不重新计算或修改原对象。
+
+两个入口在原service查询前刷新固定基础授权：业务分页只要求其已有iqc:result:business:view，不额外误要求legacy result:view；批次汇总仍result:view。保留原Task数据范围，不新增资源或路由；成功返回no-store/nosniff。查询Audit只记录目标/元数据，不含请求/响应正文；缺敏感组件的嵌入构造fail-closed。标签聚合等其他副本仍待独立核验，不以本批声明全读取面已保护。Root未新增或执行测试，构建及B验证以协作记录为准。
