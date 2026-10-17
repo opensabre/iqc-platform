@@ -34,17 +34,25 @@ class InspectionResultControllerTest {
                 .thenReturn(new io.github.opensabre.iqc.shared.IqcPage<>(java.util.List.of(
                         new BatchResultQueryService.BusinessConversationRow("canonical", "task-1", "电话销售质检", "conversation-1",
                                 "sales.txt", "attempt-2", "FINAL", java.math.BigDecimal.ZERO, 2, 2, 0, "HIGH")), 1, 1, 2));
+        var sensitive = mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
+        when(sensitive.current(java.util.Set.of("iqc:result:business:view"))).thenReturn(
+                new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test",false,false,false,java.time.Instant.now()));
         var controller = new InspectionResultController(mock(InspectionExecutionService.class), mock(UsageCounterRecorder.class),
                 batch, mock(HierarchicalResultService.class), mock(LabelResultQueryService.class),
-                mock(LabelInsightExportService.class), mock(io.github.opensabre.iqc.quality.BusinessItemReviewService.class));
+                mock(LabelInsightExportService.class), mock(io.github.opensabre.iqc.quality.BusinessItemReviewService.class), sensitive,
+                new io.github.opensabre.iqc.privacy.ResultReadProjection(new com.fasterxml.jackson.databind.ObjectMapper()));
         var mvc = MockMvcBuilders.standaloneSetup(controller).setControllerAdvice(new RestResponseBodyAdvice()).build();
 
         mvc.perform(get("/api/iqc/results/business").param("taskId", "task-1").param("size", "1")
                         .param("scoreStatus", "FINAL").param("minScore", "0"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(2))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cache-Control","private, no-store"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("X-Content-Type-Options","nosniff"))
+                .andExpect(jsonPath("$.data.total").value(2))
                 .andExpect(jsonPath("$.data.records[0].finalScore").value(0))
                 .andExpect(jsonPath("$.data.records[0].taskName").value("电话销售质检"))
                 .andExpect(jsonPath("$.data.records[0].id").value("canonical"));
+        verify(sensitive).current(java.util.Set.of("iqc:result:business:view"));
         verify(batch).businessPage(1, 1, "task-1", "FINAL", null, java.math.BigDecimal.ZERO, null);
     }
 

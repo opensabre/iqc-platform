@@ -152,7 +152,7 @@ public class InspectionResultController {
     @GetMapping("/results/business")
     @ResourcePermission(code = "iqc:result:business:view", name = "查看业务会话结果", type = "iqc", description = "按当前会话业务结果分页查询")
     @RateLimit(sceneCode = "iqc-result-query", maxCount = 60, period = 60)
-    @Audit(operationType = OperationType.QUERY, description = "读取业务会话结果分页", module = "IQC_PRIVACY", request = false, response = false, key = "#taskId")
+    @Audit(operationType = OperationType.QUERY, description = "读取业务会话结果分页", module = "IQC_PRIVACY", request = false, response = false)
     public IqcPage<BatchResultQueryService.BusinessConversationRow> businessResults(
             @RequestParam(defaultValue = "1") long current, @RequestParam(defaultValue = "20") long size,
             @RequestParam(required = false) String taskId, @RequestParam(required = false) String scoreStatus,

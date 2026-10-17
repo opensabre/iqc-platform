@@ -149,3 +149,36 @@ GoldSampleController的草稿、版本、历史、标注和审核在原service�
 标注/审核写响应仅返回身份、修订、状态等回执，不把写权限当作完整读取权限；原写命令与角色、独立审核、CAS和原始存储不改变。编辑器保存后另走已授权GET重新取得草稿，失败明确提示已保存但加载失败并清除旧展示；受限预览不能回写或被当原始金标审核。QualitySample/Version的privacy为exist=false且null不序列化，不改原领域JSON或冻结hash；预览永不重算原hash。
 
 其它样本列表/创建入口由协作开发者接同一sample/samples/sampleMetadata投影，未接入前仍是已知旁路；候选、数据集、评测和其它副本仍需逐项核验。当前是HTTP读取/回执投影，不声明完整I7、任意无标签PII识别、真实角色/数据库/浏览器验收完成。Root未新增或执行测试、SQL或部署。
+### 反馈响应副本保护
+
+反馈列表与提交返回值复用SensitiveReadAccessService和ResultReadProjection；分别刷新既有result:view、result:feedback基础权限后才调用领域服务，缺少接线直接拒绝。原结果归属和数据范围校验保留。两个响应均private,no-store与nosniff，查询审计不记录正文。
+
+反馈comment和evidenceJson仅完整会话与PII双授权可返回原文；其它组合按原自由文本规则遮罩。证据全部视为用户payload，id等结构形似键不豁免；非法JSON返回既有withheld标识。所有操作在响应副本进行，原始反馈保存值及精确数字不改。本批不覆盖复核/样本/Gold等其它入口，也不保证识别任意无标签PII。验证结果以协作记录的终态为准。
+
+## 业务结果分页与批次汇总副本
+
+原/results/business与/tasks/{id}/result-summary也返回归档文件名，不能绕过详情投影。现复用ResultReadProjection复制原BusinessConversationRow/IqcPage和BatchResultSummary/ConversationResultSummary；文件名沿原CUSTOM字段规则，任务名沿原自由文本规则，只有完整+PII双授权返回原展示文本。ID、状态、原BigDecimal分数（含0/null）、分页current/size/total、会话及各类统计保持，不重新计算或修改原对象。
+
+两个入口在原service查询前刷新固定基础授权：业务分页只要求其已有iqc:result:business:view，不额外误要求legacy result:view；批次汇总仍result:view。保留原Task数据范围，不新增资源或路由；成功返回no-store/nosniff。查询Audit只记录目标/元数据，不含请求/响应正文；缺敏感组件的嵌入构造fail-closed。标签聚合等其他副本仍待独立核验，不以本批声明全读取面已保护。Root未新增或执行测试，构建及B验证以协作记录为准。
+
+业务分页/汇总已与反馈投影合并保留。业务分页taskId可省略，审计不再把可空筛选值作为目标键，保留原查询元数据及正文关闭。新增BusinessSummaryPrivacyTest覆盖四种敏感grant组合、原对象不变、零分/null分、分页与全部会话统计不重算、授权撤销先于第二次查询及批次固定result:view；原InspectionResultControllerTest改用完整接线和仅business:view的敏感授权模拟，MockMvc验证no-store/nosniff与业务分页零分及总数。13724终态exit0，连同反馈4项和结果投影6项，本轮共14项通过；此处MockMvc不含真实网关/PDP，直接Controller撤销模拟也不代替组织服务真实授权验收。
+
+补跑原查询服务测试发现单类运行依赖其它测试预热InspectionTask的MyBatis lambda元数据，66105首轮15项中1error。夹具按已有TableInfoHelper模式显式初始化实体后，74081最终exit0，BatchResultQueryServiceTest15+BusinessSummaryPrivacyTest2+InspectionResultControllerTest2共19项零失败/错误/跳过，涵盖原任务无权/无可见任务边界。未修改生产查询服务或降低断言；日志/tmp/iqc-business-summary-scope-final.log。此次合并仍非当前完整默认套件验收。
+
+## 金标精确数值与展示回写前置边界
+
+金标原始值和完整输入不可因脱敏展示或浏览器浮点改变。GoldFinding.value、GoldDecision.labels及Gold草稿/审核/标注的businessContext复用现有人工复核ExactValueDeserializer，仅为这些JsonNode入口启用精确树，不改全局mapper/数据模型/协议。GoldDecision.score原BigDecimal绑定保留。
+
+金标编辑器对已有无法由浏览器无损表示的草稿保持原JSON只读，历史快照不经浮点美化；新NUMBER/业务分数先保留用户输入文本，保存前复用精度检查，OBJECT/业务上下文/高级标签JSON亦检查。不能精确表示的值明确拒绝表单保存，不悄悄舍入；后端原标注接口可接收原始精确JSON。更完整的精确可视化编辑与金标隐私投影/回放防护仍待，不以这个前置保护宣称完成Gold/I7。
+
+### 金标精确值生命周期回归
+
+集成86609ac等价8aa3b99字段级解码，不修改全局Jackson。GoldSampleReviewTest新增一条真实GoldSampleService标注、独立审核和EvaluationDatasetService冻结的贯穿用例：默认ObjectMapper解码Annotation的高精度NUMBER、嵌套OBJECT、大整数、补充context和labels，断言精确数值；读取审批GoldConversation和冻结DatasetSnapshot后再次断言精确值，逐字序列化保持，成员金标hash及数据集外层hash一致，标注草稿未因审核被改写。DAO为mock，不代表事务/数据库或HTTP与UI验收。原78610终态exit0，日志/tmp/iqc-gold-exact-lifecycle.log；原金标审核和数据集历史/防篡改回归同轮通过，数量见协作记录。样本/金标读取隐私与前端精确编辑仍需独立交付。
+
+### 冻结候选元数据的精度丢失修复
+
+在原金标字段级精确解码之外，GoldSampleService.reviewedCandidate还会把contentSnapshot读为普通JsonNode再嵌入金标context。新增frozenCandidateMetadataKeepsItsExactNumbersDuringAnnotation先复现：冻结候选原值0.12345678901234567890123456789在draft变成0.12345678901234568（74878终态exit1，单例精度断言失败）。
+
+应用服务仅在read目标为JsonNode时使用局部mapper副本启用BigDecimal和精确节点工厂，保留现有大小/空值检查、模块和其它typed读取；不改共享Jackson，不重新捕获当前会话，也不写回原候选内容。回归同时检查原冻结contentSnapshot未变及大整数保持；最终测试状态见协作记录。
+
+PipelineAssetService.hash仍沿历史普通树规范化，不能据hash保持断言证明它区分所有高精度差异；更换摘要协议和历史兼容需要独立处理，本批没有改全局算法。真实HTTP转换器、数据库持久化、UI与其它候选生产解析边界不在这条局部修复的证明范围。

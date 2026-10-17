@@ -256,7 +256,12 @@ public class GoldSampleService {
         if (body == null || body.getBytes(StandardCharsets.UTF_8).length > MAX_SNAPSHOT_BYTES)
             throw IqcException.invalidState("金标快照为空或超过限制");
         try {
-            T value = json.readValue(body, type);
+            // Frozen candidate metadata must not pass through binary floating-point nodes.
+            // Keep the shared mapper and historical hash algorithm unchanged.
+            ObjectMapper reader = type == JsonNode.class ? json.copy()
+                    .enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                    .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true)) : json;
+            T value = reader.readValue(body, type);
             if (value == null) throw IqcException.invalidState("金标快照不能为空值");
             return value;
         }
