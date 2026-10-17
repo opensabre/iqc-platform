@@ -167,6 +167,15 @@ class LabelReviewQueueHttpTest {
                 new IqcOrganizationClient.OrganizationUser("b", "Other", "other", "g2", "Group 2")));
         when(organization.getUserByUniqueId("alice")).thenReturn(Result.success(
                 new IqcOrganizationClient.OrganizationUser("a", "Alice", "alice", "g1", "Group 1")));
+        when(organization.getUserByUniqueId("admin")).thenReturn(Result.success(
+                new IqcOrganizationClient.OrganizationUser("admin", "Admin", "admin", "g2", "Group 2")));
+        when(organization.currentActionAccess(anyString())).thenAnswer(invocation -> {
+            String id=invocation.getArgument(0); boolean admin="admin".equals(id);
+            return Result.success(new IqcOrganizationClient.SchedulerAccess("iqc-scheduler-access-v1",id,
+                    "a".equals(id)?"alice":admin?"admin":"other",true,"a".equals(id)?"g1":"g2",
+                    admin?java.util.Set.of("ADMIN"):java.util.Set.of(),
+                    java.util.Set.of("iqc:result:business:view"),java.time.Instant.now()));
+        });
     }
 
     @Test
@@ -210,7 +219,9 @@ class LabelReviewQueueHttpTest {
         JsonNode team = first.path("records").get(0);
         assertThat(team.path("id").asText()).isEqualTo("c2");
         assertThat(team.path("taskName").asText()).isEqualTo("同组任务");
-        assertThat(team.path("sourceFileName").asText()).isEqualTo("隔离测试会话");
+        assertThat(team.path("sourceFileName").asText()).isEqualTo("******");
+        assertThat(jdbc.queryForObject("SELECT source_file_name FROM iqc_conversation WHERE id='conversation'",String.class))
+                .isEqualTo("隔离测试会话");
         assertThat(team.path("scoreStatus").asText()).isEqualTo("NOT_APPLICABLE");
         assertThat(team.path("finalScore").isNull()).isTrue();
 
@@ -243,14 +254,27 @@ class LabelReviewQueueHttpTest {
     }
 
     @Test
-    void businessOrganizationLookupFailureFallsBackToOwnTasksAndRejectsTamperedIdentity() throws Exception {
+    void businessOrganizationLookupFailureFailsClosedAndRejectsTamperedIdentity() throws Exception {
         when(organization.getUserByUniqueId("alice")).thenThrow(new IllegalStateException("organization unavailable"));
         String alice = token("alice", List.of());
-        JsonNode own = data(business(alice, ""));
-        assertThat(own.path("total").asInt()).isEqualTo(1);
-        assertThat(own.path("records").get(0).path("taskId").asText()).isEqualTo("own");
-        assertThat(data(business(alice, "?taskId=team")).path("total").asInt()).isZero();
+        var response=business(alice, "");
+        assertThat(response.statusCode()).isEqualTo(200);
+        var error=mapper.readTree(response.body());
+        assertThat(error.path("code").asText()).isEqualTo("IQC-1006");
+        assertThat(error.has("data")).isFalse();
         assertThat(business(alice + "tampered", "").statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    void businessGrantRevocationDeniesNextReadEvenWithSameValidToken() throws Exception {
+        String alice=token("alice",List.of());
+        var allowed=business(alice,"?size=1");
+        assertThat(data(allowed).path("total").asInt()).isEqualTo(2);
+        assertThat(allowed.headers().firstValue("Cache-Control")).contains("private, no-store");
+        assertThat(allowed.headers().firstValue("X-Content-Type-Options")).contains("nosniff");
+        when(organization.currentActionAccess("a")).thenReturn(Result.success(new IqcOrganizationClient.SchedulerAccess(
+                "iqc-scheduler-access-v1","a","alice",true,"g1",java.util.Set.of(),java.util.Set.of(),java.time.Instant.now())));
+        assertDeniedHistory(business(alice,"?size=1"));
     }
 
     private String token(String username, List<String> roles) {
@@ -348,6 +372,8 @@ class LabelReviewQueueHttpTest {
 
     private JsonNode data(HttpResponse<String> response) throws Exception {
         assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
-        return mapper.readTree(response.body()).path("data");
+        var body=mapper.readTree(response.body());
+        assertThat(body.path("code").asText()).as(response.body()).isEqualTo("000000");
+        return body.path("data");
     }
 }

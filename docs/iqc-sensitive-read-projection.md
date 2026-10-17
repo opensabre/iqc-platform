@@ -156,3 +156,11 @@ QualityConfigController的18个配置审计入口（Agent七项、规则/导入�
 应用服务仅在read目标为JsonNode时使用局部mapper副本启用BigDecimal和精确节点工厂，保留现有大小/空值检查、模块和其它typed读取；不改共享Jackson，不重新捕获当前会话，也不写回原候选内容。回归同时检查原冻结contentSnapshot未变及大整数保持；最终测试状态见协作记录。
 
 PipelineAssetService.hash仍沿历史普通树规范化，不能据hash保持断言证明它区分所有高精度差异；更换摘要协议和历史兼容需要独立处理，本批没有改全局算法。真实HTTP转换器、数据库持久化、UI与其它候选生产解析边界不在这条局部修复的证明范围。
+
+### 2026-10-18 当前累计后端默认全套回归
+
+552335d累计源（含反馈、业务分页/汇总和金标精度修复）首轮11754默认全套1139项有5项旧HTTP夹具失败。联合试跑仅提供旧result:view或缺当前grant，标签HTTP夹具无currentActionAccess，组织故障仍期待业务数据fallback。同步两类夹具到固定当前grant和稳定身份，不修改生产授权/数据范围；保留仅business:view可读、admin/本人/同组/外组及零分/null分检查。新用例复用同一有效令牌，在组织当前grant撤销后再次真实HTTP请求，确认IQC-1005无data；组织查询异常明确IQC-1006无data，旧标签队列fallback契约仍保持。成功响应检查no-store/nosniff，helper同时检查HTTP状态与业务成功码。
+
+67297专项59项仅剩旧文件名预期失败（实际无敏感grant正确返回******）；改为脱敏预期并通过H2 SELECT验证原文件名未变。最终35079默认全套进程exit0，按/tmp/iqc-current-full-final.log创建时刻筛选本轮新报告：154份XML、1140 tests、0 failures/errors/skipped，报告时间2026-10-18 07:44:12–07:48:23。包含LabelReviewQueueHttpTest10和JointLabelMaterializationTransactionTest49，非叠加旧MySQL IT报告；日志/tmp/iqc-current-full-final.log。命令沿离线mvn -o -q test并显式传入已安装ByteBuddy agent，真实HTTP随机本机端口、隔离H2，组织及限流依赖仍为测试替身。
+
+本结果不含随后A6c81569金标读取投影，不证明真实组织/网关角色、供应商、MySQL持久化、浏览器或整个I1–I7完成；不能把旧默认全套1067项或本轮1140项外推到尚未集成源。

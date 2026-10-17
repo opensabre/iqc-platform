@@ -415,7 +415,7 @@ class JointLabelMaterializationTransactionTest {
             String userId = invocation.getArgument(0);
             return Result.success(new IqcOrganizationClient.SchedulerAccess("iqc-scheduler-access-v1",
                     userId, userId, true, "alice".equals(userId) ? "g1" : "g2", java.util.Set.of(),
-                    java.util.Set.of("iqc:result:view"), java.time.Instant.now()));
+                    java.util.Set.of("iqc:result:view", "iqc:result:business:view"), java.time.Instant.now()));
         });
         when(httpRateLimiter.check(any())).thenReturn(new RateLimitDecision(
                 true, 60, 0, 60, null, "isolated-test"));
@@ -504,6 +504,12 @@ class JointLabelMaterializationTransactionTest {
                     new IqcOrganizationClient.OrganizationUser(user, user, user, "g1", "Group 1")));
         when(httpRateLimiter.check(any())).thenReturn(new RateLimitDecision(true, 60, 0, 60, null, "isolated-test"));
         String alice = signedHttpIdentity("alice");
+        when(httpOrganization.currentActionAccess(anyString())).thenAnswer(invocation -> {
+            String user=invocation.getArgument(0);
+            return Result.success(new IqcOrganizationClient.SchedulerAccess("iqc-scheduler-access-v1",user,user,true,
+                    List.of("alice","bob").contains(user)?"g1":"g2",java.util.Set.of(),
+                    java.util.Set.of("iqc:result:business:view"),java.time.Instant.now()));
+        });
         String bob = signedHttpIdentity("bob");
         String trialId = httpData(http(alice, "/api/iqc/schemes/scheme-1/trials",
                 "{\"expectedRevision\":1,\"conversationIds\":[\"conversation-1\"],\"requestId\":\"published_trial_01\"}")).path("id").asText();
