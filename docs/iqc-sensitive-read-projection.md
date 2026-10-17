@@ -182,3 +182,8 @@ GoldSampleController的草稿、版本、历史、标注和审核在原service�
 应用服务仅在read目标为JsonNode时使用局部mapper副本启用BigDecimal和精确节点工厂，保留现有大小/空值检查、模块和其它typed读取；不改共享Jackson，不重新捕获当前会话，也不写回原候选内容。回归同时检查原冻结contentSnapshot未变及大整数保持；最终测试状态见协作记录。
 
 PipelineAssetService.hash仍沿历史普通树规范化，不能据hash保持断言证明它区分所有高精度差异；更换摘要协议和历史兼容需要独立处理，本批没有改全局算法。真实HTTP转换器、数据库持久化、UI与其它候选生产解析边界不在这条局部修复的证明范围。
+
+
+### 通用样本入口接线
+
+通用samples GET在查询前刷新原sample:view，复用samples投影，即使双敏感grant也不返回goldDraftJson；创建POST在写入前刷新原sample:manage，只返回sampleMetadata。原业务候选/消息样本领域校验及数据范围保持，不新增写权限，不因写授权返回冻结正文。共享反馈授权接线改名readAccess，仍仅接受控制器内部固定资源码；缺少组件拒绝，成功no-store/nosniff。样本列表审计不记录正文。此接线收口此前通用样本已知旁路，其他读取面及行为验收仍待。
