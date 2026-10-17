@@ -31,7 +31,12 @@ public final class ResultReadProjection {
     private static final int PREVIEW_TEXT_LENGTH = 200;
     private final ObjectMapper json;
 
-    public ResultReadProjection(ObjectMapper json) { this.json = Objects.requireNonNull(json); }
+    public ResultReadProjection(ObjectMapper json) {
+        // Response-local exact tree parsing, following the existing Selector snapshot convention.
+        this.json = Objects.requireNonNull(json).copy()
+                .enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));
+    }
 
     public Map<String, Object> conversationDetail(ConversationResultDetail source, SensitiveReadAccessService.Access access) {
         Objects.requireNonNull(source); Objects.requireNonNull(access);
@@ -100,11 +105,11 @@ public final class ResultReadProjection {
         boolean revealPii = access.fullConversation() && access.pii();
         return source.stream().map(row -> {
             Map<String, Object> copy = new LinkedHashMap<>();
-            copy.put("id", row.id()); copy.put("conversationId", row.conversationId()); copy.put("sourceFileName", text(row.sourceFileName(), revealPii));
+            copy.put("id", row.id()); copy.put("conversationId", row.conversationId()); copy.put("sourceFileName", fileName(row.sourceFileName(), revealPii));
             copy.put("labelId", row.labelId()); copy.put("labelName", text(row.labelName(), revealPii));
             copy.put("labelCode", text(row.labelCode(), revealPii)); copy.put("labelPath", text(row.labelPath(), revealPii));
             copy.put("labelVersionNo", row.labelVersionNo()); copy.put("valueCode", row.valueCode());
-            copy.put("valueJson", jsonText(row.valueJson(), revealPii)); copy.put("confidence", row.confidence());
+            copy.put("valueJson", jsonText(row.valueJson(), revealPii, true)); copy.put("confidence", row.confidence());
             copy.put("generationSource", row.generationSource()); copy.put("sourceRuleResultId", row.sourceRuleResultId());
             copy.put("evidenceJson", jsonText(row.evidenceJson(), revealPii)); copy.put("status", row.status());
             copy.put("reviewOverlay", review(row.reviewOverlay(), revealPii)); copy.put("findingSource", row.findingSource());
@@ -120,12 +125,13 @@ public final class ResultReadProjection {
         copy.put("latestRevision", source.latestRevision()); copy.put("latestStatus", source.latestStatus());
         copy.put("effectiveReviewId", source.effectiveReviewId()); copy.put("effectiveRevision", source.effectiveRevision());
         copy.put("effectiveStatus", source.effectiveStatus());
-        copy.put("effectiveValue", source.effectiveValue() == null ? null : project(source.effectiveValue(), revealPii));
+        copy.put("effectiveValue", source.effectiveValue() == null ? null : project(source.effectiveValue(), revealPii, true));
         copy.put("evidenceMessageIds", source.evidenceMessageIds()); return copy;
     }
 
     private InspectionResult projectResult(InspectionResult source, boolean revealPii) {
         var copy = new InspectionResult(); BeanUtils.copyProperties(source, copy);
+        copy.setSourceFileName(fileName(copy.getSourceFileName(), revealPii));
         copy.setReason(text(copy.getReason(), revealPii)); copy.setEvidence(text(copy.getEvidence(), revealPii));
         copy.setFindingJson(jsonText(copy.getFindingJson(), revealPii));
         copy.setEvidenceJson(jsonText(copy.getEvidenceJson(), revealPii));
@@ -203,7 +209,7 @@ public final class ResultReadProjection {
             BatchResultQueryService.ConversationResultSummary source, boolean revealPii) {
         if (source == null) return null;
         return new BatchResultQueryService.ConversationResultSummary(source.conversationId(),
-                text(source.sourceFileName(), revealPii), source.messageCount(), source.resultCount(), source.averageScore(),
+                fileName(source.sourceFileName(), revealPii), source.messageCount(), source.resultCount(), source.averageScore(),
                 source.hitCount(), source.highRiskCount(), source.errorCount(), source.scoreStatus());
     }
 
@@ -222,22 +228,43 @@ public final class ResultReadProjection {
     }
 
     private String text(String value, boolean revealPii) { return value == null || revealPii ? value : SensitiveTextProjection.mask(value).text(); }
-    private String jsonText(String value, boolean revealPii) {
-        if (value == null || value.isBlank() || revealPii) return value;
-        try { return project(json.readTree(value), revealPii).toString(); }
-        catch (Exception malformed) { return "{\"privacyProjection\":\"WITHHELD_INVALID_JSON\"}"; }
+    private String fileName(String value, boolean revealPii) {
+        return revealPii ? value : ConversationReadProjection.maskedSourceFileName(value);
     }
-    private JsonNode project(JsonNode source, boolean revealPii) {
+    private String jsonText(String value, boolean revealPii) { return jsonText(value,revealPii,false); }
+    private String jsonText(String value, boolean revealPii, boolean payload) {
+        if (value == null || value.isBlank() || revealPii) return value;
+        try { return project(json.readTree(value), false, payload).toString(); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException malformed) { return "{\"privacyProjection\":\"WITHHELD_INVALID_JSON\"}"; }
+    }
+    private static final Set<String> PAYLOAD_FIELDS = Set.of("value", "effectiveValue", "variables",
+            "payload", "input", "output", "arguments", "parameters", "configuration", "businessContext");
+    private JsonNode project(JsonNode source, boolean revealPii, boolean payload) {
         if (source == null || source.isNull()) return source;
         if (revealPii) return source.deepCopy();
         if (source.isTextual()) return json.getNodeFactory().textNode(SensitiveTextProjection.mask(source.textValue()).text());
-        if (source.isArray()) { ArrayNode copy = json.createArrayNode(); source.forEach(value -> copy.add(project(value, false))); return copy; }
+        if (source.isArray()) { ArrayNode copy = json.createArrayNode(); source.forEach(value -> copy.add(project(value, false, payload))); return copy; }
         if (source.isObject()) {
-            ObjectNode copy = json.createObjectNode(); source.properties().forEach(entry -> copy.set(entry.getKey(),
-                    STRUCTURAL_TEXT.contains(entry.getKey()) || entry.getKey().endsWith("Hash")
-                            ? entry.getValue().deepCopy() : project(entry.getValue(), false))); return copy;
+            ObjectNode copy = json.createObjectNode();
+            source.properties().forEach(entry -> {
+                String key=entry.getKey(); JsonNode value=entry.getValue();
+                boolean structural=STRUCTURAL_TEXT.contains(key);
+                boolean protectedValue=payload || PAYLOAD_FIELDS.contains(key) || key.endsWith("Hash") && value.isContainerNode()
+                        || structural && value.isContainerNode()
+                        && !("messageIds".equals(key) && value.isArray() && textualArray(value));
+                boolean safeHash=key.endsWith("Hash") && value.isTextual() && value.textValue().matches("[a-fA-F0-9]{64}");
+                // A structural field never exempts an arbitrary object or a business value subtree.
+                if (!protectedValue && (structural && (value.isTextual() || "messageIds".equals(key) && value.isArray() && textualArray(value)) || safeHash))
+                    copy.set(key,value.deepCopy());
+                else copy.set(key,project(value,false,protectedValue));
+            });
+            return copy;
         }
         return source.deepCopy();
+    }
+    private static boolean textualArray(JsonNode values) {
+        for (JsonNode value:values) if (!value.isTextual()) return false;
+        return true;
     }
     private String limit(String value, int max) {
         if (value == null || value.length() <= max) return value;

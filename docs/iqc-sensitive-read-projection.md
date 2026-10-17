@@ -88,3 +88,10 @@ InspectionResultController当前`/results`、`/results/{id}`、两种`result-det
 字段为schemaVersion=iqc-task-presentation-v1、kind=LEGACY/SCHEME/PIPELINE/UNKNOWN、labelOnly=boolean/null。只由原冻结快照解析固定枚举和布尔，不包含Prompt、规则正文、ID、自由文本或任意JSON。无效历史返回UNKNOWN/null，不回退暴露原快照，也不把未知推断成无命中或零分。Scheme有质检项即非labelOnly；仅items为空且labels非空时labelOnly=true，历史省略labels不能使正常计分方案误判未知。
 
 前端优先使用该元数据，旧响应缺字段时保留旧快照兼容；未知元数据隐藏依赖类型的评分摘要及业务操作并提示核对。原结果、坐标、Finding及机器/人工记录不改。编译状态以根协作记录为准；未新增或执行测试，无SQL/部署，完整敏感读取面仍未完成。
+
+
+## 响应JSON的精度与嵌套边界加固
+
+结果投影采用响应本地的ObjectMapper副本，沿现有Selector精确树读取配置保留BigDecimal数值，不改变全局Jackson或冻结JSON。结构白名单只适用于结构文本及明确的messageIds文本数组；同名对象/异常容器必须继续递归，不能整棵deepCopy。Finding的value、标签valueJson/人工有效值以及变量/输入/业务载荷内部不继承外层ID或Hash字段豁免；Hash豁免限64位十六进制文本。已知证据的结构ID、序号、偏移与数值事实仍按原类型保留，不以字符串重写数字。
+
+结果行、会话摘要及标签结果的sourceFileName复用ConversationReadProjection的原字段级CUSTOM规则，避免只依赖自由文本匹配漏掉文件名中的无标签身份。没有完整+PII授权时遮罩副本，原档案和存储文件名不改。自由文本规则仍不保证识别任意无标签PII；未知JSON和所有响应面尚需逐项验收，不据本批宣称I7完成。Root未新增或执行测试，编译状态见协作记录。
