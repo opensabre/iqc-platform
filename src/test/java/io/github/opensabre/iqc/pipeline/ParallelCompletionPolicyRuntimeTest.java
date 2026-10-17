@@ -25,6 +25,129 @@ class ParallelCompletionPolicyRuntimeTest {
                 Map.of(id + "_value", json.getNodeFactory().numberNode(1)), Map.of(), null);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void siblingCompletedDuringProgressKeepsItsActualSuccessOrFailure(boolean siblingFails) {
+        var started = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        EngineAdapter adapter = new EngineAdapter() {
+            public String type() { return "TEST"; }
+            public NodeResult execute(NodeContext context) throws Exception {
+                if (context.node().nodeId().equals("sibling")) {
+                    started.countDown(); release.await();
+                    if (siblingFails) return NodeResult.failure(NodeResult.Status.ERROR, "completed failure");
+                } else assertTrue(started.await(3, TimeUnit.SECONDS));
+                return success(context.node().nodeId());
+            }
+        };
+        try (var runtime = new PipelineRuntime(List.of(adapter), 2, 4)) {
+            var executor = (java.util.concurrent.ThreadPoolExecutor)
+                    org.springframework.test.util.ReflectionTestUtils.getField(runtime, "executor");
+            assertNotNull(executor);
+            var run = runtime.execute(new PipelineDefinition(PipelineDefinition.PARALLEL_POLICY_SCHEMA,
+                    List.of(node("sibling", List.of()), node("required", List.of())),
+                    new PipelineDefinition.CompletionPolicy(List.of("required"), null)),
+                    json.createObjectNode(), Map.of(), PipelineRuntime.Mode.PRODUCTION, trace -> {
+                        if (!trace.nodeId().equals("required")) return;
+                        release.countDown();
+                        // Both real worker slots must reach this barrier: the two original FutureTasks are done.
+                        // This forces completion during the caller callback without sleeps or completion races in the test.
+                        var workers = new CountDownLatch(2);
+                        var barriers = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+                        for (int i = 0; i < 2; i++) barriers.add(executor.submit(() -> {
+                            workers.countDown();
+                            try { assertTrue(workers.await(3, TimeUnit.SECONDS)); }
+                            catch (InterruptedException failure) { Thread.currentThread().interrupt(); throw new AssertionError(failure); }
+                        }));
+                        try { for (var barrier : barriers) barrier.get(3, TimeUnit.SECONDS); }
+                        catch (Exception failure) { throw new AssertionError(failure); }
+                    });
+            assertEquals(siblingFails ? PipelineRuntime.Status.FAILED : PipelineRuntime.Status.SUCCESS, run.status());
+            assertEquals(PipelineRuntime.CompletionReason.POLICY_SATISFIED, run.completionReason());
+            assertEquals(2, run.trace().size());
+            var sibling = run.trace().stream().filter(t -> t.nodeId().equals("sibling")).findFirst().orElseThrow();
+            assertEquals(siblingFails ? NodeResult.Status.ERROR : NodeResult.Status.SUCCESS, sibling.result().status());
+            assertFalse(PipelineRuntime.policySkipped(run, sibling));
+            assertEquals(!siblingFails, run.variables().containsKey("sibling_value"));
+            assertEquals(1, run.variables().get("required_value").intValue());
+        } finally { release.countDown(); }
+    }
+
+    @Test void policyCleanupMustNotHideSiblingDeadlineExpiredDuringProgressCallback() {
+        var started = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        EngineAdapter adapter = new EngineAdapter() {
+            public String type() { return "TEST"; }
+            public NodeResult execute(NodeContext context) throws Exception {
+                if (context.node().nodeId().equals("slow")) { started.countDown(); release.await(); }
+                else assertTrue(started.await(3, TimeUnit.SECONDS));
+                return success(context.node().nodeId());
+            }
+        };
+        var slow = node("slow", List.of());
+        slow = new PipelineDefinition.Node(slow.nodeId(), slow.type(), slow.name(), slow.version(),
+                slow.dependsOn(), slow.inputMapping(), slow.config(), slow.condition(), 1000, 0,
+                slow.onError(), null, slow.outputSchema(), true);
+        try (var runtime = new PipelineRuntime(List.of(adapter), 2, 4)) {
+            var run = runtime.execute(new PipelineDefinition(PipelineDefinition.PARALLEL_POLICY_SCHEMA,
+                    List.of(slow, node("required", List.of())), new PipelineDefinition.CompletionPolicy(List.of("required"), null)),
+                    json.createObjectNode(), Map.of(), PipelineRuntime.Mode.PRODUCTION, trace -> {
+                        if (trace.nodeId().equals("required")) {
+                            try { assertFalse(release.await(1200, TimeUnit.MILLISECONDS)); }
+                            catch (InterruptedException failure) { Thread.currentThread().interrupt(); throw new AssertionError(failure); }
+                        }
+                    });
+            assertEquals(PipelineRuntime.Status.FAILED, run.status());
+            var timedOut = run.trace().stream().filter(t -> t.nodeId().equals("slow")).findFirst().orElseThrow();
+            assertEquals(NodeResult.Status.TIMEOUT, timedOut.result().status());
+            assertFalse(PipelineRuntime.policySkipped(run, timedOut));
+            assertEquals(1, run.variables().get("required_value").intValue());
+        } finally { release.countDown(); }
+    }
+
+    @Test void sharedExecutorQueueTimeCountsTowardDeadlineWithoutCallingTimedOutAdapter() throws Exception {
+        var occupied = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var queuedCalls = new AtomicInteger();
+        var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        EngineAdapter adapter = new EngineAdapter() {
+            public String type() { return "TEST"; }
+            public NodeResult execute(NodeContext context) throws Exception {
+                if (context.node().nodeId().equals("occupier")) { occupied.countDown(); release.await(); }
+                else queuedCalls.incrementAndGet();
+                return success(context.node().nodeId());
+            }
+        };
+        try (var runtime = new PipelineRuntime(List.of(adapter), 1, 4)) {
+            var caller = new Thread(() -> {
+                try { runtime.execute(new PipelineDefinition(PipelineDefinition.PARALLEL_POLICY_SCHEMA,
+                        List.of(node("occupier", List.of())), new PipelineDefinition.CompletionPolicy(List.of("occupier"), null)),
+                        json.createObjectNode(), Map.of(), PipelineRuntime.Mode.PRODUCTION); }
+                catch (Throwable problem) { failure.set(problem); }
+            }, "pipeline-shared-pool-test");
+            caller.start();
+            try {
+                assertTrue(occupied.await(3, TimeUnit.SECONDS));
+                var queued = node("queued", List.of());
+                queued = new PipelineDefinition.Node(queued.nodeId(), queued.type(), queued.name(), queued.version(),
+                        queued.dependsOn(), queued.inputMapping(), null, null, 100, 3,
+                        queued.onError(), null, queued.outputSchema(), true);
+                var run = runtime.execute(new PipelineDefinition(PipelineDefinition.PARALLEL_POLICY_SCHEMA,
+                        List.of(queued), new PipelineDefinition.CompletionPolicy(List.of("queued"), null)),
+                        json.createObjectNode(), Map.of(), PipelineRuntime.Mode.PRODUCTION);
+                assertEquals(PipelineRuntime.Status.FAILED, run.status());
+                assertNull(run.completionReason());
+                assertEquals(1, run.trace().size());
+                assertEquals(NodeResult.Status.TIMEOUT, run.trace().getFirst().result().status());
+                assertEquals(1, run.trace().getFirst().attempt());
+                assertEquals(0, queuedCalls.get());
+            } finally { release.countDown(); caller.join(3000); }
+            assertFalse(caller.isAlive());
+            assertNull(failure.get());
+            assertEquals(0, queuedCalls.get());
+        }
+    }
+
     private PipelineDefinition.Node executionPolicy(PipelineDefinition.Node node, int retries,
             PipelineDefinition.OnError onError, String fallback, boolean enabled) {
         return new PipelineDefinition.Node(node.nodeId(), node.type(), node.name(), node.version(),
