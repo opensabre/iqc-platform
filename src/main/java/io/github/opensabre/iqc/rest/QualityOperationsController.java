@@ -37,10 +37,10 @@ public class QualityOperationsController {
         this(service, businessReviews, businessReports, labelReviews, businessSamples, null, null);
     }
 
-    /** Refresh fixed grants before reading or writing feedback. */
-    private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access feedbackAccess(String resource) {
+    /** Refresh fixed grants before reading or writing sensitive quality operations. */
+    private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access responseAccess(String resource) {
         if (sensitive == null || resultProjection == null)
-            throw IqcException.invalidState("反馈敏感读取授权组件不可用");
+            throw IqcException.invalidState("质检操作敏感读取授权组件不可用");
         var access = sensitive.current(java.util.Set.of(resource));
         if (org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()
                 instanceof org.springframework.web.context.request.ServletRequestAttributes servlet
@@ -98,14 +98,14 @@ public class QualityOperationsController {
     @Audit(operationType=OperationType.UPDATE, description="标注 IQC 质检结果", module="IQC_RESULT", request=false, response=false, key="#resultId")
     @RateLimit(sceneCode="iqc-result-feedback", maxCount=60, period=60)
     public ResultFeedback feedback(@PathVariable String resultId, @RequestBody FeedbackRequest request) {
-        var access = feedbackAccess("iqc:result:feedback");
+        var access = responseAccess("iqc:result:feedback");
         return resultProjection.feedback(service.feedback(resultId, request.feedbackType(), request.comment(), request.evidenceJson()), access);
     }
     @GetMapping("/feedback")
     @ResourcePermission(code="iqc:result:view", name="查看质检反馈", type="iqc", description="查询误判漏判反馈")
     @Audit(operationType=OperationType.QUERY, description="查询 IQC 质检反馈", module="IQC_RESULT", request=false, response=false)
     public List<ResultFeedback> feedbacks(@RequestParam(required=false) String resultId, @RequestParam(required=false) String type) {
-        var access = feedbackAccess("iqc:result:view");
+        var access = responseAccess("iqc:result:view");
         return service.feedbacks(resultId, type).stream().map(row -> resultProjection.feedback(row, access)).toList();
     }
 
@@ -174,18 +174,23 @@ public class QualityOperationsController {
     @ResourcePermission(code="iqc:sample:manage", name="管理质检样本", type="iqc", description="从质检结果沉淀样本")
     @Audit(operationType=OperationType.CREATE, description="创建 IQC 质检样本", module="IQC_SAMPLE", request=false, response=false, key="#resultId")
     public QualitySample createSample(@PathVariable String resultId, @RequestBody SampleRequest request) {
+        var access = responseAccess("iqc:sample:manage");
         if (request == null) throw IqcException.invalidArgument("样本请求不能为空");
         if (business(request.targetType())) {
             if (request.expectedJson() != null) throw IqcException.invalidArgument("业务候选的期望结果必须来自已完成复核");
             if (businessSamples == null) throw IqcException.invalidState("会话候选服务未配置");
-            return businessSamples.create(resultId, request.reviewId(), request.requestId(), request.name(), request.sampleType(), request.tagsJson());
+            return resultProjection.sampleMetadata(businessSamples.create(resultId, request.reviewId(), request.requestId(), request.name(), request.sampleType(), request.tagsJson()), access);
         }
         if (request.reviewId() != null || request.requestId() != null) throw IqcException.invalidArgument("消息样本不接受业务复核参数");
-        return service.createSample(resultId, request.name(), request.sampleType(), request.expectedJson(), request.tagsJson());
+        return resultProjection.sampleMetadata(service.createSample(resultId, request.name(), request.sampleType(), request.expectedJson(), request.tagsJson()), access);
     }
     @GetMapping("/samples")
     @ResourcePermission(code="iqc:sample:view", name="查看质检样本", type="iqc", description="查询质检样本库")
-    public List<QualitySample> samples(@RequestParam(required=false) String type, @RequestParam(required=false) String status) { return service.samples(type, status); }
+    @Audit(operationType=OperationType.QUERY, description="读取 IQC 样本列表", module="IQC_PRIVACY", request=false, response=false)
+    public List<QualitySample> samples(@RequestParam(required=false) String type, @RequestParam(required=false) String status) {
+        var access = responseAccess("iqc:sample:view");
+        return resultProjection.samples(service.samples(type, status), access);
+    }
 
     @GetMapping("/report")
     @ResourcePermission(code="iqc:report:view", name="查看质检报表", type="iqc", description="查看基于人工复核的质量报表")

@@ -176,3 +176,13 @@ GoldSampleController的草稿、版本、历史、标注和审核在原service�
 标注/审核写响应仅返回身份、修订、状态等回执，不把写权限当作完整读取权限；原写命令与角色、独立审核、CAS和原始存储不改变。编辑器保存后另走已授权GET重新取得草稿，失败明确提示已保存但加载失败并清除旧展示；受限预览不能回写或被当原始金标审核。QualitySample/Version的privacy为exist=false且null不序列化，不改原领域JSON或冻结hash；预览永不重算原hash。
 
 其它样本列表/创建入口由协作开发者接同一sample/samples/sampleMetadata投影，未接入前仍是已知旁路；候选、数据集、评测和其它副本仍需逐项核验。当前是HTTP读取/回执投影，不声明完整I7、任意无标签PII识别、真实角色/数据库/浏览器验收完成。Root未新增或执行测试、SQL或部署。
+
+### 通用样本读取与创建回执旁路
+
+集成A6c81569等价2b106d3后，QualityOperationsController的GET samples在原领域查询前刷新固定iqc:sample:view，用ResultReadProjection.samples返回副本。即使完整+PII双grant，通用列表也不返回goldDraftJson，完整金标仍须走独立Gold读取授权；候选contentSnapshot/expectedJson/tagsJson沿双grant判定。查询Audit无正文，也不把可空筛选作为目标键。
+
+POST results/{resultId}/samples在进入原消息/业务候选服务前刷新既有iqc:sample:manage，不引入新sample:create权限，保留原参数和来源/复核检查；结果只经sampleMetadata返回标识/修订等元数据，不靠写权限返回冻结正文。两入口复用反馈已有敏感响应helper与no-store/nosniff；缺敏感组件直接拒绝，旧嵌入构造不回退原始内容。原领域对象和数据库模型未新增持久化列。
+
+GoldSamplePrivacyTest使用真实投影及Controller直接调用，覆盖四grant组合、冻结消息预览、通用列表与金标专用读取边界、跨样本/会话和损坏快照拒绝预览、历史及写回执不含snapshot、原对象/Hash/分页保持及固定权限拒绝先于领域读写。服务隔离为mock；本批不代表HTTP/PDP/组织角色/数据库或前端迟到响应验收，运行终态见协作记录。先前1140默认全套仅属df525a4，不外推到新金标源。
+
+84131专项最终exit0，逐XML确认GoldSamplePrivacyTest5、FeedbackPrivacyTest4、BusinessReviewControllerTest10、GoldSampleReviewTest12、EvaluationDatasetVersionTest7，共38 run、0 failures/errors/skipped；日志/tmp/iqc-gold-sample-privacy.log。本轮为直接Controller与投影/领域服务既有测试组合，未重新执行默认完整套件，也未验证本批HTTP/PDP/UI路径。
