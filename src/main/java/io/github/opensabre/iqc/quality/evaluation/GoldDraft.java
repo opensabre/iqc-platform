@@ -6,7 +6,7 @@ import java.util.Objects;
 
 /** Server-authored annotation identity and input snapshot awaiting independent review. */
 public record GoldDraft(String schemaVersion, String sourceSampleId, String conversationId,
-                        List<GoldConversation.Message> messages, JsonNode businessContext,
+                        List<GoldConversation.Message> messages, @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class) JsonNode businessContext,
                         List<GoldFinding> findings, String annotatorId, String source, List<String> tags,
                         GoldConversation.Difficulty difficulty, GoldDecision decision) {
     public static final String SCHEMA = "iqc-gold-draft-v1";

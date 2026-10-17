@@ -8,7 +8,7 @@ import java.util.stream.Collectors;
 
 /** Immutable reviewed Finding-level gold input; persistence must authenticate both identities. */
 public record GoldConversation(String schemaVersion, String sourceSampleId, String conversationId,
-                               List<Message> messages, JsonNode businessContext, List<GoldFinding> findings,
+                               List<Message> messages, @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class) JsonNode businessContext, List<GoldFinding> findings,
                                String annotatorId, String reviewerId, String source, List<String> tags,
                                Difficulty difficulty, GoldDecision decision) {
     public static final String SCHEMA = "iqc-gold-conversation-v1";
