@@ -187,3 +187,8 @@ PipelineAssetService.hash仍沿历史普通树规范化，不能据hash保持断
 ### 通用样本入口接线
 
 通用samples GET在查询前刷新原sample:view，复用samples投影，即使双敏感grant也不返回goldDraftJson；创建POST在写入前刷新原sample:manage，只返回sampleMetadata。原业务候选/消息样本领域校验及数据范围保持，不新增写权限，不因写授权返回冻结正文。共享反馈授权接线改名readAccess，仍仅接受控制器内部固定资源码；缺少组件拒绝，成功no-store/nosniff。样本列表审计不记录正文。此接线收口此前通用样本已知旁路，其他读取面及行为验收仍待。
+
+
+### 数据集与离线评测写操作审计
+
+EvaluationDatasetController创建、更新、冻结、可用性四个写操作及PipelineEvaluationController创建评测均显式关闭审计请求与响应正文。已核对框架Audit默认request=true、response=false：本次实际关闭数据集草稿、名称等请求正文，显式保留响应关闭；冻结响应含完整金标snapshotJson、评测创建响应含冻结任务配置，继续禁止其进入审计正文；更新/冻结/可用性保留路径id目标，创建不使用未生成ID作审计键。沿用既有Audit事件及权限和领域调用，不新增日志表，不改变冻结内容或hash。此处仅减少审计正文；原HTTP数据集和评测返回值仍须另行实施读取投影与实际权限验收。
