@@ -51,7 +51,8 @@ public final class ResultReadProjection {
         Conversation conversation = ConversationReadProjection.summary(source.conversation(), revealPii);
         InspectionTask task = task(source.task(), access);
         var result = new LinkedHashMap<String, Object>();
-        result.put("conversation", conversation); result.put("task", task); result.put("summary", summary(source.summary(), revealPii));
+        result.put("conversation", conversation); result.put("task", task);
+        result.put("taskPresentation", taskPresentation(source.task())); result.put("summary", summary(source.summary(), revealPii));
         result.put("messages", List.copyOf(messages)); result.put("results", results);
         var withheld = new ArrayList<>(List.of("rawLine", "agentSnapshotJson", "ruleSnapshotJson", "labelScopeSnapshotJson", "triggerRequestJson"));
         if (!full && source.messages().size() > PREVIEW_MESSAGE_COUNT) withheld.add("messageContentAfterPreview");
@@ -146,6 +147,7 @@ public final class ResultReadProjection {
         }
         result.put("message", message);
         result.put("task", task instanceof InspectionTask row ? task(row, access) : task);
+        result.put("taskPresentation", taskPresentation(task instanceof InspectionTask row ? row : null));
         if (execution instanceof io.github.opensabre.iqc.task.model.TaskExecution row) {
             var copy = new io.github.opensabre.iqc.task.model.TaskExecution(); BeanUtils.copyProperties(row, copy);
             copy.setErrorMessage(text(copy.getErrorMessage(), false)); execution = copy;
@@ -155,6 +157,36 @@ public final class ResultReadProjection {
                 message != null && !access.fullConversation(),
                 List.of("rawLine", "agentSnapshotJson", "ruleSnapshotJson", "labelScopeSnapshotJson", "triggerRequestJson")));
         return result;
+    }
+
+    /** Public display facts only; no prompt, rule text, identifiers or arbitrary snapshot fields. */
+    public record TaskPresentation(String schemaVersion, String kind, Boolean labelOnly) { }
+    private TaskPresentation taskPresentation(InspectionTask task) {
+        String kind = "UNKNOWN"; Boolean labelOnly = null;
+        if (task != null && task.getRuleSnapshotJson() != null) {
+            try {
+                JsonNode snapshot = json.readTree(task.getRuleSnapshotJson());
+                if (snapshot != null && snapshot.isArray()) { kind = "LEGACY"; labelOnly = false; }
+                else if (snapshot != null && snapshot.isObject()) {
+                    boolean scheme = snapshot.has("schemeSnapshot"), pipeline = snapshot.has("pipelineSnapshot");
+                    if (pipeline && !scheme && snapshot.path("pipelineSnapshot").isObject()) {
+                        kind = "PIPELINE"; labelOnly = false;
+                    } else if (scheme && !pipeline && snapshot.path("schemeSnapshot").isObject()) {
+                        kind = "SCHEME";
+                        JsonNode definition = snapshot.at("/schemeSnapshot/release/definition");
+                        if (definition.path("items").isArray() && !definition.path("items").isEmpty())
+                            labelOnly = false; // Historical scoring schemes may omit their optional labels field.
+                        else if (definition.path("items").isArray() && definition.path("labels").isArray()
+                                && !definition.path("labels").isEmpty()) labelOnly = true;
+                    } else if (!scheme && !pipeline && snapshot.path("rules").isArray()) {
+                        kind = "LEGACY"; labelOnly = false;
+                    }
+                }
+            } catch (com.fasterxml.jackson.core.JsonProcessingException malformed) {
+                // Malformed history stays unknown; never fall back to exposing its snapshot.
+            }
+        }
+        return new TaskPresentation("iqc-task-presentation-v1", kind, labelOnly);
     }
 
     private InspectionTask task(InspectionTask source, SensitiveReadAccessService.Access access) {
