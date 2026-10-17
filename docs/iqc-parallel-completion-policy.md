@@ -68,3 +68,11 @@ v2收尾仅对未完成且尚未到期的future执行计划取消；已完成或
 最终原32565终态exit0，四类30项0失败/错误/跳过（Runtime14、ALL4、Freeze1、ProcessedConversation11），日志/tmp/iqc-parallel-policy-deadline-fixed.log。新四项覆盖过期收尾、同一有界executor被另一调用占用时排队期限/超时不重试且适配器不执行，以及双worker屏障强制progress期间兄弟真实完成的成功/失败两种竞争。成功变量与失败Trace均保留，失败不被策略满足覆盖。
 
 测试不调用模型或共享数据库；不代表实际供应商取消可回滚。固定历史hash、真实任务/评测持久化、发布门禁、来源证明/重算存储与浏览器及其余I1–I7仍待验收。
+
+## 隔离MySQL重试持久化（2026-10-17）
+
+复用IsolatedMysqlProductionRetryIT真实MyBatis/Spring事务与正式Flyway路径，在本机独立mysqld8.0.34实例验证。端口34307，数据目录/private/tmp/iqc-mysql-validation.0jEnpQ/，执行前SQL核对身份且既有测试重复守卫；不使用应用或共享数据库凭证。首轮86509 exit0，正式迁移53项应用到1.1.72；补齐样例Metric状态输出声明后，最终14127 exit0，14项0失败/错误/跳过。第二轮Flyway验证73项可用迁移，当前1.1.72，无需新增迁移。日志/tmp/iqc-parallel-policy-mysql-retry.log与/tmp/iqc-parallel-policy-mysql-retry-final.log。
+
+新增用例以真实PipelineRelease解码和Runtime图校验确认v2样例，再经原queueRetrySystem事务读取回写：冻结策略及条件、整个快照字符串、release内容Hash、完整原会话输入均保持；原成功结果ID/检查点保留，失败检查点变为新轮待执行，不读取当前消息。原13项并发、回滚、累计进度与自动重试边界同时通过。
+
+此夹具仍隔离外部发布资产与Evaluator，证明的是数据库队列/快照/检查点边界，不证明真实发布版本来源校验、worker模型执行、业务结果保存或Evaluation持久化端到端。生产应用代码无改动。临时MySQL已通过专属socket正常关闭，服务handle45850和关闭handle98829均exit0，server.log确认Shutdown complete。其余I1–I7继续推进。

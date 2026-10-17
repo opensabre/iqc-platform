@@ -126,3 +126,13 @@ QualityConfigController的18个配置审计入口（Agent七项、规则/导入�
 金标原始值和完整输入不可因脱敏展示或浏览器浮点改变。GoldFinding.value、GoldDecision.labels及Gold草稿/审核/标注的businessContext复用现有人工复核ExactValueDeserializer，仅为这些JsonNode入口启用精确树，不改全局mapper/数据模型/协议。GoldDecision.score原BigDecimal绑定保留。
 
 金标编辑器对已有无法由浏览器无损表示的草稿保持原JSON只读，历史快照不经浮点美化；新NUMBER/业务分数先保留用户输入文本，保存前复用精度检查，OBJECT/业务上下文/高级标签JSON亦检查。不能精确表示的值明确拒绝表单保存，不悄悄舍入；后端原标注接口可接收原始精确JSON。更完整的精确可视化编辑与金标隐私投影/回放防护仍待，不以这个前置保护宣称完成Gold/I7。
+
+## 配置审计真实切面回归与规则解析错误（2026-10-17）
+
+集成8f9a89b等价本地提交58cfc6b：原QualityConfigController18个配置动作、IqcModelProfileController4个模型动作关闭请求和响应审计正文，路径ID与Agent回滚版本作为目标键，四个规则集生命周期保留审计。ConfigurationAuditPayloadTest显式列22方法，每方法成功/失败两种共44项，通过真实已安装AuditAspect、实际Controller注解及SpEL参数名生成事件；领域proceed与本地事件sink隔离，验证无配置canary且操作者/目标键/操作/URL/耗时/失败元数据保留。不是HTTP/PDP/领域事务或EDA落库验收，预算接口沿原独立审计行为。
+
+审阅发现原QualityRuleService.validateExpression拼接exception.getMessage，正则解析异常含表达式全文，会通过AuditAspect.errorMessage绕过正文开关。应用服务改为固定错误，正则只附数值位置；结构化条件保留固定字段/操作符/JSON类别，不返回用户原字段或表达式。异常cause保留诊断；此变更只保护该边界外层消息与审计事件，不声明已治理所有堆栈或日志。规则解释/匹配及领域权限不变，无framework修改。
+
+新增3项真实Controller+Service+AuditAspect覆盖REGEX/STRUCTURED/DLS错误，正则cause实际包含canary证明风险输入确实触发底层解析消息；事件和外层异常均无canary，无DAO写入。最终93384原handle exit0，Audit47项+原QualityRuleService9项合计56 run、0 failures/errors/skipped；日志/tmp/iqc-config-audit-validation-compatible.log。11838首轮仅原结构化诊断类别断言失败，补回固定安全类别后原测试保持通过，未恢复解析正文。原26066的44项也exit0。
+
+其它Prompt/配置读取面、任意服务异常、日志保留、真实权限/HTTP/审计落库及完整I1–I7仍待，不据此声明I7完成。
