@@ -410,6 +410,13 @@ class JointLabelMaterializationTransactionTest {
                 new IqcOrganizationClient.OrganizationUser("eve", "Eve", "eve", "g2", "Group 2")));
         when(httpOrganization.getUserByUniqueId("alice")).thenReturn(Result.success(
                 new IqcOrganizationClient.OrganizationUser("alice", "Alice", "alice", "g1", "Group 1")));
+        // The sensitive read boundary uses fresh organization grants, not grants copied into a token.
+        when(httpOrganization.currentActionAccess(anyString())).thenAnswer(invocation -> {
+            String userId = invocation.getArgument(0);
+            return Result.success(new IqcOrganizationClient.SchedulerAccess("iqc-scheduler-access-v1",
+                    userId, userId, true, "alice".equals(userId) ? "g1" : "g2", java.util.Set.of(),
+                    java.util.Set.of("iqc:result:view"), java.time.Instant.now()));
+        });
         when(httpRateLimiter.check(any())).thenReturn(new RateLimitDecision(
                 true, 60, 0, 60, null, "isolated-test"));
         jdbc.update("INSERT INTO iqc_label_category (id,name,code,status,version_no,created_by,owner_group_id) VALUES ('profile','画像','profile','PUBLISHED',1,'alice','g1')");
@@ -463,6 +470,9 @@ class JointLabelMaterializationTransactionTest {
         assertThat(business.path("records").get(0).path("finalScore").decimalValue()).isEqualByComparingTo("90");
         JsonNode labels = httpData(http(alice, "/api/iqc/tasks/" + taskId + "/label-results", null));
         assertThat(labels).hasSize(1);
+        assertThat(labels.get(0).path("privacy").path("piiMasked").asBoolean()).isTrue();
+        assertThat(labels.get(0).path("privacy").path("canReadFull").asBoolean()).isFalse();
+        assertThat(labels.get(0).path("privacy").path("canReadPii").asBoolean()).isFalse();
         assertThat(labels.get(0).path("labelId").asText()).isEqualTo("house");
         assertThat(labels.get(0).path("labelName").asText()).isEqualTo("是否有房");
         assertThat(labels.get(0).path("labelPath").asText()).isEqualTo("画像 / 资产 / 是否有房");
@@ -587,9 +597,7 @@ class JointLabelMaterializationTransactionTest {
 
     private String signedHttpIdentity(String username) {
         return internalTokens.issue(new InternalTokenRequest(
-                "iqc-platform", username, username, "iqc-platform", List.of(), List.of(),
-                List.of("iqc:result:view", "iqc:result:business:view", "iqc:sensitive:conversation:read",
-                        "iqc:sensitive:pii:read"),
+                "iqc-platform", username, username, "iqc-platform", List.of(), List.of(), List.of(),
                 0, null, null, Map.of()));
     }
 
