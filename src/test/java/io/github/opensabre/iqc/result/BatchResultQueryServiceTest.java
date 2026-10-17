@@ -40,6 +40,7 @@ class BatchResultQueryServiceTest {
 
     @BeforeEach
     void setup() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "batch-task-query"), InspectionTask.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "batch-query"), ConversationInspectionResult.class);
         task = new InspectionTask(); task.setId("t1"); task.setConversationId("c1"); task.setStatus("SUCCEEDED");
         task.setRuleSnapshotJson("{\"schemeSnapshot\":{}}"); task.setCurrentExecutionId("e2");

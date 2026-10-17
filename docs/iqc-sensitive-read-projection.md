@@ -134,3 +134,7 @@ QualityConfigController的18个配置审计入口（Agent七项、规则/导入�
 原/results/business与/tasks/{id}/result-summary也返回归档文件名，不能绕过详情投影。现复用ResultReadProjection复制原BusinessConversationRow/IqcPage和BatchResultSummary/ConversationResultSummary；文件名沿原CUSTOM字段规则，任务名沿原自由文本规则，只有完整+PII双授权返回原展示文本。ID、状态、原BigDecimal分数（含0/null）、分页current/size/total、会话及各类统计保持，不重新计算或修改原对象。
 
 两个入口在原service查询前刷新固定基础授权：业务分页只要求其已有iqc:result:business:view，不额外误要求legacy result:view；批次汇总仍result:view。保留原Task数据范围，不新增资源或路由；成功返回no-store/nosniff。查询Audit只记录目标/元数据，不含请求/响应正文；缺敏感组件的嵌入构造fail-closed。标签聚合等其他副本仍待独立核验，不以本批声明全读取面已保护。Root未新增或执行测试，构建及B验证以协作记录为准。
+
+业务分页/汇总已与反馈投影合并保留。业务分页taskId可省略，审计不再把可空筛选值作为目标键，保留原查询元数据及正文关闭。新增BusinessSummaryPrivacyTest覆盖四种敏感grant组合、原对象不变、零分/null分、分页与全部会话统计不重算、授权撤销先于第二次查询及批次固定result:view；原InspectionResultControllerTest改用完整接线和仅business:view的敏感授权模拟，MockMvc验证no-store/nosniff与业务分页零分及总数。13724终态exit0，连同反馈4项和结果投影6项，本轮共14项通过；此处MockMvc不含真实网关/PDP，直接Controller撤销模拟也不代替组织服务真实授权验收。
+
+补跑原查询服务测试发现单类运行依赖其它测试预热InspectionTask的MyBatis lambda元数据，66105首轮15项中1error。夹具按已有TableInfoHelper模式显式初始化实体后，74081最终exit0，BatchResultQueryServiceTest15+BusinessSummaryPrivacyTest2+InspectionResultControllerTest2共19项零失败/错误/跳过，涵盖原任务无权/无可见任务边界。未修改生产查询服务或降低断言；日志/tmp/iqc-business-summary-scope-final.log。此次合并仍非当前完整默认套件验收。
