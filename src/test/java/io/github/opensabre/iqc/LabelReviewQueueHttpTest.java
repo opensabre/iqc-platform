@@ -121,6 +121,8 @@ class LabelReviewQueueHttpTest {
                   ended_time timestamp, business_type varchar(64), business_no varchar(128), tags_json clob,
                   source_file_name varchar(255), source_fingerprint varchar(128), message_count int,
                   error_count int, ignored_blank_lines int, status varchar(32), owner_group_id varchar(64),
+                  audio_sha256 varchar(64), audio_size_bytes bigint, audio_media_type varchar(128),
+                  audio_duration_ms bigint,
                   created_by varchar(128), created_time timestamp, updated_by varchar(128), updated_time timestamp)
                 """);
         jdbc.update("INSERT INTO iqc_conversation (id, source_file_name) VALUES ('conversation','隔离测试会话')");
