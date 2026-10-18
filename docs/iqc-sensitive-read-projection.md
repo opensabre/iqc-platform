@@ -276,3 +276,9 @@ PipelineAssetController.trial/task在访问冻结草稿、发布版本或Selecto
 InspectionTask新增taskPresentation仅exist=false/NON_NULL，由taskReceipt在HTTP副本上生成，复用已有iqc-task-presentation-v1任务类型/labelOnly判断，扩展hasLabels、正整数schemeDraftRevision及格式受限selectedVariantCode。无名称、Prompt、规则/变量或任意快照JSON。未知/损坏不伪造修订或标签类型，原存储/冻结序列化和hash不变；执行/恢复等原回执自动保留这些展示信息。
 
 InspectionSchemeController trial/trials/task分别在领域调用前刷新原scheme:trial:create/trial:view/use，缺接线拒绝，成功no-store/nosniff，无正文Audit及id目标。试跑创建/列表及正式模板任务的BATCH/SCHEDULED、默认/显式variant分支统一taskReceipt，不附原冻结正文。原请求幂等、修订、数据范围、任务参数互斥及发布证据验证保留。UI优先公共元数据，旧响应无元数据仍兼容原展示；新响应未知/不完整元数据明确提示并阻止确认发布，不回退私密快照。variant只显示受限代码，避免自由名称扩散。方案配置/模板读取、通用任务列表/详情等尚待；当前仅构建检查，不代替真实角色、HTTP、浏览器验收。
+
+### Scheme试跑公共元数据默认MVC专项
+
+在d4e2e91接A0363666为f5427d8，新增SchemeTaskPresentationHttpTest，四FULL/PII组合覆盖POST trials、GET trials、BATCH/SCHEDULED默认/指定variant四任务分支，以及run/resume回执。验证不返回冻结正文，保留schema/kind/labelOnly/hasLabels/正整数draftRevision/格式受限variant，原任务JSON与派生字段不被修改、原异步executionId保持。坏或歧义快照保留UNKNOWN，非整数修订/非法variant不生成公开证据，固定基础grant拒绝先于domain。既有InspectionSchemeControllerTest补当前授权+真实projection构造夹具，原参数/校验断言保留。
+
+首83843为36项31通过/5失败，原因是新增测试误用POST /trial，既有生产路由为/trials。只修测试路径，不改生产路由/权限。最终90721 exit0，/tmp/iqc-scheme-task-presentation-http-final.log；按日志创建时间核对四份XML均为本轮：SchemeTaskPresentationHttpTest6、InspectionSchemeControllerTest9、TaskCommandHttpPrivacyTest10、EvaluationCommandHttpPrivacyTest11，共36项，0 failures/errors/skipped。默认MVC/真实投影，领域/PDP/worker mock，不代表浏览器未知元数据发布保护或真实组织/SQL验收；通用任务GET仍在另一批，完整I1–I7未完成。
