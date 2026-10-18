@@ -12,4 +12,7 @@ public class EvaluationDataset extends BasePo {
     private Integer activeVersion;
     private String status;
     private String ownerGroupId;
+    @com.baomidou.mybatisplus.annotation.TableField(exist=false)
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private java.util.Map<String,Object> privacy;
 }

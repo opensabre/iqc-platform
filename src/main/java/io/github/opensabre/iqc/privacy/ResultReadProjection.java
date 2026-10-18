@@ -424,4 +424,28 @@ public final class ResultReadProjection {
                 benchmarkPair(source.experiment(),access),source.baseline(),source.candidate(),source.complete(),source.deltas());
     }
 
+    public io.github.opensabre.iqc.quality.model.EvaluationDataset dataset(
+            io.github.opensabre.iqc.quality.model.EvaluationDataset source,
+            SensitiveReadAccessService.Access access, boolean detailRead) {
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.quality.model.EvaluationDataset();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead && access.fullConversation() && access.pii();
+        copy.setName(text(copy.getName(),access.fullConversation() && access.pii()));
+        var metadata=new LinkedHashMap<String,Object>();
+        metadata.put("policyVersion","iqc-dataset-draft-read-v1");metadata.put("canonicalPayloadVisible",canonical);
+        metadata.put("canReadFull",access.fullConversation());metadata.put("canReadPii",access.pii());
+        metadata.put("withheldFields",canonical?List.of():List.of("draftConfigJson"));
+        if(!canonical){
+            copy.setDraftConfigJson(null);metadata.put("previewState",detailRead?"NOT_INCLUDED":"SUMMARY_ONLY");
+            if(detailRead && source.getDraftConfigJson()!=null){
+                try{
+                    if(source.getDraftConfigJson().length()>1024*1024)throw new IllegalArgumentException();
+                    var draft=json.readValue(source.getDraftConfigJson(),io.github.opensabre.iqc.quality.evaluation.DatasetDraft.class);
+                    metadata.put("members",draft.members());metadata.put("previewState","AVAILABLE");
+                }catch(java.io.IOException | RuntimeException invalid){metadata.put("previewState","INVALID_DRAFT");}
+            }
+        }
+        copy.setPrivacy(metadata);return copy;
+    }
+
 }
