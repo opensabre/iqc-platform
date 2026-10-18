@@ -510,4 +510,34 @@ public final class ResultReadProjection {
         metadata.put("withheldFields",withheld);copy.setPrivacy(metadata);return copy;
     }
 
+    public io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CallPage gatewayCalls(
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CallPage source,SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(source);Objects.requireNonNull(access);
+        boolean reveal=access.fullConversation() && access.pii() && access.prompt();
+        var rows=source.records().stream().map(row -> {
+            var original=row.reconciliation();
+            var reconciliation=original==null?null:new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ReconciliationView(
+                    original.callId(),original.modelKey(),original.tokens(),original.cost(),original.currency(),original.atUtc(),
+                    original.owner(),original.userId(),reveal?original.evidence():null);
+            return new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CallView(
+                    row.callId(),row.modelKey(),row.logicalRecordId(),row.ruleId(),
+                    row.owner(),row.status(),row.reservedAtUtc(),row.settledAtUtc(),
+                    row.inputTokens(),row.outputTokens(),row.totalTokens(),text(row.responseModelId(),reveal),
+                    row.usageStatus(),row.errorType(),row.capacityReleasedAtUtc(),row.capacityReleasedBy(),
+                    row.capacityReleaseReason(),reveal ? row.capacityReleaseEvidence() : null,row.taskId(),row.executionId(),
+                    row.nodeId(),row.runIndex(),row.conversationId(),row.modelProfileId(),
+                    row.modelProfileVersion(),row.pricingHash(),row.pricingCurrency(),row.calculatedCost(),
+                    row.costStatus(),text(row.requestedModelName(),reveal),row.cacheReadInputTokens(),row.cacheWriteInputTokens(),
+                    row.maxOutputTokens(),row.outputTokenParameter(),row.outputLimitStatus(),row.toolRoundIndex(),
+                    row.contextWindowTokens(),text(row.deploymentRef(),reveal),row.toolExecutionStartedAtUtc(),row.budgetReservedTokens(),
+                    row.budgetReservedCost(),row.budgetCurrency(),row.budgetPolicyVersion(),row.budgetStatus(),
+                    reveal ? row.budgetEvidenceRef() : null,reconciliation);
+        }).toList();
+        var metadata=new LinkedHashMap<String,Object>();metadata.put("policyVersion","iqc-model-call-read-v1");
+        metadata.put("evidenceVisible",reveal);metadata.put("canReadFull",access.fullConversation());
+        metadata.put("canReadPii",access.pii());metadata.put("canReadPrompt",access.prompt());
+        metadata.put("withheldFields",reveal?List.of():List.of("capacityReleaseEvidence","budgetEvidenceRef","reconciliation.evidence"));
+        return new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CallPage(rows,source.current(),source.size(),source.total(),source.costSummary(),metadata);
+    }
+
 }

@@ -284,3 +284,9 @@ PeriodicScheduleController/EventSubscriptionController.instances分别在原quer
 ModelGatewayController的ConfigureCapacity.concurrencyLimit/budget、ReconcileBudget.tokens/cost、RecoverBudget.budget五个JsonNode record字段复用已存在HumanFindingReviewEvaluator的ExactValueDeserializer和HttpExactValueDeserializer，分别支持Jackson2领域/历史调用和默认Jackson3 MVC字段绑定。局部转换保留整数、极长小数及字符串，不改变全局mapper/HTTP转换器、持久化类型或预算服务；原并发canConvertToInt、版本精确字符串、Token/金额字符串及证据/确认/状态校验保持，不放宽数值。
 
 该接线来自对已验证Gold跨代问题的同类输入面排查；本批仅test-compile，未在这些预算入口复现或执行HTTP测试，不宣称行为验收已通过。PRD§18.3和安全条款要求模型调用数据可配置落盘，现GatewayCall账本只有用量/费用/容量元数据，不含模型请求/响应正文；该日志配置需求仍待设计实施，不因字段绑定修复声明完成，也不新增重复日志表。
+
+### 模型调用账本列表自由证据
+
+ModelGatewayController.calls和TaskModelCallController.page在query前刷新各自原model-gateway:calls:view/task:model-calls:view，不追加错误的task:view要求，原全局管理员/任务数据范围检查保留；成功no-store/nosniff，无正文Audit，任务查询仅id目标。ResultReadProjection.gatewayCalls复制原CallView，人工capacityReleaseEvidence、budgetEvidenceRef、reconciliation.evidence仅FULL+PII+Prompt三grant齐全才原文，否则null；请求模型名/响应模型名/部署引用沿既有文本规则。操作者身份、状态、日期、全部Token及精确金额字符串、hash、版本、预算/容量事实不变，costSummary直接保留原对象，不重算统计。
+
+沿用原CallPage增加可空privacy并保留旧5参构造，不新建日志表/副作用，不修改GatewayCall存储或预算对账证据。UI提示凭据受限，隐藏不等于没有凭据；请求开始清旧列表/隐私状态并沿原generation防迟到。容量详情与写回执等其它读取面仍待，现有日志账本不含模型请求/响应正文，模型调用数据可配置落盘依然未实施；不能以本次列表投影声明完成该PRD要求或全I7。当前仅构建检查，默认MVC、真实账号/SQL/浏览器验收待协作补齐。
