@@ -327,3 +327,11 @@ PeriodicScheduleController/EventSubscriptionController.instances分别在原quer
 ModelGatewayController的ConfigureCapacity.concurrencyLimit/budget、ReconcileBudget.tokens/cost、RecoverBudget.budget五个JsonNode record字段复用已存在HumanFindingReviewEvaluator的ExactValueDeserializer和HttpExactValueDeserializer，分别支持Jackson2领域/历史调用和默认Jackson3 MVC字段绑定。局部转换保留整数、极长小数及字符串，不改变全局mapper/HTTP转换器、持久化类型或预算服务；原并发canConvertToInt、版本精确字符串、Token/金额字符串及证据/确认/状态校验保持，不放宽数值。
 
 该接线来自对已验证Gold跨代问题的同类输入面排查；本批仅test-compile，未在这些预算入口复现或执行HTTP测试，不宣称行为验收已通过。PRD§18.3和安全条款要求模型调用数据可配置落盘，现GatewayCall账本只有用量/费用/容量元数据，不含模型请求/响应正文；该日志配置需求仍待设计实施，不因字段绑定修复声明完成，也不新增重复日志表。
+
+### 模型容量与预算默认 HTTP 字段绑定验证
+
+`ModelBudgetHttpContractTest` 使用默认 MVC converter，隔离 GatewayCallService，覆盖 ConfigureCapacity 的 concurrencyLimit/budget、ReconcileBudget 的 tokens/cost、RecoverBudget 的 budget 五个跨代 JsonNode 字段。检查大于JS安全整数的版本号、Long上限Token、18位小数金额与完整嵌套预算原样传递；另以嵌套数字验证BigDecimal精度，外层第二JSON文档必须拒绝。
+
+并发非整型/int溢出、版本非规范或long溢出、Token非字符串/负数/非规范/溢出及金额非字符串/科学计数/超长值在调用领域服务前拒绝。供应商未确认与缺证据仅检查false/null原样传递，不将控制器mock测试当作实际供应商核验或预算政策校验。并发业务区间0–10000、完整政策字段、CAS和恢复隔离规则属于原GatewayCallService/GatewayBudgetPolicy，仍需领域或真实数据库验证。未改framework/全局转换器或放宽外层多文档校验。
+
+最终34265退出0，`/tmp/iqc-model-budget-http-contract-final.log`；三份本轮新XML：ModelBudgetHttpContractTest31、TaskConfigurationHttpPrivacyTest11、TaskReadHttpPrivacyTest13，共55项，0失败/错误/跳过。首68240为55项54通过/1失败，诊断54388确认外层第二文档已抛HttpMessageNotReadableException，真实框架advice按既有协议返回HTTP200/020000；测试改为该协议+解析异常+无领域调用，生产/框架未改。尚未进行真实服务预算校验、SQL/角色/browser或新默认完整套件。
