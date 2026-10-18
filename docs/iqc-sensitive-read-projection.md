@@ -231,3 +231,7 @@ BenchmarkController的create/pair/report分别在领域调用前刷新既有benc
 数据集page/get/create/update/availability在领域调用前分别刷新原dataset:view/detail:view/manage/update/availability，沿现有敏感接线no-store/nosniff，两个查询补无正文Audit。ResultReadProjection.dataset只复制PO；专用详情且FULL+PII双grant才返回原draftConfigJson，限制模式隐藏整个原草稿，仅在校验成功时提供精确sampleId/versionNo引用；不返回description。损坏或超限明确INVALID_DRAFT，不回退原文。名称沿既有文本规则，不保证识别任意无标签PII。
 
 目录与所有写回执始终不附原草稿或成员预览，不能借列表/写权限绕过详情读取。privacy仅exist=false/NON_NULL，原版本、修订、成员、状态及存储不改。UI未知/受限展示只读，不能将遮罩名称/缺省说明重写为原数据；保存先消费元数据回执、清旧历史/快照并独立GET，读取失败明确“已保存但重新读取失败”，保留受限只读状态，不建议重复提交。原直接写命令不新增FULL/PII要求，服务范围和CAS保持。当前仅构建检查，角色/浏览器/HTTP验收及完整I1–I7仍待。
+
+### 通用任务写回执
+
+InspectionTaskController.create/cancel/pause/priority复用taskReceipt，始终不返回任务冻结快照、Prompt、筛选/集合JSON、触发/重试请求或错误正文；保留原任务ID、状态、计数等回执元数据。五个写入口（含无返回值delete）在领域操作前刷新原task:create/cancel/execute/delete固定grant，缺敏感组件拒绝，不新增写命令的FULL/PII要求；成功no-store/nosniff。写Audit显式关闭请求/响应正文，路径操作保留id目标。原服务状态转换、任务范围、创建用量记录保持，响应仅副本，未改存储。已核对任务UI四写返回均未消费冻结配置，操作后走原refresh。list/get/executions以及执行/恢复等其它控制器仍待独立保护，不以此声明全部任务读取已收口；当前仅编译检查，不代表行为/角色/浏览器验收。
