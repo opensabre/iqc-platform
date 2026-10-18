@@ -9,6 +9,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class LlmQualityProperties {
     /** spring-ai is the Boot 4 compatible default; http remains available for rollback. */
     private String provider = "spring-ai";
+    /** Optional diagnostic bodies; accounting and frozen business evidence are independent. */
+    private CallData callData = new CallData();
+    @Data
+    public static class CallData {
+        private boolean enabled = false;
+        private int maxBytesPerBody = 65536;
+        private int retentionHours = 24;
+    }
     private String endpoint;
     private String path = "/v1/chat/completions";
     private String apiKey;

@@ -15,16 +15,19 @@ import java.util.function.*;
 @Component @Slf4j
 public class ModelGateway {
     private final GatewayCallService calls;
+    private final GatewayCallDataService callData;
     private final GovernanceRateLimiter rateLimiter;
     private final LlmQualityProperties properties;
     private final io.micrometer.core.instrument.MeterRegistry meters;
     @org.springframework.beans.factory.annotation.Autowired
     public ModelGateway(GatewayCallService calls,GovernanceRateLimiter rateLimiter,LlmQualityProperties properties,
-            org.springframework.beans.factory.ObjectProvider<io.micrometer.core.instrument.MeterRegistry> meters){
-        this.calls=calls;this.rateLimiter=rateLimiter;this.properties=properties;this.meters=meters.getIfAvailable();
+            org.springframework.beans.factory.ObjectProvider<io.micrometer.core.instrument.MeterRegistry> meters,GatewayCallDataService callData){
+        this.callData=callData;this.calls=calls;this.rateLimiter=rateLimiter;this.properties=properties;this.meters=meters.getIfAvailable();
     }
+    public ModelGateway(GatewayCallService calls,GovernanceRateLimiter rateLimiter,LlmQualityProperties properties,
+            org.springframework.beans.factory.ObjectProvider<io.micrometer.core.instrument.MeterRegistry> meters){this(calls,rateLimiter,properties,meters,null);}
     public ModelGateway(GatewayCallService calls,GovernanceRateLimiter rateLimiter,LlmQualityProperties properties){
-        this.calls=calls;this.rateLimiter=rateLimiter;this.properties=properties;this.meters=null;
+        this.calls=calls;this.rateLimiter=rateLimiter;this.properties=properties;this.meters=null;this.callData=null;
     }
     private void recordInvocation(long started,String outcome){
         if(meters==null)return;
@@ -65,6 +68,11 @@ public class ModelGateway {
     @Transactional(propagation=Propagation.NOT_SUPPORTED)
     public <T> Invocation<T> invokeTracked(GatewayCallService.ModelIdentity model,GatewayCallService.Context context,Supplier<T> invoke,
                         Function<T,GatewayCallService.Usage> usage){
+        return invokeTracked(model,context,invoke,usage,null,null);
+    }
+    @Transactional(propagation=Propagation.NOT_SUPPORTED)
+    public <T> Invocation<T> invokeTracked(GatewayCallService.ModelIdentity model,GatewayCallService.Context context,Supplier<T> invoke,
+            Function<T,GatewayCallService.Usage> usage,Supplier<String> requestData,Function<T,String> responseData){
         if(properties.getRateLimitMaxCount()<1 || properties.getRateLimitPeriod()<1){
             metric("iqc.model.gateway.admission",1,"stage","CONFIGURATION","outcome","DENIED");
             throw new GatewayAdmissionException("GATEWAY_RATE_CONFIGURATION_INVALID");}
@@ -81,12 +89,19 @@ public class ModelGateway {
         catch(GatewayAdmissionException denied){metric("iqc.model.gateway.admission",1,"stage","CAPACITY","outcome","DENIED");throw denied.withModelKey(model.key());}
         catch(RuntimeException unavailable){metric("iqc.model.gateway.admission",1,"stage","CAPACITY","outcome","UNAVAILABLE");throw new GatewayAdmissionException("MODEL_CAPACITY_ADMISSION_UNAVAILABLE");}
         metric("iqc.model.gateway.admission",1,"stage","CAPACITY","outcome","ACCEPTED");
+        String archivedRequest=null;
+        if(callData!=null && callData.enabled() && requestData!=null)try{archivedRequest=requestData.get();}
+        catch(RuntimeException invalid){log.warn("Model diagnostic request unavailable type={}",invalid.getClass().getSimpleName());}
         final T response;long invocationStarted=System.nanoTime();String invocationOutcome="UNKNOWN";
         try{try{response=invoke.get();invocationOutcome="RESPONDED";}finally{recordInvocation(invocationStarted,invocationOutcome);}}
-        catch(RuntimeException failure){try{calls.unknown(handle,failure);metric("iqc.model.gateway.settlement",1,"outcome","UNKNOWN_RECORDED");}catch(RuntimeException appendFailure){
+        catch(RuntimeException failure){archive(handle,archivedRequest,null);try{calls.unknown(handle,failure);metric("iqc.model.gateway.settlement",1,"outcome","UNKNOWN_RECORDED");}catch(RuntimeException appendFailure){
                 metric("iqc.model.gateway.settlement",1,"outcome","UNKNOWN_UNCONFIRMED");
                 log.warn("Model call remains unconfirmed call={} type={}",handle.callId(),appendFailure.getClass().getSimpleName());}
             throw failure;}
+        String archivedResponse=null;
+        if(callData!=null && callData.enabled() && responseData!=null)try{archivedResponse=responseData.apply(response);}
+        catch(RuntimeException invalid){log.warn("Model diagnostic response unavailable type={}",invalid.getClass().getSimpleName());}
+        archive(handle,archivedRequest,archivedResponse);
         GatewayCallService.Usage observed;
         try{observed=usage.apply(response);}catch(RuntimeException invalidUsage){observed=new GatewayCallService.Usage(-1L,null,null,null);}
         if(observed==null)observed=GatewayCallService.Usage.missing();
@@ -98,4 +113,10 @@ public class ModelGateway {
         metric("iqc.model.gateway.settlement",1,"outcome","RESPONSE_CONFIRMED");recordUsage(observed);
         return new Invocation<>(response,handle);
     }
+    private void archive(GatewayCallService.Handle handle,String request,String response){
+        if(callData==null || !callData.enabled())return;
+        try{callData.store(handle,request,response);}
+        catch(RuntimeException unavailable){log.warn("Model diagnostic archive unavailable call={} type={}",handle.callId(),unavailable.getClass().getSimpleName());}
+    }
+
 }

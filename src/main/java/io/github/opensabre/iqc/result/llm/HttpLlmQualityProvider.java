@@ -107,17 +107,18 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
         int attempts = Math.max(1, Math.min(properties.getMaxAttempts(), 3));
         for (int attempt = 1; attempt <= attempts; attempt++) {
             try {
-                java.util.function.Supplier<JsonNode> request=()->restClient.post().uri(properties.getPath())
-                        .body(Map.of("model", properties.getModel(), "temperature", 0,
+                var requestBody=Map.of("model", properties.getModel(), "temperature", 0,
                                 "response_format", Map.of("type", "json_object"),
                                 "messages", List.of(
                                         Map.of("role", "system", "content", "你是质检规则执行器。只返回 JSON，不要 Markdown。必须包含 hit 布尔值和 reason 字符串；规则要求的标签值放入 labelValues 数组，可扩展的新标签放入 candidates 数组，不得臆造。"),
-                                Map.of("role", "user", "content", prompt(content, rule, preRuleFindings)))))
-                        .retrieve().body(JsonNode.class);
-                JsonNode response=gateway==null?request.get():gateway.invoke(
+                                Map.of("role", "user", "content", prompt(content, rule, preRuleFindings))));
+                java.util.function.Supplier<JsonNode> request=()->restClient.post().uri(properties.getPath())
+                        .body(requestBody).retrieve().body(JsonNode.class);
+                JsonNode response=gateway==null?request.get():gateway.invokeTracked(
                         new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity("HTTP",properties.getEndpoint(),properties.getModel()),
                         new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context(recordId,rule.path("id").asText("unknown"),callContext==null?null:callContext.owner(),callContext),request,
-                        HttpLlmQualityProvider::usage);
+                        HttpLlmQualityProvider::usage,()->objectMapper.valueToTree(requestBody).toString(),
+                        observed->observed==null?null:observed.toString()).response();
                 return parseEvaluation(response);
             } catch (RestClientException | IllegalArgumentException exception) {
                 last = new IllegalStateException(exception.getMessage(), exception);
