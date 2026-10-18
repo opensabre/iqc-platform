@@ -271,3 +271,8 @@ PipelineAssetController.trial/task在访问冻结草稿、发布版本或Selecto
 首轮64486为38项28通过/10失败：4项实际跨代绑定缺陷来自SelectorDefinition.Condition.value的Jackson2 JsonNode，默认Jackson3无法构造。仅该字段复用现有HttpExactValueDeserializer注解，保留领域类型、存储与全局转换器，精确NUMBER条件不经Double。其余6项更正夹具：delete沿框架既有void响应封装验证状态/缓存头/无敏感正文及真实删除调用；互斥参数码按IqcErrorType为1003；授权拒绝夹具提供有效原始int修订/版本，让绑定后实际执行授权。未改框架void响应协议或放宽输入校验。
 
 原InspectionTaskControllerTest创建夹具接当前固定grant和真实projection，改为响应副本身份断言，原RULE_ONLY参数与用量验证保留。最终48858 exit0，/tmp/iqc-task-command-http-privacy-final.log：TaskCommandHttpPrivacyTest10、InspectionTaskControllerTest3、BenchmarkDraftHttpPrivacyTest14、EvaluationCommandHttpPrivacyTest11，共38项，0 failures/errors/skipped。默认MVC与真实投影，领域/PDP/worker为mock，不称真实队列/SQL/browser验收；本批尚不包含Scheme元数据及通用任务读取保护，也未重跑默认全套，I1–I7仍未完成。
+### 方案试跑公共元数据与任务回执
+
+InspectionTask新增taskPresentation仅exist=false/NON_NULL，由taskReceipt在HTTP副本上生成，复用已有iqc-task-presentation-v1任务类型/labelOnly判断，扩展hasLabels、正整数schemeDraftRevision及格式受限selectedVariantCode。无名称、Prompt、规则/变量或任意快照JSON。未知/损坏不伪造修订或标签类型，原存储/冻结序列化和hash不变；执行/恢复等原回执自动保留这些展示信息。
+
+InspectionSchemeController trial/trials/task分别在领域调用前刷新原scheme:trial:create/trial:view/use，缺接线拒绝，成功no-store/nosniff，无正文Audit及id目标。试跑创建/列表及正式模板任务的BATCH/SCHEDULED、默认/显式variant分支统一taskReceipt，不附原冻结正文。原请求幂等、修订、数据范围、任务参数互斥及发布证据验证保留。UI优先公共元数据，旧响应无元数据仍兼容原展示；新响应未知/不完整元数据明确提示并阻止确认发布，不回退私密快照。variant只显示受限代码，避免自由名称扩散。方案配置/模板读取、通用任务列表/详情等尚待；当前仅构建检查，不代替真实角色、HTTP、浏览器验收。

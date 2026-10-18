@@ -15,7 +15,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
-import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -25,12 +24,33 @@ import java.util.TreeSet;
 /** Separates expert standard maintenance from ordinary use of published business templates. */
 @RestController
 @RequestMapping("/api/iqc/schemes")
-@RequiredArgsConstructor
 @Tag(name = "业务质检方案", description = "专家维护、草稿试跑、版本发布与模板任务")
 public class InspectionSchemeController {
     private final InspectionSchemeService schemes;
     private final SchemePublicationService publication;
     private final SchemeTaskService tasks;
+    private final io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive;
+    private final io.github.opensabre.iqc.privacy.ResultReadProjection projection;
+    @org.springframework.beans.factory.annotation.Autowired
+    public InspectionSchemeController(InspectionSchemeService schemes,SchemePublicationService publication,SchemeTaskService tasks,
+            io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive,
+            io.github.opensabre.iqc.privacy.ResultReadProjection projection){
+        this.schemes=schemes;this.publication=publication;this.tasks=tasks;this.sensitive=sensitive;this.projection=projection;
+    }
+    public InspectionSchemeController(InspectionSchemeService schemes,SchemePublicationService publication,SchemeTaskService tasks){
+        this(schemes,publication,tasks,null,null);
+    }
+    private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access access(String resource){
+        if(sensitive==null || projection==null)throw io.github.opensabre.iqc.governance.IqcException.invalidState("方案任务响应授权组件不可用");
+        var access=sensitive.current(java.util.Set.of(resource));
+        if(org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()
+                instanceof org.springframework.web.context.request.ServletRequestAttributes servlet && servlet.getResponse()!=null){
+            servlet.getResponse().setHeader("Cache-Control","private, no-store");
+            servlet.getResponse().setHeader("X-Content-Type-Options","nosniff");
+        }
+        return access;
+    }
+
 
     @GetMapping
     @ResourcePermission(code="iqc:scheme:manage", name="维护业务方案", type="iqc", description="查询业务方案草稿")
@@ -77,16 +97,21 @@ public class InspectionSchemeController {
     @PostMapping("/{id}/trials")
     @Operation(summary="创建草稿试跑任务", description="可选请求标识支持超时幂等重试；使用现有任务执行接口启动，最多 20 个可见会话")
     @ResourcePermission(code="iqc:scheme:trial:create", name="试跑业务方案", type="iqc", description="创建业务方案草稿试跑任务")
-    @Audit(operationType=OperationType.CREATE, description="创建业务方案试跑", module="IQC_SCHEME")
+    @Audit(operationType=OperationType.CREATE, description="创建业务方案试跑", module="IQC_SCHEME", request=false, response=false, key="#id")
     public InspectionTask trial(@PathVariable String id, @RequestBody @Valid TrialRequest request) {
-        return publication.trial(id, request.expectedRevision(), request.conversationIds(), request.requestId(),
-                request.variantCode(), request.runCount(), request.confidenceThreshold());
+        var access=access("iqc:scheme:trial:create");
+        return projection.taskReceipt(publication.trial(id, request.expectedRevision(), request.conversationIds(), request.requestId(),
+                request.variantCode(), request.runCount(), request.confidenceThreshold()),access);
     }
 
     @GetMapping("/{id}/trials")
     @Operation(summary="查询最近试跑", description="最近 20 条当前用户可见的方案试跑任务，修订号以任务快照为准")
     @ResourcePermission(code="iqc:scheme:trial:view", name="查看方案试跑", type="iqc", description="恢复业务方案试跑记录")
-    public List<InspectionTask> trials(@PathVariable String id) { return publication.trials(id); }
+    @Audit(operationType=OperationType.QUERY, description="读取方案试跑摘要", module="IQC_PRIVACY", request=false, response=false, key="#id")
+    public List<InspectionTask> trials(@PathVariable String id) {
+        var access=access("iqc:scheme:trial:view");
+        return publication.trials(id).stream().map(row -> projection.taskReceipt(row,access)).toList();
+    }
 
     @PostMapping("/{id}/publish")
     @Operation(summary="管理业务模板发布状态", description="PUBLISH 要求完整试跑与专家确认；DISABLE/ENABLE 切换方案可用性；ARCHIVE_VERSION/RESTORE_VERSION 仅作用于已被取代的发布版本")
@@ -113,8 +138,9 @@ public class InspectionSchemeController {
     @PostMapping("/{id}/versions/{versionNo}/tasks")
     @Operation(summary="使用业务模板创建任务", description="按请求标识幂等创建，可指定模板允许的 variantCode，省略则推荐；正式能力门禁仍适用，拒绝未声明字段及规则、评分或 Agent 覆盖")
     @ResourcePermission(code="iqc:scheme:use", name="使用业务模板", type="iqc", description="按已发布业务模板创建质检任务")
-    @Audit(operationType=OperationType.CREATE, description="使用业务模板创建任务", module="IQC_TASK")
+    @Audit(operationType=OperationType.CREATE, description="使用业务模板创建任务", module="IQC_TASK", request=false, response=false, key="#id")
     public InspectionTask task(@PathVariable String id, @PathVariable int versionNo, @RequestBody @Valid TaskRequest request) {
+        var access=access("iqc:scheme:use");
         if (!request.unsupportedFields().isEmpty())
             throw new IllegalArgumentException("模板任务不支持字段: " + String.join(", ", request.unsupportedFields()));
         String taskType = request.taskType() == null ? "BATCH" : request.taskType().trim().toUpperCase(java.util.Locale.ROOT);
@@ -123,20 +149,22 @@ public class InspectionSchemeController {
                 throw new IllegalArgumentException("批量模板任务不接受 scheduledTime 或 selectionFilter 字段");
             if (request.conversationIds() == null || request.conversationIds().isEmpty())
                 throw new IllegalArgumentException("批量模板任务必须选择会话");
-            return request.variantCode() == null
+            var task = request.variantCode() == null
                     ? tasks.create(id, versionNo, request.name(), request.conversationIds(), request.concurrency(), request.requestId())
                     : tasks.create(id, versionNo, request.name(), request.conversationIds(), request.concurrency(), request.requestId(), request.variantCode());
+            return projection.taskReceipt(task,access);
         }
         if ("SCHEDULED".equals(taskType)) {
             if (request.conversationIds() != null && !request.conversationIds().isEmpty())
                 throw new IllegalArgumentException("定时模板任务使用 selectionFilter，不能提交 conversationIds");
             if (request.scheduledTime() == null || request.scheduledTime().isBlank())
                 throw new IllegalArgumentException("定时模板任务必须指定 scheduledTime");
-            return request.variantCode() == null
+            var task = request.variantCode() == null
                     ? tasks.createScheduled(id, versionNo, request.name(), request.selectionFilter(),
                         parseScheduledTime(request.scheduledTime()), request.concurrency(), request.requestId())
                     : tasks.createScheduled(id, versionNo, request.name(), request.selectionFilter(),
                         parseScheduledTime(request.scheduledTime()), request.concurrency(), request.requestId(), request.variantCode());
+            return projection.taskReceipt(task,access);
         }
         throw new IllegalArgumentException("模板任务类型仅支持 BATCH 或 SCHEDULED");
     }
