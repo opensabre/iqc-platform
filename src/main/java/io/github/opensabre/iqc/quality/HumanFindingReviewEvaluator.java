@@ -61,6 +61,25 @@ public final class HumanFindingReviewEvaluator {
                     .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readValue(parser);
         }
     }
+    /** Field-local bridge for HTTP Jackson 3 while persisted domain trees remain Jackson 2. */
+    public static final class HttpExactValueDeserializer extends tools.jackson.databind.ValueDeserializer<JsonNode> {
+        private static final tools.jackson.databind.json.JsonMapper HTTP = tools.jackson.databind.json.JsonMapper.builder()
+                .enable(tools.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                // This mapper consumes one nested field; the outer MVC reader still checks the whole document.
+                .disable(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
+        @Override public JsonNode deserialize(tools.jackson.core.JsonParser parser,
+                tools.jackson.databind.DeserializationContext context) {
+            var tree = HTTP.readTree(parser);
+            try {
+                return new ObjectMapper().readerFor(JsonNode.class)
+                        .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                        .readValue(tree.toString());
+            } catch (java.io.IOException invalid) {
+                return context.reportInputMismatch(JsonNode.class, "精确 JSON 值无效");
+            }
+        }
+    }
+
     /** Original observations stay available; effective values are explicitly human and not re-fused outputs. */
     public record Projection(List<FindingFusion.Result> original,List<FindingFusion.Result> reviewed,List<Decision> decisions) {
         public Projection {original=List.copyOf(original);reviewed=List.copyOf(reviewed);decisions=List.copyOf(decisions);}

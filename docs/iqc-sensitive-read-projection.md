@@ -186,3 +186,13 @@ POST results/{resultId}/samples在进入原消息/业务候选服务前刷新既
 GoldSamplePrivacyTest使用真实投影及Controller直接调用，覆盖四grant组合、冻结消息预览、通用列表与金标专用读取边界、跨样本/会话和损坏快照拒绝预览、历史及写回执不含snapshot、原对象/Hash/分页保持及固定权限拒绝先于领域读写。服务隔离为mock；本批不代表HTTP/PDP/组织角色/数据库或前端迟到响应验收，运行终态见协作记录。先前1140默认全套仅属df525a4，不外推到新金标源。
 
 84131专项最终exit0，逐XML确认GoldSamplePrivacyTest5、FeedbackPrivacyTest4、BusinessReviewControllerTest10、GoldSampleReviewTest12、EvaluationDatasetVersionTest7，共38 run、0 failures/errors/skipped；日志/tmp/iqc-gold-sample-privacy.log。本轮为直接Controller与投影/领域服务既有测试组合，未重新执行默认完整套件，也未验证本批HTTP/PDP/UI路径。
+
+### 默认MVC金标请求的跨代树绑定
+
+GoldSampleHttpContractTest通过默认MockMvc路由/转换器执行GET样本与Gold的四敏感grant组合、预览条数/200字符、no-store/nosniff、源对象保持，以及PUT标注精确值和POST样本元数据回执。领域与组织授权为mock，不代表网络服务器/PDP/数据库验收。
+
+41055首轮11项中10通过、1 error：默认Jackson3 MVC转换器无法实例化GoldFinding.value的Jackson2 JsonNode，PUT请求在进入service前失败；单独用Jackson2 ObjectMapper读请求的既有测试不能覆盖此问题。已核对应用与framework WebMvc配置，未注册专用Jackson2 HTTP转换器，不修改框架或通过测试强制换转换器绕过。
+
+应用层复用HumanFindingReviewEvaluator原精确解码位置，新增HttpExactValueDeserializer用于金标请求字段：Jackson3局部精确数字树转成原Jackson2精确领域树。仅给GoldFinding.value、GoldDecision.labels内容、GoldSampleService.Annotation.businessContext补Jackson3字段注解，保留原Jackson2解码注解、持久化模型、共享mapper和历史hash。当前结果以协作记录终态为准；其它使用Jackson2树的HTTP请求面仍需逐项核验，不声称已全局迁移。
+
+17259中间回归30项29通过/1失败：字段级readTree默认尾随检查把下一个同层属性误当多余文档。仅局部HTTP字段mapper关闭FAIL_ON_TRAILING_TOKENS，外层MVC保持严格；新增完整请求后追加第二JSON文档返回400且授权/领域均未访问的回归。最终74757 exit0：GoldSampleHttpContractTest7、GoldSamplePrivacyTest5、GoldSampleReviewTest12、EvaluationDatasetVersionTest7，共31项，无失败/错误/跳过，日志/tmp/iqc-gold-sample-http-fragment-final.log。此为默认MockMvc契约及既有领域专项，不冒称真实PDP或完整全套验收。

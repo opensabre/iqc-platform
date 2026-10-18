@@ -8,7 +8,7 @@ import java.util.Set;
 
 /** Human expectation, without invented engine provenance or confidence. */
 public record GoldFinding(String code, Finding.ValueType valueType, Finding.State state,
-                          @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class) JsonNode value, List<String> evidenceMessageIds) {
+                          @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class) @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class) JsonNode value, List<String> evidenceMessageIds) {
     public GoldFinding {
         if (code == null || !code.matches("[A-Z][A-Z0-9_]{1,63}"))
             throw new IllegalArgumentException("invalid gold finding code");

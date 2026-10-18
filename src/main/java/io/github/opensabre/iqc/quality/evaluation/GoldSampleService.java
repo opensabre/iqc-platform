@@ -31,7 +31,7 @@ public class GoldSampleService {
     private final ObjectMapper json;
     public static final int MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
 
-    public record Annotation(Integer expectedRevision, List<GoldFinding> findings, @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class) JsonNode businessContext,
+    public record Annotation(Integer expectedRevision, List<GoldFinding> findings, @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class) @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class) JsonNode businessContext,
                              List<String> tags, GoldConversation.Difficulty difficulty, GoldDecision decision) { }
 
     public QualitySample get(String sampleId) { return require(sampleId, false); }
