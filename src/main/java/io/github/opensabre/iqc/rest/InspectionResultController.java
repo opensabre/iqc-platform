@@ -99,24 +99,26 @@ public class InspectionResultController {
 
     @PostMapping("/tasks/{id}/run")
     @ResourcePermission(code = "iqc:task:execute", name = "执行质检任务", type = "iqc", description = "执行质检任务")
-    @Audit(operationType = OperationType.SCAN, description = "执行 IQC 质检任务", module = "IQC_TASK")
+    @Audit(operationType = OperationType.SCAN, description = "执行 IQC 质检任务", module = "IQC_TASK", request = false, response = false, key = "#id")
     @RateLimit(sceneCode = "iqc-task-run", maxCount = 10, period = 60)
     public InspectionTask run(@PathVariable String id) {
+        var access = resultReadAccess(java.util.Set.of("iqc:task:execute"));
         InspectionTask task = executionService.queue(id);
         try{executionService.executeAsync(id,task.getCurrentExecutionId());}
         catch(org.springframework.core.task.TaskRejectedException busy){if(!workerEnabled)throw busy;log.info("event=iqc_api_backpressure taskId={} status=QUEUED",id);}
         usageCounterRecorder.record(new UsageRecord("inspection-task:run:" + id, null, "iqc-platform", "INSPECTION_TASK", id, "RUN", UsageOutcome.SUCCESS));
-        return task;
+        return resultProjection.taskReceipt(task,access);
     }
 
     @PostMapping("/tasks/{id}/resume")
     @ResourcePermission(code = "iqc:task:execute", name = "恢复质检任务", type = "iqc", description = "恢复已暂停的质检任务")
-    @Audit(operationType = OperationType.UPDATE, description = "恢复 IQC 质检任务", module = "IQC_TASK")
+    @Audit(operationType = OperationType.UPDATE, description = "恢复 IQC 质检任务", module = "IQC_TASK", request = false, response = false, key = "#id")
     public InspectionTask resume(@PathVariable String id) {
+        var access = resultReadAccess(java.util.Set.of("iqc:task:execute"));
         InspectionTask task = executionService.resume(id);
         try{executionService.executeAsync(id,task.getCurrentExecutionId());}
         catch(org.springframework.core.task.TaskRejectedException busy){if(!workerEnabled)throw busy;log.info("event=iqc_api_backpressure taskId={} status=QUEUED",id);}
-        return task;
+        return resultProjection.taskReceipt(task,access);
     }
 
     @GetMapping("/results")
