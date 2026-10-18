@@ -540,4 +540,53 @@ public final class ResultReadProjection {
         return new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CallPage(rows,source.current(),source.size(),source.total(),source.costSummary(),metadata);
     }
 
+    private Map<String,Object> schedulePrivacy(SensitiveReadAccessService.Access access,boolean canonical,List<String> withheld){
+        var result=new LinkedHashMap<String,Object>();result.put("policyVersion","iqc-schedule-read-v1");
+        result.put("canonicalPayloadVisible",canonical);result.put("canReadFull",access.fullConversation());
+        result.put("canReadPii",access.pii());result.put("canReadPrompt",access.prompt());
+        result.put("withheldFields",canonical?List.of():withheld);return result;
+    }
+
+    public io.github.opensabre.iqc.schedule.model.PeriodicSchedule periodicSchedule(io.github.opensabre.iqc.schedule.model.PeriodicSchedule source,
+            SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.schedule.model.PeriodicSchedule();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead && access.fullConversation() && access.pii() && access.prompt();
+        copy.setName(text(copy.getName(),access.fullConversation() && access.pii()));
+        if(!canonical){copy.setDraftConfigJson(null);copy.setLastError(null);}
+        copy.setPrivacy(schedulePrivacy(access,canonical,List.of("draftConfigJson","lastError")));
+        return copy;
+    }
+
+    public io.github.opensabre.iqc.schedule.model.EventSubscription eventSubscription(io.github.opensabre.iqc.schedule.model.EventSubscription source,
+            SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.schedule.model.EventSubscription();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead && access.fullConversation() && access.pii() && access.prompt();
+        copy.setName(text(copy.getName(),access.fullConversation() && access.pii()));
+        if(!canonical){copy.setDraftConfigJson(null);copy.setLastError(null);}
+        copy.setPrivacy(schedulePrivacy(access,canonical,List.of("draftConfigJson","lastError")));
+        return copy;
+    }
+
+    public io.github.opensabre.iqc.schedule.model.PeriodicScheduleRevision periodicRevision(io.github.opensabre.iqc.schedule.model.PeriodicScheduleRevision source,
+            SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.schedule.model.PeriodicScheduleRevision();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead && access.fullConversation() && access.pii() && access.prompt();
+        if(!canonical)copy.setSnapshotJson(null);
+        copy.setPrivacy(schedulePrivacy(access,canonical,List.of("snapshotJson")));
+        return copy;
+    }
+
+    public io.github.opensabre.iqc.schedule.model.EventSubscriptionRevision subscriptionRevision(io.github.opensabre.iqc.schedule.model.EventSubscriptionRevision source,
+            SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.schedule.model.EventSubscriptionRevision();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead && access.fullConversation() && access.pii() && access.prompt();
+        if(!canonical)copy.setSnapshotJson(null);
+        copy.setPrivacy(schedulePrivacy(access,canonical,List.of("snapshotJson")));
+        return copy;
+    }
+
 }

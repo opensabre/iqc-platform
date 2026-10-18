@@ -290,3 +290,13 @@ ModelGatewayController的ConfigureCapacity.concurrencyLimit/budget、ReconcileBu
 ModelGatewayController.calls和TaskModelCallController.page在query前刷新各自原model-gateway:calls:view/task:model-calls:view，不追加错误的task:view要求，原全局管理员/任务数据范围检查保留；成功no-store/nosniff，无正文Audit，任务查询仅id目标。ResultReadProjection.gatewayCalls复制原CallView，人工capacityReleaseEvidence、budgetEvidenceRef、reconciliation.evidence仅FULL+PII+Prompt三grant齐全才原文，否则null；请求模型名/响应模型名/部署引用沿既有文本规则。操作者身份、状态、日期、全部Token及精确金额字符串、hash、版本、预算/容量事实不变，costSummary直接保留原对象，不重算统计。
 
 沿用原CallPage增加可空privacy并保留旧5参构造，不新建日志表/副作用，不修改GatewayCall存储或预算对账证据。UI提示凭据受限，隐藏不等于没有凭据；请求开始清旧列表/隐私状态并沿原generation防迟到。容量详情与写回执等其它读取面仍待，现有日志账本不含模型请求/响应正文，模型调用数据可配置落盘依然未实施；不能以本次列表投影声明完成该PRD要求或全I7。当前仅构建检查，默认MVC、真实账号/SQL/浏览器验收待协作补齐。
+
+### 周期与订阅配置/历史读取
+
+PeriodicScheduleController及EventSubscriptionController配置目录、详情、创建、更新、发布、启停、历史分别刷新各自原固定资源，先于服务调用；preview也刷新其原preview资源。原负责人/组范围、CAS、不可变发布、调度与事件触发不改，不新增写命令的FULL/PII/Prompt要求。查询审计无正文，路径操作仅id，成功no-store/nosniff；旧缺接线构造拒绝。
+
+ResultReadProjection复用四个原PO响应副本：目录与所有写回执永不附draftConfigJson/snapshotJson；详情与历史正文只有FULL+PII+Prompt三grant才原文。受限lastError为空，名称沿原文本规则；版本号/修订/活动指针/状态/计划时间/原hash/分页及身份保留，不重算、不修改原存储。新增privacy仅exist=false/NON_NULL，不改原冻结序列化或新增表。历史原本是唯一版本正文入口，沿原versions:view独立授权，不增加虚假版本路由。
+
+两页UI未知/受限policy只展示元数据，隐藏配置表单，不以默认Cron/事件配置填入真实草稿；不能从副本编辑、预览或确认发布。最近错误明确未展示，不当作没有错误。保存/发布/启停成功先清旧历史/配置，再独立GET；失败提示操作已完成但重新读取失败，不建议重复提交。当前编辑存在未保存内容时先阻止同资产启停，避免静默丢弃。重新读取先清旧正文并用generation拒绝迟到；关闭/卸载清配置和历史。版本正文按原字符串展示，不做浮点美化。
+
+仅构建检查，真实角色/HTTP/浏览器与调度SQL仍待验收；其它Selector/Pipeline/Scheme配置/人工复核副本及全部I1–I7仍未完成。
