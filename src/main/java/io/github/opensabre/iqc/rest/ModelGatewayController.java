@@ -15,7 +15,7 @@ public class ModelGatewayController {
     @GetMapping("/capacity/{modelKey}")
     @ResourcePermission(code="iqc:model-gateway:capacity:view",name="查看模型容量",type="iqc",description="质检管理员查看模型并发占用和配置版本")
     public GatewayCallService.CapacityView capacity(@PathVariable String modelKey){return calls.getCapacity(modelKey);}
-    public record ConfigureCapacity(com.fasterxml.jackson.databind.JsonNode concurrencyLimit,String expectedVersion,com.fasterxml.jackson.databind.JsonNode budget) {
+    public record ConfigureCapacity(@com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class) @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class) com.fasterxml.jackson.databind.JsonNode concurrencyLimit,String expectedVersion,@com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class) @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class) com.fasterxml.jackson.databind.JsonNode budget) {
         public ConfigureCapacity(com.fasterxml.jackson.databind.JsonNode concurrencyLimit,String expectedVersion){this(concurrencyLimit,expectedVersion,null);}
     }
     @PutMapping("/capacity/{modelKey}")
@@ -38,7 +38,7 @@ public class ModelGatewayController {
         if(request==null)throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("缺少恢复凭据");
         return calls.releaseCapacity(callId,request.modelKey(),request.reason(),request.evidence(),Boolean.TRUE.equals(request.remoteStopped()));
     }
-    public record ReconcileBudget(String modelKey,com.fasterxml.jackson.databind.JsonNode tokens,com.fasterxml.jackson.databind.JsonNode cost,
+    public record ReconcileBudget(String modelKey,@com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class) @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class) com.fasterxml.jackson.databind.JsonNode tokens,@com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class) @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class) com.fasterxml.jackson.databind.JsonNode cost,
             String currency,String evidence,Boolean verified) { }
     @PostMapping("/calls/{callId}/budget-reconciliation")
     @ResourcePermission(code="iqc:model-gateway:calls:reconcile",name="核对模型预算",type="iqc",description="质检管理员根据供应商最终凭据核对预算承诺")
@@ -54,7 +54,7 @@ public class ModelGatewayController {
         catch(NumberFormatException invalid){throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("对账Token超出范围");}
     }
 
-    public record RecoverBudget(String expectedVersion,com.fasterxml.jackson.databind.JsonNode budget) { }
+    public record RecoverBudget(String expectedVersion,@com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class) @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class) com.fasterxml.jackson.databind.JsonNode budget) { }
     @PostMapping("/capacity/{modelKey}/budget-recovery")
     @ResourcePermission(code="iqc:model-gateway:budget:recover",name="恢复模型预算隔离",type="iqc",description="管理员完成最终对账并重新核定供应商契约后恢复模型预算")
     @io.github.opensabre.governance.audit.annotations.Audit(operationType=io.github.opensabre.governance.audit.annotations.OperationType.UPDATE,

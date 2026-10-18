@@ -322,3 +322,8 @@ PeriodicScheduleController/EventSubscriptionController.instances分别在原quer
 缺授权组件与基础资源撤销均 fail closed。资源注解绑定原 PROMPT，限流声明为独立场景30次/60秒，审计声明仅id且无请求/响应正文；反射验证声明不代表实际限流/审计切面的运行证明。权限迁移未执行，浏览器清理旧快照与迟到响应拦截仍待实际交互验收。
 
 原64045退出0，日志 `/tmp/iqc-task-configuration-http-privacy.log`。五份本轮新XML：TaskConfigurationHttpPrivacyTest11、TaskReadHttpPrivacyTest13、InspectionTaskControllerTest3、SchemeTaskPresentationHttpTest6、TaskCommandHttpPrivacyTest10，共43项，0失败/错误/跳过。未运行新的默认全套，也未执行权限SQL。
+### 模型容量与预算HTTP字段边界
+
+ModelGatewayController的ConfigureCapacity.concurrencyLimit/budget、ReconcileBudget.tokens/cost、RecoverBudget.budget五个JsonNode record字段复用已存在HumanFindingReviewEvaluator的ExactValueDeserializer和HttpExactValueDeserializer，分别支持Jackson2领域/历史调用和默认Jackson3 MVC字段绑定。局部转换保留整数、极长小数及字符串，不改变全局mapper/HTTP转换器、持久化类型或预算服务；原并发canConvertToInt、版本精确字符串、Token/金额字符串及证据/确认/状态校验保持，不放宽数值。
+
+该接线来自对已验证Gold跨代问题的同类输入面排查；本批仅test-compile，未在这些预算入口复现或执行HTTP测试，不宣称行为验收已通过。PRD§18.3和安全条款要求模型调用数据可配置落盘，现GatewayCall账本只有用量/费用/容量元数据，不含模型请求/响应正文；该日志配置需求仍待设计实施，不因字段绑定修复声明完成，也不新增重复日志表。
