@@ -212,3 +212,9 @@ EvaluationDatasetController创建、更新、冻结、可用性四个写操作�
 PipelineEvaluationController分页与详情在原service前分别刷新固定evaluation:results:view/result:view，保留原任务范围、轮次、产物hash及来源校验。成功no-store/nosniff，查询Audit无正文。分页始终仅元数据，防止绕过独立详情授权；详情只有FULL、PII、Prompt三grant同时具备才返回原actualJson，因为任意机器输出、变量或错误可能复现输入及Prompt。其余模式只展示原运行枚举状态、轨迹/事实数量及明确的POLICY_SATISFIED标记；不展示变量、值、错误或轨迹正文，不把受限正文视作无命中。解析失败/超限返回INVALID_OUTPUT，不回退原文。
 
 仅复制原EvaluationSampleResult，privacy字段exist=false/NON_NULL；原status/durationMs、dataset/gold/actual哈希与执行/样本身份不改、不重算。UI读取前清旧详情并拒绝迟到覆盖，未知policy不显示正文；受限摘要明确标记，完整产物按原字符串展示避免数值舍入。现有Prompt敏感资源的实际登记/授予仍待，不借系统ADMIN或JWT绕过；当前缺grant仅限制正文，不阻断原基础权限下元数据查看。评测create回执、report和通用task读取及数据集草稿仍需单独处理；当前仅构建检查，不代表真实组织/浏览器/数据库验收。
+
+### 冻结数据集及评测输出的默认MVC验收
+
+在215b034基础集成A审计ccfdfc6、数据集a8e24e7与评测a0b47d0（本树86ed3f9/319008a/2ee0897），保留反馈、通用样本及精确字段桥。DatasetEvaluationHttpPrivacyTest使用默认MockMvc、真实ResultReadProjection，领域/PDP依赖隔离mock；四种数据集FULL/PII组合与八种评测FULL/PII/Prompt组合验证独立详情读取、列表/历史/冻结回执永不含正文、冻结消息预览的3条/200字符限制、零时长和原对象不变、跨数据集/损坏快照及非法评测输出明确状态、当前授权失败先于领域访问。
+
+原59362 exit0，/tmp/iqc-dataset-evaluation-http-privacy.log；本轮逐XML为DatasetEvaluationHttpPrivacyTest14、GoldSampleHttpContractTest7、GoldSamplePrivacyTest5、EvaluationDatasetVersionTest7，共33项，0 failures/errors/skipped。本测试不证明真实组织/PDP/数据库/浏览器，不包含A后续评测创建回执和报告增量，不外推整个I7或默认完整回归。
