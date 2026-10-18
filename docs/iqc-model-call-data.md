@@ -77,3 +77,18 @@ GatewayCallDataBehaviorTest已按未部署的新协议调整：真实解密后�
 `GatewayCallDataReadTest` 直接比较读取前后两个密文、状态、记录时间及到期时间；正常和八种破坏读取均不修改这些列。实体 JSON 比较仅验证其他可序列化字段，不能替代敏感列比较。
 
 原 Maven handle 95099 退出 0，日志 `/tmp/iqc-diagnostic-http-privacy.log`。五份本轮 XML 共 53 项（HTTP12、读取14、归档7、gateway隔离7、调用列表13），零失败、错误、跳过。此证据不包括真实 PDP、SQL、审计/限流切面、浏览器或全量回归；输入为已处理会话，无语音转换。
+
+## 隔离 MySQL 验证（B，2026-10-18）
+
+新增 `IsolatedMysqlCallDataIT` 复用 `IsolatedMysqlMigrationIT.verifyIsolatedServer`，核对端口34307及全新专属datadir后建随机库，加载正式 Flyway、生产 MyBatis Mapper、真实 AES 和 Spring 事务代理；不启动业务调度或供应商。四项验证：
+
+- 新增两个 LONGTEXT 及 expiry 索引；错误 model 不写，正确归档解密还原处理好的会话，第二次写不覆盖；除五个归档列外整行字段保持相等。
+- 双线程各自真实事务竞争同一 call，最终 request/response 来自同一次归档。
+- 外层事务回滚后，原 `REQUIRES_NEW` 归档仍已提交。
+- capture 关闭时205条过期归档首轮清200、次轮清5；正文及expiry清除、recorded保留；未来归档不变。所有206行原状态、9007199254740993 Token、18位小数费用均保留。
+
+同步将原迁移专项末版本断言更新为1.1.73，原五项覆盖全新库、1.1.31/1.1.44历史升级、动作journal及Finding升级。全新库执行54份迁移至1.1.73，validate74份，再次migrate0；不把74份文件等同执行74次。
+
+原handle4294退出0，日志 `/tmp/iqc-call-data-mysql-final.log`；本轮XML 5+4=9项零失败、错误、跳过。MySQL8.0.34目录 `/private/tmp/iqc-mysql-validation.J0Pl2x`，随机归档库finally删除，服务器正常关闭，pid/socket均消失。旧迁移测试固定库仅存在该已关闭临时datadir。
+
+布局检查脚本仍退出1：旧V1.1.64触发器定义内INSERT被其逐行DML检测误判，已人工核对，未改旧SQL或隐藏失败；检查器改进仍待。该批不证明真实PDP/供应商、HTTP到数据库完整链路、浏览器或全部PRD；无语音转换工作。

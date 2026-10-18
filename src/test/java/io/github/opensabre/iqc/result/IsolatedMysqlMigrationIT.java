@@ -304,7 +304,7 @@ class IsolatedMysqlMigrationIT {
             try (var query = connection.createStatement();
                  var history = query.executeQuery("SELECT version,success FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1")) {
                 assertThat(history.next()).isTrue();
-                assertThat(history.getString(1)).isEqualTo("1.1.71");
+                assertThat(history.getString(1)).isEqualTo("1.1.73");
                 assertThat(history.getBoolean(2)).isTrue();
             }
             try (var query = connection.createStatement();
