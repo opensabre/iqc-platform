@@ -340,3 +340,11 @@ ModelGatewayController的ConfigureCapacity.concurrencyLimit/budget、ReconcileBu
 ModelGatewayController.calls和TaskModelCallController.page在query前刷新各自原model-gateway:calls:view/task:model-calls:view，不追加错误的task:view要求，原全局管理员/任务数据范围检查保留；成功no-store/nosniff，无正文Audit，任务查询仅id目标。ResultReadProjection.gatewayCalls复制原CallView，人工capacityReleaseEvidence、budgetEvidenceRef、reconciliation.evidence仅FULL+PII+Prompt三grant齐全才原文，否则null；请求模型名/响应模型名/部署引用沿既有文本规则。操作者身份、状态、日期、全部Token及精确金额字符串、hash、版本、预算/容量事实不变，costSummary直接保留原对象，不重算统计。
 
 沿用原CallPage增加可空privacy并保留旧5参构造，不新建日志表/副作用，不修改GatewayCall存储或预算对账证据。UI提示凭据受限，隐藏不等于没有凭据；请求开始清旧列表/隐私状态并沿原generation防迟到。容量详情与写回执等其它读取面仍待，现有日志账本不含模型请求/响应正文，模型调用数据可配置落盘依然未实施；不能以本次列表投影声明完成该PRD要求或全I7。当前仅构建检查，默认MVC、真实账号/SQL/浏览器验收待协作补齐。
+
+### 调用账本默认 MVC 边界验证
+
+`ModelCallReadHttpPrivacyTest` 使用默认MVC与真实投影，八种FULL/PII/Prompt组合覆盖全局和Task两类列表。验证三个自由凭据字段仅三权限齐全可见、模型文本PII按同一组合保护，并逐字段比较其余日期、ID、hash、版本、Token和金额事实。用大于JS安全整数的Long及18位小数金额检查HTTP精度；costSummary完整节点相等，直接投影保留同一summary对象，源页序列化前后不变。
+
+原model-gateway:calls:view/task:model-calls:view分别先于query，不额外要求task:view；撤权与缺接线在领域调用前拒绝，原领域管理/Task scope拒绝仍透传。缺对账不生成对账、空页不生成记录或汇总。两读取Audit无正文仅反射声明检查。组织/PDP和领域服务隔离mock，不代表真实范围、审计切面、浏览器或模型调用正文落盘验收。后者由另一批负责，不能将账本读取投影当作日志正文全需求完成。
+
+原26063退出0，`/tmp/iqc-model-call-read-http-privacy.log`。四份本轮新XML：ModelCallReadHttpPrivacyTest13、ModelBudgetHttpContractTest31、TaskConfigurationHttpPrivacyTest11、TaskReadHttpPrivacyTest13，共68项，0失败/错误/跳过。未验证真实组织/SQL/浏览器或新默认全套，不扩大本专项结论。
