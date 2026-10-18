@@ -218,3 +218,8 @@ PipelineEvaluationController分页与详情在原service前分别刷新固定eva
 在215b034基础集成A审计ccfdfc6、数据集a8e24e7与评测a0b47d0（本树86ed3f9/319008a/2ee0897），保留反馈、通用样本及精确字段桥。DatasetEvaluationHttpPrivacyTest使用默认MockMvc、真实ResultReadProjection，领域/PDP依赖隔离mock；四种数据集FULL/PII组合与八种评测FULL/PII/Prompt组合验证独立详情读取、列表/历史/冻结回执永不含正文、冻结消息预览的3条/200字符限制、零时长和原对象不变、跨数据集/损坏快照及非法评测输出明确状态、当前授权失败先于领域访问。
 
 原59362 exit0，/tmp/iqc-dataset-evaluation-http-privacy.log；本轮逐XML为DatasetEvaluationHttpPrivacyTest14、GoldSampleHttpContractTest7、GoldSamplePrivacyTest5、EvaluationDatasetVersionTest7，共33项，0 failures/errors/skipped。本测试不证明真实组织/PDP/数据库/浏览器，不包含A后续评测创建回执和报告增量，不外推整个I7或默认完整回归。
+### 评测创建任务回执及报告当前授权
+
+评测create在领域写入前刷新原evaluation:task:create，返回ResultReadProjection.taskReceipt副本：保留任务ID、状态及运行元数据，移除agent/rule/label快照、Prompt、触发请求、重试策略与错误、筛选JSON、会话/规则集合JSON。写grant不能充当读冻结输入grant，即使全敏感grant也不在创建回执附带这些内容。任务名称沿现有文本保护，领域存储不变；UI创建仅消费task.id，当前流程兼容。普通任务及Benchmark入口尚待独立接线。
+
+报告刷新原evaluation:report:view先于service，沿用原Task/Execution范围与完整金标分母、数值指标及原样本来源，不重算、不投影成空报告。查询Audit仅taskId且无正文，成功no-store/nosniff；缺接线拒绝。构建检查不能替代实际组织/HTTP/浏览器行为验收。
