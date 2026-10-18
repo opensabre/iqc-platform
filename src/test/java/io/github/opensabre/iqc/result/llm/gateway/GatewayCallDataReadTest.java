@@ -32,10 +32,12 @@ class GatewayCallDataReadTest {
         row.setCallDataRecordedAtUtc(LocalDateTime.now(ZoneOffset.UTC));row.setCallDataExpiresAtUtc(row.getCallDataRecordedAtUtc().plusHours(1));
         row.setRequestDataEncrypted(envelope("call","model","REQUEST","private-request"));row.setResponseDataEncrypted(envelope("call","model","RESPONSE","private-response"));when(rows.selectOne(any())).thenReturn(row);
     }
+    // Sensitive columns are JsonIgnore: compare them directly rather than through entity JSON.
+    private java.util.List<Object> archiveSnapshot(){return java.util.Arrays.asList(row.getRequestDataEncrypted(),row.getResponseDataEncrypted(),row.getCallDataStatus(),row.getCallDataRecordedAtUtc(),row.getCallDataExpiresAtUtc());}
     private String envelope(String id,String model,String side,String body){return cipher.encrypt(json.createObjectNode().put("schemaVersion","iqc-model-call-data-v1").put("callId",id).put("modelKey",model).put("side",side).put("body",body).toString());}
     @Test void validEnvelopesReadWithoutChangingStoredCiphertext()throws Exception{
-        String before=json.writeValueAsString(row);var view=service.read("task","call");assertEquals("CAPTURED",view.state());assertEquals("private-request",view.requestJson());assertEquals("private-response",view.responseJson());
-        assertEquals(before,json.writeValueAsString(row));var order=inOrder(tasks,rows,encryptors);order.verify(tasks).get("task");order.verify(rows).selectOne(any());order.verify(encryptors).getIfAvailable();
+        var encryptedBefore=archiveSnapshot();String before=json.writeValueAsString(row);var view=service.read("task","call");assertEquals("CAPTURED",view.state());assertEquals("private-request",view.requestJson());assertEquals("private-response",view.responseJson());
+        assertEquals(encryptedBefore,archiveSnapshot());assertEquals(before,json.writeValueAsString(row));var order=inOrder(tasks,rows,encryptors);order.verify(tasks).get("task");order.verify(rows).selectOne(any());order.verify(encryptors).getIfAvailable();
         var captor=org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.Wrapper.class);verify(rows).selectOne(captor.capture());
         String sql=captor.getValue().getSqlSegment();assertTrue(sql.contains("call_id"));assertTrue(sql.contains("task_id"));
         assertEquals("call",view.callId());assertEquals("run",view.executionId());
@@ -52,7 +54,7 @@ class GatewayCallDataReadTest {
             case "status"->row.setCallDataStatus("REQUEST_ONLY");
             case "ciphertext"->row.setResponseDataEncrypted("broken-ciphertext");
         }
-        var view=service.read("task","call");assertEquals("UNREADABLE",view.state());assertNull(view.requestJson());assertNull(view.responseJson());
+        var before=archiveSnapshot();var view=service.read("task","call");assertEquals("UNREADABLE",view.state());assertNull(view.requestJson());assertNull(view.responseJson());assertEquals(before,archiveSnapshot());
     }
     @Test void expiredBodyIsDeniedBeforeDecryptEvenBeforePhysicalPurge(){
         row.setCallDataExpiresAtUtc(LocalDateTime.now(ZoneOffset.UTC).minusSeconds(1));var view=service.read("task","call");assertEquals("EXPIRED",view.state());assertNull(view.requestJson());assertNull(view.responseJson());verifyNoInteractions(encryptors);
@@ -69,6 +71,6 @@ class GatewayCallDataReadTest {
         row.setCallDataStatus("SIZE_LIMIT");assertEquals("SIZE_LIMIT",service.read("task","call").state());verifyNoInteractions(encryptors);
     }
     @Test void unavailableKeyWithholdsAllBodies(){
-        when(encryptors.getIfAvailable()).thenReturn(null);var view=service.read("task","call");assertEquals("UNREADABLE",view.state());assertNull(view.requestJson());assertNull(view.responseJson());
+        when(encryptors.getIfAvailable()).thenReturn(null);var before=archiveSnapshot();var view=service.read("task","call");assertEquals("UNREADABLE",view.state());assertNull(view.requestJson());assertNull(view.responseJson());assertEquals(before,archiveSnapshot());
     }
 }

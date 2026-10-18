@@ -69,3 +69,11 @@ GatewayCallDataBehaviorTest已按未部署的新协议调整：真实解密后�
 读取前检查任务范围，拒绝时不查询账本或获取解密器；query按taskId/callId绑定。已到期直接EXPIRED且不解密，不依赖物理清理；缺归档NOT_RECORDED、超限SIZE_LIMIT、缺任务组件或调用拒绝。mapper/任务服务隔离mock，更新条件与查询条件不能证明实际SQL范围或并发；HTTP独立资源/三敏感grant、DDL、真实角色及浏览器另行验证。旧64171的裸密文行为证据不能外推新信封协议。
 
 原86758退出0，`/tmp/iqc-call-data-envelope-read.log`，五份本轮新XML：GatewayCallDataReadTest14、GatewayCallDataBehaviorTest7、ModelGatewayCallDataIsolationTest7、ModelCallReadHttpPrivacyTest13、ModelBudgetHttpContractTest31，共72项，0失败/错误/跳过。新增读取源对象JSON相等不包含JsonIgnore密文列，密文前后直接比较仍需补齐；未将此断言当作密文不变证明。HTTP诊断端点、SQL与完整I1–I7仍待。
+
+## 诊断读取 HTTP 验证（B，2026-10-18）
+
+`ModelDiagnosticReadHttpPrivacyTest` 使用默认 MVC 和真实 Access 判定，组织授权与诊断服务隔离：八种 FULL/PII/Prompt 组合只有全具备时读取；固定原日志 view、新诊断 view、Prompt 基础资源，不追加 task:view。撤销基础授权、缺组件、任务范围拒绝不返回正文；授权检查先于诊断读取。响应验证 private/no-store 与 nosniff，并核对独立资源、30/60 限流及不记录请求/响应正文的 Audit 声明。注解检查不证明切面实际执行。
+
+`GatewayCallDataReadTest` 直接比较读取前后两个密文、状态、记录时间及到期时间；正常和八种破坏读取均不修改这些列。实体 JSON 比较仅验证其他可序列化字段，不能替代敏感列比较。
+
+原 Maven handle 95099 退出 0，日志 `/tmp/iqc-diagnostic-http-privacy.log`。五份本轮 XML 共 53 项（HTTP12、读取14、归档7、gateway隔离7、调用列表13），零失败、错误、跳过。此证据不包括真实 PDP、SQL、审计/限流切面、浏览器或全量回归；输入为已处理会话，无语音转换。
