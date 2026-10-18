@@ -131,7 +131,11 @@ public class GatewayCallService {
     /** Same snapshot and authorization as the paged facts; totals cover all matching pages. */
     public record CurrencyCost(String currency,String callCount,String knownCount,String unknownCount,String knownSubtotal) { }
     public record CostSummary(String callCount,String knownCount,String unknownCount,List<CurrencyCost> currencies) { }
-    public record CallPage(List<CallView> records,long current,long size,long total,CostSummary costSummary) { }
+    public record CallPage(List<CallView> records,long current,long size,long total,CostSummary costSummary,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            java.util.Map<String,Object> privacy) {
+        public CallPage(List<CallView> records,long current,long size,long total,CostSummary costSummary){this(records,current,size,total,costSummary,null);}
+    }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public CallPage pageWithSummary(String modelKey,String status,long current,long size){
         var page=page(modelKey,status,current,size);

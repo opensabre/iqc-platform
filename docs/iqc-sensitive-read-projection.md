@@ -335,3 +335,8 @@ ModelGatewayController的ConfigureCapacity.concurrencyLimit/budget、ReconcileBu
 并发非整型/int溢出、版本非规范或long溢出、Token非字符串/负数/非规范/溢出及金额非字符串/科学计数/超长值在调用领域服务前拒绝。供应商未确认与缺证据仅检查false/null原样传递，不将控制器mock测试当作实际供应商核验或预算政策校验。并发业务区间0–10000、完整政策字段、CAS和恢复隔离规则属于原GatewayCallService/GatewayBudgetPolicy，仍需领域或真实数据库验证。未改framework/全局转换器或放宽外层多文档校验。
 
 最终34265退出0，`/tmp/iqc-model-budget-http-contract-final.log`；三份本轮新XML：ModelBudgetHttpContractTest31、TaskConfigurationHttpPrivacyTest11、TaskReadHttpPrivacyTest13，共55项，0失败/错误/跳过。首68240为55项54通过/1失败，诊断54388确认外层第二文档已抛HttpMessageNotReadableException，真实框架advice按既有协议返回HTTP200/020000；测试改为该协议+解析异常+无领域调用，生产/框架未改。尚未进行真实服务预算校验、SQL/角色/browser或新默认完整套件。
+### 模型调用账本列表自由证据
+
+ModelGatewayController.calls和TaskModelCallController.page在query前刷新各自原model-gateway:calls:view/task:model-calls:view，不追加错误的task:view要求，原全局管理员/任务数据范围检查保留；成功no-store/nosniff，无正文Audit，任务查询仅id目标。ResultReadProjection.gatewayCalls复制原CallView，人工capacityReleaseEvidence、budgetEvidenceRef、reconciliation.evidence仅FULL+PII+Prompt三grant齐全才原文，否则null；请求模型名/响应模型名/部署引用沿既有文本规则。操作者身份、状态、日期、全部Token及精确金额字符串、hash、版本、预算/容量事实不变，costSummary直接保留原对象，不重算统计。
+
+沿用原CallPage增加可空privacy并保留旧5参构造，不新建日志表/副作用，不修改GatewayCall存储或预算对账证据。UI提示凭据受限，隐藏不等于没有凭据；请求开始清旧列表/隐私状态并沿原generation防迟到。容量详情与写回执等其它读取面仍待，现有日志账本不含模型请求/响应正文，模型调用数据可配置落盘依然未实施；不能以本次列表投影声明完成该PRD要求或全I7。当前仅构建检查，默认MVC、真实账号/SQL/浏览器验收待协作补齐。
