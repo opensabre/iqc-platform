@@ -39,3 +39,13 @@ iqc:
 ## 当前证据与待验收
 
 仅离线skipTests test-compile通过，未新增/运行测试、SQL、真实供应商或加密数据库验证。新DDL未执行，部署前需按原迁移流程集成。待验证默认off无序列化/无正文写、开关on密文及精确正文、UTF-8限额、追加一次/失败隔离、工具续调来源、TTL关闭后清理、并发和结算不变。此实现不代表完整I7或PRD已验收。
+
+## 行为验证与模型身份键修复（2026-10-18）
+
+新增GatewayCallDataBehaviorTest使用真实Jasypt PBEWITHHMACSHA512ANDAES_256加密器，验证默认关闭、双侧加密且不传明文入mapper、UTF8字节超限不存半截、配置边界、缺加密器/加密失败无写入、REQUEST_ONLY及关闭后仍执行有界清理。mapper隔离，更新条件只证明代码声明的callId/modelKey/recordedAt fence，不替代数据库并发一次写入或DDL验证。
+
+新增ModelGatewayCallDataIsolationTest使用真实ModelGateway控制流，验证关闭不调用serializer/store、开启归档、归档或serializer失败仍结算一次、供应商失败保留原异常并记录unknown/请求侧、结算失败不重发供应商。供应商/账本/限流隔离mock，不等同真实HTTP/Spring router工具续调或供应商验收。
+
+首轮78166为57项50通过/1失败/6错误。清理断言以status=子串误判call_data_status，改为独立列边界；六错误实际暴露ModelIdentity.key把非JSON长度frame文本交给SelectorAssetService.hash的JSON规范化入口。最小修复仅模型身份按原UTF8长度frame字节使用JDK SHA256，Selector与定价JSON摘要保持不变；增加固定摘要向量、中文UTF8、provider别名、host/端口规范化及不同模型区分回归。未新增摘要模型或全局算法更改。
+
+最终64171退出0，`/tmp/iqc-call-data-behavior-final.log`；四份本轮新XML：GatewayCallDataBehaviorTest7、ModelGatewayCallDataIsolationTest7、ModelCallReadHttpPrivacyTest13、ModelBudgetHttpContractTest31，共58项，0失败/错误/跳过。真实加密/控制流通过，但mapper与供应商隔离，SQL一次写入/TTL/新DDL、HTTP与Spring router来源、解密读取/真实角色及浏览器、新默认全套仍待。
