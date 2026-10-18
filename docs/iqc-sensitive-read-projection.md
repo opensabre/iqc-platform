@@ -372,3 +372,11 @@ ConversationSelectorController.preview和SelectorAssetController.preview分别�
 ResultReadProjection.selectorPreview仅复制原Preview：FULL+PII双grant才显示原employeeId和员工维度map；否则员工标识和两个employees map为null并明确withheld，不生成掩码员工键而造成碰撞/错误合计。文件名复用原字段mask，渠道沿原文本规则。候选/命中/抽样/最终计数、limited、时间窗口、会话ID、团队/部门结构ID及其原分布、时间/风险和definitionHash均保持，不重算、不修改原选集或定义。组织结构ID用于原分布关联，不视作员工标识。自由文本规则不保证识别任意无标签PII。
 
 原Preview增加可空privacy且保留旧12参构造，null不序列化；领域内部旧预览保持原结构，不改Selection持久化/冻结hash或新建表。UI明确员工信息未展示不是没有员工，未知policy隐藏样本/分布明细；旧无privacy响应仅兼容历史部署。当前仅编译/构建检查，HTTP四grant、精确数值/source/分布不变及真实角色/browser仍待。Selector资产草稿/历史/Prepared定义读取尚未接本投影，不能声称整个Selector域已收口。
+
+### B Selector 预览默认 MVC 验证（2026-10-18）
+
+`SelectorPreviewHttpPrivacyTest` 的八种 FULL/PII/Prompt 组合同时覆盖 inline 与精确发布版本预览：仅 FULL+PII 就可见原身份，不额外要求 Prompt；受限 employeeId 和两个员工分布为 null，带 withheld 标记，不能改成空分布或合并掩码键。文件名/渠道不泄露原电话号码。组织结构 ID 和两类组织分布、每个其余计数/时间窗口/limited/定义 hash 与默认 HTTP 原值逐字段相等，源对象不变；无分布和空样本仍为未知/空样本。
+
+两种固定基础权限核对；撤权先于精确定义解析/查询，缺接线 failclosed，领域 scope 拒绝透传；definitionJson 原字符串和显式 previewSize 按授权->解析->选数顺序传递。此处资产解析和选数为 mock，只证明 HTTP 透传与投影，不证明实际解析或数据库选数；Audit/RateLimit 只核对无正文及20/60声明。
+
+原81216退出0，日志 `/tmp/iqc-selector-preview-http-privacy.log`；四份本轮XML SelectorPreview14+ScheduleConfiguration19+TaskRead13+ModelDiagnostic12=58项，零失败/错误/跳过。未覆盖 Selector 资产草稿/历史/Prepared 后续增量、真实PDP/浏览器或新默认全套。数据源为已处理会话，无语音转换。
