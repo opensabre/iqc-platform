@@ -252,3 +252,6 @@ BenchmarkController的create/pair/report分别在领域调用前刷新既有benc
 首轮68072为46项38通过/8失败：默认Jackson3把Jackson2 ObjectNode当普通POJO，仅返回节点属性而丢失selection/comparison内容。基于测试实际classpath独立复现/tmp/IqcTreeSerialization.java确认。仅BenchmarkService.Pair两个HTTP JSON字段新增HttpTreeSerializer，以局部精确Jackson3树writeTree输出；保留Jackson2领域类型、原比较算法/存储/历史hash/全局converter，不改framework。此补丁不代表所有跨代HTTP树均已验证。
 
 最终68868 exit0，/tmp/iqc-benchmark-draft-http-privacy-final.log；逐XML BenchmarkDraftHttpPrivacyTest14、EvaluationCommandHttpPrivacyTest11、DatasetEvaluationHttpPrivacyTest14、GoldSampleHttpContractTest7，共46项，0 failures/errors/skipped。无SQL/浏览器/真实组织验收，未重跑默认完整套件，整体I1–I7仍未完成。
+### 通用任务写回执
+
+InspectionTaskController.create/cancel/pause/priority复用taskReceipt，始终不返回任务冻结快照、Prompt、筛选/集合JSON、触发/重试请求或错误正文；保留原任务ID、状态、计数等回执元数据。五个写入口（含无返回值delete）在领域操作前刷新原task:create/cancel/execute/delete固定grant，缺敏感组件拒绝，不新增写命令的FULL/PII要求；成功no-store/nosniff。写Audit显式关闭请求/响应正文，路径操作保留id目标。原服务状态转换、任务范围、创建用量记录保持，响应仅副本，未改存储。已核对任务UI四写返回均未消费冻结配置，操作后走原refresh。list/get/executions以及执行/恢复等其它控制器仍待独立保护，不以此声明全部任务读取已收口；当前仅编译检查，不代表行为/角色/浏览器验收。
