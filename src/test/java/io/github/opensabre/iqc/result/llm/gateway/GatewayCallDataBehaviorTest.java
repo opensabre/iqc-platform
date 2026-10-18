@@ -40,7 +40,7 @@ class GatewayCallDataBehaviorTest {
         var values=update.getParamNameValuePairs().values();assertTrue(values.contains("call"));assertTrue(values.contains("model"));assertTrue(values.contains("CAPTURED"));
         assertFalse(values.contains("request 私密"));assertFalse(values.contains("response 私密"));
         var decoded=new java.util.ArrayList<String>();
-        for(Object value:values)if(value instanceof String text)try{decoded.add(cipher.decrypt(text));}catch(org.jasypt.exceptions.EncryptionOperationNotPossibleException ignored){}
+        for(Object value:values)if(value instanceof String text)try{decoded.add(new com.fasterxml.jackson.databind.ObjectMapper().readTree(cipher.decrypt(text)).path("body").asText());}catch(org.jasypt.exceptions.EncryptionOperationNotPossibleException | java.io.IOException ignored){}
         assertEquals(java.util.Set.of("request 私密","response 私密"),new java.util.HashSet<>(decoded));
         var times=values.stream().filter(LocalDateTime.class::isInstance).map(LocalDateTime.class::cast).sorted().toList();
         assertEquals(2,times.size());assertFalse(times.get(0).isBefore(before));assertEquals(Duration.ofHours(24),Duration.between(times.get(0),times.get(1)));
@@ -52,12 +52,12 @@ class GatewayCallDataBehaviorTest {
     }
     @Test void missingEncryptorOrEncryptionFailureWritesNothing(){
         properties.getCallData().setEnabled(true);assertThrows(IllegalStateException.class,()->service.store(handle,"req","res"));
-        var cipher=mock(StringEncryptor.class);when(encryptors.getIfAvailable()).thenReturn(cipher);when(cipher.encrypt("req")).thenThrow(new IllegalStateException("unavailable"));
+        var cipher=mock(StringEncryptor.class);when(encryptors.getIfAvailable()).thenReturn(cipher);when(cipher.encrypt(anyString())).thenThrow(new IllegalStateException("unavailable"));
         assertThrows(IllegalStateException.class,()->service.store(handle,"req","res"));verifyNoInteractions(rows);
     }
     @Test void requestOnlyCaptureIsExplicitAndEmptyCaptureIsSkipped(){
         properties.getCallData().setEnabled(true);service.store(handle,null,null);verifyNoInteractions(rows,encryptors);
-        var cipher=mock(StringEncryptor.class);when(encryptors.getIfAvailable()).thenReturn(cipher);when(cipher.encrypt("req")).thenReturn("encrypted");
+        var cipher=mock(StringEncryptor.class);when(encryptors.getIfAvailable()).thenReturn(cipher);when(cipher.encrypt(anyString())).thenReturn("encrypted");
         service.store(handle,"req",null);assertTrue(update().getParamNameValuePairs().containsValue("REQUEST_ONLY"));
     }
     @Test void invalidRetentionOrSizeConfigurationWritesNothing(){

@@ -61,3 +61,11 @@ GET /api/iqc/tasks/{id}/model-calls/{callId}/diagnostics使用独立资源iqc:ta
 UI仅在任务调用列表显示独立授权按钮；切换任务、重新加载、关闭或卸载会清除正文并失效旧请求，未知协议或不匹配来源不显示正文。JSON按原字符串显示，避免数值舍入，不回写为业务产物。
 
 组织迁移V20261018_02仅本地草案，资源/按钮900264挂任务900103，默认仅IQC_ADMIN/IQC_QUALITY_MANAGER；不隐含其它敏感grant。SQL尚未执行。当前仅编译/构建，权限、真实加密/DB、跨调用与请求响应调换、到期竞争和浏览器交互验收仍待。
+
+## 信封绑定读取行为专项
+
+GatewayCallDataBehaviorTest已按未部署的新协议调整：真实解密后解析绑定信封中的body，保留加密器不可用/失败无写入及原大小/TTL测试。GatewayCallDataReadTest使用真实AES与读取服务，覆盖callId、modelKey、REQUEST/RESPONSE侧绑定、schema、裸明文旧格式、第二JSON文档、归档状态和密文损坏，任一失败均不返回两侧正文；缺密钥同样UNREADABLE。
+
+读取前检查任务范围，拒绝时不查询账本或获取解密器；query按taskId/callId绑定。已到期直接EXPIRED且不解密，不依赖物理清理；缺归档NOT_RECORDED、超限SIZE_LIMIT、缺任务组件或调用拒绝。mapper/任务服务隔离mock，更新条件与查询条件不能证明实际SQL范围或并发；HTTP独立资源/三敏感grant、DDL、真实角色及浏览器另行验证。旧64171的裸密文行为证据不能外推新信封协议。
+
+原86758退出0，`/tmp/iqc-call-data-envelope-read.log`，五份本轮新XML：GatewayCallDataReadTest14、GatewayCallDataBehaviorTest7、ModelGatewayCallDataIsolationTest7、ModelCallReadHttpPrivacyTest13、ModelBudgetHttpContractTest31，共72项，0失败/错误/跳过。新增读取源对象JSON相等不包含JsonIgnore密文列，密文前后直接比较仍需补齐；未将此断言当作密文不变证明。HTTP诊断端点、SQL与完整I1–I7仍待。
