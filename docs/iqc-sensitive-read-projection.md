@@ -307,3 +307,10 @@ PeriodicScheduleController/EventSubscriptionController.instances分别在原quer
 首轮32项中24通过、8失败均为新增夹具以 Jackson 2 毫秒日期与默认 Jackson 3 ISO 日期比较；修正测试基准并增加时间值断言，生产日期协议不变。最终运行结果另记。上述专项不证明真实组织角色、数据库、浏览器或完整 I1–I7 验收；语音转换/ASR/转写生成不在当前范围。
 
 最终原进程71725退出0，日志 `/tmp/iqc-task-read-http-privacy-final.log`。四份XML均为本轮新生成：TaskReadHttpPrivacyTest 13、InspectionTaskControllerTest 3、SchemeTaskPresentationHttpTest 6、TaskCommandHttpPrivacyTest 10，合计32项，0失败/错误/跳过。未运行新的默认全套。
+### Prompt独立敏感资源的实际读取入口
+
+新增GET /api/iqc/tasks/{id}/configuration，ResourcePermission使用原SensitiveReadAccessService.PROMPT码iqc:sensitive:prompt:read。复用原任务Controller/授权服务/taskRead，不新增存储或ACL模型；先刷新固定task:view+Prompt基础资源，再要求FULL+PII+Prompt当前均有效，最后调用原taskService.get执行数据范围检查。仅原冻结快照，无实时配置替换；成功no-store/nosniff，审计无正文/id目标，限流沿原RateLimit。原通用task GET继续同三grant控制正文，不因新路由放宽。该实际功能入口解决此前只有常量、没有可登记Prompt资源的问题。
+
+组织权限树新增迁移V20261018_01，资源/按钮900263挂任务900103，仅IQC_ADMIN/IQC_QUALITY_MANAGER，沿原SHA2关联与自然键去重，不授系统ADMIN/查看者/质检员，不隐含FULL/PII授权。该迁移仅本地草案，未执行或部署，真实角色和MySQL新库/升级/重复执行验收仍待。
+
+任务页面提供独立敏感读取按钮，读取开始清旧快照，失败保持受限内容，切换任务/关闭详情/卸载均阻断迟到响应；菜单可见性不替代后端实时授权。当前仅编译/构建检查，不能宣称Prompt权限已在环境生效、或全I1–I7完成。

@@ -37,7 +37,11 @@ public class InspectionTaskController {
     }
     private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access access(String resource) {
         if(sensitive==null || projection==null)throw io.github.opensabre.iqc.governance.IqcException.invalidState("任务敏感响应授权组件不可用");
-        var access=sensitive.current(java.util.Set.of(resource));
+        return access(java.util.Set.of(resource));
+    }
+    private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access access(java.util.Set<String> required) {
+        if(sensitive==null || projection==null)throw io.github.opensabre.iqc.governance.IqcException.invalidState("任务敏感响应授权组件不可用");
+        var access=sensitive.current(required);
         if(org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()
                 instanceof org.springframework.web.context.request.ServletRequestAttributes servlet && servlet.getResponse()!=null) {
             servlet.getResponse().setHeader("Cache-Control","private, no-store");
@@ -65,6 +69,16 @@ public class InspectionTaskController {
     @Audit(operationType=OperationType.QUERY, description="读取任务详情", module="IQC_PRIVACY", request=false, response=false, key="#id")
     public InspectionTask get(@PathVariable String id) {
         var access=access("iqc:task:view");
+        return projection.taskRead(taskService.get(id),access,true);
+    }
+
+    @GetMapping("/{id}/configuration")
+    @ResourcePermission(code="iqc:sensitive:prompt:read",name="读取任务冻结配置与Prompt",type="iqc",description="在原任务范围内独立授权读取冻结配置")
+    @Audit(operationType=OperationType.QUERY,description="读取任务冻结配置",module="IQC_PRIVACY",request=false,response=false,key="#id")
+    @RateLimit(sceneCode="iqc-task-configuration-query",maxCount=30,period=60)
+    public InspectionTask configuration(@PathVariable String id){
+        var access=access(java.util.Set.of("iqc:task:view",io.github.opensabre.iqc.privacy.SensitiveReadAccessService.PROMPT));
+        access.requireFullConversation();access.requirePii();access.requirePrompt();
         return projection.taskRead(taskService.get(id),access,true);
     }
 
