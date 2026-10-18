@@ -363,4 +363,37 @@ public final class ResultReadProjection {
         copy.setPrivacy(metadata); return copy;
     }
 
+    /** Raw machine output may contain reproduced input or prompts; summaries never substitute for it. */
+    public io.github.opensabre.iqc.quality.model.EvaluationSampleResult evaluationResult(
+            io.github.opensabre.iqc.quality.model.EvaluationSampleResult source,
+            SensitiveReadAccessService.Access access, boolean dedicatedRead) {
+        Objects.requireNonNull(access); if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.quality.model.EvaluationSampleResult();
+        BeanUtils.copyProperties(source,copy);
+        boolean canonical=dedicatedRead && access.fullConversation() && access.pii() && access.prompt();
+        var metadata=new LinkedHashMap<String,Object>();
+        metadata.put("policyVersion","iqc-evaluation-read-v1"); metadata.put("canonicalPayloadVisible",canonical);
+        metadata.put("canReadFull",access.fullConversation()); metadata.put("canReadPii",access.pii());
+        metadata.put("canReadPrompt",access.prompt());
+        metadata.put("withheldFields",canonical?List.of():List.of("actualJson"));
+        if(!canonical){
+            copy.setActualJson(null); metadata.put("previewState",dedicatedRead?"NOT_INCLUDED":"SUMMARY_ONLY");
+            if(dedicatedRead && source.getActualJson()!=null){
+                try{
+                    if(source.getActualJson().length()>64*1024*1024)throw new IllegalArgumentException();
+                    var body=json.readTree(source.getActualJson()); var run=body.path("run");
+                    var status=run.path("status").asText();
+                    if(!Set.of("SUCCESS","PARTIAL_SUCCESS","FAILED","CANCELLED").contains(status))throw new IllegalArgumentException();
+                    if(!run.path("trace").isArray() || !run.path("findings").isArray())throw new IllegalArgumentException();
+                    var preview=new LinkedHashMap<String,Object>();
+                    preview.put("runStatus",status); preview.put("traceCount",run.path("trace").size());
+                    preview.put("findingCount",run.path("findings").size());
+                    if("POLICY_SATISFIED".equals(run.path("completionReason").asText()))preview.put("completionReason","POLICY_SATISFIED");
+                    metadata.put("preview",preview);metadata.put("previewState","AVAILABLE");
+                }catch(java.io.IOException | RuntimeException invalid){metadata.put("previewState","INVALID_OUTPUT");}
+            }
+        }
+        copy.setPrivacy(metadata);return copy;
+    }
+
 }

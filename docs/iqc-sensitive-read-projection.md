@@ -206,3 +206,9 @@ EvaluationDatasetController创建、更新、冻结、可用性四个写操作�
 版本GET、历史GET及freeze POST分别在领域调用前刷新原dataset:version:view、dataset:versions:view、dataset:freeze；缺敏感组件拒绝，原服务数据范围与完整性/hash校验保持，成功no-store/nosniff。两个查询Audit仅目标元数据。版本专用读取仅FULL+PII双grant返回原snapshotJson；限制模式不返回原opaque正文，解析原冻结DatasetSnapshot并验证datasetId，逐成员复用GoldSampleReadProjection获得完整脱敏或3条/200字符会话预览和无值Finding元数据，保留样本/版本/hash引用。损坏、来源不匹配或超限明确INVALID_DATASET，不回退原文、不查询当前会话。
 
 历史与冻结写回执无论敏感grant均只给版本摘要，不含snapshotJson或预览，避免用写/历史权限绕过专用读取。新增privacy仅exist=false且null不序列化，不改持久化和冻结hash。UI未知策略不显示正文，受限预览明确非原始金标；每次版本读取先清旧内容并用现有generation拒绝迟到响应，完整快照原文本展示，不经JSON.parse/数字舍入。数据集草稿的名称/说明、评测结果actualJson及其它副本仍待，不以本批声明I7完成。仅构建检查，行为、浏览器、真实组织与数据库验收仍待协作验证。
+
+### 离线评测机器产物读取
+
+PipelineEvaluationController分页与详情在原service前分别刷新固定evaluation:results:view/result:view，保留原任务范围、轮次、产物hash及来源校验。成功no-store/nosniff，查询Audit无正文。分页始终仅元数据，防止绕过独立详情授权；详情只有FULL、PII、Prompt三grant同时具备才返回原actualJson，因为任意机器输出、变量或错误可能复现输入及Prompt。其余模式只展示原运行枚举状态、轨迹/事实数量及明确的POLICY_SATISFIED标记；不展示变量、值、错误或轨迹正文，不把受限正文视作无命中。解析失败/超限返回INVALID_OUTPUT，不回退原文。
+
+仅复制原EvaluationSampleResult，privacy字段exist=false/NON_NULL；原status/durationMs、dataset/gold/actual哈希与执行/样本身份不改、不重算。UI读取前清旧详情并拒绝迟到覆盖，未知policy不显示正文；受限摘要明确标记，完整产物按原字符串展示避免数值舍入。现有Prompt敏感资源的实际登记/授予仍待，不借系统ADMIN或JWT绕过；当前缺grant仅限制正文，不阻断原基础权限下元数据查看。评测create回执、report和通用task读取及数据集草稿仍需单独处理；当前仅构建检查，不代表真实组织/浏览器/数据库验收。

@@ -18,4 +18,7 @@ public class EvaluationSampleResult extends BasePo {
     private String actualJson;
     private String actualHash;
     private Long durationMs;
+    @com.baomidou.mybatisplus.annotation.TableField(exist=false)
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private java.util.Map<String,Object> privacy;
 }
