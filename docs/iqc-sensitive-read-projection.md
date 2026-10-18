@@ -357,3 +357,11 @@ ResultReadProjection复用四个原PO响应副本：目录与所有写回执永�
 两页UI未知/受限policy只展示元数据，隐藏配置表单，不以默认Cron/事件配置填入真实草稿；不能从副本编辑、预览或确认发布。最近错误明确未展示，不当作没有错误。保存/发布/启停成功先清旧历史/配置，再独立GET；失败提示操作已完成但重新读取失败，不建议重复提交。当前编辑存在未保存内容时先阻止同资产启停，避免静默丢弃。重新读取先清旧正文并用generation拒绝迟到；关闭/卸载清配置和历史。版本正文按原字符串展示，不做浮点美化。
 
 仅构建检查，真实角色/HTTP/浏览器与调度SQL仍待验收；其它Selector/Pipeline/Scheme配置/人工复核副本及全部I1–I7仍未完成。
+
+### B 周期与订阅默认 MVC 验证（2026-10-18）
+
+`ScheduleConfigurationHttpPrivacyTest` 使用真实投影与默认 MVC，领域/组织授权 mock。八种 FULL/PII/Prompt 组合验证两类目录、详情、历史：详情/历史仅三项齐全时显示配置原文；目录永不附正文/lastError，受限错误明确列入 withheldFields。创建、更新、发布、启停八组合回执均不带配置正文；写操作不额外要求敏感读权限，原 expectedRevision 参数保留。
+
+默认 HTTP 输出逐字段比较其余元数据、状态、修订、活动指针、计划/重试时间、原 contentHash 和分页；源对象序列化前后相同。当前固定基础权限逐接口核对，撤权与缺接线在业务服务调用前拒绝，原领域 scope 拒绝透传，响应 no-store/nosniff。该批不证明实际 PDP、数据库发布/调度、审计切面或浏览器交互。
+
+原15284首轮55项中2失败为新拒权夹具缺少原始类型必填字段，默认解析先返回020000；只补合法 expectedRevision/enabled，不放宽生产解析。主源与成功编译产物未变，最终显式 compiler:testCompile surefire:test。原57014退出0，`/tmp/iqc-schedule-config-http-privacy-final.log`；本轮XML ScheduleConfiguration19+TaskRead13+TaskConfiguration11+ModelDiagnostic12=55，零失败/错误/跳过。尚未执行当前组合的默认全套。
