@@ -259,3 +259,7 @@ InspectionTaskController.create/cancel/pause/priority复用taskReceipt，始终�
 ### 执行与恢复任务回执
 
 InspectionResultController.run/resume复用已有resultReadAccess固定task:execute，在queue/resume及异步提交之前刷新当前授权，成功沿no-store/nosniff。两响应仅taskReceipt副本，任何敏感grant组合均不附冻结配置/Prompt/筛选/触发/重试正文；缺接线拒绝。原异步执行、worker启停时背压处理、当前executionId、RUN用量记录及领域状态转换不变。审计仅id目标并关闭请求/响应正文。任务UI原run/resume均只等待成功再refresh，不依赖正文；读取接口和其它创建入口仍需继续处理。此处仅编译检查，不等同实际执行链路、权限和浏览器验收。
+
+### 流水线任务创建返回
+
+PipelineAssetController.trial/task在访问冻结草稿、发布版本或Selector资产前刷新原pipeline:execute/task:create；返回统一taskReceipt，覆盖显式会话IDs、内联Selector与发布Selector资产分支。原互斥参数检查、冻结来源、请求幂等、数据范围及任务构造保持，任何敏感grant组合均不通过写响应附带快照/Prompt/筛选正文。成功no-store/nosniff，缺接线拒绝；两个写Audit仅id且关闭正文。已核对流水线页面创建后仅消费任务ID/名称/状态，无快照依赖。方案试跑页面仍从快照读取修订/标签类型，须先补公共展示元数据再收口，当前未误删该功能；其它流水线配置/历史读取与完整I1–I7仍待。仅编译检查，不代表实际角色/HTTP/浏览器验收。

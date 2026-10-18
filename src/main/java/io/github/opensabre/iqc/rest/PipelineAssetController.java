@@ -14,7 +14,25 @@ import java.util.List;
 public class PipelineAssetController {
     private final PipelineAssetService assets;
     private final InspectionTaskService tasks;
-    public PipelineAssetController(PipelineAssetService assets,InspectionTaskService tasks) { this.assets=assets; this.tasks=tasks; }
+    private final io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive;
+    private final io.github.opensabre.iqc.privacy.ResultReadProjection projection;
+    @org.springframework.beans.factory.annotation.Autowired
+    public PipelineAssetController(PipelineAssetService assets,InspectionTaskService tasks,
+            io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive,
+            io.github.opensabre.iqc.privacy.ResultReadProjection projection) {
+        this.assets=assets;this.tasks=tasks;this.sensitive=sensitive;this.projection=projection;
+    }
+    public PipelineAssetController(PipelineAssetService assets,InspectionTaskService tasks){this(assets,tasks,null,null);}
+    private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access access(String resource){
+        if(sensitive==null || projection==null)throw io.github.opensabre.iqc.governance.IqcException.invalidState("流水线任务响应授权组件不可用");
+        var access=sensitive.current(java.util.Set.of(resource));
+        if(org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()
+                instanceof org.springframework.web.context.request.ServletRequestAttributes servlet && servlet.getResponse()!=null){
+            servlet.getResponse().setHeader("Cache-Control","private, no-store");
+            servlet.getResponse().setHeader("X-Content-Type-Options","nosniff");
+        }
+        return access;
+    }
     @org.springframework.beans.factory.annotation.Autowired
     private io.github.opensabre.iqc.selector.SelectorAssetService selectorAssets;
     @GetMapping
@@ -40,9 +58,10 @@ public class PipelineAssetController {
     public List<PipelineAssetVersion> history(@PathVariable String id) { return assets.history(id); }
     @PostMapping("/{id}/trial")
     @ResourcePermission(code="iqc:pipeline:execute",name="试跑流水线",type="iqc",description="创建冻结草稿试跑任务")
-    @Audit(operationType=OperationType.CREATE,description="创建流水线试跑任务",module="IQC_PIPELINE")
+    @Audit(operationType=OperationType.CREATE,description="创建流水线试跑任务",module="IQC_PIPELINE",request=false,response=false,key="#id")
     public InspectionTask trial(@PathVariable String id,@RequestBody Trial body) {
-        return tasks.createUsingPipelineSnapshot(assets.frozenDraft(id,body.expectedRevision()),body.name(),body.conversationIds(),1,body.requestId());
+        var access=access("iqc:pipeline:execute");
+        return projection.taskReceipt(tasks.createUsingPipelineSnapshot(assets.frozenDraft(id,body.expectedRevision()),body.name(),body.conversationIds(),1,body.requestId()),access);
     }
     @PostMapping("/{id}/publish")
     @ResourcePermission(code="iqc:pipeline:publish",name="发布流水线",type="iqc",description="经真实试跑确认发布流水线版本")
@@ -68,20 +87,21 @@ public class PipelineAssetController {
     }
     @PostMapping("/{id}/tasks")
     @ResourcePermission(code="iqc:pipeline:task:create",name="创建流水线任务",type="iqc",description="使用不可变已发布流水线创建任务")
-    @Audit(operationType=OperationType.CREATE,description="创建流水线任务",module="IQC_PIPELINE")
+    @Audit(operationType=OperationType.CREATE,description="创建流水线任务",module="IQC_PIPELINE",request=false,response=false,key="#id")
     public InspectionTask task(@PathVariable String id,@RequestBody Run body) {
+        var access=access("iqc:pipeline:task:create");
         var release=assets.publishedRelease(id,body.versionNo());
         if(body.selectorAsset()!=null) {
             if(body.selector()!=null || (body.conversationIds()!=null && !body.conversationIds().isEmpty()))
                 throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("Selector资产、内联Selector与会话IDs不能同时提交");
             var selector=selectorAssets.published(body.selectorAsset().selectorId(),body.selectorAsset().versionNo());
-            return tasks.createUsingPipelineSelectorAsset(release,body.name(),selector,body.concurrency(),body.requestId());
+            return projection.taskReceipt(tasks.createUsingPipelineSelectorAsset(release,body.name(),selector,body.concurrency(),body.requestId()),access);
         }
         if(body.selector()!=null) {
             if(body.conversationIds()!=null && !body.conversationIds().isEmpty()) throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("Selector与显式会话IDs不能同时提交");
-            return tasks.createUsingPipelineSelector(release,body.name(),body.selector(),body.concurrency(),body.requestId());
+            return projection.taskReceipt(tasks.createUsingPipelineSelector(release,body.name(),body.selector(),body.concurrency(),body.requestId()),access);
         }
-        return tasks.createUsingPipelineSnapshot(release,body.name(),body.conversationIds(),body.concurrency(),body.requestId());
+        return projection.taskReceipt(tasks.createUsingPipelineSnapshot(release,body.name(),body.conversationIds(),body.concurrency(),body.requestId()),access);
     }
     public record Create(String code,String name,PipelineRelease release) { }
     public record Update(int expectedRevision,String name,PipelineRelease release) { }
