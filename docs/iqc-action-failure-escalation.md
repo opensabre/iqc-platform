@@ -23,3 +23,13 @@ PRD 第12节要求可配置失败处理，现有ESCALATE_REVIEW目前只是冻�
 现有ActionExecutionController.history只展示原动作账本/尝试，不能证明已保存失败升级产物。扩展同一controller的GET /{actionExecutionId}/failure-review，独立iqc:action:failure-review:view；路径resultId与实际动作sourceResultId必须一致。复用原lookup历史来源/负责人范围和原复核持久请求证明，不接收客户端回执/结果ID或新建指令。组织01/900257已核对无占用，按原四只读角色授予查看，实际查询仍仅原负责人范围，不授创建或重试。HTTP/SQL/真实角色/浏览器验收仍待，未发现产物不推断等待原因。
 
 HTTP读取还复用原ScheduledActorAccessService.capture，在查询事务开始前解析当前账号稳定ID；查询服务核对该ID与冻结ownerBound，避免用户名复用被当作原负责人。当前解析不要求发送权限，也不在数据库锁内调用组织RPC；不新增身份模型或修改framework。
+
+## 失败升级令牌摘要修复与回归（2026-10-18）
+
+原verifiedToken在完整冻结来源和确认失败校验后，将`iqc-action-failure-review-v1:`加原动作幂等键的普通文本传给SelectorAssetService.hash；该入口要求JSON，导致正常升级在请求复核前抛摘要输入无效。最小修复保留原命名空间和源动作键，对同一UTF8字节直接SHA256，不改变Selector/政策JSON摘要、动作幂等身份、源匹配、权限、历史范围或失败回执。
+
+新增ActionFailureEscalationHashTest通过公开escalate/lookup入口验证同一稳定token、重复请求token不变、源动作未改写，以及stale观察/冻结输入篡改/撤权不请求Review。领域来源、复核服务和mapper隔离，原ActionEnqueueService.requireSame与policy条件/hash真实执行。此专项不证明数据库唯一性、真实角色或后台重启恢复。
+
+前两轮新增夹具分别因MyBatis重载断言歧义、Context遗漏必填scoreStatus而未到token分支；修正后16912为5项3通过/2错误，其中重复升级真实复现Selector摘要输入无效，另一项源对象日期序列化缺jsr310，补测试mapper模块。生产仅修token摘要，未放宽原领域约束。
+
+最终12991退出0，`/tmp/iqc-action-escalation-hash-final.log`；四份本轮新XML合计43项，0失败/错误/跳过。新增升级5项与原入队、来源幂等、历史查询回归通过。未进行数据库并发唯一性、真实复核持久化/角色/后台重启或新默认全套验收。
