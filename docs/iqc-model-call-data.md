@@ -52,3 +52,7 @@ GET /api/iqc/tasks/{id}/model-calls/{callId}/diagnostics使用独立资源iqc:ta
 UI仅在任务调用列表显示独立授权按钮；切换任务、重新加载、关闭或卸载会清除正文并失效旧请求，未知协议或不匹配来源不显示正文。JSON按原字符串显示，避免数值舍入，不回写为业务产物。
 
 组织迁移V20261018_02仅本地草案，资源/按钮900264挂任务900103，默认仅IQC_ADMIN/IQC_QUALITY_MANAGER；不隐含其它敏感grant。SQL尚未执行。当前仅编译/构建，权限、真实加密/DB、跨调用与请求响应调换、到期竞争和浏览器交互验收仍待。
+
+## 模型身份键的非JSON输入修复
+
+ModelIdentity.key以UTF-8字节长度对provider/规范化endpoint/modelName做无歧义分帧。该输入是普通分帧文本，不能传给SelectorAssetService.hash的JSON解析/规范化流程。已集成B78d37c0的生产局部修复：直接对分帧UTF-8字节SHA256，保留原字段框定及模型端点规范化，不改Selector/定价JSON摘要或重写历史账本。当前组合仅test-compile通过；B原64171的58项包含固定模型身份键与归档隔离，但属早期归档格式，不外推当前信封读取验收。当前信封、历史model_key/预算来源和真实供应商/数据库兼容仍待独立核验。

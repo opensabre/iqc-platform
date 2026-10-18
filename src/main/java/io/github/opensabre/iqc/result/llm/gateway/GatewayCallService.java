@@ -52,7 +52,12 @@ public class GatewayCallService {
                 endpoint=uri.getScheme()+"://"+uri.getHost().toLowerCase(java.util.Locale.ROOT)+(port<0?"":":"+port)+path;
             }catch(RuntimeException invalid){throw new GatewayAdmissionException("MODEL_ENDPOINT_IDENTITY_INVALID");}
         }
-        public String key(){return SelectorAssetService.hash(frame(provider)+frame(endpoint)+frame(modelName));}
+        /** Hash the length-framed identity bytes; this input is not a Selector JSON document. */
+        public String key(){
+            try{return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest((frame(provider)+frame(endpoint)+frame(modelName)).getBytes(StandardCharsets.UTF_8)));}
+            catch(java.security.NoSuchAlgorithmException unavailable){throw new IllegalStateException("SHA-256 unavailable",unavailable);}
+        }
         private static String frame(String value){return value.getBytes(StandardCharsets.UTF_8).length+":"+value;}
     }
     public record Context(String logicalRecordId,String ruleId,String owner,io.github.opensabre.iqc.result.llm.ModelCallContext execution,Integer toolRoundIndex) {
