@@ -34,7 +34,7 @@ iqc:
 - Spring AI router：FRAMEWORK_MESSAGES（角色、文本、工具调用/工具响应）和FRAMEWORK_GENERATIONS（文本及工具调用）；包括显式工具续调各次模型请求。不宣称完整SDK传输报文，模型选项、headers、媒体流和框架隐藏内部调用不在该副本中。
 - gateway缺省旧构造/直接兼容调用不具备归档服务；生产DI使用新增服务，旧接口/构造保留，未提供正文序列化器的调用仅保留原元数据账本。
 
-当前没有解密HTTP接口或UI；现有调用日志列表仍按敏感授权投影元数据/人工凭据，不返回密文或明文正文。后续若提供正文读取必须走独立当前授权、原任务范围及无正文审计，不能直接暴露实体。
+已有独立受控诊断读取接口及任务调用列表入口，见下节；普通调用日志列表仍仅投影元数据/人工凭据，不返回密文或正文。
 
 ## 当前证据与待验收
 
@@ -49,3 +49,15 @@ iqc:
 首轮78166为57项50通过/1失败/6错误。清理断言以status=子串误判call_data_status，改为独立列边界；六错误实际暴露ModelIdentity.key把非JSON长度frame文本交给SelectorAssetService.hash的JSON规范化入口。最小修复仅模型身份按原UTF8长度frame字节使用JDK SHA256，Selector与定价JSON摘要保持不变；增加固定摘要向量、中文UTF8、provider别名、host/端口规范化及不同模型区分回归。未新增摘要模型或全局算法更改。
 
 最终64171退出0，`/tmp/iqc-call-data-behavior-final.log`；四份本轮新XML：GatewayCallDataBehaviorTest7、ModelGatewayCallDataIsolationTest7、ModelCallReadHttpPrivacyTest13、ModelBudgetHttpContractTest31，共58项，0失败/错误/跳过。真实加密/控制流通过，但mapper与供应商隔离，SQL一次写入/TTL/新DDL、HTTP与Spring router来源、解密读取/真实角色及浏览器、新默认全套仍待。
+
+## 独立受控读取
+
+GET /api/iqc/tasks/{id}/model-calls/{callId}/diagnostics使用独立资源iqc:task:model-call-data:view，先刷新调用日志查看、诊断读取、Prompt当前基础授权，要求FULL/PII/Prompt齐全，原Task.get验证范围，再按taskId/callId查原调用并解密。旧缺组件构造拒绝，成功no-store/nosniff，审计只有任务/调用ID且无正文，限流30/60。配置关闭后仍可在有效期内读取之前的归档。
+
+加密内容为iqc-model-call-data-v1信封，绑定callId/modelKey/REQUEST或RESPONSE及原body字符串。解密后严格核对身份/方向/文本类型/大小，不回退裸正文；不匹配、密钥不可用、非法状态或损坏返回UNREADABLE且两侧正文均空。当前归档代码尚未部署，未增加旧裸密文兼容；该绑定不是新增加密算法或独立的防篡改签名协议。
+
+读取前及解密完成后均检查UTC过期，不依赖物理清理已完成。NOT_RECORDED/EXPIRED/SIZE_LIMIT/UNREADABLE与REQUEST_ONLY/RESPONSE_ONLY/CAPTURED明确区分，不把缺失正文视作模型空输出。普通调用事实、用量和评分不因读取状态改变。
+
+UI仅在任务调用列表显示独立授权按钮；切换任务、重新加载、关闭或卸载会清除正文并失效旧请求，未知协议或不匹配来源不显示正文。JSON按原字符串显示，避免数值舍入，不回写为业务产物。
+
+组织迁移V20261018_02仅本地草案，资源/按钮900264挂任务900103，默认仅IQC_ADMIN/IQC_QUALITY_MANAGER；不隐含其它敏感grant。SQL尚未执行。当前仅编译/构建，权限、真实加密/DB、跨调用与请求响应调换、到期竞争和浏览器交互验收仍待。
