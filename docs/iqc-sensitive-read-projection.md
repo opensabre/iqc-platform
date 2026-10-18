@@ -249,3 +249,10 @@ PipelineAssetController.trial/task在访问冻结草稿、发布版本或Selecto
 InspectionTask新增taskPresentation仅exist=false/NON_NULL，由taskReceipt在HTTP副本上生成，复用已有iqc-task-presentation-v1任务类型/labelOnly判断，扩展hasLabels、正整数schemeDraftRevision及格式受限selectedVariantCode。无名称、Prompt、规则/变量或任意快照JSON。未知/损坏不伪造修订或标签类型，原存储/冻结序列化和hash不变；执行/恢复等原回执自动保留这些展示信息。
 
 InspectionSchemeController trial/trials/task分别在领域调用前刷新原scheme:trial:create/trial:view/use，缺接线拒绝，成功no-store/nosniff，无正文Audit及id目标。试跑创建/列表及正式模板任务的BATCH/SCHEDULED、默认/显式variant分支统一taskReceipt，不附原冻结正文。原请求幂等、修订、数据范围、任务参数互斥及发布证据验证保留。UI优先公共元数据，旧响应无元数据仍兼容原展示；新响应未知/不完整元数据明确提示并阻止确认发布，不回退私密快照。variant只显示受限代码，避免自由名称扩散。方案配置/模板读取、通用任务列表/详情等尚待；当前仅构建检查，不代替真实角色、HTTP、浏览器验收。
+### Benchmark及数据集草稿MVC验证与跨代输出修复
+
+从3cccf3b接A0fd6b7c/ea80b68为a1b17af/a52561d，保留既有投影/精确绑定。BenchmarkDraftHttpPrivacyTest八种敏感grant覆盖create/pair/report双侧任务无冻结正文、选择与比较树完整相等、数据集身份/零值/高精度差值/原对象保持；四数据集grant覆盖独立详情正文、受限成员引用、目录和三写回执无草稿、损坏状态与固定基础grant拒绝先于领域调用。默认MockMvc、真实投影，领域/PDP mock。
+
+首轮68072为46项38通过/8失败：默认Jackson3把Jackson2 ObjectNode当普通POJO，仅返回节点属性而丢失selection/comparison内容。基于测试实际classpath独立复现/tmp/IqcTreeSerialization.java确认。仅BenchmarkService.Pair两个HTTP JSON字段新增HttpTreeSerializer，以局部精确Jackson3树writeTree输出；保留Jackson2领域类型、原比较算法/存储/历史hash/全局converter，不改framework。此补丁不代表所有跨代HTTP树均已验证。
+
+最终68868 exit0，/tmp/iqc-benchmark-draft-http-privacy-final.log；逐XML BenchmarkDraftHttpPrivacyTest14、EvaluationCommandHttpPrivacyTest11、DatasetEvaluationHttpPrivacyTest14、GoldSampleHttpContractTest7，共46项，0 failures/errors/skipped。无SQL/浏览器/真实组织验收，未重跑默认完整套件，整体I1–I7仍未完成。
