@@ -29,7 +29,19 @@ public class BenchmarkService {
     public record Create(String name,String datasetId,Integer datasetVersion,Target baseline,Target candidate,
                          BenchmarkVariableComparator.Selection selection,Integer concurrency,String requestId) { }
     public record Pair(String schemaVersion,String experimentId,String name,String datasetId,int datasetVersion,
-                       String datasetHash,JsonNode selection,JsonNode comparison,InspectionTask baseline,InspectionTask candidate) { }
+                       String datasetHash,
+                       @tools.jackson.databind.annotation.JsonSerialize(using=HttpTreeSerializer.class) JsonNode selection,
+                       @tools.jackson.databind.annotation.JsonSerialize(using=HttpTreeSerializer.class) JsonNode comparison,
+                       InspectionTask baseline,InspectionTask candidate) { }
+    /** Field-local HTTP bridge; Jackson 2 trees must retain JSON contents under Jackson 3 MVC. */
+    public static final class HttpTreeSerializer extends tools.jackson.databind.ValueSerializer<JsonNode> {
+        private static final tools.jackson.databind.json.JsonMapper HTTP=tools.jackson.databind.json.JsonMapper.builder()
+                .enable(tools.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
+        @Override public void serialize(JsonNode value,tools.jackson.core.JsonGenerator output,
+                tools.jackson.databind.SerializationContext context) {
+            output.writeTree(HTTP.readTree(value.toString()));
+        }
+    }
     public record Report(String schemaVersion,Pair experiment,PipelineEvaluationService.Report baseline,
                          PipelineEvaluationService.Report candidate,boolean complete,Map<String,BigDecimal> deltas) { }
 
