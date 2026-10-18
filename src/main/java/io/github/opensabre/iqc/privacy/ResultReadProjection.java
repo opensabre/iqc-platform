@@ -408,4 +408,20 @@ public final class ResultReadProjection {
         return copy;
     }
 
+    public io.github.opensabre.iqc.quality.evaluation.BenchmarkService.Pair benchmarkPair(
+            io.github.opensabre.iqc.quality.evaluation.BenchmarkService.Pair source,
+            SensitiveReadAccessService.Access access) {
+        Objects.requireNonNull(access);if(source==null)return null;
+        return new io.github.opensabre.iqc.quality.evaluation.BenchmarkService.Pair(source.schemaVersion(),source.experimentId(),
+                text(source.name(),access.fullConversation() && access.pii()),source.datasetId(),source.datasetVersion(),
+                source.datasetHash(),source.selection(),source.comparison(),taskReceipt(source.baseline(),access),taskReceipt(source.candidate(),access));
+    }
+    public io.github.opensabre.iqc.quality.evaluation.BenchmarkService.Report benchmarkReport(
+            io.github.opensabre.iqc.quality.evaluation.BenchmarkService.Report source,
+            SensitiveReadAccessService.Access access) {
+        Objects.requireNonNull(access);if(source==null)return null;
+        return new io.github.opensabre.iqc.quality.evaluation.BenchmarkService.Report(source.schemaVersion(),
+                benchmarkPair(source.experiment(),access),source.baseline(),source.candidate(),source.complete(),source.deltas());
+    }
+
 }
