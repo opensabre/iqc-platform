@@ -270,3 +270,11 @@ InspectionTask.privacy为派生exist=false/NON_NULL；公共taskPresentation继�
 PeriodicScheduleController/EventSubscriptionController.instances分别在原query前刷新schedule:instances:view/subscription:instances:view，不误要求额外task:view；原服务仍检查负责人/组范围。复用taskRead(false)，所有敏感grant组合均仅列表元数据，不附冻结配置、Prompt、筛选、触发请求或错误正文。原分页current/size/total、顺序、任务状态、executionId、计划时刻/事件ID和公共计数保持，响应副本不改原任务。缺接线拒绝，成功no-store/nosniff，查询Audit仅id且关闭正文。
 
 两个Controller的创建/修订/发布/可用性共8个写Audit均显式关闭请求/响应正文，路径操作保留id；原发布response=true会复制冻结配置，现仅保留审计事件元数据，不改领域发布/触发行为。配置/历史HTTP响应仍需独立读取保护。事件实例表格及任务详情对withheld triggerError明确显示原因未展示，不把缺省当作等待接入会话或空原因；其余UI原任务状态/链接依赖保持。当前仅构建检查，真实角色/HTTP/浏览器及完整I1–I7仍待。
+
+### Prompt独立敏感资源的实际读取入口
+
+新增GET /api/iqc/tasks/{id}/configuration，ResourcePermission使用原SensitiveReadAccessService.PROMPT码iqc:sensitive:prompt:read。复用原任务Controller/授权服务/taskRead，不新增存储或ACL模型；先刷新固定task:view+Prompt基础资源，再要求FULL+PII+Prompt当前均有效，最后调用原taskService.get执行数据范围检查。仅原冻结快照，无实时配置替换；成功no-store/nosniff，审计无正文/id目标，限流沿原RateLimit。原通用task GET继续同三grant控制正文，不因新路由放宽。该实际功能入口解决此前只有常量、没有可登记Prompt资源的问题。
+
+组织权限树新增迁移V20261018_01，资源/按钮900263挂任务900103，仅IQC_ADMIN/IQC_QUALITY_MANAGER，沿原SHA2关联与自然键去重，不授系统ADMIN/查看者/质检员，不隐含FULL/PII授权。该迁移仅本地草案，未执行或部署，真实角色和MySQL新库/升级/重复执行验收仍待。
+
+任务页面提供独立敏感读取按钮，读取开始清旧快照，失败保持受限内容，切换任务/关闭详情/卸载均阻断迟到响应；菜单可见性不替代后端实时授权。当前仅编译/构建检查，不能宣称Prompt权限已在环境生效、或全I1–I7完成。
