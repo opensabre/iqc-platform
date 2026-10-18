@@ -263,3 +263,11 @@ InspectionResultController.run/resume复用已有resultReadAccess固定task:exec
 ### 流水线任务创建返回
 
 PipelineAssetController.trial/task在访问冻结草稿、发布版本或Selector资产前刷新原pipeline:execute/task:create；返回统一taskReceipt，覆盖显式会话IDs、内联Selector与发布Selector资产分支。原互斥参数检查、冻结来源、请求幂等、数据范围及任务构造保持，任何敏感grant组合均不通过写响应附带快照/Prompt/筛选正文。成功no-store/nosniff，缺接线拒绝；两个写Audit仅id且关闭正文。已核对流水线页面创建后仅消费任务ID/名称/状态，无快照依赖。方案试跑页面仍从快照读取修订/标签类型，须先补公共展示元数据再收口，当前未误删该功能；其它流水线配置/历史读取与完整I1–I7仍待。仅编译检查，不代表实际角色/HTTP/浏览器验收。
+
+### 通用任务/执行与流水线任务写回执MVC专项
+
+在073653a接Ab28b909/070db8d/0ea8eca为5f90b02/58d68f6/a7dfd3d，保留原Worker/队列与用量行为。TaskCommandHttpPrivacyTest覆盖四FULL/PII组合下create/cancel/pause/priority/run/resume安全回执、delete无任务正文、两次异步提交使用原executionId、CREATE/RUN用量次数、固定基础grant拒绝先于domain/worker；Pipeline trial及发布后显式ID/内联Selector/Selector资产三分支无正文、源对象不变、Selector互斥仍拒绝。
+
+首轮64486为38项28通过/10失败：4项实际跨代绑定缺陷来自SelectorDefinition.Condition.value的Jackson2 JsonNode，默认Jackson3无法构造。仅该字段复用现有HttpExactValueDeserializer注解，保留领域类型、存储与全局转换器，精确NUMBER条件不经Double。其余6项更正夹具：delete沿框架既有void响应封装验证状态/缓存头/无敏感正文及真实删除调用；互斥参数码按IqcErrorType为1003；授权拒绝夹具提供有效原始int修订/版本，让绑定后实际执行授权。未改框架void响应协议或放宽输入校验。
+
+原InspectionTaskControllerTest创建夹具接当前固定grant和真实projection，改为响应副本身份断言，原RULE_ONLY参数与用量验证保留。最终48858 exit0，/tmp/iqc-task-command-http-privacy-final.log：TaskCommandHttpPrivacyTest10、InspectionTaskControllerTest3、BenchmarkDraftHttpPrivacyTest14、EvaluationCommandHttpPrivacyTest11，共38项，0 failures/errors/skipped。默认MVC与真实投影，领域/PDP/worker为mock，不称真实队列/SQL/browser验收；本批尚不包含Scheme元数据及通用任务读取保护，也未重跑默认全套，I1–I7仍未完成。
