@@ -589,4 +589,24 @@ public final class ResultReadProjection {
         return copy;
     }
 
+    public io.github.opensabre.iqc.selector.ConversationSelectionService.Preview selectorPreview(
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Preview source,SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(source);Objects.requireNonNull(access);
+        boolean reveal=access.fullConversation() && access.pii();
+        var matched=source.matchedDistribution();var selected=source.selectedDistribution();
+        if(!reveal){
+            if(matched!=null)matched=new io.github.opensabre.iqc.selector.ConversationSelectionService.Distribution(null,matched.teams(),matched.departments());
+            if(selected!=null)selected=new io.github.opensabre.iqc.selector.ConversationSelectionService.Distribution(null,selected.teams(),selected.departments());
+        }
+        var rows=source.preview().stream().map(row -> new io.github.opensabre.iqc.selector.ConversationSelectionService.PreviewConversation(
+                row.conversationId(),fileName(row.fileName(),reveal),reveal?row.employeeId():null,row.employeeGroupId(),
+                row.employeeDepartmentId(),text(row.channel(),reveal),row.startedTime(),row.riskLevel())).toList();
+        var metadata=new LinkedHashMap<String,Object>();metadata.put("policyVersion","iqc-selector-preview-read-v1");
+        metadata.put("piiVisible",reveal);metadata.put("canReadFull",access.fullConversation());metadata.put("canReadPii",access.pii());
+        metadata.put("withheldFields",reveal?List.of():List.of("preview.employeeId","matchedDistribution.employees","selectedDistribution.employees"));
+        metadata.put("maskedFields",reveal?List.of():List.of("preview.fileName","preview.channel"));
+        return new io.github.opensabre.iqc.selector.ConversationSelectionService.Preview(source.schemaVersion(),source.anchor(),source.resolvedWindow(),
+                source.candidateCount(),source.matchedCount(),source.sampledCount(),source.selectedCount(),source.limited(),matched,selected,rows,source.definitionHash(),metadata);
+    }
+
 }

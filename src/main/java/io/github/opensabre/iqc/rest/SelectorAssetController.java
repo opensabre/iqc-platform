@@ -7,14 +7,20 @@ import io.github.opensabre.governance.ratelimit.annotations.RateLimit;
 import io.github.opensabre.iqc.selector.*;
 import io.github.opensabre.iqc.selector.model.*;
 import io.github.opensabre.iqc.shared.IqcPage;
-import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
-@RestController @RequiredArgsConstructor
+@RestController
 @RequestMapping("/api/iqc/selectors/assets")
 public class SelectorAssetController {
     private final SelectorAssetService assets;
+    private final io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive;
+    private final io.github.opensabre.iqc.privacy.ResultReadProjection projection;
+    @org.springframework.beans.factory.annotation.Autowired
+    public SelectorAssetController(SelectorAssetService assets,io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive,
+            io.github.opensabre.iqc.privacy.ResultReadProjection projection){this.assets=assets;this.sensitive=sensitive;this.projection=projection;}
+    public SelectorAssetController(SelectorAssetService assets){this(assets,null,null);}
+
     public record Create(String code,String name,SelectorDefinition definition,String definitionJson) {
         public Create(String code,String name,SelectorDefinition definition){this(code,name,definition,null);}
     }
@@ -55,5 +61,14 @@ public class SelectorAssetController {
     @PostMapping("/{id}/versions/{versionNo}/preview")
     @ResourcePermission(code="iqc:selector:asset:version:preview",name="预览选择器发布版本",type="iqc",description="按当前授权数据预览精确选择器版本")
     @RateLimit(sceneCode="iqc-selector-asset-preview",maxCount=20,period=60)
-    public ConversationSelectionService.Preview preview(@PathVariable String id,@PathVariable int versionNo,@RequestBody Preview body){return assets.preview(id,versionNo,body.previewSize()==null?10:body.previewSize());}
+    @Audit(operationType=OperationType.QUERY,description="预览已发布选择器选数",module="IQC_PRIVACY",request=false,response=false,key="#id + ':' + #versionNo")
+    public ConversationSelectionService.Preview preview(@PathVariable String id,@PathVariable int versionNo,@RequestBody Preview body){
+        if(sensitive==null || projection==null)throw io.github.opensabre.iqc.governance.IqcException.invalidState("选择器预览授权组件不可用");
+        var access=sensitive.current(java.util.Set.of("iqc:selector:asset:version:preview"));
+        if(org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()
+                instanceof org.springframework.web.context.request.ServletRequestAttributes servlet && servlet.getResponse()!=null){
+            servlet.getResponse().setHeader("Cache-Control","private, no-store");servlet.getResponse().setHeader("X-Content-Type-Options","nosniff");
+        }
+        return projection.selectorPreview(assets.preview(id,versionNo,body.previewSize()==null?10:body.previewSize()),access);
+    }
 }
