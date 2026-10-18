@@ -21,38 +21,45 @@ public class EventSubscriptionController {
     }
     public EventSubscriptionController(EventSubscriptionService schedules){this(schedules,null,null);}
 
-    public record Create(String code,String name,EventSubscriptionDefinition definition) { }
-    public record Update(int expectedRevision,String name,EventSubscriptionDefinition definition) { }
-    public record Publish(int expectedRevision) { }
-    public record Availability(boolean enabled) { }
-    @GetMapping @ResourcePermission(code="iqc:subscription:view",name="查看事件订阅目录",type="iqc",description="查看授权事件订阅")
-    public IqcPage<EventSubscription> page(@RequestParam(defaultValue="1")long current,@RequestParam(defaultValue="20")long size){return schedules.page(current,size);}
-    @GetMapping("/{id}") @ResourcePermission(code="iqc:subscription:detail:view",name="查看事件订阅",type="iqc",description="查看事件订阅草稿")
-    public EventSubscription get(@PathVariable String id){return schedules.get(id);}
-    @PostMapping @ResourcePermission(code="iqc:subscription:create",name="创建事件订阅",type="iqc",description="创建负责人事件订阅草稿")
-    @Audit(operationType=OperationType.CREATE,description="创建事件订阅",module="IQC_SUBSCRIPTION",request=false,response=false)
-    public EventSubscription create(@RequestBody Create body){return schedules.create(body.code(),body.name(),body.definition());}
-    @PutMapping("/{id}") @ResourcePermission(code="iqc:subscription:update",name="修订事件订阅",type="iqc",description="按修订更新负责人事件订阅草稿")
-    @Audit(operationType=OperationType.UPDATE,description="修订事件订阅",module="IQC_SUBSCRIPTION",request=false,response=false,key="#id")
-    public EventSubscription update(@PathVariable String id,@RequestBody Update body){return schedules.update(id,body.expectedRevision(),body.name(),body.definition());}
-    @PostMapping("/{id}/publish") @ResourcePermission(code="iqc:subscription:publish",name="发布事件订阅修订",type="iqc",description="冻结事件订阅及资产来源")
-    @Audit(operationType=OperationType.UPDATE,description="发布事件订阅修订",module="IQC_SUBSCRIPTION",request=false,response=false,key="#id")
-    public EventSubscriptionRevision publish(@PathVariable String id,@RequestBody Publish body){return schedules.publish(id,body.expectedRevision());}
-    @PostMapping("/{id}/availability") @ResourcePermission(code="iqc:subscription:availability",name="启停事件订阅",type="iqc",description="启停当前已发布事件订阅")
-    @Audit(operationType=OperationType.UPDATE,description="启停事件订阅",module="IQC_SUBSCRIPTION",request=false,response=false,key="#id")
-    public EventSubscription availability(@PathVariable String id,@RequestBody Availability body){return schedules.availability(id,body.enabled());}
-    @GetMapping("/{id}/versions") @ResourcePermission(code="iqc:subscription:versions:view",name="查看事件订阅历史",type="iqc",description="查看不可变事件订阅修订")
-    public List<EventSubscriptionRevision> versions(@PathVariable String id){return schedules.history(id);}
-    @GetMapping("/{id}/instances") @ResourcePermission(code="iqc:subscription:instances:view",name="查看事件订阅实例",type="iqc",description="查看授权原任务实例与轮次")
-    @Audit(operationType=OperationType.QUERY,description="读取调度任务实例",module="IQC_PRIVACY",request=false,response=false,key="#id")
-    public IqcPage<InspectionTask> instances(@PathVariable String id,@RequestParam(defaultValue="1")long current,@RequestParam(defaultValue="20")long size){
+    private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access access(String resource){
         if(sensitive==null || projection==null)throw io.github.opensabre.iqc.governance.IqcException.invalidState("调度实例响应授权组件不可用");
-        var access=sensitive.current(java.util.Set.of("iqc:subscription:instances:view"));
+        var access=sensitive.current(java.util.Set.of(resource));
         if(org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()
                 instanceof org.springframework.web.context.request.ServletRequestAttributes servlet && servlet.getResponse()!=null){
             servlet.getResponse().setHeader("Cache-Control","private, no-store");
             servlet.getResponse().setHeader("X-Content-Type-Options","nosniff");
         }
+        return access;
+    }
+    public record Create(String code,String name,EventSubscriptionDefinition definition) { }
+    public record Update(int expectedRevision,String name,EventSubscriptionDefinition definition) { }
+    public record Publish(int expectedRevision) { }
+    public record Availability(boolean enabled) { }
+    @GetMapping @ResourcePermission(code="iqc:subscription:view",name="查看事件订阅目录",type="iqc",description="查看授权事件订阅")
+    @Audit(operationType=OperationType.QUERY,description="读取调度目录",module="IQC_PRIVACY",request=false,response=false)
+    public IqcPage<EventSubscription> page(@RequestParam(defaultValue="1")long current,@RequestParam(defaultValue="20")long size){var access=access("iqc:subscription:view");var page=schedules.page(current,size);return new IqcPage<>(page.records().stream().map(row -> projection.eventSubscription(row,access,false)).toList(),page.current(),page.size(),page.total());}
+    @GetMapping("/{id}") @ResourcePermission(code="iqc:subscription:detail:view",name="查看事件订阅",type="iqc",description="查看事件订阅草稿")
+    @Audit(operationType=OperationType.QUERY,description="读取调度草稿",module="IQC_PRIVACY",request=false,response=false,key="#id")
+    public EventSubscription get(@PathVariable String id){var access=access("iqc:subscription:detail:view");return projection.eventSubscription(schedules.get(id),access,true);}
+    @PostMapping @ResourcePermission(code="iqc:subscription:create",name="创建事件订阅",type="iqc",description="创建负责人事件订阅草稿")
+    @Audit(operationType=OperationType.CREATE,description="创建事件订阅",module="IQC_SUBSCRIPTION",request=false,response=false)
+    public EventSubscription create(@RequestBody Create body){var access=access("iqc:subscription:create");return projection.eventSubscription(schedules.create(body.code(),body.name(),body.definition()),access,false);}
+    @PutMapping("/{id}") @ResourcePermission(code="iqc:subscription:update",name="修订事件订阅",type="iqc",description="按修订更新负责人事件订阅草稿")
+    @Audit(operationType=OperationType.UPDATE,description="修订事件订阅",module="IQC_SUBSCRIPTION",request=false,response=false,key="#id")
+    public EventSubscription update(@PathVariable String id,@RequestBody Update body){var access=access("iqc:subscription:update");return projection.eventSubscription(schedules.update(id,body.expectedRevision(),body.name(),body.definition()),access,false);}
+    @PostMapping("/{id}/publish") @ResourcePermission(code="iqc:subscription:publish",name="发布事件订阅修订",type="iqc",description="冻结事件订阅及资产来源")
+    @Audit(operationType=OperationType.UPDATE,description="发布事件订阅修订",module="IQC_SUBSCRIPTION",request=false,response=false,key="#id")
+    public EventSubscriptionRevision publish(@PathVariable String id,@RequestBody Publish body){var access=access("iqc:subscription:publish");return projection.subscriptionRevision(schedules.publish(id,body.expectedRevision()),access,false);}
+    @PostMapping("/{id}/availability") @ResourcePermission(code="iqc:subscription:availability",name="启停事件订阅",type="iqc",description="启停当前已发布事件订阅")
+    @Audit(operationType=OperationType.UPDATE,description="启停事件订阅",module="IQC_SUBSCRIPTION",request=false,response=false,key="#id")
+    public EventSubscription availability(@PathVariable String id,@RequestBody Availability body){var access=access("iqc:subscription:availability");return projection.eventSubscription(schedules.availability(id,body.enabled()),access,false);}
+    @GetMapping("/{id}/versions") @ResourcePermission(code="iqc:subscription:versions:view",name="查看事件订阅历史",type="iqc",description="查看不可变事件订阅修订")
+    @Audit(operationType=OperationType.QUERY,description="读取调度版本历史",module="IQC_PRIVACY",request=false,response=false,key="#id")
+    public List<EventSubscriptionRevision> versions(@PathVariable String id){var access=access("iqc:subscription:versions:view");return schedules.history(id).stream().map(row -> projection.subscriptionRevision(row,access,true)).toList();}
+    @GetMapping("/{id}/instances") @ResourcePermission(code="iqc:subscription:instances:view",name="查看事件订阅实例",type="iqc",description="查看授权原任务实例与轮次")
+    @Audit(operationType=OperationType.QUERY,description="读取调度任务实例",module="IQC_PRIVACY",request=false,response=false,key="#id")
+    public IqcPage<InspectionTask> instances(@PathVariable String id,@RequestParam(defaultValue="1")long current,@RequestParam(defaultValue="20")long size){
+        var access=access("iqc:subscription:instances:view");
         var page=schedules.instances(id,current,size);
         return new IqcPage<>(page.records().stream().map(row -> projection.taskRead(row,access,false)).toList(),page.current(),page.size(),page.total());
     }
