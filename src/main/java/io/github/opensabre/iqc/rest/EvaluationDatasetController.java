@@ -37,26 +37,35 @@ public class EvaluationDatasetController {
 
     @GetMapping
     @ResourcePermission(code="iqc:dataset:view", name="查看评测数据集", type="iqc", description="按数据范围分页查询评测数据集")
+    @Audit(operationType=OperationType.QUERY, description="读取数据集目录", module="IQC_PRIVACY", request=false, response=false)
     public IqcPage<EvaluationDataset> page(@RequestParam(defaultValue="1") long current, @RequestParam(defaultValue="20") long size) {
-        return service.page(current, size);
+        var access=access("iqc:dataset:view");
+        var page=service.page(current,size);
+        return new IqcPage<>(page.records().stream().map(row -> projection.dataset(row,access,false)).toList(),page.current(),page.size(),page.total());
     }
     @GetMapping("/{id}")
     @ResourcePermission(code="iqc:dataset:detail:view", name="查看评测数据集草稿", type="iqc", description="查看数据集草稿和精确金标成员引用")
-    public EvaluationDataset get(@PathVariable String id) { return service.get(id); }
+    @Audit(operationType=OperationType.QUERY, description="读取数据集草稿", module="IQC_PRIVACY", request=false, response=false, key="#id")
+    public EvaluationDataset get(@PathVariable String id) {
+        var access=access("iqc:dataset:detail:view");
+        return projection.dataset(service.get(id),access,true);
+    }
 
     @PostMapping
     @ResourcePermission(code="iqc:dataset:manage", name="创建评测数据集", type="iqc", description="使用已批准样本版本创建数据集")
     @Audit(operationType=OperationType.CREATE, description="创建 IQC 评测数据集", module="IQC_EVALUATION", request=false, response=false)
     public EvaluationDataset create(@RequestBody Edit request) {
+        var access=access("iqc:dataset:manage");
         if (request == null) throw IqcException.invalidArgument("数据集请求不能为空");
-        return service.create(request.name(), request.draft());
+        return projection.dataset(service.create(request.name(), request.draft()),access,false);
     }
     @PutMapping("/{id}")
     @ResourcePermission(code="iqc:dataset:update", name="更新评测数据集", type="iqc", description="按预期修订更新数据集成员")
     @Audit(operationType=OperationType.UPDATE, description="更新 IQC 评测数据集", module="IQC_EVALUATION", request=false, response=false, key="#id")
     public EvaluationDataset update(@PathVariable String id, @RequestBody Edit request) {
+        var access=access("iqc:dataset:update");
         if (request == null || request.expectedRevision() == null) throw IqcException.invalidArgument("必须指定数据集预期修订");
-        return service.update(id, request.expectedRevision(), request.name(), request.draft());
+        return projection.dataset(service.update(id, request.expectedRevision(), request.name(), request.draft()),access,false);
     }
     @PostMapping("/{id}/freeze")
     @ResourcePermission(code="iqc:dataset:freeze", name="冻结评测数据集版本", type="iqc", description="冻结精确金标成员、完整会话及摘要")
@@ -70,8 +79,9 @@ public class EvaluationDatasetController {
     @ResourcePermission(code="iqc:dataset:availability", name="设置评测数据集可用性", type="iqc", description="设置数据集能否冻结或用于新的评测")
     @Audit(operationType=OperationType.UPDATE, description="设置 IQC 数据集可用性", module="IQC_EVALUATION", request=false, response=false, key="#id")
     public EvaluationDataset availability(@PathVariable String id, @RequestBody Availability request) {
+        var access=access("iqc:dataset:availability");
         if (request == null || request.enabled() == null) throw IqcException.invalidArgument("必须指定数据集可用性");
-        return service.availability(id, request.enabled());
+        return projection.dataset(service.availability(id, request.enabled()),access,false);
     }
     @GetMapping("/{id}/versions")
     @ResourcePermission(code="iqc:dataset:versions:view", name="查看数据集版本历史", type="iqc", description="分页查看数据集冻结版本摘要")

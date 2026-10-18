@@ -238,3 +238,9 @@ PipelineEvaluationController分页与详情在原service前分别刷新固定eva
 ### Benchmark聚合响应中的任务快照
 
 BenchmarkController的create/pair/report分别在领域调用前刷新既有benchmark:create/view/report:view，缺接线拒绝，成功no-store/nosniff。创建审计关闭请求/响应正文，查询审计仅baselineTaskId。ResultReadProjection复制Pair及Report，双侧InspectionTask复用taskReceipt，所有grant组合均不在实验摘要/报告附带冻结任务配置或Prompt；实验名称沿已有文本规则。保留实验身份、数据集版本/hash、selection、comparison、双侧报告、complete及原BigDecimal差值。已核对Comparison仅selection、允许路径和各类hash，不含原变量或Prompt正文。原领域双向绑定、单变量比较、任务范围和原始产物均不改。UI创建后仅使用pair.baseline.id保持兼容，原始任务配置读取需走后续独立受控入口；通用任务接口和数据集草稿尚待。仅编译检查，不代表HTTP、真实角色、浏览器或完整I1–I7验收。
+
+### 数据集草稿与写回执
+
+数据集page/get/create/update/availability在领域调用前分别刷新原dataset:view/detail:view/manage/update/availability，沿现有敏感接线no-store/nosniff，两个查询补无正文Audit。ResultReadProjection.dataset只复制PO；专用详情且FULL+PII双grant才返回原draftConfigJson，限制模式隐藏整个原草稿，仅在校验成功时提供精确sampleId/versionNo引用；不返回description。损坏或超限明确INVALID_DRAFT，不回退原文。名称沿既有文本规则，不保证识别任意无标签PII。
+
+目录与所有写回执始终不附原草稿或成员预览，不能借列表/写权限绕过详情读取。privacy仅exist=false/NON_NULL，原版本、修订、成员、状态及存储不改。UI未知/受限展示只读，不能将遮罩名称/缺省说明重写为原数据；保存先消费元数据回执、清旧历史/快照并独立GET，读取失败明确“已保存但重新读取失败”，保留受限只读状态，不建议重复提交。原直接写命令不新增FULL/PII要求，服务范围和CAS保持。当前仅构建检查，角色/浏览器/HTTP验收及完整I1–I7仍待。
