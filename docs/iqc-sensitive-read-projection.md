@@ -282,3 +282,12 @@ InspectionSchemeController trial/trials/task分别在领域调用前刷新原sch
 在d4e2e91接A0363666为f5427d8，新增SchemeTaskPresentationHttpTest，四FULL/PII组合覆盖POST trials、GET trials、BATCH/SCHEDULED默认/指定variant四任务分支，以及run/resume回执。验证不返回冻结正文，保留schema/kind/labelOnly/hasLabels/正整数draftRevision/格式受限variant，原任务JSON与派生字段不被修改、原异步executionId保持。坏或歧义快照保留UNKNOWN，非整数修订/非法variant不生成公开证据，固定基础grant拒绝先于domain。既有InspectionSchemeControllerTest补当前授权+真实projection构造夹具，原参数/校验断言保留。
 
 首83843为36项31通过/5失败，原因是新增测试误用POST /trial，既有生产路由为/trials。只修测试路径，不改生产路由/权限。最终90721 exit0，/tmp/iqc-scheme-task-presentation-http-final.log；按日志创建时间核对四份XML均为本轮：SchemeTaskPresentationHttpTest6、InspectionSchemeControllerTest9、TaskCommandHttpPrivacyTest10、EvaluationCommandHttpPrivacyTest11，共36项，0 failures/errors/skipped。默认MVC/真实投影，领域/PDP/worker mock，不代表浏览器未知元数据发布保护或真实组织/SQL验收；通用任务GET仍在另一批，完整I1–I7未完成。
+最终68868 exit0，/tmp/iqc-benchmark-draft-http-privacy-final.log；逐XML BenchmarkDraftHttpPrivacyTest14、EvaluationCommandHttpPrivacyTest11、DatasetEvaluationHttpPrivacyTest14、GoldSampleHttpContractTest7，共46项，0 failures/errors/skipped。无SQL/浏览器/真实组织验收，未重跑默认完整套件，整体I1–I7仍未完成。
+
+### 通用任务读取及跨页面公共导航
+
+InspectionTaskController list/get/executions分别在原服务前刷新固定task:view，缺接线拒绝，成功no-store/nosniff；查询审计关闭正文，详情/轮次仅id目标。list通过taskRead副本始终不附快照；get仅FULL+PII+Prompt三grant才附原agent/rule/label快照与autoExpandPrompt，因为冻结评测任务可嵌全部金标。其它筛选/集合JSON、触发请求、重试策略/错误始终withheld；不修改原存储、范围、状态、计数/hash。executions原记录仅id/轮次/状态/数量/时间/current，无自由正文，刷新权限后原样返回。
+
+InspectionTask.privacy为派生exist=false/NON_NULL；公共taskPresentation继续复用Scheme展示事实，并增加校验过的conversationCount（损坏/缺失为null，不视作0）。仅冻结任务确认为PIPELINE_EVALUATION、benchmark schema/side及双方ID格式有效且不相等时提供benchmarkBaselineTaskId，用于页面导航；实际Benchmark查询继续原双向绑定/范围/冻结证据验证，此元数据不授予权限。评测页优先该导航元数据，不为恢复入口读取整份快照；旧响应无元数据仍兼容。
+
+任务详情页受限/未知policy隐藏配置区并明确提示，不把隐藏正文解释成历史没有规则/Agent；会话数量未知明确展示未知，元数据不回写配置。周期计划/事件订阅实例列表、其它配置/复核副本仍待；仅构建检查，不等同真实组织/HTTP/浏览器和全部I1–I7验收。

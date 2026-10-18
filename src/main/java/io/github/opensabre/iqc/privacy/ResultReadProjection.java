@@ -454,6 +454,15 @@ public final class ResultReadProjection {
         result.put("schemaVersion",basic.schemaVersion());result.put("kind",basic.kind());
         result.put("labelOnly",basic.labelOnly());
         result.put("hasLabels",null);
+        Integer conversationCount=null;
+        if(source.getConversationIdsJson()!=null){
+            try{
+                var ids=json.readTree(source.getConversationIdsJson());
+                if(ids.isArray()&&java.util.stream.StreamSupport.stream(ids.spliterator(),false).allMatch(JsonNode::isTextual))
+                    conversationCount=ids.size();
+            }catch(java.io.IOException | RuntimeException invalid){ /* Unknown count remains explicit. */ }
+        }else if(source.getConversationId()!=null)conversationCount=1;
+        result.put("conversationCount",conversationCount);
         if("SCHEME".equals(basic.kind())) {
             try {
                 var snapshot=json.readTree(source.getRuleSnapshotJson()).path("schemeSnapshot");
@@ -470,7 +479,35 @@ public final class ResultReadProjection {
                 // Unknown display metadata cannot substitute for frozen publication evidence.
             }
         }
+        if("PIPELINE_EVALUATION".equals(source.getTaskType()) && source.getRuleSnapshotJson()!=null){
+            try{
+                var marker=json.readTree(source.getRuleSnapshotJson()).path("benchmarkSnapshot");
+                var peer=marker.path("peerTaskId");var side=marker.path("side").asText();
+                if("iqc-benchmark-pair-v1".equals(marker.path("schemaVersion").asText())
+                        && peer.isTextual() && peer.textValue().matches("[A-Za-z0-9_-]{1,64}")
+                        && source.getId()!=null && source.getId().matches("[A-Za-z0-9_-]{1,64}")
+                        && !source.getId().equals(peer.textValue()) && Set.of("BASELINE","CANDIDATE").contains(side))
+                    result.put("benchmarkBaselineTaskId","BASELINE".equals(side)?source.getId():peer.textValue());
+            }catch(java.io.IOException | RuntimeException invalid){ /* Navigation stays unavailable for malformed history. */ }
+        }
         return result;
+    }
+
+    /** Frozen task snapshots may embed full gold inputs and prompts. */
+    public InspectionTask taskRead(InspectionTask source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=taskReceipt(source,access);
+        boolean snapshots=detailRead && access.fullConversation() && access.pii() && access.prompt();
+        if(snapshots){
+            copy.setAgentSnapshotJson(source.getAgentSnapshotJson());copy.setRuleSnapshotJson(source.getRuleSnapshotJson());
+            copy.setLabelScopeSnapshotJson(source.getLabelScopeSnapshotJson());copy.setAutoExpandPrompt(source.getAutoExpandPrompt());
+        }
+        var metadata=new LinkedHashMap<String,Object>();metadata.put("policyVersion","iqc-task-read-v1");
+        metadata.put("snapshotsVisible",snapshots);metadata.put("canReadFull",access.fullConversation());
+        metadata.put("canReadPii",access.pii());metadata.put("canReadPrompt",access.prompt());
+        var withheld=new ArrayList<>(List.of("selectionFilterJson","conversationIdsJson","ruleIdsJson","triggerRequestJson","retryPolicyJson","retryError","triggerError"));
+        if(!snapshots)withheld.addAll(List.of("agentSnapshotJson","ruleSnapshotJson","labelScopeSnapshotJson","autoExpandPrompt"));
+        metadata.put("withheldFields",withheld);copy.setPrivacy(metadata);return copy;
     }
 
 }

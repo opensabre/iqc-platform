@@ -49,24 +49,31 @@ public class InspectionTaskController {
     @GetMapping
     @ResourcePermission(code = "iqc:task:view", name = "查看质检任务", type = "iqc", description = "查询质检任务")
     @RateLimit(sceneCode = "iqc-task-query", maxCount = 60, period = 60)
+    @Audit(operationType=OperationType.QUERY, description="读取任务目录", module="IQC_PRIVACY", request=false, response=false)
     public IqcPage<InspectionTask> list(@RequestParam(defaultValue = "1") long current,
                                        @RequestParam(defaultValue = "20") long size,
                                        @RequestParam(required = false) String keyword,
                                        @RequestParam(required = false) String status,
                                        @RequestParam(required = false) String taskType) {
-        return taskService.page(current, size, keyword, status, taskType);
+        var access=access("iqc:task:view");
+        var page=taskService.page(current,size,keyword,status,taskType);
+        return new IqcPage<>(page.records().stream().map(row -> projection.taskRead(row,access,false)).toList(),page.current(),page.size(),page.total());
     }
 
     @GetMapping("/{id}")
     @ResourcePermission(code = "iqc:task:view", name = "查看质检任务详情", type = "iqc", description = "查看质检任务详情")
+    @Audit(operationType=OperationType.QUERY, description="读取任务详情", module="IQC_PRIVACY", request=false, response=false, key="#id")
     public InspectionTask get(@PathVariable String id) {
-        return taskService.get(id);
+        var access=access("iqc:task:view");
+        return projection.taskRead(taskService.get(id),access,true);
     }
 
     @GetMapping("/{id}/executions")
     @ResourcePermission(code = "iqc:task:view", name = "查看任务执行记录", type = "iqc", description = "按任务可见范围查看执行轮次")
     @RateLimit(sceneCode = "iqc-task-execution-query", maxCount = 60, period = 60)
+    @Audit(operationType=OperationType.QUERY, description="读取任务执行轮次", module="IQC_PRIVACY", request=false, response=false, key="#id")
     public List<InspectionTaskService.TaskRunSummary> executions(@PathVariable String id) {
+        access("iqc:task:view");
         return taskService.executions(id);
     }
 
