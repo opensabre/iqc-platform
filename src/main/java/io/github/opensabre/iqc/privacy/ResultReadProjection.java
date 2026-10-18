@@ -405,6 +405,7 @@ public final class ResultReadProjection {
         copy.setAutoExpandPrompt(null);copy.setTriggerRequestJson(null);copy.setRetryPolicyJson(null);
         copy.setSelectionFilterJson(null);copy.setConversationIdsJson(null);copy.setRuleIdsJson(null);
         copy.setRetryError(null);copy.setTriggerError(null);
+        copy.setTaskPresentation(taskPublicMetadata(source));
         return copy;
     }
 
@@ -446,6 +447,30 @@ public final class ResultReadProjection {
             }
         }
         copy.setPrivacy(metadata);return copy;
+    }
+
+    private Map<String,Object> taskPublicMetadata(InspectionTask source) {
+        var basic=taskPresentation(source);var result=new LinkedHashMap<String,Object>();
+        result.put("schemaVersion",basic.schemaVersion());result.put("kind",basic.kind());
+        result.put("labelOnly",basic.labelOnly());
+        result.put("hasLabels",null);
+        if("SCHEME".equals(basic.kind())) {
+            try {
+                var snapshot=json.readTree(source.getRuleSnapshotJson()).path("schemeSnapshot");
+                var labels=snapshot.at("/release/definition/labels");
+                if(labels.isArray())result.put("hasLabels",!labels.isEmpty());
+                else if(source.getLabelScopeSnapshotJson()!=null)result.put("hasLabels",true);
+                var revision=snapshot.path("draftRevision");
+                if(revision.isIntegralNumber()&&revision.canConvertToInt()&&revision.intValue()>0)
+                    result.put("schemeDraftRevision",revision.intValue());
+                var variant=snapshot.path("selectedVariantCode");
+                if(variant.isTextual()&&variant.textValue().matches("[A-Za-z0-9_-]{1,64}"))
+                    result.put("selectedVariantCode",variant.textValue());
+            }catch(java.io.IOException | RuntimeException invalid){
+                // Unknown display metadata cannot substitute for frozen publication evidence.
+            }
+        }
+        return result;
     }
 
 }
