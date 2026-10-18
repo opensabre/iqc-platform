@@ -89,7 +89,12 @@ public class ActionFailureEscalationService {
             if(action.failureHandling()!=ActionPolicy.FailureHandling.ESCALATE_REVIEW)return null;
             if(ActionPolicy.evaluate(action.condition(),validated.context())!=ActionPolicy.Match.MATCH)
                 throw IqcException.invalidState("失败升级原触发条件不一致");
-            return SelectorAssetService.hash("iqc-action-failure-review-v1:"+source.idempotencyKey(action.type()));
+            // The namespaced action key is plain UTF-8, not a Selector JSON document.
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(("iqc-action-failure-review-v1:"+source.idempotencyKey(action.type()))
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch(java.security.NoSuchAlgorithmException unavailable) {
+            throw new IllegalStateException("SHA-256 unavailable",unavailable);
         } catch(com.fasterxml.jackson.core.JsonProcessingException failure) {
             throw IqcException.invalidState("失败升级冻结策略损坏");
         }
