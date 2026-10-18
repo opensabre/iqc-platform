@@ -264,3 +264,9 @@ InspectionTaskController list/get/executions分别在原服务前刷新固定tas
 InspectionTask.privacy为派生exist=false/NON_NULL；公共taskPresentation继续复用Scheme展示事实，并增加校验过的conversationCount（损坏/缺失为null，不视作0）。仅冻结任务确认为PIPELINE_EVALUATION、benchmark schema/side及双方ID格式有效且不相等时提供benchmarkBaselineTaskId，用于页面导航；实际Benchmark查询继续原双向绑定/范围/冻结证据验证，此元数据不授予权限。评测页优先该导航元数据，不为恢复入口读取整份快照；旧响应无元数据仍兼容。
 
 任务详情页受限/未知policy隐藏配置区并明确提示，不把隐藏正文解释成历史没有规则/Agent；会话数量未知明确展示未知，元数据不回写配置。周期计划/事件订阅实例列表、其它配置/复核副本仍待；仅构建检查，不等同真实组织/HTTP/浏览器和全部I1–I7验收。
+
+### 周期计划与事件订阅任务实例
+
+PeriodicScheduleController/EventSubscriptionController.instances分别在原query前刷新schedule:instances:view/subscription:instances:view，不误要求额外task:view；原服务仍检查负责人/组范围。复用taskRead(false)，所有敏感grant组合均仅列表元数据，不附冻结配置、Prompt、筛选、触发请求或错误正文。原分页current/size/total、顺序、任务状态、executionId、计划时刻/事件ID和公共计数保持，响应副本不改原任务。缺接线拒绝，成功no-store/nosniff，查询Audit仅id且关闭正文。
+
+两个Controller的创建/修订/发布/可用性共8个写Audit均显式关闭请求/响应正文，路径操作保留id；原发布response=true会复制冻结配置，现仅保留审计事件元数据，不改领域发布/触发行为。配置/历史HTTP响应仍需独立读取保护。事件实例表格及任务详情对withheld triggerError明确显示原因未展示，不把缺省当作等待接入会话或空原因；其余UI原任务状态/链接依赖保持。当前仅构建检查，真实角色/HTTP/浏览器及完整I1–I7仍待。
