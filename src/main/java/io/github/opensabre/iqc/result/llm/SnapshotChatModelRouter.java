@@ -150,8 +150,28 @@ public class SnapshotChatModelRouter {
                 || (prompt.getOptions() instanceof OpenAiChatOptions openai && openai.getMaxCompletionTokens()!=null)))
             throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_OUTPUT_OVERRIDE_NOT_ALLOWED");
         if(gateway==null)return model.call(prompt);
-        var result=gateway.invokeTracked(identity,context,()->model.call(prompt),SnapshotChatModelRouter::usage);
+        var result=gateway.invokeTracked(identity,context,()->model.call(prompt),SnapshotChatModelRouter::usage,
+                ()->diagnosticRequest(prompt),this::diagnosticResponse);
         return result.response()==null?null:new MeteredResponse(result.response(),result.handle());
+    }
+    private String diagnosticRequest(Prompt prompt){
+        var messages=new java.util.ArrayList<java.util.Map<String,Object>>();
+        for(var message:prompt.getInstructions()){
+            var item=new java.util.LinkedHashMap<String,Object>();
+            item.put("role",message.getMessageType().toString());item.put("text",message.getText());
+            if(message instanceof org.springframework.ai.chat.messages.AssistantMessage assistant)item.put("toolCalls",assistant.getToolCalls());
+            if(message instanceof org.springframework.ai.chat.messages.ToolResponseMessage tool)item.put("toolResponses",tool.getResponses());
+            messages.add(item);
+        }
+        return objectMapper.valueToTree(java.util.Map.of("source","FRAMEWORK_MESSAGES","messages",messages)).toString();
+    }
+    private String diagnosticResponse(ChatResponse response){
+        if(response==null)return null;
+        var generations=response.getResults().stream().map(generation->{
+            var item=new java.util.LinkedHashMap<String,Object>();item.put("text",generation.getOutput().getText());
+            item.put("toolCalls",generation.getOutput().getToolCalls());return item;
+        }).toList();
+        return objectMapper.valueToTree(java.util.Map.of("source","FRAMEWORK_GENERATIONS","generations",generations)).toString();
     }
     public static io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Usage usage(ChatResponse response) {
         if(response==null || response.getMetadata()==null || response.getMetadata().getUsage()==null)

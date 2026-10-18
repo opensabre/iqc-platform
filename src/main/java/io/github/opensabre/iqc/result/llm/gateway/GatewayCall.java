@@ -6,6 +6,11 @@ import java.time.LocalDateTime;
 public class GatewayCall {
     @TableId private String callId;
     private String modelKey;
+    @com.fasterxml.jackson.annotation.JsonIgnore private String requestDataEncrypted;
+    @com.fasterxml.jackson.annotation.JsonIgnore private String responseDataEncrypted;
+    @com.fasterxml.jackson.annotation.JsonIgnore private String callDataStatus;
+    @com.fasterxml.jackson.annotation.JsonIgnore private LocalDateTime callDataRecordedAtUtc;
+    @com.fasterxml.jackson.annotation.JsonIgnore private LocalDateTime callDataExpiresAtUtc;
     private Integer contextWindowTokens;
     private String deploymentRef;
     private String modelProfileId;
