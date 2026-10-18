@@ -223,3 +223,9 @@ PipelineEvaluationController分页与详情在原service前分别刷新固定eva
 评测create在领域写入前刷新原evaluation:task:create，返回ResultReadProjection.taskReceipt副本：保留任务ID、状态及运行元数据，移除agent/rule/label快照、Prompt、触发请求、重试策略与错误、筛选JSON、会话/规则集合JSON。写grant不能充当读冻结输入grant，即使全敏感grant也不在创建回执附带这些内容。任务名称沿现有文本保护，领域存储不变；UI创建仅消费task.id，当前流程兼容。普通任务及Benchmark入口尚待独立接线。
 
 报告刷新原evaluation:report:view先于service，沿用原Task/Execution范围与完整金标分母、数值指标及原样本来源，不重算、不投影成空报告。查询Audit仅taskId且无正文，成功no-store/nosniff；缺接线拒绝。构建检查不能替代实际组织/HTTP/浏览器行为验收。
+
+### 评测创建回执和报告MVC专项
+
+在ca0ae01上接A62c061b为876d8c1，新增EvaluationCommandHttpPrivacyTest。八种FULL/PII/Prompt组合下，创建回执始终移除冻结Agent/Rule/Label、Prompt、触发请求、重试策略/错误及筛选/集合JSON，保留任务身份、状态、零计数及请求hash；敏感原对象不变。报告HTTP保留缺失样本、来源轮次、完整分母、零召回及精确小数；固定当前grant失败与缺接线均阻止领域调用。
+
+首轮79724为32项31通过/1error：独立MVC夹具漏注册框架默认BaseException处理器，缺接线IqcException未转换响应。只读核对并补测试DefaultWebMvcExceptionHandlerAdvice注册，未改框架/生产异常逻辑。最终85879 exit0，/tmp/iqc-evaluation-command-http-privacy-final.log：EvaluationCommandHttpPrivacyTest11、DatasetEvaluationHttpPrivacyTest14、GoldSampleHttpContractTest7，共32项，无失败/错误/跳过。领域与组织授权仍mock，不证明真实PDP/SQL/browser；本批未包含Benchmark后续增量，不称整个I7或默认全套完成。
