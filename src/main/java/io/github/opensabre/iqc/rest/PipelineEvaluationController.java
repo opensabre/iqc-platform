@@ -36,9 +36,10 @@ public class PipelineEvaluationController {
     @ResourcePermission(code="iqc:evaluation:task:create", name="创建冻结数据集评测任务", type="iqc", description="使用精确数据集与流水线版本创建离线评测")
     @Audit(operationType=OperationType.CREATE, description="创建 IQC 冻结数据集评测", module="IQC_EVALUATION", request=false, response=false)
     public InspectionTask create(@RequestBody Create request) {
+        var access=access("iqc:evaluation:task:create");
         if (request == null || request.datasetVersion() == null) throw IqcException.invalidArgument("必须选择精确数据集版本");
-        return service.create(request.datasetId(), request.datasetVersion(), request.pipelineId(), request.pipelineVersion(),
-                request.draftRevision(), request.name(), request.concurrency(), request.requestId());
+        return projection.taskReceipt(service.create(request.datasetId(), request.datasetVersion(), request.pipelineId(), request.pipelineVersion(),
+                request.draftRevision(), request.name(), request.concurrency(), request.requestId()),access);
     }
     @GetMapping("/{taskId}/results")
     @ResourcePermission(code="iqc:evaluation:results:view", name="查看评测样本结果", type="iqc", description="分页查询精确执行轮次的评测结果摘要")
@@ -58,7 +59,9 @@ public class PipelineEvaluationController {
     }
     @GetMapping("/{taskId}/report")
     @ResourcePermission(code="iqc:evaluation:report:view", name="查看固定数据集评测报告", type="iqc", description="以完整金标分母计算并保留失败重试来源")
+    @Audit(operationType=OperationType.QUERY, description="读取冻结数据集评测报告", module="IQC_PRIVACY", request=false, response=false, key="#taskId")
     public PipelineEvaluationService.Report report(@PathVariable String taskId, @RequestParam(required=false) String executionId) {
+        access("iqc:evaluation:report:view");
         return service.report(taskId, executionId);
     }
     public record Create(String datasetId, Integer datasetVersion, String pipelineId, Integer pipelineVersion,

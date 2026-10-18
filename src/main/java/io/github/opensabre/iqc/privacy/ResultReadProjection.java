@@ -396,4 +396,16 @@ public final class ResultReadProjection {
         copy.setPrivacy(metadata);return copy;
     }
 
+    /** A command grant acknowledges a created task without granting its frozen inputs. */
+    public InspectionTask taskReceipt(InspectionTask source, SensitiveReadAccessService.Access access) {
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new InspectionTask();BeanUtils.copyProperties(source,copy);
+        copy.setName(text(copy.getName(),access.fullConversation() && access.pii()));
+        copy.setAgentSnapshotJson(null);copy.setRuleSnapshotJson(null);copy.setLabelScopeSnapshotJson(null);
+        copy.setAutoExpandPrompt(null);copy.setTriggerRequestJson(null);copy.setRetryPolicyJson(null);
+        copy.setSelectionFilterJson(null);copy.setConversationIdsJson(null);copy.setRuleIdsJson(null);
+        copy.setRetryError(null);copy.setTriggerError(null);
+        return copy;
+    }
+
 }
