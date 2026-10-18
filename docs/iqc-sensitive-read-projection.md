@@ -297,3 +297,13 @@ InspectionTask.privacy为派生exist=false/NON_NULL；公共taskPresentation继�
 PeriodicScheduleController/EventSubscriptionController.instances分别在原query前刷新schedule:instances:view/subscription:instances:view，不误要求额外task:view；原服务仍检查负责人/组范围。复用taskRead(false)，所有敏感grant组合均仅列表元数据，不附冻结配置、Prompt、筛选、触发请求或错误正文。原分页current/size/total、顺序、任务状态、executionId、计划时刻/事件ID和公共计数保持，响应副本不改原任务。缺接线拒绝，成功no-store/nosniff，查询Audit仅id且关闭正文。
 
 两个Controller的创建/修订/发布/可用性共8个写Audit均显式关闭请求/响应正文，路径操作保留id；原发布response=true会复制冻结配置，现仅保留审计事件元数据，不改领域发布/触发行为。配置/历史HTTP响应仍需独立读取保护。事件实例表格及任务详情对withheld triggerError明确显示原因未展示，不把缺省当作等待接入会话或空原因；其余UI原任务状态/链接依赖保持。当前仅构建检查，真实角色/HTTP/浏览器及完整I1–I7仍待。
+
+### 通用任务与调度实例 HTTP 边界回归（2026-10-18）
+
+新增 `TaskReadHttpPrivacyTest` 使用默认 MVC、真实 `ResultReadProjection` 与应用及框架原异常 advice；领域服务和当前权限查询为隔离 mock。八种 FULL/PII/Prompt 组合验证任务详情仅三权限齐全可读冻结快照，任务列表及周期/事件实例列表始终不附敏感输入；检查原分页、状态、事件/hash、公共会话计数和 Benchmark 导航。执行摘要按默认 HTTP mapper 比较完整响应，并单独比较日期 Instant，源任务序列化前后保持一致。
+
+当前授权拒绝在五个读取端点调用领域服务前生效；缺接线 fail closed。实例分别只要求原 schedule/subscription instances grant，不额外要求 task:view。缺失或损坏会话集合计数保持未知，已知空集合才为零；非法 Benchmark 标记不产生导航。反射检查两调度控制器八个写 Audit 均不记录正文，此项不等同实际审计切面运行验收。
+
+首轮32项中24通过、8失败均为新增夹具以 Jackson 2 毫秒日期与默认 Jackson 3 ISO 日期比较；修正测试基准并增加时间值断言，生产日期协议不变。最终运行结果另记。上述专项不证明真实组织角色、数据库、浏览器或完整 I1–I7 验收；语音转换/ASR/转写生成不在当前范围。
+
+最终原进程71725退出0，日志 `/tmp/iqc-task-read-http-privacy-final.log`。四份XML均为本轮新生成：TaskReadHttpPrivacyTest 13、InspectionTaskControllerTest 3、SchemeTaskPresentationHttpTest 6、TaskCommandHttpPrivacyTest 10，合计32项，0失败/错误/跳过。未运行新的默认全套。
