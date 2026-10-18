@@ -300,3 +300,11 @@ ResultReadProjection复用四个原PO响应副本：目录与所有写回执永�
 两页UI未知/受限policy只展示元数据，隐藏配置表单，不以默认Cron/事件配置填入真实草稿；不能从副本编辑、预览或确认发布。最近错误明确未展示，不当作没有错误。保存/发布/启停成功先清旧历史/配置，再独立GET；失败提示操作已完成但重新读取失败，不建议重复提交。当前编辑存在未保存内容时先阻止同资产启停，避免静默丢弃。重新读取先清旧正文并用generation拒绝迟到；关闭/卸载清配置和历史。版本正文按原字符串展示，不做浮点美化。
 
 仅构建检查，真实角色/HTTP/浏览器与调度SQL仍待验收；其它Selector/Pipeline/Scheme配置/人工复核副本及全部I1–I7仍未完成。
+
+### Selector选数预览的PII副本
+
+ConversationSelectorController.preview和SelectorAssetController.preview分别在解析/查询前刷新原selector:preview、selector:asset:version:preview，保留原选数scope、定义解析/精确JSON、发布版本和限流。成功no-store/nosniff，查询Audit不含输入条件或输出正文；发布版仅id:version目标，缺接线拒绝。没有增加Prompt要求，因为预览不返回模型配置或Prompt。
+
+ResultReadProjection.selectorPreview仅复制原Preview：FULL+PII双grant才显示原employeeId和员工维度map；否则员工标识和两个employees map为null并明确withheld，不生成掩码员工键而造成碰撞/错误合计。文件名复用原字段mask，渠道沿原文本规则。候选/命中/抽样/最终计数、limited、时间窗口、会话ID、团队/部门结构ID及其原分布、时间/风险和definitionHash均保持，不重算、不修改原选集或定义。组织结构ID用于原分布关联，不视作员工标识。自由文本规则不保证识别任意无标签PII。
+
+原Preview增加可空privacy且保留旧12参构造，null不序列化；领域内部旧预览保持原结构，不改Selection持久化/冻结hash或新建表。UI明确员工信息未展示不是没有员工，未知policy隐藏样本/分布明细；旧无privacy响应仅兼容历史部署。当前仅编译/构建检查，HTTP四grant、精确数值/source/分布不变及真实角色/browser仍待。Selector资产草稿/历史/Prepared定义读取尚未接本投影，不能声称整个Selector域已收口。

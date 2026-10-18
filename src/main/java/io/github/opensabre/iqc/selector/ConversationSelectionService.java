@@ -40,7 +40,16 @@ public class ConversationSelectionService {
                                       String employeeDepartmentId,String channel,LocalDateTime startedTime,String riskLevel) { }
     public record Preview(String schemaVersion,Instant anchor,ResolvedWindow resolvedWindow,int candidateCount,int matchedCount,
                           int sampledCount,int selectedCount,boolean limited,Distribution matchedDistribution,
-                          Distribution selectedDistribution,List<PreviewConversation> preview,String definitionHash) { }
+                          Distribution selectedDistribution,List<PreviewConversation> preview,String definitionHash,
+                          @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                          Map<String,Object> privacy) {
+        public Preview(String schemaVersion,Instant anchor,ResolvedWindow resolvedWindow,int candidateCount,int matchedCount,
+                int sampledCount,int selectedCount,boolean limited,Distribution matchedDistribution,Distribution selectedDistribution,
+                List<PreviewConversation> preview,String definitionHash){
+            this(schemaVersion,anchor,resolvedWindow,candidateCount,matchedCount,sampledCount,selectedCount,limited,
+                    matchedDistribution,selectedDistribution,preview,definitionHash,null);
+        }
+    }
     public record SelectedEvidence(String conversationId,JsonNode metadata,String metadataHash,String resultId,
                                    String executionId,String sourceOwnerGroupId,Map<String,String> labelResultIds,Map<String,JsonNode> values) { }
     public record SelectionScope(boolean all,String owner,String groupId) { }
