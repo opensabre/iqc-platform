@@ -7,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Optional business-layer expectations. Absent dimensions are unlabelled, never assumed negative. */
-public record GoldDecision(BigDecimal score, ScoreStatus scoreStatus, @com.fasterxml.jackson.databind.annotation.JsonDeserialize(contentUsing=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class) Map<String, JsonNode> labels, Risk risk) {
+public record GoldDecision(BigDecimal score, ScoreStatus scoreStatus, @com.fasterxml.jackson.databind.annotation.JsonDeserialize(contentUsing=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class) @tools.jackson.databind.annotation.JsonDeserialize(contentUsing=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class) Map<String, JsonNode> labels, Risk risk) {
     public enum ScoreStatus { FINAL, PENDING, NOT_APPLICABLE }
     public enum Risk { NONE, LOW, MEDIUM, HIGH, CRITICAL, UNKNOWN }
     public GoldDecision {
