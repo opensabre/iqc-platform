@@ -314,3 +314,11 @@ PeriodicScheduleController/EventSubscriptionController.instances分别在原quer
 组织权限树新增迁移V20261018_01，资源/按钮900263挂任务900103，仅IQC_ADMIN/IQC_QUALITY_MANAGER，沿原SHA2关联与自然键去重，不授系统ADMIN/查看者/质检员，不隐含FULL/PII授权。该迁移仅本地草案，未执行或部署，真实角色和MySQL新库/升级/重复执行验收仍待。
 
 任务页面提供独立敏感读取按钮，读取开始清旧快照，失败保持受限内容，切换任务/关闭详情/卸载均阻断迟到响应；菜单可见性不替代后端实时授权。当前仅编译/构建检查，不能宣称Prompt权限已在环境生效、或全I1–I7完成。
+
+### 独立配置入口默认 MVC 验证
+
+`TaskConfigurationHttpPrivacyTest` 覆盖八种 FULL/PII/Prompt 组合：仅三者齐备才返回冻结 agent/rule/label/autoExpandPrompt，保留原 triggerRequestHash，仍不附筛选与触发请求正文。所有缺失组合在任务服务调用前拒绝；固定基础资源是 task:view 与 PROMPT，不从客户端接受权限集合。原服务数据范围拒绝仍返回拒绝，测试只证明控制器保留此边界，不代替真实组织和数据库的范围验收。原对象序列化前后相同。
+
+缺授权组件与基础资源撤销均 fail closed。资源注解绑定原 PROMPT，限流声明为独立场景30次/60秒，审计声明仅id且无请求/响应正文；反射验证声明不代表实际限流/审计切面的运行证明。权限迁移未执行，浏览器清理旧快照与迟到响应拦截仍待实际交互验收。
+
+原64045退出0，日志 `/tmp/iqc-task-configuration-http-privacy.log`。五份本轮新XML：TaskConfigurationHttpPrivacyTest11、TaskReadHttpPrivacyTest13、InspectionTaskControllerTest3、SchemeTaskPresentationHttpTest6、TaskCommandHttpPrivacyTest10，共43项，0失败/错误/跳过。未运行新的默认全套，也未执行权限SQL。
