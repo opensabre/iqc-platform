@@ -2,6 +2,8 @@
 
 ## 当前边界
 
+后续已新增独立的 [策略配置修订管理](iqc-pipeline-rollout-revisions.md)；本页的“不保存策略”描述仅指 rollout-preview 接口。配置修订保存仍不改变实际任务路由。
+
 本批提供真实预览 API 与流水线详情中的预览界面，不保存策略、不创建任务、不改变实际任务路由。完整 I7 灰度发布仍未完成。本批不新增表，不修改 framework。
 
 已搜索 IQC、公共框架及 Wiki；现有发布版本、Prepared 与 BenchmarkVariableComparator 可以满足精确来源和五维单变量验证，直接复用。没有发现现成 IQC 灰度分配器，因此新增无 IO 的 PipelineRolloutPolicy，避免建立第二套版本或权限模型。
