@@ -38,7 +38,7 @@ public class PipelineRolloutController {
         authorize("iqc:pipeline:rollout:history:view");return rollouts.history(id,beforeRevision,limit);
     }
     @PostMapping("/revisions")
-    @ResourcePermission(code="iqc:pipeline:rollout:manage",name="修订流水线灰度策略",type="iqc",description="按预期修订追加策略配置；当前不改变实际任务路由")
+    @ResourcePermission(code="iqc:pipeline:rollout:manage",name="修订流水线灰度策略",type="iqc",description="按预期修订追加策略，供后续灰度任务新请求使用")
     @Audit(operationType=OperationType.UPDATE,description="追加灰度策略修订",module="IQC_ROLLOUT",request=false,response=false,key="#id")
     @io.github.opensabre.governance.ratelimit.annotations.RateLimit(sceneCode="iqc-pipeline-rollout-save",maxCount=10,period=60)
     public PipelineRolloutService.Revision save(@PathVariable String id,@RequestBody Save request){

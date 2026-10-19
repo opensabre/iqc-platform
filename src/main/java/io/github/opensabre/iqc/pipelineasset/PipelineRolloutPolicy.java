@@ -32,12 +32,17 @@ public record PipelineRolloutPolicy(String schemaVersion,String pipelineId,Integ
         requireVersion(baseline,baselineVersionNo);requireVersion(candidate,candidateVersionNo);
         var comparison=BenchmarkVariableComparator.compare(baseline.release(),candidate.release(),variable,json);
         String policyHash=io.github.opensabre.iqc.selector.SelectorAssetService.hash(json.valueToTree(this).toString());
-        String cohortHash=digest("iqc-pipeline-rollout-cohort-v1",pipelineId,actorId,requestKey,cohortSalt);
+        String cohortHash=cohortHash(actorId,requestKey);
         int bucket=new java.math.BigInteger(cohortHash,16).mod(java.math.BigInteger.valueOf(10000)).intValueExact();
         boolean useCandidate=state==State.ACTIVE && bucket<candidateBasisPoints;
         var selected=useCandidate?candidate:baseline;
         return new Decision(SCHEMA,pipelineId,policyHash,cohortHash,bucket,baselineVersionNo,candidateVersionNo,candidateBasisPoints,
                 state,useCandidate?Side.CANDIDATE:Side.BASELINE,selected.versionNo(),selected.contentHash(),comparison);
+    }
+    public String cohortHash(String actorId,String requestKey){
+        if(actorId==null||!actorId.matches("[A-Za-z0-9:_-]{1,64}")||requestKey==null||!requestKey.matches("[A-Za-z0-9:_-]{1,128}"))
+            throw IqcException.invalidArgument("灰度分桶缺少稳定身份或有效请求键");
+        return digest("iqc-pipeline-rollout-cohort-v1",pipelineId,actorId,requestKey,cohortSalt);
     }
     private void requireVersion(PipelineAssetService.Prepared source,int expected){
         if(source==null||!pipelineId.equals(source.pipelineId())||source.versionNo()==null||source.versionNo()!=expected

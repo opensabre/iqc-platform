@@ -490,6 +490,29 @@ public final class ResultReadProjection {
                     result.put("benchmarkBaselineTaskId","BASELINE".equals(side)?source.getId():peer.textValue());
             }catch(java.io.IOException | RuntimeException invalid){ /* Navigation stays unavailable for malformed history. */ }
         }
+        if("PIPELINE".equals(source.getTaskType())&&source.getRuleSnapshotJson()!=null){
+            try{
+                var root=json.readTree(source.getRuleSnapshotJson());
+                if(root.has("rolloutSnapshot")){
+                    var evidence=io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.read(root.path("rolloutSnapshot"),json);
+                    var revision=evidence.revision();var decision=evidence.decision();var marker=root.path("pipelineSnapshot");
+                    if(!io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.SCHEMA.equals(evidence.schemaVersion())
+                            ||!Objects.equals(source.getId(),evidence.taskId())||revision==null||revision.snapshot()==null||decision==null
+                            ||revision.revisionNo()<1||decision.selectedVersionNo()<1||decision.side()==null
+                            ||!Objects.equals(revision.contentHash(),io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(json.valueToTree(revision.snapshot()).toString()))
+                            ||!Objects.equals(decision.policyHash(),revision.snapshot().policyHash())
+                            ||!Objects.equals(decision.pipelineId(),marker.path("pipelineId").asText())
+                            ||!marker.path("versionNo").isIntegralNumber()||!marker.path("versionNo").canConvertToInt()
+                            ||decision.selectedVersionNo()!=marker.path("versionNo").intValue()
+                            ||decision.selectedReleaseHash()==null||!decision.selectedReleaseHash().matches("[a-f0-9]{64}")
+                            ||!Objects.equals(decision.selectedReleaseHash(),marker.path("contentHash").asText())
+                            ||!Objects.equals(decision.selectedReleaseHash(),io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(marker.path("release").toString())))
+                        throw new IllegalArgumentException();
+                    result.put("rollout",Map.of("schemaVersion","iqc-rollout-presentation-v1","policyRevision",revision.revisionNo(),
+                            "side",decision.side().name(),"selectedVersionNo",decision.selectedVersionNo(),"selectedReleaseHash",decision.selectedReleaseHash()));
+                }
+            }catch(java.io.IOException|RuntimeException invalid){ /* Invalid or absent history never becomes a public routing claim. */ }
+        }
         return result;
     }
 

@@ -2,7 +2,7 @@
 
 ## 当前边界
 
-后续已新增独立的 [策略配置修订管理](iqc-pipeline-rollout-revisions.md)；本页的“不保存策略”描述仅指 rollout-preview 接口。配置修订保存仍不改变实际任务路由。
+后续已新增独立的 [策略配置修订管理](iqc-pipeline-rollout-revisions.md)；本页的“不保存策略”描述仅指 rollout-preview 接口。后续已接入 [显式会话灰度任务入口](iqc-pipeline-rollout-tasks.md)，保存的修订会供后续灰度新请求使用；预览接口本身仍不创建任务。
 
 本批提供真实预览 API 与流水线详情中的预览界面，不保存策略、不创建任务、不改变实际任务路由。完整 I7 灰度发布仍未完成。本批不新增表，不修改 framework。
 
