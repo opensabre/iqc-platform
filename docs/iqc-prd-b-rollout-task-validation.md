@@ -41,3 +41,5 @@ B 在 `fdda5fc` 上只集成 A 已提交 `c6f87ac`（本分支 `1ee833a`）与 `
 执行入口专项：原68645 terminal exit0，`/tmp/iqc-b-rollout-worker-boundaries.log`。InspectionExecutionServiceTest共35项，fresh XML零失败错误跳过，新增3项逐一检查queueSystem/resume/run在g保留ID缺信封/null信封时将实际ID传给校验入口。拒绝后无checkpoint/message读取、模型或Pipeline evaluator调用；排队/恢复不写执行记录，run沿既有流程先claim再校验。入口真实，PipelineAssetService/DAO/state/provider模拟，不能替代真实守卫+DB/领取事务及完整worker运行验收。
 
 worker异常收尾专项：原38902 terminal exit0，`/tmp/iqc-b-rollout-worker-failure.log`；InspectionExecutionServiceTest37+TaskExecutionStateServiceTest7共44项fresh XML零失败错误跳过。新增persisted/async两项精确验证领取后灰度拒绝调用state.fail(actualTaskId,executionId,true,error)，无budget-wait及会话/模型调用。runner的state服务仍模拟；原state7项为真实状态服务+mapper模拟，两层不能合称真实数据库失败回写或异步代理验收。
+
+真实服务串联专项：原8695 terminal exit0，`/tmp/iqc-b-rollout-worker-real-services.log`；Execution38+State7+Wiring3共48项fresh XML零失败错误跳过。新增一项以真实runner、真实PipelineAssetService旧构造及真实TaskExecutionStateService串联，仅mapper模拟；缺/null信封的保留g任务均因缺守卫被拒绝，任务和执行轮次转FAILED、保留原因、原ruleSnapshotJson不变，未读取消息/checkpoint或调用模型。日志中的拒绝异常为预期路径，不是测试失败。不证明真实DB提交、Spring事务或异步代理。

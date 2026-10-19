@@ -357,6 +357,8 @@ class InspectionExecutionServiceTest {
     @Test void rolloutPersistentWorkerRecordsClaimedFailureWithoutInference() { rejectRolloutAtBoundary("persisted"); }
     @Test void rolloutAsyncRunnerRecordsClaimedFailureWithoutInference() { rejectRolloutAtBoundary("async"); }
 
+    @Test void rolloutMissingGuardFailsThroughRealAssetAndStateServices() { rejectRolloutAtBoundary("integrated"); }
+
     /** Real entry methods must pass the actual task ID even when rollout markers are absent. */
     private void rejectRolloutAtBoundary(String boundary) {
         for (boolean markerPresent : new boolean[]{false,true}) {
@@ -371,9 +373,13 @@ class InspectionExecutionServiceTest {
                     mock(UsageCounterRecorder.class),mock(HierarchicalResultService.class),
                     mock(io.github.opensabre.iqc.label.LabelCandidateService.class),
                     mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class));
-            ReflectionTestUtils.setField(runner,"pipelineAssets",pipelines);
+            boolean integrated=boundary.equals("integrated");
+            ReflectionTestUtils.setField(runner,"pipelineAssets",integrated
+                    ?new io.github.opensabre.iqc.pipelineasset.PipelineAssetService(null,null,null,null,null,null,null,null,
+                        objectMapper,null,null,null,null,null):pipelines);
             ReflectionTestUtils.setField(runner,"pipelineEvaluator",evaluator);
-            ReflectionTestUtils.setField(runner,"executionStates",states);
+            ReflectionTestUtils.setField(runner,"executionStates",integrated
+                    ?new io.github.opensabre.iqc.task.TaskExecutionStateService(tasks,executions):states);
             var task=task();task.setId("g"+"a".repeat(63));task.setCurrentExecutionId("execution-1");
             task.setStatus(boundary.equals("queue")?"CREATED":boundary.equals("resume")?"PAUSED":"QUEUED");
             var snapshot=objectMapper.createObjectNode();if(markerPresent)snapshot.putNull("rolloutSnapshot");
@@ -381,11 +387,28 @@ class InspectionExecutionServiceTest {
             when(tasks.selectOne(any())).thenReturn(task);when(tasks.selectById(task.getId())).thenReturn(task);
             when(scope.canView(any(),any())).thenReturn(true);
             var execution=new TaskExecution();execution.setId("execution-1");execution.setTaskId(task.getId());
+            execution.setStatus("QUEUED");
             when(executions.selectById("execution-1")).thenReturn(execution);
+            if(integrated) {
+                when(executions.selectOne(any())).thenReturn(execution);
+                when(tasks.update(isNull(),any())).thenReturn(1);
+                when(executions.update(isNull(),any())).thenReturn(1);
+                when(tasks.updateById(any(InspectionTask.class))).thenReturn(1);
+                when(executions.updateById(any(TaskExecution.class))).thenReturn(1);
+            }
             when(states.claim(task.getId(),"execution-1")).thenReturn(true);
             org.mockito.Mockito.doThrow(new IllegalStateException("rollout evidence rejected"))
                     .when(pipelines).validateTask(any(),org.mockito.ArgumentMatchers.eq(task.getId()));
-            if(boundary.equals("persisted") || boundary.equals("async")) {
+            if(integrated) {
+                String frozen=task.getRuleSnapshotJson();
+                runner.executePersisted(task.getId(),"execution-1");
+                assertThat(task.getStatus()).isEqualTo("FAILED");
+                assertThat(execution.getStatus()).isEqualTo("FAILED");
+                assertThat(execution.getErrorMessage()).contains("灰度任务原始证据校验组件不可用");
+                assertThat(task.getRuleSnapshotJson()).isEqualTo(frozen);
+                verify(tasks).updateById(task);verify(executions).updateById(execution);
+                verifyNoInteractions(pipelines,states);
+            } else if(boundary.equals("persisted") || boundary.equals("async")) {
                 if(boundary.equals("persisted"))runner.executePersisted(task.getId(),"execution-1");
                 else runner.executeAsync(task.getId(),"execution-1");
                 verify(states).claim(task.getId(),"execution-1");
@@ -398,10 +421,10 @@ class InspectionExecutionServiceTest {
                     default -> runner.run(task.getId(),"execution-1");
                 }
             }).hasMessageContaining("rollout evidence rejected");
-            verify(pipelines).validateTask(any(),org.mockito.ArgumentMatchers.eq(task.getId()));
+            if(!integrated)verify(pipelines).validateTask(any(),org.mockito.ArgumentMatchers.eq(task.getId()));
             verify(pipelines,org.mockito.Mockito.never()).validateTask(any());
             verifyNoInteractions(items,messages,models,evaluator);
-            verify(tasks,org.mockito.Mockito.never()).updateById(any(InspectionTask.class));
+            if(!integrated)verify(tasks,org.mockito.Mockito.never()).updateById(any(InspectionTask.class));
             if(boundary.equals("queue") || boundary.equals("resume"))verifyNoInteractions(executions,states);
         }
     }
