@@ -113,9 +113,21 @@ public class PipelineAssetService {
     public PipelineRolloutPolicy.Decision previewRollout(String id,PipelineRolloutPolicy policy,String requestKey){
         if(policy==null||!id.equals(policy.pipelineId()))throw IqcException.invalidArgument("灰度策略流水线不匹配");
         var actorId=scope.actorUserId();
-        var baseline=publishedRelease(id,policy.baselineVersionNo());
-        var candidate=publishedRelease(id,policy.candidateVersionNo(),false,policy.state()!=PipelineRolloutPolicy.State.ROLLED_BACK);
-        return policy.preview(actorId,requestKey,baseline,candidate,json);
+        var sources=rolloutSources(id,policy);
+        return policy.preview(actorId,requestKey,sources.baseline(),sources.candidate(),json);
+    }
+    record RolloutSources(Prepared baseline,Prepared candidate) { }
+    RolloutSources rolloutSources(String id,PipelineRolloutPolicy policy){
+        if(policy==null||!id.equals(policy.pipelineId()))throw IqcException.invalidArgument("灰度策略流水线不匹配");
+        return new RolloutSources(publishedRelease(id,policy.baselineVersionNo()),
+                publishedRelease(id,policy.candidateVersionNo(),false,policy.state()!=PipelineRolloutPolicy.State.ROLLED_BACK));
+    }
+    /** Shares the original asset lock with publication and availability changes. */
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void lockForRollout(String id){
+        var asset=require(id,true);
+        if(!java.util.Objects.equals(id,asset.getId()))throw IqcException.invalidArgument("流水线标识必须与原资产一致");
+        requireActive(asset);
     }
     @Transactional public PipelineAssetVersion publish(String id,int revision,String trialTaskId,boolean reviewed) {
         return publishMeasured(id,revision,trialTaskId,reviewed,null,null,false,null);
