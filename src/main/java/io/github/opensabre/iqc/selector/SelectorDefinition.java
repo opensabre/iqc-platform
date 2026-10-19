@@ -12,7 +12,11 @@ public record SelectorDefinition(String schemaVersion, Condition condition, Cond
     public static final String SCHEMA="iqc-selector-v1";
     public enum Junction { AND,OR }
     public enum Operator { EQ,NE,GT,GE,LT,LE,IN,NOT_IN,EXISTS,CONTAINS }
-    public record Condition(Junction junction,List<Condition> children,String field,Operator operator,JsonNode value) {
+    public record Condition(Junction junction,List<Condition> children,String field,Operator operator,
+            @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class)
+            @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class)
+            @tools.jackson.databind.annotation.JsonSerialize(using=io.github.opensabre.iqc.quality.evaluation.BenchmarkService.HttpTreeSerializer.class)
+            JsonNode value) {
         public Condition { children=children==null?List.of():List.copyOf(children); value=value==null?null:value.deepCopy(); }
         @Override public JsonNode value(){return value==null?null:value.deepCopy();}
     }
