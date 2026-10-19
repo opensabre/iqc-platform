@@ -58,6 +58,12 @@ public class IqcDataScope {
         if(actor==null)throw io.github.opensabre.iqc.governance.IqcException.accessDenied("后台操作缺少当前负责人上下文");
         io.github.opensabre.iqc.action.ActionEnqueueService.requireBound(bound,actor);
     }
+    /** Stable account identity for routing; never replace it with mutable display names. */
+    public String actorUserId(){
+        var actor=scheduledActor.get();String id=actor==null?userContext.getUserId():actor.userId();
+        if(id==null||id.isBlank())throw io.github.opensabre.iqc.governance.IqcException.accessDenied("缺少稳定账户身份");
+        return id;
+    }
     public String owner() {
         var actor=scheduledActor.get();if(actor!=null)return actor.owner();
         String username = userContext.getUsername();

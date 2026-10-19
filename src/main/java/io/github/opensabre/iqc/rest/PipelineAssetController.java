@@ -103,6 +103,21 @@ public class PipelineAssetController {
         }
         return projection.taskReceipt(tasks.createUsingPipelineSnapshot(release,body.name(),body.conversationIds(),body.concurrency(),body.requestId()),access);
     }
+    public record RolloutPreview(PipelineRolloutPolicy policy,
+            @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class)
+            @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class)
+            com.fasterxml.jackson.databind.JsonNode requestKey) { }
+    @PostMapping("/{id}/rollout-preview")
+    @ResourcePermission(code="iqc:pipeline:rollout:preview",name="预览流水线灰度分配",type="iqc",description="已发布版本单变量校验与确定性分桶，不改变实际路由")
+    @Audit(operationType=OperationType.QUERY,description="预览流水线灰度分配",module="IQC_ROLLOUT",request=false,response=false,key="#id")
+    @io.github.opensabre.governance.ratelimit.annotations.RateLimit(sceneCode="iqc-pipeline-rollout-preview",maxCount=30,period=60)
+    public PipelineRolloutPolicy.Decision rolloutPreview(@PathVariable String id,@RequestBody RolloutPreview request){
+        access("iqc:pipeline:rollout:preview");
+        if(request==null||request.requestKey()==null||!request.requestKey().isTextual()
+                ||!request.requestKey().textValue().matches("[A-Za-z0-9:_-]{1,128}"))
+            throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("灰度预览需指定有效字符串请求键");
+        return assets.previewRollout(id,request.policy(),request.requestKey().textValue());
+    }
     public record Create(String code,String name,PipelineRelease release) { }
     public record Update(int expectedRevision,String name,PipelineRelease release) { }
     public record Availability(boolean enabled) { }
