@@ -98,15 +98,24 @@ public class PipelineAssetService {
     }
     public Prepared publishedRelease(String id,int versionNo) {return publishedRelease(id,versionNo,false);}
     public Prepared publishedReleaseForTask(String id,int versionNo) {return publishedRelease(id,versionNo,true);}
-    private Prepared publishedRelease(String id,int versionNo,boolean lock) {
+    private Prepared publishedRelease(String id,int versionNo,boolean lock){return publishedRelease(id,versionNo,lock,true);}
+    private Prepared publishedRelease(String id,int versionNo,boolean lock,boolean executionAvailable) {
         var asset=require(id,lock); requireActive(asset);
         var version=versions.selectOne(Wrappers.<PipelineAssetVersion>lambdaQuery().eq(PipelineAssetVersion::getPipelineId,id)
                 .eq(PipelineAssetVersion::getVersionNo,versionNo));
         if(version==null) throw IqcException.notFound("流水线发布版本不存在");
         if(!hash(version.getSnapshotJson()).equals(version.getContentHash())) throw IqcException.invalidState("流水线版本摘要不一致");
         validatePublicationEvidence(version);
-        var release=read(version.getSnapshotJson()); validateFrozen(release);
+        var release=read(version.getSnapshotJson()); validateFrozen(release,executionAvailable);
         return new Prepared(id,versionNo,null,release,version.getContentHash());
+    }
+    /** Does not save a policy or create/route a task. Both versions remain original publication evidence. */
+    public PipelineRolloutPolicy.Decision previewRollout(String id,PipelineRolloutPolicy policy,String requestKey){
+        if(policy==null||!id.equals(policy.pipelineId()))throw IqcException.invalidArgument("灰度策略流水线不匹配");
+        var actorId=scope.actorUserId();
+        var baseline=publishedRelease(id,policy.baselineVersionNo());
+        var candidate=publishedRelease(id,policy.candidateVersionNo(),false,policy.state()!=PipelineRolloutPolicy.State.ROLLED_BACK);
+        return policy.preview(actorId,requestKey,baseline,candidate,json);
     }
     @Transactional public PipelineAssetVersion publish(String id,int revision,String trialTaskId,boolean reviewed) {
         return publishMeasured(id,revision,trialTaskId,reviewed,null,null,false,null);
