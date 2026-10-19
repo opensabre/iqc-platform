@@ -102,7 +102,12 @@ public class ActionProductionSourceValidator {
     private Validated validateFacts(Reference reference,InspectionTask task,ConversationInspectionResult result,boolean historical) {
         try {
             var snapshot=json.readTree(task.getRuleSnapshotJson());
-            var release=historical?assets.historicalPublishedTaskRelease(snapshot):assets.publishedTaskRelease(snapshot);
+            boolean rollout=io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.requiresEvidence(task.getId())
+                    ||snapshot!=null&&snapshot.has("rolloutSnapshot");
+            if(rollout)snapshot=json.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                    .readTree(task.getRuleSnapshotJson());
+            var release=rollout?(historical?assets.historicalPublishedTaskRelease(snapshot,task.getId()):assets.publishedTaskRelease(snapshot,task.getId()))
+                    :(historical?assets.historicalPublishedTaskRelease(snapshot):assets.publishedTaskRelease(snapshot));
             io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound ownerBound=null;
             if(release.actionPolicy()!=null && !release.actionPolicy().actions().isEmpty()) {
                 ownerBound=json.treeToValue(snapshot.path("actionOwnerBound"),io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound.class);

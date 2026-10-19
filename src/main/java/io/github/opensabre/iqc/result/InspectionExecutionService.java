@@ -130,10 +130,12 @@ public class InspectionExecutionService {
         if(terminal){item.setResultId(previous.getResultId());item.setErrorMessage(previous.getErrorMessage());}
         return item;
     }
-    private void validatePipelineDependencies(JsonNode snapshot) {
-        if (!io.github.opensabre.iqc.pipelineasset.PipelineAssetService.isPipeline(snapshot)) return;
+    private void validatePipelineDependencies(InspectionTask task,JsonNode snapshot) {
+        boolean rollout=io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.requiresEvidence(task.getId())
+                ||snapshot!=null&&snapshot.has("rolloutSnapshot");
+        if (!rollout&&!io.github.opensabre.iqc.pipelineasset.PipelineAssetService.isPipeline(snapshot)) return;
         if (pipelineAssets == null || pipelineEvaluator == null) throw IqcException.invalidState("当前执行器未启用流水线能力");
-        pipelineAssets.validateTask(snapshot);
+        if(rollout)pipelineAssets.validateTask(snapshot,task.getId());else pipelineAssets.validateTask(snapshot);
     }
     private final Map<String, DlsEngine.Compiled> dlsCompileCache = Collections.synchronizedMap(
             new LinkedHashMap<>(32, 0.75f, true) {
@@ -181,7 +183,7 @@ public class InspectionExecutionService {
             io.github.opensabre.iqc.scheme.SchemeDependencyResolver.validateJointTaskProjection(snapshot,
                     task.getLabelScopeSnapshotJson(), objectMapper);
             schemeDependencies.validateTaskDependencies(snapshot);
-            validatePipelineDependencies(snapshot);
+            validatePipelineDependencies(task,snapshot);
             var productionInputs=prepareProduction(task,snapshot);
             var evaluationInputs=prepareEvaluation(task,snapshot);
             String previousStatus = task.getStatus();
@@ -315,7 +317,7 @@ public class InspectionExecutionService {
         io.github.opensabre.iqc.scheme.SchemeDependencyResolver.validateJointTaskProjection(ruleSnapshot,
                 task.getLabelScopeSnapshotJson(), objectMapper);
         schemeDependencies.validateTaskDependencies(ruleSnapshot);
-        validatePipelineDependencies(ruleSnapshot);
+        validatePipelineDependencies(task,ruleSnapshot);
         var productionInputs=prepareProduction(task,ruleSnapshot);
         var evaluationInputs=prepareEvaluation(task,ruleSnapshot);
         List<TaskItem> items = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
@@ -362,7 +364,7 @@ public class InspectionExecutionService {
         io.github.opensabre.iqc.scheme.SchemeDependencyResolver.validateJointTaskProjection(snapshot,
                 task.getLabelScopeSnapshotJson(), objectMapper);
         schemeDependencies.validateTaskDependencies(snapshot);
-        validatePipelineDependencies(snapshot);
+        validatePipelineDependencies(task,snapshot);
         var productionInputs=prepareProduction(task,snapshot);
         prepareEvaluation(task,snapshot);
         List<TaskItem> previousItems = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery().eq(TaskItem::getExecutionId, task.getCurrentExecutionId()));
@@ -1648,7 +1650,11 @@ public class InspectionExecutionService {
 
     private JsonNode readSnapshot(String snapshot) {
         if (snapshot == null || snapshot.isBlank()) return null;
-        try { return objectMapper.readTree(snapshot); }
+        try {
+            var tree=objectMapper.readTree(snapshot);
+            return tree!=null&&tree.has("rolloutSnapshot")?objectMapper.reader()
+                    .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readTree(snapshot):tree;
+        }
         catch (Exception exception) { throw new IllegalStateException("任务规则快照损坏", exception); }
     }
 

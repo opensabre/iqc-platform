@@ -30,23 +30,34 @@ public record PipelineRolloutTaskEvidence(String schemaVersion,String taskId,Str
         var envelope=json.createObjectNode();envelope.set("evidence",body);
         envelope.put("evidenceHash",PipelineAssetService.hash(body.toString()));return envelope;
     }
+    public static boolean requiresEvidence(String taskId){return taskId!=null&&taskId.matches("g[a-f0-9]{63}");}
     public void verify(String actorId,String pipelineId,String requestKey,String fingerprint,JsonNode prepared,ObjectMapper json){
         try{
-            if(!SCHEMA.equals(schemaVersion)||!Objects.equals(taskId,taskId(actorId,pipelineId,requestKey,json))
-                    ||!Objects.equals(requestFingerprint,fingerprint)||revision==null||revision.snapshot()==null||decision==null
+            verifyFrozen(taskId(actorId,pipelineId,requestKey,json),prepared,json);
+            if(!Objects.equals(requestFingerprint,fingerprint)||!pipelineId.equals(revision.snapshot().pipelineId())
+                    ||!revision.snapshot().policy().cohortHash(actorId,requestKey).equals(decision.cohortHash()))throw new IllegalArgumentException();
+        }catch(Exception invalid){throw IqcException.invalidState("灰度任务分配证据无效");}
+    }
+    /** Checks the recorded choice without needing a raw account ID, request key or a mutable current policy. */
+    public void verifyFrozen(String expectedTaskId,JsonNode prepared,ObjectMapper json){
+        try{
+            if(!SCHEMA.equals(schemaVersion)||!requiresEvidence(taskId)||!Objects.equals(taskId,expectedTaskId)
+                    ||!validHash(requestFingerprint)||revision==null||revision.snapshot()==null||decision==null
                     ||revision.id()==null||revision.id().isBlank()||revision.revisionNo()<1)throw new IllegalArgumentException();
-            var source=revision.snapshot();var policy=source.policy();
-            if(!"iqc-pipeline-rollout-revision-v1".equals(source.schemaVersion())||!pipelineId.equals(source.pipelineId())
-                    ||source.revisionNo()!=revision.revisionNo()||policy==null||!pipelineId.equals(policy.pipelineId())
+            var source=revision.snapshot();var policy=source.policy();String pipelineId=source.pipelineId();
+            if(!"iqc-pipeline-rollout-revision-v1".equals(source.schemaVersion())||pipelineId==null
+                    ||source.revisionNo()!=revision.revisionNo()||policy==null||!pipelineId.equals(policy.pipelineId())||source.change()==null
+                    ||(source.revisionNo()==1?source.previousContentHash()!=null:!validHash(source.previousContentHash()))
+                    ||!validHash(source.baselineReleaseHash())||!validHash(source.candidateReleaseHash())
                     ||!Objects.equals(revision.contentHash(),PipelineAssetService.hash(json.valueToTree(source).toString()))
-                    ||!Objects.equals(source.policyHash(),PipelineAssetService.hash(json.valueToTree(policy).toString())))throw new IllegalArgumentException();
-            String cohort=policy.cohortHash(actorId,requestKey);
-            int bucket=new BigInteger(cohort,16).mod(BigInteger.valueOf(10000)).intValueExact();
+                    ||!Objects.equals(source.policyHash(),PipelineAssetService.hash(json.valueToTree(policy).toString()))
+                    ||!validHash(decision.cohortHash()))throw new IllegalArgumentException();
+            int bucket=new BigInteger(decision.cohortHash(),16).mod(BigInteger.valueOf(10000)).intValueExact();
             boolean candidate=policy.state()==PipelineRolloutPolicy.State.ACTIVE&&bucket<policy.candidateBasisPoints();
             int version=candidate?policy.candidateVersionNo():policy.baselineVersionNo();
             String releaseHash=candidate?source.candidateReleaseHash():source.baselineReleaseHash();
             if(!PipelineRolloutPolicy.SCHEMA.equals(decision.schemaVersion())||!pipelineId.equals(decision.pipelineId())
-                    ||!Objects.equals(decision.policyHash(),source.policyHash())||!cohort.equals(decision.cohortHash())||bucket!=decision.bucket()
+                    ||!Objects.equals(decision.policyHash(),source.policyHash())||bucket!=decision.bucket()
                     ||decision.baselineVersionNo()!=policy.baselineVersionNo()||decision.candidateVersionNo()!=policy.candidateVersionNo()
                     ||decision.candidateBasisPoints()!=policy.candidateBasisPoints()||decision.state()!=policy.state()
                     ||decision.side()!=(candidate?PipelineRolloutPolicy.Side.CANDIDATE:PipelineRolloutPolicy.Side.BASELINE)
@@ -55,11 +66,13 @@ public record PipelineRolloutTaskEvidence(String schemaVersion,String taskId,Str
             var versionNode=prepared==null?null:prepared.get("versionNo");
             if(prepared==null||!prepared.isObject()||!pipelineId.equals(prepared.path("pipelineId").asText())
                     ||versionNode==null||!versionNode.isIntegralNumber()||!versionNode.canConvertToInt()||versionNode.intValue()!=version
-                    ||prepared.hasNonNull("draftRevision")||prepared.path("trial").asBoolean(false)
+                    ||prepared.hasNonNull("draftRevision")
+                    ||prepared.has("trial")&&(!prepared.path("trial").isBoolean()||prepared.path("trial").booleanValue())
                     ||!Objects.equals(prepared.path("contentHash").asText(),releaseHash)||!prepared.path("release").isObject()
                     ||!Objects.equals(PipelineAssetService.hash(prepared.path("release").toString()),releaseHash))throw new IllegalArgumentException();
-        }catch(Exception invalid){throw IqcException.invalidState("灰度任务分配证据无效");}
+        }catch(Exception invalid){throw IqcException.invalidState("灰度任务冻结分配证据无效");}
     }
+    private static boolean validHash(String value){return value!=null&&value.matches("[a-f0-9]{64}");}
     public static PipelineRolloutTaskEvidence read(JsonNode envelope,ObjectMapper json){
         try{
             var body=envelope==null?null:envelope.get("evidence");

@@ -52,6 +52,7 @@ public class PipelineAssetService {
     private final org.springframework.beans.factory.ObjectProvider<PipelinePublicationGateService> publicationGates;
 
     private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.label.FindingLabelFreezeService> labelPolicies;
+    private final org.springframework.beans.factory.ObjectProvider<PipelineRolloutExecutionGuard> rolloutGuards;
     public PipelineAssetService(PipelineAssetMapper assets,PipelineAssetVersionMapper versions,QualityRuleMapper rules,
             QualityRuleVersionMapper ruleVersions,QualityAgentMapper agents,QualityAgentVersionMapper agentVersions,
             AgentAssetReferenceValidator agentAssets,FindingCatalogService findings,ObjectMapper json,IqcDataScope scope,
@@ -59,7 +60,16 @@ public class PipelineAssetService {
             org.springframework.beans.factory.ObjectProvider<PipelinePublicationGateService> publicationGates) {
         this.assets=assets;this.versions=versions;this.rules=rules;this.ruleVersions=ruleVersions;this.agents=agents;
         this.agentVersions=agentVersions;this.agentAssets=agentAssets;this.findings=findings;this.json=json;this.scope=scope;
-        this.runtime=runtime;this.tasks=tasks;this.results=results;this.publicationGates=publicationGates;this.labelPolicies=null;
+        this.runtime=runtime;this.tasks=tasks;this.results=results;this.publicationGates=publicationGates;this.labelPolicies=null;this.rolloutGuards=null;
+    }
+
+    public PipelineAssetService(PipelineAssetMapper assets,PipelineAssetVersionMapper versions,QualityRuleMapper rules,
+            QualityRuleVersionMapper ruleVersions,QualityAgentMapper agents,QualityAgentVersionMapper agentVersions,
+            AgentAssetReferenceValidator agentAssets,FindingCatalogService findings,ObjectMapper json,IqcDataScope scope,
+            PipelineRuntime runtime,InspectionTaskMapper tasks,ConversationInspectionResultMapper results,
+            org.springframework.beans.factory.ObjectProvider<PipelinePublicationGateService> publicationGates,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.label.FindingLabelFreezeService> labelPolicies){
+        this(assets,versions,rules,ruleVersions,agents,agentVersions,agentAssets,findings,json,scope,runtime,tasks,results,publicationGates,labelPolicies,null);
     }
 
     public IqcPage<PipelineAsset> page(long current, long size) {
@@ -188,12 +198,15 @@ public class PipelineAssetService {
         version.setPublicationDecisionJson(admission); version.setPublicationDecisionHash(hash(admission)); versions.insert(version);
         asset.setActivePublishedVersion(version.getVersionNo()); assets.updateById(asset); return version;
     }
-    private void validatePublicationEvidence(PipelineAssetVersion version) {
+    private void validatePublicationEvidence(PipelineAssetVersion version) {validatePublicationEvidence(version,json);}
+    static void validatePublicationEvidence(PipelineAssetVersion version,ObjectMapper json) {
         String body=version.getPublicationDecisionJson(), digest=version.getPublicationDecisionHash();
         if(body==null && digest==null) return; // Versions published before this migration.
         if(body==null || digest==null || !hash(body).equals(digest))
             throw IqcException.invalidState("流水线发布证据摘要不一致");
-        var admission=parse(body); var gate=admission.path("gate");
+        JsonNode admission;
+        try{admission=json.readTree(body);}catch(Exception invalid){throw IqcException.invalidState("流水线JSON无效");}
+        var gate=admission.path("gate");
         if(!"iqc-pipeline-publication-v1".equals(admission.path("schemaVersion").asText())
                 || !"iqc-publication-gate-decision-v1".equals(gate.path("schemaVersion").asText())
                 || !version.getPipelineId().equals(gate.path("pipelineId").asText())
@@ -201,8 +214,10 @@ public class PipelineAssetService {
                 || !version.getContentHash().equals(gate.path("releaseHash").asText()))
             throw IqcException.invalidState("流水线发布证据协议或来源不一致");
     }
-    public void validateTask(JsonNode snapshot) { validateTask(snapshot,true); }
-    private void validateTask(JsonNode snapshot,boolean requireExecutionAvailability) {
+    public void validateTask(JsonNode snapshot) { validateTask(snapshot,true,null); }
+    public void validateTask(JsonNode snapshot,String expectedTaskId) { validateTask(snapshot,true,expectedTaskId); }
+    private void validateTask(JsonNode snapshot,boolean requireExecutionAvailability,String expectedTaskId) {
+        validateRolloutEvidence(snapshot,expectedTaskId);
         if(!isPipeline(snapshot)) return;
         if(!TASK_SCHEMA.equals(snapshot.path("executionStrategy").path("schemaVersion").asText())
                 || snapshot.has("schemeSnapshot")) throw IqcException.invalidState("流水线任务协议无效");
@@ -215,17 +230,25 @@ public class PipelineAssetService {
         if(!hash(releaseNode.toString()).equals(marker.path("contentHash").asText())) throw IqcException.invalidState("任务流水线摘要不一致");
         validateFrozen(convert(releaseNode),requireExecutionAvailability);
     }
+    private void validateRolloutEvidence(JsonNode snapshot,String expectedTaskId){
+        if(!PipelineRolloutTaskEvidence.requiresEvidence(expectedTaskId)&&(snapshot==null||!snapshot.has("rolloutSnapshot")))return;
+        var guard=rolloutGuards==null?null:rolloutGuards.getIfAvailable();
+        if(guard==null)throw IqcException.invalidState("灰度任务原始证据校验组件不可用");
+        guard.validate(snapshot,expectedTaskId);
+    }
     public static boolean isPipeline(JsonNode snapshot) { return snapshot!=null && snapshot.has("pipelineSnapshot"); }
     public PipelineRelease taskRelease(JsonNode snapshot) { validateTask(snapshot); return convert(snapshot.path("pipelineSnapshot").path("release")); }
 
     /** Worker validation of an actual published production snapshot, without a thread user scope. */
-    public PipelineRelease publishedTaskRelease(JsonNode snapshot) { return publishedTaskRelease(snapshot,true); }
+    public PipelineRelease publishedTaskRelease(JsonNode snapshot) { return publishedTaskRelease(snapshot,true,null); }
+    public PipelineRelease publishedTaskRelease(JsonNode snapshot,String expectedTaskId) { return publishedTaskRelease(snapshot,true,expectedTaskId); }
     /** Immutable production publication proof; current availability gates execution, not historical audit. */
-    public PipelineRelease historicalPublishedTaskRelease(JsonNode snapshot) { return publishedTaskRelease(snapshot,false); }
-    private PipelineRelease publishedTaskRelease(JsonNode snapshot,boolean requireExecutionAvailability) {
+    public PipelineRelease historicalPublishedTaskRelease(JsonNode snapshot) { return publishedTaskRelease(snapshot,false,null); }
+    public PipelineRelease historicalPublishedTaskRelease(JsonNode snapshot,String expectedTaskId) { return publishedTaskRelease(snapshot,false,expectedTaskId); }
+    private PipelineRelease publishedTaskRelease(JsonNode snapshot,boolean requireExecutionAvailability,String expectedTaskId) {
         if (!isPipeline(snapshot) || snapshot.has("evaluationSnapshot"))
             throw IqcException.invalidState("动作来源必须是已发布生产流水线");
-        validateTask(snapshot,requireExecutionAvailability);
+        validateTask(snapshot,requireExecutionAvailability,expectedTaskId);
         var marker=snapshot.path("pipelineSnapshot");
         if (!"PIPELINE".equals(snapshot.path("executionStrategy").path("mode").asText())
                 || !marker.path("trial").isBoolean() || marker.path("trial").booleanValue()
@@ -238,7 +261,7 @@ public class PipelineAssetService {
                 .eq(PipelineAssetVersion::getVersionNo,marker.path("versionNo").intValue()));
         if (version==null || !hash(version.getSnapshotJson()).equals(version.getContentHash())
                 || !Objects.equals(version.getContentHash(),marker.path("contentHash").asText())
-                || !parse(version.getSnapshotJson()).equals(marker.path("release")))
+                || !(snapshot.has("rolloutSnapshot")?parseExact(version.getSnapshotJson()):parse(version.getSnapshotJson())).equals(marker.path("release")))
             throw IqcException.invalidState("动作来源与发布流水线不一致");
         validatePublicationEvidence(version);
         return convert(marker.path("release"));
@@ -495,6 +518,10 @@ public class PipelineAssetService {
     private void validateName(String name) { if(name==null || name.isBlank() || name.length()>100) throw IqcException.invalidArgument("流水线名称不能为空或超过100字符"); }
     private PipelineRelease read(String value) { return convert(parse(value)); }
     private PipelineRelease convert(JsonNode value) { try { return json.treeToValue(value,PipelineRelease.class); } catch(Exception ex) { throw IqcException.invalidArgument("无效流水线版本",ex); } }
+    private JsonNode parseExact(String value){
+        try{return json.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readTree(value);}
+        catch(Exception invalid){throw IqcException.invalidState("流水线JSON无效");}
+    }
     private JsonNode parse(String value) { try { return json.readTree(value); } catch(Exception ex) { throw IqcException.invalidState("流水线JSON无效"); } }
     public String write(Object value) { try { return json.writeValueAsString(value); } catch(Exception ex) { throw IqcException.invalidState("无法冻结流水线配置"); } }
     public static String hash(String value) {
