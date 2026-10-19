@@ -25,3 +25,13 @@ B 在 `fdda5fc` 上只集成 A 已提交 `c6f87ac`（本分支 `1ee833a`）与 `
 原95716 terminal exit0，`/tmp/iqc-b-rollout-task-replay-final.log`；三份本轮XML Replay9+Policy9+Revision9=27，0 failures/errors/skipped。修复后模拟物化边界继续调用真实Evidence.verify，未放松合法性校验以求测试通过。跨策略原请求只读旧修订、返回原任务，参数和坏证据拒绝均有此轮覆盖。
 
 本轮没有运行当前组合完整默认后端套件、真实任务物化/worker或SQL。新增ExecutionGuard已经集成但尚无独立原来源/发布门禁测试；生产资产锁/CAS真实并发及RR旧快照等剩余门槛保持未完成。完整 I1–I7 继续推进。
+
+## 执行守卫专项设计
+
+新增 `PipelineRolloutExecutionGuardTest`，直接验证原Guard、Evidence、Comparator和正式发布门禁helper；只有原修订/发布版本mapper模拟。合成两侧真实JSON/hash及门禁来源，标记trial=false，5000比例选中baseline；故候选来源损坏也必须拒绝。RULE config包含9007199254740993.123456789012345678，成功路径额外核对源对象和完整快照序列化不变、精确值未被修改。
+
+覆盖原修订缺失或ID/资产/修订号/hash/正文错误，两侧任一版本缺失或资产/版本/hash/正文错误，两侧门禁摘要缺失/错误及重算摘要后错误schema/资产/draftRevision/releaseHash；历史版本两门禁字段均null仍按原兼容协议可读。任务缺/null信封、缺流水线、混入evaluation或scheme、跨任务移植、错误trial值在原来源读取前拒绝；重新计算信封hash后篡改comparison的invariantHash仍须与原来源重算比较不一致而拒绝。
+
+专项与原27项组合运行，终态另记。仍不证明数据库完整性、生产任务真实物化、worker的开始/异步/恢复接线、实际供应商可用性、PDP角色或容量开销。
+
+执行守卫专项终态：原25903 exit0，日志 `/tmp/iqc-b-rollout-execution-guard-final.log`；Guard8 + Replay9 + Policy9 + Revision9，共35项，fresh XML failures/errors/skipped均0。首95618因测试lambda捕获非final局部变量编译失败，修正夹具后复跑；未执行成功的首轮不计通过。仅mapper模拟的守卫验证，不替代真实worker、数据库事务及角色验收。
