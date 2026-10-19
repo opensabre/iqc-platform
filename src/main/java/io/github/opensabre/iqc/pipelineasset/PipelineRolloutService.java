@@ -56,7 +56,7 @@ public class PipelineRolloutService {
         String policyHash=hash(policy);
         if(prior!=null&&policyHash.equals(prior.snapshot().policyHash()))throw IqcException.invalidArgument("灰度策略没有变化");
         Change change=change(prior==null?null:prior.snapshot().policy(),policy);
-        var sources=pipelines.rolloutSources(id,policy);
+        var sources=pipelines.rolloutSourcesForTask(id,policy);
         // Reuse all exact-publication and single-variable guards without creating a task.
         policy.preview(actorId,"policy-validation",sources.baseline(),sources.candidate(),json);
         var snapshot=new Snapshot(SCHEMA,id,current+1,prior==null?null:prior.contentHash(),policy,policyHash,
@@ -64,6 +64,22 @@ public class PipelineRolloutService {
         var row=new PipelineRolloutRevision();row.setPipelineId(id);row.setRevisionNo(current+1);
         row.setSnapshotJson(write(snapshot));row.setContentHash(PipelineAssetService.hash(row.getSnapshotJson()));
         revisions.insert(row);
+        return view(id,row);
+    }
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public Revision currentForTask(String id){
+        pipelines.lockForRollout(id);
+        var row=latest(id,true);
+        if(row==null)throw IqcException.invalidState("流水线尚未配置灰度策略");
+        return view(id,row);
+    }
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public Revision revisionForTask(String id,int revisionNo){
+        if(revisionNo<1)throw IqcException.invalidArgument("无效灰度修订号");
+        requireCanonicalAsset(id);
+        var row=revisions.selectOne(Wrappers.<PipelineRolloutRevision>lambdaQuery()
+                .eq(PipelineRolloutRevision::getPipelineId,id).eq(PipelineRolloutRevision::getRevisionNo,revisionNo).last("FOR UPDATE"));
+        if(row==null)throw IqcException.invalidState("原灰度修订证据不存在");
         return view(id,row);
     }
     private Change change(PipelineRolloutPolicy previous,PipelineRolloutPolicy next){

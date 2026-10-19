@@ -102,7 +102,7 @@ public class PipelineAssetService {
     private Prepared publishedRelease(String id,int versionNo,boolean lock,boolean executionAvailable) {
         var asset=require(id,lock); requireActive(asset);
         var version=versions.selectOne(Wrappers.<PipelineAssetVersion>lambdaQuery().eq(PipelineAssetVersion::getPipelineId,id)
-                .eq(PipelineAssetVersion::getVersionNo,versionNo));
+                .eq(PipelineAssetVersion::getVersionNo,versionNo).last(lock,"FOR UPDATE"));
         if(version==null) throw IqcException.notFound("流水线发布版本不存在");
         if(!hash(version.getSnapshotJson()).equals(version.getContentHash())) throw IqcException.invalidState("流水线版本摘要不一致");
         validatePublicationEvidence(version);
@@ -117,17 +117,24 @@ public class PipelineAssetService {
         return policy.preview(actorId,requestKey,sources.baseline(),sources.candidate(),json);
     }
     record RolloutSources(Prepared baseline,Prepared candidate) { }
-    RolloutSources rolloutSources(String id,PipelineRolloutPolicy policy){
+    RolloutSources rolloutSources(String id,PipelineRolloutPolicy policy){return rolloutSources(id,policy,false);}
+    /** Owning append/materialization workflows already hold the asset lock in a local transaction. */
+    RolloutSources rolloutSourcesForTask(String id,PipelineRolloutPolicy policy){return rolloutSources(id,policy,true);}
+    private RolloutSources rolloutSources(String id,PipelineRolloutPolicy policy,boolean lock){
         if(policy==null||!id.equals(policy.pipelineId()))throw IqcException.invalidArgument("灰度策略流水线不匹配");
-        return new RolloutSources(publishedRelease(id,policy.baselineVersionNo()),
-                publishedRelease(id,policy.candidateVersionNo(),false,policy.state()!=PipelineRolloutPolicy.State.ROLLED_BACK));
+        return new RolloutSources(publishedRelease(id,policy.baselineVersionNo(),lock),
+                publishedRelease(id,policy.candidateVersionNo(),lock,policy.state()!=PipelineRolloutPolicy.State.ROLLED_BACK));
     }
     /** Shares the original asset lock with publication and availability changes. */
     @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
-    public void lockForRollout(String id){
+    public void lockForRollout(String id){requireActive(lockRolloutAsset(id));}
+    /** A replay may read its original task while the asset is disabled; new release resolution remains active-only. */
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void lockForRolloutRequest(String id){lockRolloutAsset(id);}
+    private PipelineAsset lockRolloutAsset(String id){
         var asset=require(id,true);
         if(!java.util.Objects.equals(id,asset.getId()))throw IqcException.invalidArgument("流水线标识必须与原资产一致");
-        requireActive(asset);
+        return asset;
     }
     @Transactional public PipelineAssetVersion publish(String id,int revision,String trialTaskId,boolean reviewed) {
         return publishMeasured(id,revision,trialTaskId,reviewed,null,null,false,null);

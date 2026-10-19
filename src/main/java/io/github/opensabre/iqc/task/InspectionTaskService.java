@@ -455,11 +455,35 @@ public class InspectionTaskService {
         return createUsingPipelineSnapshot(pipeline,receipt.getName(),ids,concurrency,null,selection,
                 selector==null?null:trigger.payloadHash(),selector,null,trigger,receipt);
     }
+    /** Internal rollout boundary; HTTP callers cannot supply allocation evidence. */
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask createUsingPipelineRollout(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,List<String> conversationIds,Integer concurrency,String requestKey,
+            io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence rollout){
+        if(rollout==null||prepared==null)throw IqcException.invalidArgument("缺少灰度任务证据或发布版本");
+        rollout.verify(dataScope.actorUserId(),prepared.pipelineId(),requestKey,
+                io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.requestFingerprint(name,conversationIds,concurrency,objectMapper),
+                objectMapper.valueToTree(prepared),objectMapper);
+        return createUsingPipelineSnapshot(prepared,name,conversationIds,concurrency,null,null,null,null,null,null,null,rollout);
+    }
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask findRolloutRequest(String id){
+        var task=taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,id).last("FOR UPDATE"));
+        if(task!=null&&!dataScope.canView(task.getCreatedBy(),task.getOwnerGroupId()))throw IqcException.accessDenied("无权读取原灰度任务");
+        return task;
+    }
     private InspectionTask createUsingPipelineSnapshot(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
             String name,List<String> conversationIds,Integer concurrency,String requestId,
             io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,String selectorRequestHash,
             io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset,PeriodicIdentity periodic,
             TriggerIdentity trigger,InspectionTask receipt) {
+        return createUsingPipelineSnapshot(prepared,name,conversationIds,concurrency,requestId,selection,selectorRequestHash,selectorAsset,periodic,trigger,receipt,null);
+    }
+    private InspectionTask createUsingPipelineSnapshot(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,List<String> conversationIds,Integer concurrency,String requestId,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,String selectorRequestHash,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset,PeriodicIdentity periodic,
+            TriggerIdentity trigger,InspectionTask receipt,io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence rollout) {
         if (prepared == null || !io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(writeSnapshot(prepared.release())).equals(prepared.contentHash()))
             throw IqcException.invalidState("流水线冻结摘要无效");
         boolean trial = prepared.versionNo() == null;
@@ -468,6 +492,7 @@ public class InspectionTaskService {
         var marker = objectMapper.valueToTree(prepared);
         ((com.fasterxml.jackson.databind.node.ObjectNode) marker).put("trial", trial);
         var root = objectMapper.createObjectNode(); root.set("pipelineSnapshot", marker);
+        if(rollout!=null)root.set("rolloutSnapshot",rollout.envelope(objectMapper));
         if(!trial && prepared.release().actionPolicy()!=null && !prepared.release().actionPolicy().actions().isEmpty()) {
             if(actionActors==null)throw IqcException.invalidState("当前物化器未启用动作负责人身份冻结");
             root.set("actionOwnerBound",objectMapper.valueToTree(actionActors.getObject().capture()));
@@ -484,9 +509,10 @@ public class InspectionTaskService {
         fingerprint.set("conversationIds", objectMapper.valueToTree(conversationIds == null ? List.of() : conversationIds.stream().filter(id -> id != null && !id.isBlank()).distinct().sorted().toList()));
         if(selectorRequestHash!=null) { fingerprint.put("selectorRequestHash",selectorRequestHash);
             ((com.fasterxml.jackson.databind.node.ObjectNode)marker).put("selectorRequestHash",selectorRequestHash); }
+        if(rollout!=null)fingerprint.put("rolloutEvidenceHash",root.path("rolloutSnapshot").path("evidenceHash").asText());
         String requestFingerprint = io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(fingerprint.toString());
         ((com.fasterxml.jackson.databind.node.ObjectNode) marker).put("requestFingerprint", requestFingerprint);
-        String taskId = requestId == null ? null : "p" + io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(
+        String taskId = rollout!=null?rollout.taskId():requestId == null ? null : "p" + io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(
                 objectMapper.createArrayNode().add(dataScope.owner()).add(prepared.pipelineId()).add(requestId).toString()).substring(0, 63);
         if (taskId != null) {
             var existing = taskMapper.selectById(taskId);
