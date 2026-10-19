@@ -37,3 +37,5 @@ B 在 `fdda5fc` 上只集成 A 已提交 `c6f87ac`（本分支 `1ee833a`）与 `
 执行守卫专项终态：原25903 exit0，日志 `/tmp/iqc-b-rollout-execution-guard-final.log`；Guard8 + Replay9 + Policy9 + Revision9，共35项，fresh XML failures/errors/skipped均0。首95618因测试lambda捕获非final局部变量编译失败，修正夹具后复跑；未执行成功的首轮不计通过。仅mapper模拟的守卫验证，不替代真实worker、数据库事务及角色验收。
 
 旧构造接线专项：原65771 exit0，`/tmp/iqc-b-rollout-guard-wiring.log`；GuardWiring3+ExecutionGuard8共11项，fresh XML零失败错误跳过。两种旧构造下灰度缺接线均拒绝、旧非流水线入口兼容；不证明真实Spring DI或完整worker运行。
+
+执行入口专项：原68645 terminal exit0，`/tmp/iqc-b-rollout-worker-boundaries.log`。InspectionExecutionServiceTest共35项，fresh XML零失败错误跳过，新增3项逐一检查queueSystem/resume/run在g保留ID缺信封/null信封时将实际ID传给校验入口。拒绝后无checkpoint/message读取、模型或Pipeline evaluator调用；排队/恢复不写执行记录，run沿既有流程先claim再校验。入口真实，PipelineAssetService/DAO/state/provider模拟，不能替代真实守卫+DB/领取事务及完整worker运行验收。

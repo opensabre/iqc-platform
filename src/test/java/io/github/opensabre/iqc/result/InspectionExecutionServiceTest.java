@@ -350,6 +350,53 @@ class InspectionExecutionServiceTest {
         assertThat(objectMapper.readTree(result.getEvidenceJson())).isEmpty();
     }
 
+    @Test void rolloutQueueRejectsBadEvidenceBeforeCreatingProgress() { rejectRolloutAtBoundary("queue"); }
+    @Test void rolloutResumeRejectsBadEvidenceBeforeReadingCheckpoints() { rejectRolloutAtBoundary("resume"); }
+    @Test void rolloutWorkerRejectsBadEvidenceBeforeConversationWork() { rejectRolloutAtBoundary("run"); }
+
+    /** Real entry methods must pass the actual task ID even when rollout markers are absent. */
+    private void rejectRolloutAtBoundary(String boundary) {
+        for (boolean markerPresent : new boolean[]{false,true}) {
+            var tasks=mock(InspectionTaskMapper.class);var executions=mock(TaskExecutionMapper.class);
+            var items=mock(TaskItemMapper.class);var messages=mock(ConversationMessageMapper.class);
+            var scope=mock(IqcDataScope.class);var models=mock(LlmQualityProvider.class);
+            var evaluator=mock(io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.class);
+            var pipelines=mock(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.class);
+            var states=mock(io.github.opensabre.iqc.task.TaskExecutionStateService.class);
+            var runner=new InspectionExecutionService(tasks,mock(ConversationMapper.class),messages,
+                    mock(InspectionResultMapper.class),objectMapper,executions,items,scope,models,
+                    mock(UsageCounterRecorder.class),mock(HierarchicalResultService.class),
+                    mock(io.github.opensabre.iqc.label.LabelCandidateService.class),
+                    mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class));
+            ReflectionTestUtils.setField(runner,"pipelineAssets",pipelines);
+            ReflectionTestUtils.setField(runner,"pipelineEvaluator",evaluator);
+            ReflectionTestUtils.setField(runner,"executionStates",states);
+            var task=task();task.setId("g"+"a".repeat(63));task.setCurrentExecutionId("execution-1");
+            task.setStatus(boundary.equals("queue")?"CREATED":boundary.equals("resume")?"PAUSED":"QUEUED");
+            var snapshot=objectMapper.createObjectNode();if(markerPresent)snapshot.putNull("rolloutSnapshot");
+            task.setRuleSnapshotJson(snapshot.toString());
+            when(tasks.selectOne(any())).thenReturn(task);when(tasks.selectById(task.getId())).thenReturn(task);
+            when(scope.canView(any(),any())).thenReturn(true);
+            var execution=new TaskExecution();execution.setId("execution-1");execution.setTaskId(task.getId());
+            when(executions.selectById("execution-1")).thenReturn(execution);
+            when(states.claim(task.getId(),"execution-1")).thenReturn(true);
+            org.mockito.Mockito.doThrow(new IllegalStateException("rollout evidence rejected"))
+                    .when(pipelines).validateTask(any(),org.mockito.ArgumentMatchers.eq(task.getId()));
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> {
+                switch(boundary) {
+                    case "queue" -> runner.queueSystem(task.getId());
+                    case "resume" -> runner.resume(task.getId());
+                    default -> runner.run(task.getId(),"execution-1");
+                }
+            }).hasMessageContaining("rollout evidence rejected");
+            verify(pipelines).validateTask(any(),org.mockito.ArgumentMatchers.eq(task.getId()));
+            verify(pipelines,org.mockito.Mockito.never()).validateTask(any());
+            verifyNoInteractions(items,messages,models,evaluator);
+            verify(tasks,org.mockito.Mockito.never()).updateById(any(InspectionTask.class));
+            if(!boundary.equals("run"))verifyNoInteractions(executions,states);
+        }
+    }
+
     @BeforeEach
     void initializeMybatisLambdaMetadata() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "iqc-execution-test"), TaskItem.class);
