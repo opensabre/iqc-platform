@@ -19,3 +19,11 @@
 ## 剩余范围
 
 真实PDP/角色、浏览器迟到响应和权限变化交互、供应商环境以及完整PRD逐项验收仍待；Selector资产草稿/历史/Prepared后续增量待提交后集成验证。迁移检查器对V1.1.64触发器INSERT的误报另待修正。输入为已处理会话，无语音转换工作；无push、部署或共享数据库变更。
+
+## 测试注册调度器退出配置复用（2026-10-19）
+
+进一步只读定位dump：SpringApplicationShutdownHook停在ExecutorConfigurationSupport.awaitTermination，governance-registration线程存在ExecutorLifecycleDelegate.beforeExecute等待。当前框架Registration默认waitForTasksToCompleteOnShutdown=true、awaitTermination35秒，长于Surefire30秒退出清理阈值。这些证据指向注册调度器关闭等待，不能仅凭线程名称断言所有退出问题已解决。
+
+仅新增测试资源`src/test/resources/application.properties`，使用框架已有开关`opensabre.governance.registration.wait-for-tasks-to-complete-on-shutdown=false`，取消无注册目标的测试环境待重试任务；生产配置与Surefire超时均不变，未关闭治理能力或修改框架。原应用启动测试断言实际绑定值为false，原治理Bean检查保留。
+
+原89183终态退出0，日志`/tmp/iqc-registration-test-shutdown.log`。两本轮XML Application6+JointLabel49=55，零失败/错误/跳过，未产生本轮dump/dumpstream，日志无Surefire强制退出告警。该证据覆盖两类真实HTTP/H2上下文及退出；不外推修改后默认全套，后续全套需再次核对。此前1353项结论仍限前一配置组合。
