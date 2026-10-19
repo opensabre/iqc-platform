@@ -393,3 +393,11 @@ SelectorDefinition.Condition.value复用已有双代字段精确解码与HTTP Js
 资产UI未知/受限policy隐藏配置编辑器，不把空默认条件当原稿；保存/发布/启停成功先清旧正文/历史，再独立GET，重读失败明确操作已完成。未保存草稿先阻止同资产启停或选用，关闭需确认丢弃；重新读取/关闭/卸载清正文及请求generation，版本读取校验来源/版本/hash。历史摘要单独读取精确版本，不通过历史权限绕过定义权限。
 
 当前仅编译/构建，默认MVC精确输入/输出、inactive历史不允许创建、各grant/source/hash/SQL/浏览器仍待验收。其他Pipeline/Scheme配置/复核副本与完整I1–I7仍未完成。
+
+### B Selector 资产与历史版本验证（2026-10-19）
+
+`SelectorAssetHttpPrivacyTest` 八种 FULL/PII/Prompt 组合验证目录、详情、历史、精确版本和四类写回执。FULL+PII 才显示详情/版本正文，不额外需要 Prompt；目录、历史列表及写回执永远不返回配置原文。逐字段比较其余状态/修订/版本/hash/分页与 source 不变，核对原固定基础权限；撤权或缺组件先于所有服务/解析调用拒绝。默认 HTTP 大整数加18位小数的条件值绑定及输出精确，Audit 声明无请求/响应正文。HTTP领域和PDP为mock，不证明实际角色或数据库。
+
+`SelectorAssetVersionBehaviorTest` 五项使用真实资产服务/hash/parser，DAO/选数校验/范围隔离：停用资产可查看精确版本且 availableForNewTasks=false，published 与带 FOR UPDATE 的 publishedForTask 均拒绝新用、不查版本；活动内部 Prepared 仍只序列化原六字段，新展示属性不进入冻结JSON。原范围拒绝先于版本读取，坏hash先于选数校验，精确decimal与规范hash保留。
+
+原35241首轮45项2失败仅新夹具默认Json2读取把高精度值舍入为9007199254740994；只启用测试mapper USE_BIG_DECIMAL_FOR_FLOATS，生产无修复。主源未改，最终compiler:testCompile surefire:test原92022退出0，日志`/tmp/iqc-selector-asset-http-privacy-final.log`。四份本轮XML HTTP12+真实服务5+预览14+周期19=50项，零失败/错误/跳过。当前组合默认全套、真实角色/SQL/浏览器仍待；无语音转换。
