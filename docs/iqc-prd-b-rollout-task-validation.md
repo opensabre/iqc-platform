@@ -35,3 +35,5 @@ B 在 `fdda5fc` 上只集成 A 已提交 `c6f87ac`（本分支 `1ee833a`）与 `
 专项与原27项组合运行，终态另记。仍不证明数据库完整性、生产任务真实物化、worker的开始/异步/恢复接线、实际供应商可用性、PDP角色或容量开销。
 
 执行守卫专项终态：原25903 exit0，日志 `/tmp/iqc-b-rollout-execution-guard-final.log`；Guard8 + Replay9 + Policy9 + Revision9，共35项，fresh XML failures/errors/skipped均0。首95618因测试lambda捕获非final局部变量编译失败，修正夹具后复跑；未执行成功的首轮不计通过。仅mapper模拟的守卫验证，不替代真实worker、数据库事务及角色验收。
+
+旧构造接线专项：原65771 exit0，`/tmp/iqc-b-rollout-guard-wiring.log`；GuardWiring3+ExecutionGuard8共11项，fresh XML零失败错误跳过。两种旧构造下灰度缺接线均拒绝、旧非流水线入口兼容；不证明真实Spring DI或完整worker运行。
