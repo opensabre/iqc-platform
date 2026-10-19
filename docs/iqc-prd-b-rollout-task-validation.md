@@ -66,3 +66,11 @@ MySQL8.0.34临时目录 `/private/tmp/iqc-mysql-validation.QC89ap`；随机schem
 2. 外层REPEATABLE_READ先读到修订1，另一连接扩量提交修订2；原一致性读仍1，真实任务创建却通过当前锁读冻结修订2/9000比例，数据库恰一任务。
 
 MySQL8.0.34临时 `/private/tmp/iqc-mysql-validation.CYVp1v`，schema `iqc_rollout_service_a59606d6f240` finally删除且目录不存在，Shutdown complete、pid/socket不存在。正式迁移74/validate75/再migrate0。仍只有scope与发布来源解析模拟；未验证真实发布依赖、HTTP角色、worker/供应商、Selector/周期事件自动灰度或完整I1–I7。本轮无生产源/框架修改或共享SQL、push、部署。
+
+## 2026-10-20 默认MVC与安全回执专项
+
+新增PipelineRolloutHttpPrivacyTest，复用默认MockMVC/框架响应与异常Advice、真实ResultReadProjection及真实Policy/Evidence夹具，授权投影和持久化服务模拟。原20880 terminal exit0，`/tmp/iqc-b-rollout-http-privacy.log`；新31+TaskCommandHttpPrivacyTest原10共41项fresh XML零失败错误跳过。
+
+覆盖四组fullConversation/PII授权下回执保留合法policyRevision/selectedVersion，不返回任何冻结正文、Prompt、筛选原文、cohortHash、盐、requestFingerprint，源对象不变；跨task移植证据不输出公开rollout声明。创建明确传入两个固定base grants；四个端点grant撤销均早拒绝、不调用服务。concurrency小数/string/bool/overflow/array/object、requestKey非string及expectedRevision负数/非精确整数/overflow均拒绝；null concurrency保留服务默认值。策略保存使用默认HTTP codec，读/历史带no-store/nosniff，审计声明request/response=false。
+
+本次只证明默认MVC codec与真实投影（默认HTTP Jackson3），不额外宣称通过两代HTTP codec；此前纯Policy双代codec是不同专项。审计注解检查不代表真实AOP审计存储，mock grants不代表实际组织PDP，mock service不代表持久化事务。本次无需监听网络端口，无生产或framework源修改、共享SQL、push、部署。完整PRD I1–I7仍进行中。
