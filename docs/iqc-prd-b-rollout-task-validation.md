@@ -43,3 +43,17 @@ B 在 `fdda5fc` 上只集成 A 已提交 `c6f87ac`（本分支 `1ee833a`）与 `
 worker异常收尾专项：原38902 terminal exit0，`/tmp/iqc-b-rollout-worker-failure.log`；InspectionExecutionServiceTest37+TaskExecutionStateServiceTest7共44项fresh XML零失败错误跳过。新增persisted/async两项精确验证领取后灰度拒绝调用state.fail(actualTaskId,executionId,true,error)，无budget-wait及会话/模型调用。runner的state服务仍模拟；原state7项为真实状态服务+mapper模拟，两层不能合称真实数据库失败回写或异步代理验收。
 
 真实服务串联专项：原8695 terminal exit0，`/tmp/iqc-b-rollout-worker-real-services.log`；Execution38+State7+Wiring3共48项fresh XML零失败错误跳过。新增一项以真实runner、真实PipelineAssetService旧构造及真实TaskExecutionStateService串联，仅mapper模拟；缺/null信封的保留g任务均因缺守卫被拒绝，任务和执行轮次转FAILED、保留原因、原ruleSnapshotJson不变，未读取消息/checkpoint或调用模型。日志中的拒绝异常为预期路径，不是测试失败。不证明真实DB提交、Spring事务或异步代理。
+
+## 2026-10-20 隔离MySQL真实任务物化
+
+扩展既有IsolatedMysqlRolloutServiceIT，复用随机schema和正式迁移，加入真实Spring代理PipelineRolloutTaskService、InspectionTaskService、ProductionInputSnapshotService及任务/会话/消息Mapper；保留真实资产锁、修订Service/Mapper。只有scope和发布来源解析使用测试桩，来源是合成RULE release，不证明真实发布依赖可用。
+
+原46286 terminal exit0，`/tmp/iqc-b-rollout-task-mysql.log`；本轮6项fresh XML零失败错误跳过，包含前轮修订3项及新任务3项：
+
+- 两连接同请求并发，真实证据校验和输入冻结后返回相同任务ID及完整JSON，最终该ID恰一行、CREATED/1消息，文本为原处理好会话。
+- 修订1创建后扩量至修订2、停用原资产、修改活归档，旧请求仍精确返回原任务与冻结JSON/修订1；新请求停用拒绝，同key改名拒绝。
+- BEFORE UPDATE触发器在任务INSERT后的消息数更新注入失败，外层事务回滚后该ID不存在；移除故障后相同key创建成功且恰一行。
+
+MySQL8.0.34临时目录 `/private/tmp/iqc-mysql-validation.QC89ap`；随机schema `iqc_rollout_service_a56fe1ec9a3b` finally删除且目录不存在，server Shutdown complete，pid/socket不存在。正式迁移至1.1.74/validate75文件/再migrate0。无共享数据库、framework、push或部署操作。
+
+这证明上述实际物化SQL/事务和重放边界，不证明真实授权、实际发布来源、Selector/周期事件自动灰度、领取执行/恢复、真实模型与浏览器或容量。默认全套1414项对应此前3625fcc，不将此次独立IT相加或宣称当前全PRD完成。
