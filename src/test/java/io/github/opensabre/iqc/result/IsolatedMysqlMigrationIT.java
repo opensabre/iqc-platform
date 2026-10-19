@@ -10,7 +10,7 @@ import java.sql.DriverManager;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Explicitly invoked acceptance against a dedicated temporary local server; never uses application credentials. */
-class IsolatedMysqlMigrationIT {
+public class IsolatedMysqlMigrationIT {
     private static final String SERVER = "jdbc:mysql://127.0.0.1:34307/";
     private static final String OPTIONS = "?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8";
 
@@ -242,7 +242,7 @@ class IsolatedMysqlMigrationIT {
     }
 
     /** Fail closed on the exact disposable server identity before any schema writes. */
-    static void verifyIsolatedServer() throws Exception {
+    public static void verifyIsolatedServer() throws Exception {
         String directory = System.getenv("IQC_MYSQL_VALIDATION_DIR");
         assertThat(directory).startsWith("/private/tmp/iqc-mysql-validation.");
         try (var connection = DriverManager.getConnection(SERVER + OPTIONS, "root", "");

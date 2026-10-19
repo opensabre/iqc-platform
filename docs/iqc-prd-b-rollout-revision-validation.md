@@ -23,3 +23,17 @@
 服务规则专项17与SQL10是不同验证层，不合称一次27项完整端到端。随机 `iqc_rollout_7e0d00346a6e` 已删除（对应datadir子目录不存在），服务器日志明确 Shutdown complete，mysql.pid/mysql.sock均不存在。临时datadir保留日志用于审计；未访问共享数据库。
 
 后续：生产service的资产锁/CAS真实并发、外层REPEATABLE_READ旧快照、实际灰度任务幂等/冻结/回退、默认MVC与真实授权仍缺证据，不能由本轮直接SQL唯一竞争替代。
+
+## 2026-10-20 真实Spring事务与资产锁专项
+
+新增IsolatedMysqlRolloutServiceIT，真实Spring代理PipelineRolloutService、PipelineAssetService原资产行锁、MyBatis两Mapper及正式Flyway迁移；仅发布来源解析和scope使用测试桩。跨包复用既有IsolatedMysqlMigrationIT.verifyIsolatedServer，将测试类和该方法设为public，没有复制服务器校验或改生产源。
+
+原6565 terminal exit0，日志 `/tmp/iqc-b-rollout-service-mysql.log`；3项fresh XML tests=3/failures=0/errors=0/skipped=0：
+
+- 两连接并发expectedRevision=0，恰一成功，另一收到“灰度策略修订已变化，请重新读取”的领域拒绝，最终恰一修订；不是用唯一约束SQLException冒充CAS。
+- 外层REPEATABLE_READ事务先读修订1，另一连接提交修订2；外层一致性读仍为1，而append锁定读拒绝expectedRevision=1，最终修订2与原修订1摘要不变。
+- 外层事务主动回滚撤销新修订，随后相同expectedRevision=0能够成功生成修订1。
+
+MySQL8.0.34，临时目录 `/private/tmp/iqc-mysql-validation.CURCFa`；随机schema `iqc_rollout_service_a533b3f2d06f` finally删除且对应目录不存在，server日志Shutdown complete，pid/socket不存在。仅本地34307，不访问共享数据库。正式迁移至1.1.74并validate，再migrate=0。
+
+本次只证明上述服务/锁/CAS/RR/回滚边界，不证明真实发布来源验证、真实授权、灰度任务物化唯一性/整笔回滚或完整worker。默认全套1414项为此前3625fcc基线，不将新IT或不同轮次相加称全量E2E。完整I1–I7仍进行中。
