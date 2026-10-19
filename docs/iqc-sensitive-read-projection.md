@@ -380,3 +380,16 @@ ResultReadProjection.selectorPreview仅复制原Preview：FULL+PII双grant才显
 两种固定基础权限核对；撤权先于精确定义解析/查询，缺接线 failclosed，领域 scope 拒绝透传；definitionJson 原字符串和显式 previewSize 按授权->解析->选数顺序传递。此处资产解析和选数为 mock，只证明 HTTP 透传与投影，不证明实际解析或数据库选数；Audit/RateLimit 只核对无正文及20/60声明。
 
 原81216退出0，日志 `/tmp/iqc-selector-preview-http-privacy.log`；四份本轮XML SelectorPreview14+ScheduleConfiguration19+TaskRead13+ModelDiagnostic12=58项，零失败/错误/跳过。未覆盖 Selector 资产草稿/历史/Prepared 后续增量、真实PDP/浏览器或新默认全套。数据源为已处理会话，无语音转换。
+### Selector资产正文与精确版本使用
+
+资产page/get/create/update/availability/history/publish/version各在原服务前刷新其原固定资源，复用原敏感接线/no-store/nosniff；配置写Audit显式关闭正文，路径操作仅id，查询Audit无正文。原scope/负责人/CAS/定义校验/发布幂等不改，不新增FULL/PII写命令要求。正文不含模型配置，故未额外要求Prompt。
+
+SelectorAsset副本只有专用详情且FULL+PII双grant才返回draftConfigJson；目录及写回执永不附原草稿。历史及发布回执只版本/修订/hash摘要，不附snapshotJson，完整定义走原独立version:view。Prepared仅增加可空非存储definitionJson/privacy/availableForNewTasks，保留旧6参构造，内部正常published/publishedForTask的新增字段全部null且不序列化，不改变原冻结协议/hash。受限精确版本仍返回ID/version/revision/hash和当前可用性，definition/definitionJson为空，能据引用选择可用版本，不误要求敏感正文授权才使用。
+
+version GET改用同服务viewVersion，只读历史允许停用资产，仍校验原scope和版本/hash；返回availableForNewTasks。新任务的publishedForTask保持活动检查/锁定，选择UI亦检查可用性，不因允许历史查看重新启用资产。definitionJson是原精确领域定义的展示序列化，保留数值，不承诺等于存储snapshotJson每个字节；原contentHash由原服务验证，不按展示文本重算。
+
+SelectorDefinition.Condition.value复用已有双代字段精确解码与HTTP JsonNode serializer，不改全局mapper，不新增重复codec，防默认MVC丢失条件树内容或精度。UI只读版本用definitionJson字符串，不将JSON.parse的近似数字回写；草稿原精确JSON编辑保护保留。
+
+资产UI未知/受限policy隐藏配置编辑器，不把空默认条件当原稿；保存/发布/启停成功先清旧正文/历史，再独立GET，重读失败明确操作已完成。未保存草稿先阻止同资产启停或选用，关闭需确认丢弃；重新读取/关闭/卸载清正文及请求generation，版本读取校验来源/版本/hash。历史摘要单独读取精确版本，不通过历史权限绕过定义权限。
+
+当前仅编译/构建，默认MVC精确输入/输出、inactive历史不允许创建、各grant/source/hash/SQL/浏览器仍待验收。其他Pipeline/Scheme配置/复核副本与完整I1–I7仍未完成。

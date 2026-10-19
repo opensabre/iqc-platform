@@ -609,4 +609,34 @@ public final class ResultReadProjection {
                 source.candidateCount(),source.matchedCount(),source.sampledCount(),source.selectedCount(),source.limited(),matched,selected,rows,source.definitionHash(),metadata);
     }
 
+    private Map<String,Object> selectorPrivacy(SensitiveReadAccessService.Access access,boolean canonical,List<String> withheld){
+        var result=new LinkedHashMap<String,Object>();result.put("policyVersion","iqc-selector-read-v1");
+        result.put("canonicalPayloadVisible",canonical);result.put("canReadFull",access.fullConversation());result.put("canReadPii",access.pii());
+        result.put("withheldFields",canonical?List.of():withheld);return result;
+    }
+    public io.github.opensabre.iqc.selector.model.SelectorAsset selectorAsset(io.github.opensabre.iqc.selector.model.SelectorAsset source,
+            SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.selector.model.SelectorAsset();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead && access.fullConversation() && access.pii();
+        copy.setName(text(copy.getName(),access.fullConversation() && access.pii()));
+        if(!canonical)copy.setDraftConfigJson(null);
+        copy.setPrivacy(selectorPrivacy(access,canonical,List.of("draftConfigJson")));return copy;
+    }
+    public io.github.opensabre.iqc.selector.model.SelectorAssetVersion selectorHistory(io.github.opensabre.iqc.selector.model.SelectorAssetVersion source,
+            SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.selector.model.SelectorAssetVersion();BeanUtils.copyProperties(source,copy);
+        copy.setSnapshotJson(null);copy.setPrivacy(selectorPrivacy(access,false,List.of("snapshotJson")));return copy;
+    }
+    public io.github.opensabre.iqc.selector.SelectorAssetService.Prepared publishedSelector(io.github.opensabre.iqc.selector.SelectorAssetService.Prepared source,
+            SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(access);if(source==null)return null;
+        boolean canonical=access.fullConversation() && access.pii();String body=null;
+        if(canonical)try{body=json.writeValueAsString(source.definition());}
+        catch(com.fasterxml.jackson.core.JsonProcessingException invalid){throw io.github.opensabre.iqc.governance.IqcException.invalidState("选择器定义展示不可用");}
+        return new io.github.opensabre.iqc.selector.SelectorAssetService.Prepared(source.selectorId(),source.versionNo(),source.sourceDraftRevision(),
+                canonical?source.definition():null,source.contentHash(),source.ownerGroupId(),body,selectorPrivacy(access,canonical,List.of("definition","definitionJson")),source.availableForNewTasks());
+    }
+
 }

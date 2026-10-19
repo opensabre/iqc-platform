@@ -18,7 +18,14 @@ import java.util.List;
 public class SelectorAssetService {
     public record Reference(String selectorId,int versionNo) { }
     public record Prepared(String selectorId,int versionNo,int sourceDraftRevision,SelectorDefinition definition,
-                           String contentHash,String ownerGroupId) { }
+                           String contentHash,String ownerGroupId,
+                           @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String definitionJson,
+                           @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) java.util.Map<String,Object> privacy,
+                           @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) Boolean availableForNewTasks) {
+        public Prepared(String selectorId,int versionNo,int sourceDraftRevision,SelectorDefinition definition,String contentHash,String ownerGroupId){
+            this(selectorId,versionNo,sourceDraftRevision,definition,contentHash,ownerGroupId,null,null,null);
+        }
+    }
     private final SelectorAssetMapper assets;
     private final SelectorAssetVersionMapper versions;
     private final ConversationSelectionService selections;
@@ -77,14 +84,20 @@ public class SelectorAssetService {
     public Prepared published(String id,int versionNo) {return published(id,versionNo,false);}
     /** Called inside task creation transaction to serialize new use with disable/update. */
     public Prepared publishedForTask(String id,int versionNo) {return published(id,versionNo,true);}
-    private Prepared published(String id,int versionNo,boolean lock) {
+    /** Historical definition viewing does not re-enable an inactive asset for task use. */
+    public Prepared viewVersion(String id,int versionNo){return published(id,versionNo,false,true);}
+    private Prepared published(String id,int versionNo,boolean lock){return published(id,versionNo,lock,false);}
+    private Prepared published(String id,int versionNo,boolean lock,boolean viewOnly) {
         if(versionNo<1)throw IqcException.invalidArgument("Selector版本必须为正数");
-        var asset=require(id,lock);active(asset);
+        var asset=require(id,lock);if(!viewOnly)active(asset);
         var version=versions.selectOne(Wrappers.<SelectorAssetVersion>lambdaQuery().eq(SelectorAssetVersion::getSelectorId,id)
                 .eq(SelectorAssetVersion::getVersionNo,versionNo));
         if(version==null)throw IqcException.notFound("Selector发布版本不存在");
         validateVersion(version);
-        return new Prepared(id,versionNo,version.getSourceDraftRevision(),read(version.getSnapshotJson()),version.getContentHash(),asset.getOwnerGroupId());
+        var prepared=new Prepared(id,versionNo,version.getSourceDraftRevision(),read(version.getSnapshotJson()),version.getContentHash(),asset.getOwnerGroupId());
+        if(!viewOnly)return prepared;
+        return new Prepared(prepared.selectorId(),prepared.versionNo(),prepared.sourceDraftRevision(),prepared.definition(),
+                prepared.contentHash(),prepared.ownerGroupId(),null,null,"ACTIVE".equals(asset.getStatus()));
     }
     public ConversationSelectionService.Preview preview(String id,int versionNo,int size) {
         var source=published(id,versionNo);var preview=selections.preview(source.definition(),size);
