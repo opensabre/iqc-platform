@@ -354,6 +354,9 @@ class InspectionExecutionServiceTest {
     @Test void rolloutResumeRejectsBadEvidenceBeforeReadingCheckpoints() { rejectRolloutAtBoundary("resume"); }
     @Test void rolloutWorkerRejectsBadEvidenceBeforeConversationWork() { rejectRolloutAtBoundary("run"); }
 
+    @Test void rolloutPersistentWorkerRecordsClaimedFailureWithoutInference() { rejectRolloutAtBoundary("persisted"); }
+    @Test void rolloutAsyncRunnerRecordsClaimedFailureWithoutInference() { rejectRolloutAtBoundary("async"); }
+
     /** Real entry methods must pass the actual task ID even when rollout markers are absent. */
     private void rejectRolloutAtBoundary(String boundary) {
         for (boolean markerPresent : new boolean[]{false,true}) {
@@ -382,7 +385,13 @@ class InspectionExecutionServiceTest {
             when(states.claim(task.getId(),"execution-1")).thenReturn(true);
             org.mockito.Mockito.doThrow(new IllegalStateException("rollout evidence rejected"))
                     .when(pipelines).validateTask(any(),org.mockito.ArgumentMatchers.eq(task.getId()));
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> {
+            if(boundary.equals("persisted") || boundary.equals("async")) {
+                if(boundary.equals("persisted"))runner.executePersisted(task.getId(),"execution-1");
+                else runner.executeAsync(task.getId(),"execution-1");
+                verify(states).claim(task.getId(),"execution-1");
+                verify(states).fail(task.getId(),"execution-1",true,"rollout evidence rejected");
+                org.mockito.Mockito.verifyNoMoreInteractions(states);
+            } else org.assertj.core.api.Assertions.assertThatThrownBy(() -> {
                 switch(boundary) {
                     case "queue" -> runner.queueSystem(task.getId());
                     case "resume" -> runner.resume(task.getId());
@@ -393,7 +402,7 @@ class InspectionExecutionServiceTest {
             verify(pipelines,org.mockito.Mockito.never()).validateTask(any());
             verifyNoInteractions(items,messages,models,evaluator);
             verify(tasks,org.mockito.Mockito.never()).updateById(any(InspectionTask.class));
-            if(!boundary.equals("run"))verifyNoInteractions(executions,states);
+            if(boundary.equals("queue") || boundary.equals("resume"))verifyNoInteractions(executions,states);
         }
     }
 
