@@ -57,3 +57,12 @@ worker异常收尾专项：原38902 terminal exit0，`/tmp/iqc-b-rollout-worker-
 MySQL8.0.34临时目录 `/private/tmp/iqc-mysql-validation.QC89ap`；随机schema `iqc_rollout_service_a56fe1ec9a3b` finally删除且目录不存在，server Shutdown complete，pid/socket不存在。正式迁移至1.1.74/validate75文件/再migrate0。无共享数据库、framework、push或部署操作。
 
 这证明上述实际物化SQL/事务和重放边界，不证明真实授权、实际发布来源、Selector/周期事件自动灰度、领取执行/恢复、真实模型与浏览器或容量。默认全套1414项对应此前3625fcc，不将此次独立IT相加或宣称当前全PRD完成。
+
+## 2026-10-20 物化与扩量锁顺序 / 旧RR快照
+
+原92857 terminal exit0，`/tmp/iqc-b-rollout-ordering-mysql.log`；IsolatedMysqlRolloutServiceIT本轮8项fresh XML零失败错误跳过，其中新增2项、前轮6项复验，不累加重复数量。
+
+1. 外层事务物化修订1任务后暂不提交，另一连接扩量；通过performance_schema.data_lock_waits联结data_locks实际观察到该schema的iqc_pipeline_asset锁等待，并确认扩量future尚未完成。物化提交后扩量才成功；新任务冻结修订2，原任务仍修订1且重放完整JSON不变。
+2. 外层REPEATABLE_READ先读到修订1，另一连接扩量提交修订2；原一致性读仍1，真实任务创建却通过当前锁读冻结修订2/9000比例，数据库恰一任务。
+
+MySQL8.0.34临时 `/private/tmp/iqc-mysql-validation.CYVp1v`，schema `iqc_rollout_service_a59606d6f240` finally删除且目录不存在，Shutdown complete、pid/socket不存在。正式迁移74/validate75/再migrate0。仍只有scope与发布来源解析模拟；未验证真实发布依赖、HTTP角色、worker/供应商、Selector/周期事件自动灰度或完整I1–I7。本轮无生产源/框架修改或共享SQL、push、部署。

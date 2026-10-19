@@ -145,6 +145,54 @@ class IsolatedMysqlRolloutServiceIT {
         assertThat(createTask("write-failure").getId()).isEqualTo(taskId);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE id=?",Integer.class,taskId)).isEqualTo(1);
     }
+    @Test void materializationHoldsAssetLockUntilCommitBeforePolicyExpansion() throws Exception {
+        service.append(id,0,policy(1000));
+        var tx=new TransactionTemplate(context.getBean(DataSourceTransactionManager.class));
+        var started=new CountDownLatch(1);
+        try(var worker=Executors.newSingleThreadExecutor()) {
+            var pending=new java.util.concurrent.atomic.AtomicReference<Future<PipelineRolloutService.Revision>>();
+            var original=tx.execute(status->{
+                var task=createTask("before-expansion");
+                pending.set(worker.submit(()->{started.countDown();return service.append(id,1,policy(9000));}));
+                try {
+                    assertThat(started.await(10,TimeUnit.SECONDS)).isTrue();
+                    long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+                    int waits=0;
+                    while(System.nanoTime()<deadline) {
+                        waits=jdbc.queryForObject("SELECT COUNT(*) FROM performance_schema.data_lock_waits w JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID AND l.ENGINE=w.ENGINE WHERE l.OBJECT_SCHEMA=? AND l.OBJECT_NAME='iqc_pipeline_asset'",Integer.class,SCHEMA);
+                        if(waits>0)break;
+                        Thread.sleep(20);
+                    }
+                    assertThat(waits).as("policy append must wait on the real asset row lock").isPositive();
+                    assertThat(pending.get().isDone()).isFalse();
+                } catch(InterruptedException e) {Thread.currentThread().interrupt();throw new IllegalStateException(e);}
+                return task;
+            });
+            assertThat(pending.get().get(30,TimeUnit.SECONDS).revisionNo()).isEqualTo(2);
+            var next=createTask("after-expansion");var json=context.getBean(ObjectMapper.class);
+            assertThat(json.readTree(original.getRuleSnapshotJson()).at("/rolloutSnapshot/evidence/revision/revisionNo").asInt()).isEqualTo(1);
+            assertThat(json.readTree(next.getRuleSnapshotJson()).at("/rolloutSnapshot/evidence/revision/revisionNo").asInt()).isEqualTo(2);
+            assertThat(createTask("before-expansion").getRuleSnapshotJson()).isEqualTo(original.getRuleSnapshotJson());
+        }
+    }
+    @Test void taskMaterializationUsesLatestPolicyDespiteOuterRepeatableReadSnapshot() throws Exception {
+        service.append(id,0,policy(1000));
+        var tx=new TransactionTemplate(context.getBean(DataSourceTransactionManager.class));
+        tx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        var task=tx.execute(status->{
+            assertThat(service.current(id).revisionNo()).isEqualTo(1);
+            try(var worker=Executors.newSingleThreadExecutor()) {
+                try {assertThat(worker.submit(()->service.append(id,1,policy(9000))).get(20,TimeUnit.SECONDS).revisionNo()).isEqualTo(2);}
+                catch(Exception e) {throw new IllegalStateException(e);}
+            }
+            assertThat(service.current(id).revisionNo()).isEqualTo(1);
+            return createTask("old-outer-snapshot");
+        });
+        var root=context.getBean(ObjectMapper.class).readTree(task.getRuleSnapshotJson());
+        assertThat(root.at("/rolloutSnapshot/evidence/revision/revisionNo").asInt()).isEqualTo(2);
+        assertThat(root.at("/rolloutSnapshot/evidence/revision/snapshot/policy/candidateBasisPoints").asInt()).isEqualTo(9000);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE conversation_id=?",Integer.class,conversationId)).isEqualTo(1);
+    }
     @Configuration @EnableTransactionManagement static class Config {
         @Bean DataSource dataSource(){return new DriverManagerDataSource(SERVER+SCHEMA+OPTIONS,"root","");}
         @Bean DataSourceTransactionManager transactionManager(DataSource ds){return new DataSourceTransactionManager(ds);}
