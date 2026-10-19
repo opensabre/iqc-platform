@@ -30,7 +30,7 @@ class PipelineRolloutRevisionBehaviorTest {
  @BeforeEach void fixture(){
   com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(new org.apache.ibatis.builder.MapperBuilderAssistant(new com.baomidou.mybatisplus.core.MybatisConfiguration(),"rollout"),PipelineRolloutRevision.class);
   var asset=new PipelineAsset();asset.setId("pipe-1");when(pipelines.get("pipe-1")).thenReturn(asset);when(scope.actorUserId()).thenReturn("actor-1");
-  when(pipelines.rolloutSources(eq("pipe-1"),any())).thenReturn(new PipelineAssetService.RolloutSources(new PipelineAssetService.Prepared("pipe-1",1,null,release(0),"a".repeat(64)),new PipelineAssetService.Prepared("pipe-1",2,null,release(1),"b".repeat(64))));
+  when(pipelines.rolloutSourcesForTask(eq("pipe-1"),any())).thenReturn(new PipelineAssetService.RolloutSources(new PipelineAssetService.Prepared("pipe-1",1,null,release(0),"a".repeat(64)),new PipelineAssetService.Prepared("pipe-1",2,null,release(1),"b".repeat(64))));
   when(mapper.selectOne(any())).thenAnswer(call->rows.isEmpty()?null:rows.getLast());
   when(mapper.insert(any(PipelineRolloutRevision.class))).thenAnswer(call->{var row=call.getArgument(0,PipelineRolloutRevision.class);row.setId("revision-"+row.getRevisionNo());rows.add(row);return 1;});
  }
@@ -51,7 +51,7 @@ class PipelineRolloutRevisionBehaviorTest {
  }
  @Test void staleCasStopsBeforeReleaseValidationAndInsert(){
   service.append("pipe-1",0,active(1000));clearInvocations(mapper,pipelines);
-  assertThatThrownBy(()->service.append("pipe-1",0,active(2000))).hasMessageContaining("修订已变化");verify(pipelines,never()).rolloutSources(anyString(),any());verify(mapper,never()).insert(any(PipelineRolloutRevision.class));
+  assertThatThrownBy(()->service.append("pipe-1",0,active(2000))).hasMessageContaining("修订已变化");verify(pipelines,never()).rolloutSourcesForTask(anyString(),any());verify(mapper,never()).insert(any(PipelineRolloutRevision.class));
  }
  @Test void duplicatePolicyDoesNotAppend(){service.append("pipe-1",0,active(1000));assertThatThrownBy(()->service.append("pipe-1",1,active(1000))).hasMessageContaining("没有变化");assertThat(rows).hasSize(1);}
  @Test void firstRollbackAndRollbackThatChangesAllocationAreRejected(){
@@ -64,13 +64,13 @@ class PipelineRolloutRevisionBehaviorTest {
  }
  @Test void corruptPreviousEnvelopeBlocksAppendAndReads(){
   service.append("pipe-1",0,active(1000));rows.getFirst().setContentHash("c".repeat(64));clearInvocations(mapper,pipelines);
-  assertThatThrownBy(()->service.current("pipe-1")).hasMessageContaining("证据无效");assertThatThrownBy(()->service.append("pipe-1",1,active(2000))).hasMessageContaining("证据无效");verify(mapper,never()).insert(any(PipelineRolloutRevision.class));verify(pipelines,never()).rolloutSources(anyString(),any());
+  assertThatThrownBy(()->service.current("pipe-1")).hasMessageContaining("证据无效");assertThatThrownBy(()->service.append("pipe-1",1,active(2000))).hasMessageContaining("证据无效");verify(mapper,never()).insert(any(PipelineRolloutRevision.class));verify(pipelines,never()).rolloutSourcesForTask(anyString(),any());
  }
  @Test void historyValidatesCanonicalScopeAndPagingWithoutCheckingExecutionDependencies(){
   service.append("pipe-1",0,active(1000));when(mapper.selectList(any())).thenReturn(List.copyOf(rows));clearInvocations(pipelines,mapper);
-  assertThat(service.history("pipe-1",2,20)).hasSize(1);verify(pipelines).get("pipe-1");verify(pipelines,never()).rolloutSources(anyString(),any());verify(pipelines,never()).lockForRollout(anyString());
+  assertThat(service.history("pipe-1",2,20)).hasSize(1);verify(pipelines).get("pipe-1");verify(pipelines,never()).rolloutSourcesForTask(anyString(),any());verify(pipelines,never()).lockForRollout(anyString());
   var query=org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.Wrapper.class);verify(mapper).selectList(query.capture());assertThat(query.getValue().getSqlSegment()).contains("revision_no <","ORDER BY revision_no DESC","LIMIT 20");
   clearInvocations(pipelines,mapper);for(int limit:List.of(0,101))assertThatThrownBy(()->service.history("pipe-1",null,limit)).hasMessageContaining("分页");assertThatThrownBy(()->service.history("pipe-1",0,20)).hasMessageContaining("分页");verifyNoInteractions(pipelines,mapper);
  }
- @Test void sourceValidationFailureNeverWrites(){when(pipelines.rolloutSources(anyString(),any())).thenThrow(new IllegalStateException("source unavailable"));assertThatThrownBy(()->service.append("pipe-1",0,active(1000))).hasMessageContaining("source unavailable");assertThat(rows).isEmpty();verify(mapper,never()).insert(any(PipelineRolloutRevision.class));}
+ @Test void sourceValidationFailureNeverWrites(){when(pipelines.rolloutSourcesForTask(anyString(),any())).thenThrow(new IllegalStateException("source unavailable"));assertThatThrownBy(()->service.append("pipe-1",0,active(1000))).hasMessageContaining("source unavailable");assertThat(rows).isEmpty();verify(mapper,never()).insert(any(PipelineRolloutRevision.class));}
 }

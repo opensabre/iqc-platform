@@ -22,6 +22,13 @@ class PipelineRolloutPolicyBehaviorTest {
  private PipelineAssetService.Prepared prepared(int version){return new PipelineAssetService.Prepared("pipe-1",version,null,release(version-1),(version==1?"a":"b").repeat(64));}
  private PipelineRolloutPolicy policy(int points,PipelineRolloutPolicy.State state){return new PipelineRolloutPolicy(PipelineRolloutPolicy.SCHEMA,"pipe-1",1,2,points,"salt_0001",state,new BenchmarkVariableComparator.Selection(BenchmarkVariableComparator.Dimension.PIPELINE,null,null));}
  private PipelineRolloutPolicy.Decision decide(int points,PipelineRolloutPolicy.State state,String actor,String key){return policy(points,state).preview(actor,key,prepared(1),prepared(2),json);}
+ @Test void decisionPolicyHashMatchesPersistedRevisionProtocolForRoundAndNonRoundRatios(){
+  for(int points:List.of(0,10,1000,5000,10000,1234)){
+   var policy=policy(points,PipelineRolloutPolicy.State.ACTIVE);
+   assertThat(policy.preview("actor-1","request-1",prepared(1),prepared(2),json).policyHash())
+    .as("ratio %s must match revision policyHash",points).isEqualTo(PipelineAssetService.hash(json.valueToTree(policy).toString()));
+  }
+ }
  @Test void zeroFullAndRollbackUseExactReleaseHashes(){
   for(int i=0;i<50;i++){
    var zero=decide(0,PipelineRolloutPolicy.State.ACTIVE,"actor-1","key-"+i);
