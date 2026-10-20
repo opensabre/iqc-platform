@@ -16,8 +16,10 @@ public record ReviewPolicy(String schemaVersion,String seed,UnknownHandling unkn
     public enum UnknownHandling {REQUIRE_REVIEW,KEEP_UNKNOWN}
     public enum Status {REQUIRED,NOT_REQUIRED,UNKNOWN}
     public record ConfidenceGate(String findingCode,
-            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class) String minimumInclusive,
-            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class) String maximumExclusive) {
+            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class)
+            @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.HttpDecimalThresholdDeserializer.class) String minimumInclusive,
+            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class)
+            @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.HttpDecimalThresholdDeserializer.class) String maximumExclusive) {
         public ConfidenceGate {
             identity(findingCode);if(minimumInclusive==null && maximumExclusive==null)throw new IllegalArgumentException("Confidence interval is empty");
             if(minimumInclusive!=null)probability(minimumInclusive);if(maximumExclusive!=null)probability(maximumExclusive);
@@ -26,7 +28,8 @@ public record ReviewPolicy(String schemaVersion,String seed,UnknownHandling unkn
         }
     }
     public record Rule(String ruleId,ActionPolicy.Condition condition,ConfidenceGate confidence,
-            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class) String probability,
+            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class)
+            @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.HttpDecimalThresholdDeserializer.class) String probability,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_DEFAULT) boolean fallback) {
         public Rule(String ruleId,ActionPolicy.Condition condition,ConfidenceGate confidence,String probability){this(ruleId,condition,confidence,probability,false);}
         public Rule {identity(ruleId);Objects.requireNonNull(condition);ReviewPolicy.probability(probability);if(decimal(probability).scale()>4)throw new IllegalArgumentException("Sampling probability supports 4 decimal places");ActionPolicy.validatePostDecisionInputs(condition,null,null,null);}

@@ -403,3 +403,7 @@ CREATE_RISK_EVENT v1引用原冻结生产结果/动作账本，稳定幂等事�
 ## Skill敏感配置批次（2026-10-20）
 
 原唯一list配置读和版本历史按FULL/PII/PROMPT三grant投影，命令回执不带指令/Schema/说明；ID/code/version/status保留供原Agent/流水线选用，不新增API/表/ACL。UI受限不加载空表单、不保存覆盖，成功后清表单独立重读，卸载隔离迟到响应。后端77870/前端99858构建均exit0，Root没有新增/运行测试；B独立授权/HTTP/真实角色验收待，全部适用I1–I7继续。详情见iqc-sensitive-read-projection.md。
+
+## 完整PipelineRelease HTTP字段桥接批次（2026-10-20）
+
+复用已有本地HTTP精确树decoder/serializer接六个实际嵌套请求字段；新增单一Jackson3严格十进制JSON字符串guard接原数值谓词/Action/Review/高级评分字段。Jackson2/全局mapper/framework/旧摘要算法不改，后端98028 skipTests test-compile terminal0。B原基线完整MVC复现与修复后回归待，存储和摘要精度/旧hash兼容单列后续验证；完整适用I1–I7继续。

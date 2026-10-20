@@ -18,14 +18,20 @@ public record PipelineDefinition(String schemaVersion, List<Node> nodes,
     public static final String PARALLEL_SCHEMA = "iqc-pipeline-parallel-v1";
     public enum OnError { FAIL_PIPELINE, CONTINUE, MARK_REVIEW, FALLBACK }
     public enum Operator { EXISTS, EQUALS, NOT_EQUALS, GREATER_OR_EQUAL, LESS_OR_EQUAL, GREATER_THAN, LESS_THAN }
-    public record Condition(String pointer, Operator operator, JsonNode value) {
+    public record Condition(String pointer, Operator operator, @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class)
+            @tools.jackson.databind.annotation.JsonSerialize(using=io.github.opensabre.iqc.quality.evaluation.BenchmarkService.HttpTreeSerializer.class)
+            JsonNode value) {
         public Condition { value = value == null ? null : value.deepCopy(); }
         @Override public JsonNode value() { return value == null ? null : value.deepCopy(); }
     }
     public record Node(String nodeId, String type, String name, String version,
-                       List<String> dependsOn, Map<String,String> inputMapping, JsonNode config,
+                       List<String> dependsOn, Map<String,String> inputMapping, @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class)
+            @tools.jackson.databind.annotation.JsonSerialize(using=io.github.opensabre.iqc.quality.evaluation.BenchmarkService.HttpTreeSerializer.class)
+            JsonNode config,
                        Condition condition, long timeoutMs, int retries, OnError onError,
-                       String fallbackNodeId, JsonNode outputSchema, boolean enabled) {
+                       String fallbackNodeId, @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class)
+            @tools.jackson.databind.annotation.JsonSerialize(using=io.github.opensabre.iqc.quality.evaluation.BenchmarkService.HttpTreeSerializer.class)
+            JsonNode outputSchema, boolean enabled) {
         public Node {
             dependsOn = dependsOn == null ? List.of() : List.copyOf(dependsOn);
             inputMapping = inputMapping == null ? Map.of() : Map.copyOf(inputMapping);

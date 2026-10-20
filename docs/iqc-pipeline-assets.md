@@ -67,3 +67,17 @@ GET 同一路径返回该源结果最新100条重算记录。源任务数据范�
 Pipeline列包括资产ID/发布版本/试跑修订/摘要、源结果/执行、业务项结论与贡献、确定事实值、选中事实ID/来源节点、证据消息ID及保存的融合证据JSON。融合证据保留未选中候选，不当作只来自赢家；项目绑定规则与真实来源分列。未复制完整会话原文，证据JSON沿用已保存内容。该导出保持机器结果，不应用人工覆盖或政策重算。最多50000行、50MiB，无业务项目时拒绝伪造空导出。
 
 前端既有业务CSV按钮已对Pipeline开放。后端及现有测试源码编译、前端vue-tsc/Vite构建通过；测试、数据库和浏览器验收未执行，未部署。
+
+## 完整发布体的默认HTTP映射（2026-10-20）
+
+Create/Update的PipelineRelease包含Jackson2领域树，默认MVC使用Jackson3。源码核对确认原Node.config/outputSchema、Condition.value、Action.configuration/Condition.value、FindingLabelPolicy.directory没有本地HTTP桥接；这些均为实际请求字段，不能依据内部Fusion.Result不作为HTTP输入来跳过。
+
+复用现有HumanFindingReviewEvaluator.HttpExactValueDeserializer和BenchmarkService.HttpTreeSerializer，为上述六个字段增加Jackson3专用注解；不改变Jackson2读写配置/存储解码、不注册全局模块、不修改framework。对象/数组/标量/大整数和嵌套小数走已有局部精确JSON桥接，不将JsonNode作为普通JavaBean。输出也沿已有树serializer避免变成属性集合。原领域构造/防御性复制/引用与Schema校验保持。
+
+原PipelineRelease.DecimalThresholdDeserializer只约束Jackson2输入。新增对应的单一HttpDecimalThresholdDeserializer，复用其必须JSON字符串的契约，供NumericPredicate.threshold、ActionPolicy.decimalOperand、ReviewPolicy置信度区间/概率和InspectionScoring高级权重/调整/维度上下界/等级共用。数字、布尔、数组或对象不能先被String默认强转再进入领域十进制校验；词法/精度/范围仍由各原构造器验证，可选null仍由各原可空字段语义处理。
+
+本批后端原98028 terminal exit0（mvn -o -q -DskipTests test-compile）；无UI接口变更，未新增/运行Root测试。B须从修复前95cce15保留实际完整有效Create/Update默认MVC原失败证据，再覆盖六树字段精确内容/树输出、字符串数值拒绝强转、WEIGHTED/Action/Risk/Review/高级评分组合及Jackson2历史读取不变。编译不证明真实MVC/发布/worker/重算已通过。
+
+### 单列待核实：存储与摘要数值语义
+
+PipelineAssetService.hash仍通过默认Jackson2 readTree构造既有canonical hash；parse/read与parseExact路径亦不同。HTTP精确树接线不能替代完整保存/发布/冻结/读取/重算中的精度证明。应对相邻高精度小数/大整数、原1.0等历史表示、存储字符串/内容摘要和后续政策比较逐项独立验证；若需改变摘要协议，必须制定可识别新旧版本的兼容方案，不全局替换算法而让旧发布/任务失效。本批不宣称摘要碰撞/精度缺陷已被运行复现或修复。
