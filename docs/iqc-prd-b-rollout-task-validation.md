@@ -86,3 +86,11 @@ MySQL8.0.34临时 `/private/tmp/iqc-mysql-validation.CYVp1v`，schema `iqc_rollo
 原43844 terminal exit0，日志`/tmp/iqc-b-rollout-guard-mysql.log`，本轮fresh Surefire XML 11 tests / failures=0 / errors=0 / skipped=0。临时MySQL8.0.34目录`/private/tmp/iqc-mysql-validation.K2c6MW`，随机schema `iqc_rollout_service_a6da8bae83d4`已删除（目录无），服务器日志Shutdown complete，pid/socket均无。正式迁移55项至1.1.74、validate75、再次migrate0。
 
 范围：真实Spring代理任务/修订服务、InnoDB、Mapper及只读执行守卫；scope与发布来源解析继续为mock，发布版本为与合成Prepared一致的数据库夹具。未执行真实发布准入/完整worker/模型/角色/HTTP验收，不能把这11项升级为全链路完成。未改生产源码、framework、A的加权融合文件或共享数据库。
+
+## 2026-10-20 worker拒绝与真实事务状态
+
+新增2项（其中缺失/空信封同测两种情况），原36997 terminal exit0，`/tmp/iqc-b-rollout-worker-mysql.log`，本轮fresh XML共13项，零失败/错误/跳过。直接调用真实InspectionExecutionService.executePersisted，使用真实AssetService/ExecutionGuard/Task/Execution Mapper及经过Spring代理的TaskExecutionStateService；检查当前轮次从QUEUED领取后在三个拒绝场景实际落FAILED，并保存原来源错误原因。旧SUCCEEDED轮次完整数据库行及任务冻结JSON不变，任务failed_messages=1；消息Mapper、TaskItem Mapper、LLM与PipelineEvaluator均无调用。
+
+拒绝场景为reserved灰度任务ID缺失信封、信封null、原未选候选发布正文损坏。管线源解析与scope仍mock、pipeline evaluator仅前置拒绝探针；worker为直接实例调用，状态服务有真实事务代理，未证明worker异步代理、成功检测/完整生产或真实模型链路。
+
+临时MySQL8.0.34目录`/private/tmp/iqc-mysql-validation.MwB1UM`，schema `iqc_rollout_service_a7ba93514fd5`已删除，pid/socket无且日志Shutdown complete。正式迁移55至1.1.74、validate75、remigrate0。注入的预期异常有ERROR堆栈，以进程exit0与本轮XML证明测试通过，不将日志堆栈视作未处理失败。无生产/framework/共享SQL/push/部署。

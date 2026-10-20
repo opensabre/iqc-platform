@@ -238,6 +238,56 @@ class IsolatedMysqlRolloutServiceIT {
         jdbc.update("UPDATE iqc_pipeline_asset_version SET publication_decision_json=NULL,publication_decision_hash=NULL WHERE pipeline_id=? AND version_no=2",id);
         validateStoredTask(task);
     }
+    private void runRejectedTaskThroughRealWorker(io.github.opensabre.iqc.task.model.InspectionTask task) {
+        var session=new SqlSessionTemplate(context.getBean(SqlSessionFactory.class));
+        var tasks=session.getMapper(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class);
+        var executions=session.getMapper(io.github.opensabre.iqc.task.dao.TaskExecutionMapper.class);
+        String eid="e"+UUID.randomUUID().toString().replace("-","");String old="o"+eid;
+        jdbc.update("UPDATE iqc_inspection_task SET status='QUEUED',current_execution_id=? WHERE id=?",eid,task.getId());
+        jdbc.update("INSERT INTO iqc_task_execution(id,task_id,attempt_no,status) VALUES(?,?,1,'SUCCEEDED'),(?,?,2,'QUEUED')",old,task.getId(),eid,task.getId());
+        String original=jdbc.queryForObject("SELECT rule_snapshot_json FROM iqc_inspection_task WHERE id=?",String.class,task.getId());
+        var oldExecution=jdbc.queryForMap("SELECT * FROM iqc_task_execution WHERE id=?",old);
+        var items=mock(io.github.opensabre.iqc.task.dao.TaskItemMapper.class);
+        var messages=mock(io.github.opensabre.iqc.conversation.dao.ConversationMessageMapper.class);
+        var models=mock(io.github.opensabre.iqc.result.llm.LlmQualityProvider.class);
+        var evaluator=mock(io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.class);
+        var assets=new PipelineAssetService(session.getMapper(PipelineAssetMapper.class),session.getMapper(PipelineAssetVersionMapper.class),
+                null,null,null,null,null,null,context.getBean(ObjectMapper.class),context.getBean(IqcDataScope.class),null,tasks,null,null,null,
+                context.getBeanProvider(PipelineRolloutExecutionGuard.class));
+        var runner=new io.github.opensabre.iqc.result.InspectionExecutionService(tasks,
+                mock(io.github.opensabre.iqc.conversation.dao.ConversationMapper.class),messages,
+                mock(io.github.opensabre.iqc.result.dao.InspectionResultMapper.class),context.getBean(ObjectMapper.class),executions,items,
+                context.getBean(IqcDataScope.class),models,mock(io.github.opensabre.governance.usage.UsageCounterRecorder.class),
+                mock(io.github.opensabre.iqc.result.HierarchicalResultService.class),mock(io.github.opensabre.iqc.label.LabelCandidateService.class),
+                mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class),assets,evaluator);
+        var states=context.getBean(io.github.opensabre.iqc.task.TaskExecutionStateService.class);
+        assertThat(org.springframework.aop.support.AopUtils.isAopProxy(states)).isTrue();
+        org.springframework.test.util.ReflectionTestUtils.setField(runner,"executionStates",states);
+        runner.executePersisted(task.getId(),eid);
+        assertThat(jdbc.queryForObject("SELECT status FROM iqc_inspection_task WHERE id=?",String.class,task.getId())).isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject("SELECT failed_messages FROM iqc_inspection_task WHERE id=?",Integer.class,task.getId())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,eid)).isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject("SELECT error_message FROM iqc_task_execution WHERE id=?",String.class,eid)).contains("原修订、发布来源或比较证据不一致");
+        assertThat(jdbc.queryForMap("SELECT * FROM iqc_task_execution WHERE id=?",old)).isEqualTo(oldExecution);
+        assertThat(jdbc.queryForObject("SELECT rule_snapshot_json FROM iqc_inspection_task WHERE id=?",String.class,task.getId())).isEqualTo(original);
+        verifyNoInteractions(items,messages,models,evaluator);
+    }
+    @Test void workerPersistsFailureForMissingOrNullEvidenceWithoutTouchingOldAttempt() throws Exception {
+        storePublishedSources();service.append(id,0,policy(0));var json=context.getBean(ObjectMapper.class);
+        for(boolean absent:List.of(true,false)) {
+            var task=createTask("worker-envelope-"+absent);
+            var root=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(task.getRuleSnapshotJson());
+            if(absent)root.remove("rolloutSnapshot");else root.putNull("rolloutSnapshot");
+            jdbc.update("UPDATE iqc_inspection_task SET rule_snapshot_json=? WHERE id=?",root.toString(),task.getId());
+            runRejectedTaskThroughRealWorker(task);
+        }
+    }
+    @Test void workerPersistsFailureForCorruptUnselectedPublicationBeforeAnyConversationWork() throws Exception {
+        storePublishedSources();service.append(id,0,policy(0));var task=createTask("worker-corrupt-source");
+        validateStoredTask(task);
+        jdbc.update("UPDATE iqc_pipeline_asset_version SET snapshot_json='{}' WHERE pipeline_id=? AND version_no=2",id);
+        runRejectedTaskThroughRealWorker(task);
+    }
     @Configuration @EnableTransactionManagement static class Config {
         @Bean DataSource dataSource(){return new DriverManagerDataSource(SERVER+SCHEMA+OPTIONS,"root","");}
         @Bean DataSourceTransactionManager transactionManager(DataSource ds){return new DataSourceTransactionManager(ds);}
@@ -260,6 +310,11 @@ class IsolatedMysqlRolloutServiceIT {
                     new PipelineAssetService.Prepared(id,1,null,left,PipelineAssetService.hash(json.valueToTree(left).toString())),
                     new PipelineAssetService.Prepared(id,2,null,right,PipelineAssetService.hash(json.valueToTree(right).toString())));
             }).when(pipelines).rolloutSourcesForTask(anyString(),any());return pipelines;
+        }
+        @Bean io.github.opensabre.iqc.task.TaskExecutionStateService executionStates(SqlSessionFactory factory) {
+            var session=new SqlSessionTemplate(factory);
+            return new io.github.opensabre.iqc.task.TaskExecutionStateService(session.getMapper(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class),
+                    session.getMapper(io.github.opensabre.iqc.task.dao.TaskExecutionMapper.class));
         }
         @Bean PipelineRolloutExecutionGuard guard(SqlSessionFactory factory,ObjectMapper json) {
             var session=new SqlSessionTemplate(factory);
