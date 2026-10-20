@@ -31,68 +31,88 @@ public class QualityConfigController {
     private final QualityRuleSetService ruleSetService;
     private final DlsImportService dlsImportService;
 
+    private final io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive;
+    private final io.github.opensabre.iqc.privacy.ResultReadProjection projection;
+    @org.springframework.beans.factory.annotation.Autowired
+    public QualityConfigController(QualityAgentService agentService,AgentEffectService agentEffectService,
+            QualityRuleService ruleService,QualityRuleSetService ruleSetService,DlsImportService dlsImportService,
+            io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive,io.github.opensabre.iqc.privacy.ResultReadProjection projection){
+        this.agentService=agentService;this.agentEffectService=agentEffectService;this.ruleService=ruleService;this.ruleSetService=ruleSetService;this.dlsImportService=dlsImportService;this.sensitive=sensitive;this.projection=projection;
+    }
+    private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access access(String resource){
+        if(sensitive==null||projection==null)throw io.github.opensabre.iqc.governance.IqcException.invalidState("Agent响应授权组件不可用");
+        var access=sensitive.current(java.util.Set.of(resource));
+        if(org.springframework.web.context.request.RequestContextHolder.getRequestAttributes() instanceof org.springframework.web.context.request.ServletRequestAttributes servlet&&servlet.getResponse()!=null){
+            servlet.getResponse().setHeader("Cache-Control","private, no-store");servlet.getResponse().setHeader("X-Content-Type-Options","nosniff");
+        }
+        return access;
+    }
+
     public QualityConfigController(QualityAgentService agentService, AgentEffectService agentEffectService,
                                    QualityRuleService ruleService, QualityRuleSetService ruleSetService,
                                    DlsImportService dlsImportService) {
-        this.agentService = agentService; this.agentEffectService = agentEffectService; this.ruleService = ruleService;
-        this.ruleSetService = ruleSetService; this.dlsImportService = dlsImportService;
+        this(agentService,agentEffectService,ruleService,ruleSetService,dlsImportService,null,null);
     }
 
     @GetMapping("/agents")
     @ResourcePermission(code = "iqc:agent:view", name = "查看 Agent", type = "iqc", description = "查询 Agent")
-    public List<QualityAgent> agents() { return agentService.list(); }
+    @Audit(operationType=OperationType.QUERY,description="读取Agent配置",module="IQC_PRIVACY",request=false,response=false)
+    public List<QualityAgent> agents() { var access=access("iqc:agent:view");return agentService.list().stream().map(row->projection.agent(row,access,true)).toList(); }
 
     @PostMapping("/agents")
     @ResourcePermission(code = "iqc:agent:manage", name = "管理 Agent", type = "iqc", description = "创建 Agent")
     @Audit(operationType = OperationType.CREATE, description = "创建 IQC Agent", module = "IQC_AGENT", request = false, response = false)
     @RateLimit(sceneCode = "iqc-agent-create", maxCount = 20, period = 60)
-    public QualityAgent createAgent(@RequestBody AgentRequest request) { return agentService.create(request.name(), request.code(), request.description(), request.configJson()); }
+    public QualityAgent createAgent(@RequestBody AgentRequest request) { var access=access("iqc:agent:manage");return projection.agent(agentService.create(request.name(), request.code(), request.description(), request.configJson()),access,false); }
 
     @PostMapping("/agents/{id}/submit")
     @ResourcePermission(code = "iqc:agent:submit", name = "提交 Agent 审批", type = "iqc", description = "提交 Agent 审批")
     @Audit(operationType = OperationType.UPDATE, description = "提交 IQC Agent 审批", module = "IQC_AGENT", request = false, response = false, key = "#id")
-    public QualityAgent submitAgent(@PathVariable String id) { return agentService.submit(id); }
+    public QualityAgent submitAgent(@PathVariable String id) { var access=access("iqc:agent:submit");return projection.agent(agentService.submit(id),access,false); }
 
     @PostMapping("/agents/{id}/approve")
     @ResourcePermission(code = "iqc:agent:approve", name = "审批 Agent", type = "iqc", description = "审批通过 Agent")
     @Audit(operationType = OperationType.UPDATE, description = "审批通过 IQC Agent", module = "IQC_AGENT", request = false, response = false, key = "#id")
-    public QualityAgent publishAgent(@PathVariable String id) { return agentService.publish(id); }
+    public QualityAgent publishAgent(@PathVariable String id) { var access=access("iqc:agent:approve");return projection.agent(agentService.publish(id),access,false); }
 
     @PostMapping("/agents/{id}/reject")
     @ResourcePermission(code = "iqc:agent:approve", name = "驳回 Agent", type = "iqc", description = "驳回 Agent")
     @Audit(operationType = OperationType.UPDATE, description = "驳回 IQC Agent", module = "IQC_AGENT", request = false, response = false, key = "#id")
-    public QualityAgent rejectAgent(@PathVariable String id) { return agentService.reject(id); }
+    public QualityAgent rejectAgent(@PathVariable String id) { var access=access("iqc:agent:approve");return projection.agent(agentService.reject(id),access,false); }
 
     @PostMapping("/agents/{id}/disable")
     @ResourcePermission(code = "iqc:agent:disable", name = "停用 Agent", type = "iqc", description = "停用已发布 Agent")
     @Audit(operationType = OperationType.UPDATE, description = "停用 IQC Agent", module = "IQC_AGENT", request = false, response = false, key = "#id")
-    public QualityAgent disableAgent(@PathVariable String id) { return agentService.disable(id); }
+    public QualityAgent disableAgent(@PathVariable String id) { var access=access("iqc:agent:disable");return projection.agent(agentService.disable(id),access,false); }
 
     @GetMapping("/agents/{id}/versions")
     @ResourcePermission(code = "iqc:agent:view", name = "查看 Agent 版本", type = "iqc", description = "查询 Agent 版本")
-    public List<QualityAgentVersion> agentVersions(@PathVariable String id) { return agentService.versions(id); }
+    @Audit(operationType=OperationType.QUERY,description="读取Agent版本",module="IQC_PRIVACY",request=false,response=false,key="#id")
+    public List<QualityAgentVersion> agentVersions(@PathVariable String id) { var access=access("iqc:agent:view");return agentService.versions(id).stream().map(row->projection.agentVersion(row,access,true)).toList(); }
 
     @PostMapping("/agents/{id}/versions")
     @ResourcePermission(code = "iqc:agent:version:manage", name = "创建 Agent 版本", type = "iqc", description = "创建 Agent 版本")
     @Audit(operationType = OperationType.CREATE, description = "创建 IQC Agent 版本", module = "IQC_AGENT", request = false, response = false, key = "#id")
-    public QualityAgentVersion createAgentVersion(@PathVariable String id, @RequestBody AgentRequest request) { return agentService.createVersion(id, request.name(), request.code(), request.description(), request.configJson()); }
+    public QualityAgentVersion createAgentVersion(@PathVariable String id, @RequestBody AgentRequest request) { var access=access("iqc:agent:version:manage");return projection.agentVersion(agentService.createVersion(id, request.name(), request.code(), request.description(), request.configJson()),access,false); }
 
     @PostMapping("/agents/{id}/versions/{versionNo}/rollback")
     @ResourcePermission(code = "iqc:agent:version:rollback", name = "回滚 Agent 版本", type = "iqc", description = "基于历史版本创建新草稿")
     @Audit(operationType = OperationType.UPDATE, description = "回滚 IQC Agent 版本", module = "IQC_AGENT", request = false, response = false, key = "#id + ':' + #versionNo")
-    public QualityAgentVersion rollbackAgent(@PathVariable String id, @PathVariable int versionNo) { return agentService.rollback(id, versionNo); }
+    public QualityAgentVersion rollbackAgent(@PathVariable String id, @PathVariable int versionNo) { var access=access("iqc:agent:version:rollback");return projection.agentVersion(agentService.rollback(id, versionNo),access,false); }
 
     @GetMapping("/agents/{id}/versions/compare")
     @ResourcePermission(code = "iqc:agent:view", name = "比较 Agent 版本", type = "iqc", description = "比较 Agent 版本配置差异")
+    @Audit(operationType=OperationType.QUERY,description="读取Agent版本差异",module="IQC_PRIVACY",request=false,response=false,key="#id + ':' + #fromVersion + ':' + #toVersion")
     public QualityAgentService.AgentVersionComparison compareAgentVersions(@PathVariable String id,
             @RequestParam int fromVersion, @RequestParam int toVersion) {
-        return agentService.compare(id, fromVersion, toVersion);
+        var access=access("iqc:agent:view");return projection.agentComparison(agentService.compare(id, fromVersion, toVersion),access);
     }
 
     @GetMapping("/agents/{id}/versions/{versionNo}/effect")
     @ResourcePermission(code = "iqc:agent:view", name = "查看 Agent 版本效果", type = "iqc", description = "查询 Agent 版本历史效果")
+    @Audit(operationType=OperationType.QUERY,description="读取Agent可见任务效果",module="IQC_PRIVACY",request=false,response=false,key="#id + ':' + #versionNo")
     public AgentEffectService.AgentEffectReport agentEffect(@PathVariable String id, @PathVariable int versionNo) {
-        return agentEffectService.report(id, versionNo);
+        access("iqc:agent:view");return agentEffectService.report(id, versionNo);
     }
 
     @GetMapping("/rules")

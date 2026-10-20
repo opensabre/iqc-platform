@@ -204,5 +204,11 @@ public class QualityAgentService {
     private void copyVersion(QualityAgent agent, QualityAgentVersion version) { agent.setName(version.getName()); agent.setCode(version.getCode()); agent.setDescription(version.getDescription()); agent.setConfigJson(version.getConfigJson()); agent.setVersionNo(version.getVersionNo()); }
 
     public record AgentVersionComparison(int fromVersion, int toVersion, List<String> changedFields,
-                                         List<String> changedConfigPaths) { }
+                                         List<String> changedConfigPaths,
+                                         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                                         java.util.Map<String,Object> privacy) {
+        public AgentVersionComparison(int fromVersion,int toVersion,List<String> changedFields,List<String> changedConfigPaths){
+            this(fromVersion,toVersion,changedFields,changedConfigPaths,null);
+        }
+    }
 }

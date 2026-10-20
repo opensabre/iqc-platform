@@ -417,3 +417,7 @@ CREATE_RISK_EVENT v1引用原冻结生产结果/动作账本，稳定幂等事�
 ## CUSTOM融合扩展批次（2026-10-20）
 
 原fuse新增受控部署SPI及真实UNANIMOUS v1，绑定精确id/version/provider class SHA256/字符串参数；同原Result保留事实/证据，输出状态/类型/选中来源受控，无校准概率伪造。PipelineRelease验证绑定可用，CUSTOM重算缺失来源补NOT_EVALUATED。API/UI目录选择与组织只读资源900270/V20261020_01脚本已编码，脚本未执行。原7/8参构造/null省略保持，framework/globalmapper/旧hash算法不改。后端12690/29380编译通过，前端构建与三仓提交见交接；独立行为/角色/SQL/browser/实际发布和重算仍待，完整适用I1–I7继续。详见iqc-fusion-policy.md与ADR。
+
+## Agent敏感配置与组织范围统计（2026-10-21）
+
+原Agent list/versions/compare及命令回执接现有敏感投影，不写原配置；独立schema/模型Skill/MCP ID版本与工具名元数据供受限角色继续选用，页面不从缺正文建默认草稿，1.0原始JSON新版本编辑保留。AgentEffect原全任务查询补owner/group/all及空组防护，零分母/无评分返回null、BigDecimal一位指标，统计口径仍为原直连Agent任务。首轮97948/39271与最终39734/54477编译构建均exit0，Root未运行测试；细则/角色/源码不变与实际SQL等验收交B，见iqc-sensitive-read-projection.md。B独占精确v2相关源不动/默认入口未切换，CUSTOM三仓提交与bf6d92e集成已在恢复后确认。完整适用I1–I7继续。

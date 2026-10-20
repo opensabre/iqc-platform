@@ -696,4 +696,64 @@ public final class ResultReadProjection {
                 List.of("description","instructions","inputSchemaJson","outputSchemaJson")));return copy;
     }
 
+    private Map<String,Object> agentPresentation(String body,SensitiveReadAccessService.Access access){
+        var unavailable=Map.<String,Object>of("policyVersion","iqc-agent-presentation-v1","state","UNAVAILABLE");
+        try{
+            var root=json.readTree(body);if(root==null||!root.path("schemaVersion").isTextual())return unavailable;String schema=root.path("schemaVersion").textValue();
+            if(!root.isObject()||!Set.of("1.0","2.0","3.0").contains(schema))return unavailable;
+            var result=new LinkedHashMap<String,Object>();result.put("policyVersion","iqc-agent-presentation-v1");result.put("state","AVAILABLE");result.put("schemaVersion",schema);
+            String mode=root.path("mode").asText();if(Set.of("RULE_ONLY","RULE_THEN_LLM","LLM_THEN_RULE","AGENT_LLM").contains(mode))result.put("mode",mode);
+            var assets=root.path("assetSnapshots");
+            if("3.0".equals(schema)&&assets.isObject()&&assets.path("skills").isArray()&&assets.path("mcpServers").isArray()){
+                var models=new ArrayList<Map<String,Object>>();
+                if(assets.path("primaryModel").isObject())models.add(agentCapability(assets.path("primaryModel"),access,false));
+                if(assets.path("fallbackModels").isArray())for(var model:assets.path("fallbackModels"))models.add(agentCapability(model,access,false));
+                result.put("models",List.copyOf(models));result.put("skills",agentCapabilities(assets.path("skills"),access,false));
+                result.put("mcpServers",agentCapabilities(assets.path("mcpServers"),access,true));result.put("capabilitiesState","AVAILABLE");
+            }else result.put("capabilitiesState","UNAVAILABLE");
+            return result;
+        }catch(Exception invalid){return unavailable;}
+    }
+    private List<Map<String,Object>> agentCapabilities(JsonNode values,SensitiveReadAccessService.Access access,boolean tools) throws java.io.IOException{
+        if(!values.isArray())throw new IllegalArgumentException();
+        var result=new ArrayList<Map<String,Object>>();for(var value:values)result.add(agentCapability(value,access,tools));return List.copyOf(result);
+    }
+    private Map<String,Object> agentCapability(JsonNode source,SensitiveReadAccessService.Access access,boolean tools) throws java.io.IOException{
+        if(!source.isObject()||!source.path("id").isTextual()||source.path("id").textValue().isBlank()
+                ||!source.path("versionNo").isIntegralNumber()||!source.path("versionNo").canConvertToInt()||source.path("versionNo").intValue()<1)
+            throw new IllegalArgumentException();
+        var result=new LinkedHashMap<String,Object>();result.put("id",source.path("id").textValue());result.put("versionNo",source.path("versionNo").intValue());
+        if(source.path("code").isTextual())result.put("code",source.path("code").textValue());
+        if(source.path("name").isTextual())result.put("name",text(source.path("name").textValue(),access.fullConversation()&&access.pii()));
+        if(tools&&source.path("allowedToolsJson").isTextual()){
+            var allowed=json.readTree(source.path("allowedToolsJson").textValue());if(!allowed.isArray())throw new IllegalArgumentException();
+            var names=new ArrayList<String>();for(var value:allowed)if(value.isTextual())names.add(value.textValue());
+            result.put("allowedToolsJson",json.writeValueAsString(names));
+        }
+        return result;
+    }
+    public io.github.opensabre.iqc.agent.model.QualityAgent agent(io.github.opensabre.iqc.agent.model.QualityAgent source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.agent.model.QualityAgent();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&access.prompt();
+        copy.setAgentPresentation(agentPresentation(source.getConfigJson(),access));copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        if(!canonical){copy.setDescription(null);copy.setConfigJson(null);}
+        copy.setPrivacy(configurationPrivacy("iqc-agent-read-v1",access,canonical,List.of("description","configJson")));return copy;
+    }
+    public io.github.opensabre.iqc.agent.model.QualityAgentVersion agentVersion(io.github.opensabre.iqc.agent.model.QualityAgentVersion source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.agent.model.QualityAgentVersion();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&access.prompt();
+        copy.setAgentPresentation(agentPresentation(source.getConfigJson(),access));copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        if(!canonical){copy.setDescription(null);copy.setConfigJson(null);}
+        copy.setPrivacy(configurationPrivacy("iqc-agent-read-v1",access,canonical,List.of("description","configJson")));return copy;
+    }
+    public io.github.opensabre.iqc.agent.QualityAgentService.AgentVersionComparison agentComparison(
+            io.github.opensabre.iqc.agent.QualityAgentService.AgentVersionComparison source,SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(access);if(source==null)return null;
+        boolean canonical=access.fullConversation()&&access.pii()&&access.prompt();
+        return new io.github.opensabre.iqc.agent.QualityAgentService.AgentVersionComparison(source.fromVersion(),source.toVersion(),source.changedFields(),
+                canonical?source.changedConfigPaths():List.of(),configurationPrivacy("iqc-agent-read-v1",access,canonical,List.of("changedConfigPaths")));
+    }
+
 }

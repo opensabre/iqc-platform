@@ -353,3 +353,30 @@ privacy使用iqc-pipeline-read-v1，含canonicalPayloadVisible、canReadFull/can
 Skill页面未知/受限协议或缺失instructions时只显示元数据，不挂编辑表单或保存空配置。写回执不替换原草稿；成功后关闭并清空表单，再独立刷新列表，失败明确重读未获结果。重读先清旧列表及打开的既有资产正文，关闭/卸载清表单，迟到读取/写回执不更新卸载组件或产生提示。创建者仍能按原manage权限输入新配置。Schema保持原字符串，页面解析仅用于JSON对象校验，不将解析结果近似回写。
 
 本批后端原77870与前端原99858均terminal exit0（skipTests test-compile / vue-tsc+Vite，1m7s，既有体积提示）；未运行Root测试/SQL/部署。八grant组合、原对象/历史不变、资源撤权及真实HTTP/browser/每路由注册仍待B独立验收，不能用原共享skill:manage资源声明本身证明网关每条URL已可达。Scheme/Agent/Rule/Model/复核配置副本继续按原完整计划收口。
+
+## Agent配置、版本与组织范围效果（2026-10-21）
+
+沿用原QualityConfigController的Agent路由、QualityAgentService工作流、SensitiveReadAccessService和ResultReadProjection，不新增Agent表/主数据/详情API或租户字段。QualityAgent/Version只增加exist=false且null省略的privacy/agentPresentation响应字段，比较DTO增加可空privacy并保留原4参构造；内部原模型未设响应字段时旧JSON保持。Rules/RuleSet路由本批未接投影，不能把整Config Controller视为已收口。
+
+### 正文与回执
+
+- Agent list是原唯一当前配置读取；历史versions同样只有FULL+PII+PROMPT三grant齐备才返回原description/configJson字符串，否则扣留，不局部改写成可编辑假配置。复制响应实体，原配置/历史/模型字段不写回，不解密凭据引用。
+- create/submit/approve/reject/disable/createVersion/rollback在原服务前刷新固定原业务grant；回执总是扣留两正文，敏感读取不代替写权限。
+- compare保留原from/to版本和changedFields结构字段，详细changedConfigPaths仅三grant齐备显示；受限时空列表配withheldFields明确扣留，不代表没有配置变化。
+- 查询Audit不收正文，版本/比较/效果目标只用ID及版本；命令沿原request/response=false，返回no-store/nosniff。既有共享view资源码每URL网关注册及真实角色仍须独立验收，不用注解或编译代替。
+
+### 独立能力元数据保留使用
+
+agentPresentation用iqc-agent-presentation-v1，声明AVAILABLE/UNAVAILABLE、真实根schemaVersion/已声明mode及能力可用状态；不把缺失/未知配置当默认模式。仅提取原冻结assetSnapshots的id/code/name/versionNo及MCP白名单中的工具名字符串，模型主/备用顺序保留；不包含systemPrompt、Skill指令/Schema、模型或MCP endpoint/secretRef/定价等正文。name沿原PII遮蔽，结构ID/版本/code/工具标识不改，防止错误引用。无伪造/截断能力计数；无可识别原配置或元数据无效则明确UNAVAILABLE。
+
+SkillApiConfigurationEditor优先用该元数据选择冻结Skill/MCP/模型，schemes Agent版本筛选用真实schema元数据，普通任务继续原Agent ID选择。未知privacy/元数据协议不回退解析正文；仅旧无privacy部署兼容原读取。选择器不因缺Prompt权限自动丢失正常已发布能力，后端原版本/可用性/只读工具校验仍权威。
+
+Agent页面受限或配置无效不创建默认编辑器、不能空存；刷新/关闭/卸载清旧列表/正文和资产，异步响应按代次隔离。写回执只作确认，成功后关闭再独立读取，失败不伪造已完成。管理配置用原2/3协议向导；1.0内嵌配置用原始JSON新版本编辑，不把内嵌旧配置悄悄替换为新默认值或近似数字。前端提交/停用/版本保存按钮和处理函数对齐原submit/disable/version:manage业务资源。
+
+### 效果统计组织范围
+
+源码确认AgentEffectService原先按Agent ID读取全部任务。本批复用BatchResultQueryService的IqcDataScope owner/group/all查询模式，在查询时限制可见任务，再按原Agent快照版本及其持久InspectionResult聚合。空/空白组不组成组范围，缺当前身份或scope拒绝；旧4参构造仅保持源码可编译，不提供无范围读取。版本须为正整数。分数/比率用BigDecimal计算并按原1位HALF_UP口径输出，无可评分样本/零分母返回null，避免把未测量当0。
+
+该统计仍为原task.agentId直连的持久结果口径，不是金标准确率、整个Pipeline多Agent节点使用分析或完整I7运营指标。原记录/分数/证据不改，无模型调用。Agent资产本身继续原全局资源模型，不伪造不存在的ownerGroupId；效果业务数据使用原组织可见任务范围。
+
+本批首轮后端97948/前端39271及最终39734/54477均terminal exit0（skipTests test-compile / vue-tsc+Vite，最终1m15s，既有体积提示）。编译覆盖已提交bf6d92e测试源码集成，Root未新增/运行测试、SQL、browser或部署；中断旧编译未知exit不算通过。B需补八grant/原对象原字节、能力元数据不漏正文但仍能选用、unknown协议、受限不空存/旧1.0、关闭/卸载和实际Controller路径；效果旧AgentEffectServiceTest须注入真实scope fixture，验证本人/同组/跨组/all/空组/缺身份/零分母及实际SQL，不能保留旧无scope构造绕过授权。其余Scheme/Rule/Model/复核副本、完整PDP/网关/角色及I1–I7继续。
