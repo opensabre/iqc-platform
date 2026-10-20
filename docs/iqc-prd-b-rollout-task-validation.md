@@ -74,3 +74,15 @@ MySQL8.0.34临时 `/private/tmp/iqc-mysql-validation.CYVp1v`，schema `iqc_rollo
 覆盖四组fullConversation/PII授权下回执保留合法policyRevision/selectedVersion，不返回任何冻结正文、Prompt、筛选原文、cohortHash、盐、requestFingerprint，源对象不变；跨task移植证据不输出公开rollout声明。创建明确传入两个固定base grants；四个端点grant撤销均早拒绝、不调用服务。concurrency小数/string/bool/overflow/array/object、requestKey非string及expectedRevision负数/非精确整数/overflow均拒绝；null concurrency保留服务默认值。策略保存使用默认HTTP codec，读/历史带no-store/nosniff，审计声明request/response=false。
 
 本次只证明默认MVC codec与真实投影（默认HTTP Jackson3），不额外宣称通过两代HTTP codec；此前纯Policy双代codec是不同专项。审计注解检查不代表真实AOP审计存储，mock grants不代表实际组织PDP，mock service不代表持久化事务。本次无需监听网络端口，无生产或framework源修改、共享SQL、push、部署。完整PRD I1–I7仍进行中。
+
+## 2026-10-20 原来源守卫真实数据库补充
+
+在301a38b基础上复用同一个IsolatedMysqlRolloutServiceIT，注册真实PipelineAssetVersionMapper和PipelineRolloutExecutionGuard，追加3项（本轮共11项，原8项一并复验）：
+
+- 真实灰度任务创建后扩量、停用资产、修改活归档，守卫仍只读验证原修订与两侧原发布版本；任务JSON、修订及版本数据库内容保持不变。
+- 比例0明确未选候选版本，候选快照损坏或候选版本删除均拒绝；恢复原内容/版本后校验通过，证明未选侧也必须有完整原来源。
+- 给原本无门禁记录的候选版本补入可自洽hash但错误协议的门禁JSON，守卫拒绝；恢复原历史空门禁后通过。
+
+原43844 terminal exit0，日志`/tmp/iqc-b-rollout-guard-mysql.log`，本轮fresh Surefire XML 11 tests / failures=0 / errors=0 / skipped=0。临时MySQL8.0.34目录`/private/tmp/iqc-mysql-validation.K2c6MW`，随机schema `iqc_rollout_service_a6da8bae83d4`已删除（目录无），服务器日志Shutdown complete，pid/socket均无。正式迁移55项至1.1.74、validate75、再次migrate0。
+
+范围：真实Spring代理任务/修订服务、InnoDB、Mapper及只读执行守卫；scope与发布来源解析继续为mock，发布版本为与合成Prepared一致的数据库夹具。未执行真实发布准入/完整worker/模型/角色/HTTP验收，不能把这11项升级为全链路完成。未改生产源码、framework、A的加权融合文件或共享数据库。

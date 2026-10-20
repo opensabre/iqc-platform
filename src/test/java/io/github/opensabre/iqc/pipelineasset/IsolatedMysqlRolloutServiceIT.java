@@ -193,6 +193,51 @@ class IsolatedMysqlRolloutServiceIT {
         assertThat(root.at("/rolloutSnapshot/evidence/revision/snapshot/policy/candidateBasisPoints").asInt()).isEqualTo(9000);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE conversation_id=?",Integer.class,conversationId)).isEqualTo(1);
     }
+    private void storePublishedSources() throws Exception {
+        var json=context.getBean(ObjectMapper.class);
+        for(int version=1;version<=2;version++) {
+            String body=json.writeValueAsString(Config.release(json,version-1));
+            jdbc.update("INSERT INTO iqc_pipeline_asset_version(id,pipeline_id,version_no,source_draft_revision,snapshot_json,content_hash) VALUES(?,?,?,?,?,?)",
+                    "v"+version+id,id,version,version,body,PipelineAssetService.hash(body));
+        }
+    }
+    private void validateStoredTask(io.github.opensabre.iqc.task.model.InspectionTask task) throws Exception {
+        context.getBean(PipelineRolloutExecutionGuard.class).validate(context.getBean(ObjectMapper.class).readTree(task.getRuleSnapshotJson()),task.getId());
+    }
+    @Test void originalDatabaseEvidenceRemainsValidAfterExpansionDisableAndLiveInputChange() throws Exception {
+        storePublishedSources();service.append(id,0,policy(0));var task=createTask("guard-original");
+        service.append(id,1,policy(10000));
+        jdbc.update("UPDATE iqc_pipeline_asset SET status='DISABLED' WHERE id=?",id);
+        jdbc.update("UPDATE iqc_conversation_message SET content='changed archive' WHERE conversation_id=?",conversationId);
+        String original=jdbc.queryForObject("SELECT rule_snapshot_json FROM iqc_inspection_task WHERE id=?",String.class,task.getId());
+        var revisions=jdbc.queryForList("SELECT id,revision_no,snapshot_json,content_hash FROM iqc_pipeline_rollout_revision WHERE pipeline_id=? ORDER BY revision_no",id);
+        var versions=jdbc.queryForList("SELECT id,snapshot_json,content_hash FROM iqc_pipeline_asset_version WHERE pipeline_id=? ORDER BY version_no",id);
+        validateStoredTask(task);
+        assertThat(jdbc.queryForObject("SELECT rule_snapshot_json FROM iqc_inspection_task WHERE id=?",String.class,task.getId())).isEqualTo(original);
+        assertThat(jdbc.queryForList("SELECT id,revision_no,snapshot_json,content_hash FROM iqc_pipeline_rollout_revision WHERE pipeline_id=? ORDER BY revision_no",id)).isEqualTo(revisions);
+        assertThat(jdbc.queryForList("SELECT id,snapshot_json,content_hash FROM iqc_pipeline_asset_version WHERE pipeline_id=? ORDER BY version_no",id)).isEqualTo(versions);
+        assertThat(context.getBean(ObjectMapper.class).readTree(original).at("/rolloutSnapshot/evidence/revision/revisionNo").asInt()).isEqualTo(1);
+    }
+    @Test void unselectedDatabaseVersionMissingOrCorruptFailsClosedAndRestorationPasses() throws Exception {
+        storePublishedSources();service.append(id,0,policy(0));var task=createTask("guard-unselected");validateStoredTask(task);
+        String body=jdbc.queryForObject("SELECT snapshot_json FROM iqc_pipeline_asset_version WHERE pipeline_id=? AND version_no=2",String.class,id);
+        jdbc.update("UPDATE iqc_pipeline_asset_version SET snapshot_json='{}' WHERE pipeline_id=? AND version_no=2",id);
+        assertThatThrownBy(()->validateStoredTask(task)).hasMessageContaining("原修订、发布来源或比较证据不一致");
+        jdbc.update("UPDATE iqc_pipeline_asset_version SET snapshot_json=? WHERE pipeline_id=? AND version_no=2",body,id);
+        validateStoredTask(task);
+        jdbc.update("DELETE FROM iqc_pipeline_asset_version WHERE pipeline_id=? AND version_no=2",id);
+        assertThatThrownBy(()->validateStoredTask(task)).hasMessageContaining("原修订、发布来源或比较证据不一致");
+        jdbc.update("INSERT INTO iqc_pipeline_asset_version(id,pipeline_id,version_no,source_draft_revision,snapshot_json,content_hash) VALUES(?,?,2,2,?,?)","v2"+id,id,body,PipelineAssetService.hash(body));
+        validateStoredTask(task);
+    }
+    @Test void storedPublicationDecisionCannotBeInventedForAnExistingFrozenTask() throws Exception {
+        storePublishedSources();service.append(id,0,policy(0));var task=createTask("guard-admission");validateStoredTask(task);
+        String invented="{\"schemaVersion\":\"other\"}";
+        jdbc.update("UPDATE iqc_pipeline_asset_version SET publication_decision_json=?,publication_decision_hash=? WHERE pipeline_id=? AND version_no=2",invented,PipelineAssetService.hash(invented),id);
+        assertThatThrownBy(()->validateStoredTask(task)).hasMessageContaining("原修订、发布来源或比较证据不一致");
+        jdbc.update("UPDATE iqc_pipeline_asset_version SET publication_decision_json=NULL,publication_decision_hash=NULL WHERE pipeline_id=? AND version_no=2",id);
+        validateStoredTask(task);
+    }
     @Configuration @EnableTransactionManagement static class Config {
         @Bean DataSource dataSource(){return new DriverManagerDataSource(SERVER+SCHEMA+OPTIONS,"root","");}
         @Bean DataSourceTransactionManager transactionManager(DataSource ds){return new DataSourceTransactionManager(ds);}
@@ -200,7 +245,7 @@ class IsolatedMysqlRolloutServiceIT {
         @Bean IqcDataScope scope(){var scope=mock(IqcDataScope.class);when(scope.actorUserId()).thenReturn("actor-1");when(scope.canView(any(),any())).thenReturn(true);return scope;}
         @Bean SqlSessionFactory sessions(DataSource ds) throws Exception {
             var config=new MybatisConfiguration();config.setMapUnderscoreToCamelCase(true);
-            config.addMapper(PipelineAssetMapper.class);config.addMapper(PipelineRolloutRevisionMapper.class);
+            config.addMapper(PipelineAssetMapper.class);config.addMapper(PipelineAssetVersionMapper.class);config.addMapper(PipelineRolloutRevisionMapper.class);
             config.addMapper(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class);
             config.addMapper(io.github.opensabre.iqc.task.dao.TaskExecutionMapper.class);
             config.addMapper(io.github.opensabre.iqc.conversation.dao.ConversationMapper.class);
@@ -215,6 +260,10 @@ class IsolatedMysqlRolloutServiceIT {
                     new PipelineAssetService.Prepared(id,1,null,left,PipelineAssetService.hash(json.valueToTree(left).toString())),
                     new PipelineAssetService.Prepared(id,2,null,right,PipelineAssetService.hash(json.valueToTree(right).toString())));
             }).when(pipelines).rolloutSourcesForTask(anyString(),any());return pipelines;
+        }
+        @Bean PipelineRolloutExecutionGuard guard(SqlSessionFactory factory,ObjectMapper json) {
+            var session=new SqlSessionTemplate(factory);
+            return new PipelineRolloutExecutionGuard(session.getMapper(PipelineRolloutRevisionMapper.class),session.getMapper(PipelineAssetVersionMapper.class),json);
         }
         @Bean PipelineRolloutService rollouts(PipelineAssetService pipelines,SqlSessionFactory factory,ObjectMapper json,IqcDataScope scope) {
             return new PipelineRolloutService(pipelines,new SqlSessionTemplate(factory).getMapper(PipelineRolloutRevisionMapper.class),json,scope);
