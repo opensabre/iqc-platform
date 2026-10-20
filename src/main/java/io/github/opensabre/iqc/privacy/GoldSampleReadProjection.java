@@ -88,10 +88,10 @@ final class GoldSampleReadProjection {
         try {
             var schema = json.readTree(snapshot).path("schemaVersion").asText();
             List<GoldConversation.Message> messages; List<GoldFinding> findings; JsonNode context; String conversationId; String sourceSampleId;
-            if (GoldDraft.SCHEMA.equals(schema)) {
+            if ((GoldDraft.SCHEMA.equals(schema) || GoldDraft.EXACT_SCHEMA.equals(schema))) {
                 var draft = json.readValue(snapshot, GoldDraft.class);
                 messages=draft.messages(); findings=draft.findings(); context=draft.businessContext(); conversationId=draft.conversationId(); sourceSampleId=draft.sourceSampleId();
-            } else if (GoldConversation.SCHEMA.equals(schema)) {
+            } else if ((GoldConversation.SCHEMA.equals(schema) || GoldConversation.EXACT_SCHEMA.equals(schema))) {
                 var gold = json.readValue(snapshot, GoldConversation.class);
                 messages=gold.messages(); findings=gold.findings(); context=gold.businessContext(); conversationId=gold.conversationId(); sourceSampleId=gold.sourceSampleId();
             } else { metadata.put("previewState", "INVALID_GOLD"); return; }

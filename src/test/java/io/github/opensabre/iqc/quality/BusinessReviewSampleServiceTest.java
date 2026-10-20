@@ -230,6 +230,9 @@ class BusinessReviewSampleServiceTest {
                 io.github.opensabre.iqc.quality.evaluation.GoldConversation.Difficulty.BASIC,null))).hasMessageContaining("来源摘要无效");
         sample.setContentSnapshot(original);when(scope.owner()).thenReturn("independent-reviewer");
         var approved=gold.review(sample.getId(),1,true,"checked exact input");
+        assertThat(approved.getSnapshotJson()).contains(io.github.opensabre.iqc.quality.evaluation.GoldConversation.EXACT_SCHEMA);
+        assertThat(PipelineAssetService.hash(approved.getSnapshotJson().replace(decimal,"0.900000000000000002")))
+                .isNotEqualTo(approved.getContentHash());
         assertThat(gold.read(approved.getSnapshotJson(),io.github.opensabre.iqc.quality.evaluation.GoldConversation.class)
                 .businessContext().at("/conversation/businessContext/value").decimalValue()).isEqualByComparingTo(decimal);
         assertThat(sample.getContentSnapshot()).isEqualTo(original);

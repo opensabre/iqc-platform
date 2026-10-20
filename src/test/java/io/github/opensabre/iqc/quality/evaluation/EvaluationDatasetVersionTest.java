@@ -41,6 +41,27 @@ class EvaluationDatasetVersionTest {
         when(datasets.selectOne(any())).thenReturn(dataset); when(datasets.selectById("dataset")).thenReturn(dataset);
         when(versions.selectOne(any())).thenReturn(version); when(scope.canView("owner", "group")).thenReturn(true);
     }
+    @Test
+    void exactDatasetAndMemberDigestsRejectAdjacentDecimalTampering() throws Exception {
+        String body=version.getSnapshotJson().replace(DatasetSnapshot.SCHEMA,DatasetSnapshot.EXACT_SCHEMA)
+                .replace(GoldConversation.SCHEMA,GoldConversation.EXACT_SCHEMA)
+                .replace("\"businessContext\":null", "\"businessContext\":{\"amount\":0.900000000000000001}");
+        var snapshot=json.readValue(body,DatasetSnapshot.class);
+        var tree=(ObjectNode)PipelineAssetService.readFrozenTree(json,body);
+        ((ObjectNode)tree.path("members").get(0)).put("contentHash",PipelineAssetService.hash(json.writeValueAsString(snapshot.members().getFirst().gold())));
+        version.setSnapshotJson(tree.toString()); rehash();
+        assertThat(service.version("dataset",1)).isSameAs(version);
+        String original=version.getSnapshotJson();
+        String altered=original.replace("0.900000000000000001","0.900000000000000002");
+        assertThat(PipelineAssetService.hash(altered)).isNotEqualTo(version.getContentHash());
+        version.setSnapshotJson(altered);
+        assertThatThrownBy(() -> service.version("dataset",1));
+        // Even a recomputed outer digest must not mask a stale member digest.
+        rehash();
+        assertThatThrownBy(() -> service.version("dataset",1));
+        assertThatThrownBy(() -> json.readValue(original.replace(DatasetSnapshot.EXACT_SCHEMA,DatasetSnapshot.SCHEMA),DatasetSnapshot.class));
+    }
+
     private void rehash() { version.setContentHash(PipelineAssetService.hash(version.getSnapshotJson())); }
     @Test
     void historicalReadUsesFrozenReviewedContentDespiteDisabledDataset() {

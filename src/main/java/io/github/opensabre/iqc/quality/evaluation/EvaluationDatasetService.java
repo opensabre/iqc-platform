@@ -78,7 +78,8 @@ public class EvaluationDatasetService {
         }
         DatasetSnapshot snapshot;
         try {
-            snapshot = new DatasetSnapshot(DatasetSnapshot.SCHEMA, id, dataset.getName(), draft.type(), draft.description(),
+            snapshot = new DatasetSnapshot(approved.values().stream().anyMatch(member -> GoldConversation.EXACT_SCHEMA.equals(member.gold().schemaVersion()))
+                    ? DatasetSnapshot.EXACT_SCHEMA : DatasetSnapshot.SCHEMA, id, dataset.getName(), draft.type(), draft.description(),
                     draft.members().stream().map(member -> approved.get(member.sampleId())).toList());
         } catch (IllegalArgumentException exception) { throw IqcException.invalidArgument("数据集冻结内容无效：" + exception.getMessage(), exception); }
         var version = new EvaluationDatasetVersion(); version.setDatasetId(id);

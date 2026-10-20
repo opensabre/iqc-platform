@@ -55,7 +55,8 @@ public class GoldSampleService {
         }
         GoldDraft draft;
         try {
-            draft = new GoldDraft(GoldDraft.SCHEMA, sampleId, sample.getConversationId(), input.messages(),
+            draft = new GoldDraft(io.github.opensabre.iqc.quality.BusinessReviewSampleService.EXACT_INPUT_SCHEMA.equals(
+                    input.context().path("conversation").path("schemaVersion").asText()) ? GoldDraft.EXACT_SCHEMA : GoldDraft.SCHEMA, sampleId, sample.getConversationId(), input.messages(),
                     context, request.findings(), actor(), "RESULT:" + sample.getSourceResultId(),
                     request.tags(), request.difficulty(), request.decision());
         } catch (IllegalArgumentException | NullPointerException exception) {

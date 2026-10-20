@@ -12,6 +12,8 @@ public record GoldConversation(String schemaVersion, String sourceSampleId, Stri
                                String annotatorId, String reviewerId, String source, List<String> tags,
                                Difficulty difficulty, GoldDecision decision) {
     public static final String SCHEMA = "iqc-gold-conversation-v1";
+    /** Explicit exact-number digest protocol; historical v1 remains unchanged. */
+    public static final String EXACT_SCHEMA = "iqc-gold-conversation-v2";
     public enum Difficulty { BASIC, INTERMEDIATE, HARD }
     public record Message(String id, String role, String content, int sequence, java.time.LocalTime relativeTime,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
@@ -31,7 +33,7 @@ public record GoldConversation(String schemaVersion, String sourceSampleId, Stri
         }
     }
     public GoldConversation {
-        if (!SCHEMA.equals(schemaVersion)) throw new IllegalArgumentException("unsupported gold schema");
+        if ((!SCHEMA.equals(schemaVersion) && !EXACT_SCHEMA.equals(schemaVersion))) throw new IllegalArgumentException("unsupported gold schema");
         required(sourceSampleId, "source sample"); required(conversationId, "conversation");
         required(annotatorId, "annotator"); required(reviewerId, "reviewer"); required(source, "source");
         if (annotatorId.equals(reviewerId)) throw new IllegalArgumentException("gold requires independent review");

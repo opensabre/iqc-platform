@@ -531,10 +531,15 @@ public class PipelineAssetService {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical(parsed).toString().getBytes(StandardCharsets.UTF_8)));
         } catch(Exception ex) { throw new IllegalStateException("Invalid frozen JSON",ex); }
     }
-    /** Dispatches only recognized release envelopes; arbitrary nested user fields cannot opt into v2. */
+    /** Dispatches recognized release envelopes and root Gold/dataset protocols; nested user fields cannot opt into v2. */
     public static boolean usesExactNumbers(JsonNode value) {
         if(value==null)return false;
-        return PipelineRelease.EXACT_SCHEMA.equals(value.path("schemaVersion").asText())
+        // Only recognized root protocols opt in; arbitrary nested user configuration cannot.
+        String schema=value.path("schemaVersion").asText();
+        return io.github.opensabre.iqc.quality.evaluation.GoldDraft.EXACT_SCHEMA.equals(schema)
+                || io.github.opensabre.iqc.quality.evaluation.GoldConversation.EXACT_SCHEMA.equals(schema)
+                || io.github.opensabre.iqc.quality.evaluation.DatasetSnapshot.EXACT_SCHEMA.equals(schema)
+                || PipelineRelease.EXACT_SCHEMA.equals(schema)
                 || PipelineRelease.EXACT_SCHEMA.equals(value.path("release").path("schemaVersion").asText())
                 || PipelineRelease.EXACT_SCHEMA.equals(value.path("pipelineSnapshot").path("release").path("schemaVersion").asText());
     }

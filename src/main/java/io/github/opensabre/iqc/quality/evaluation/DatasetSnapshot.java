@@ -7,6 +7,8 @@ import java.util.Objects;
 public record DatasetSnapshot(String schemaVersion, String datasetId, String name, DatasetDraft.Type type,
                               String description, List<Member> members) {
     public static final String SCHEMA = "iqc-dataset-snapshot-v1";
+    /** Explicit exact-number digest protocol; historical v1 remains unchanged. */
+    public static final String EXACT_SCHEMA = "iqc-dataset-snapshot-v2";
     public record Member(String sampleId, int versionNo, int draftRevision, String contentHash, GoldConversation gold) {
         public Member {
             if (sampleId == null || sampleId.isBlank() || versionNo < 1 || draftRevision < 1
@@ -17,7 +19,7 @@ public record DatasetSnapshot(String schemaVersion, String datasetId, String nam
         }
     }
     public DatasetSnapshot {
-        if (!SCHEMA.equals(schemaVersion) || datasetId == null || datasetId.isBlank()
+        if ((!SCHEMA.equals(schemaVersion) && !EXACT_SCHEMA.equals(schemaVersion)) || datasetId == null || datasetId.isBlank()
                 || name == null || name.isBlank() || name.length() > 128)
             throw new IllegalArgumentException("invalid dataset snapshot identity");
         Objects.requireNonNull(type, "type");
@@ -27,6 +29,8 @@ public record DatasetSnapshot(String schemaVersion, String datasetId, String nam
                 || members.stream().map(Member::sampleId).distinct().count() != members.size()
                 || members.stream().map(member -> member.gold().conversationId()).distinct().count() != members.size())
             throw new IllegalArgumentException("dataset requires unique samples and conversations");
+        if (SCHEMA.equals(schemaVersion) && members.stream().anyMatch(member -> GoldConversation.EXACT_SCHEMA.equals(member.gold().schemaVersion())))
+            throw new IllegalArgumentException("exact gold requires exact dataset protocol");
         var types = new java.util.HashMap<String, io.github.opensabre.iqc.finding.Finding.ValueType>();
         var messageIds = new java.util.HashSet<String>();
         for(Member member:members) for(var message:member.gold().messages())
