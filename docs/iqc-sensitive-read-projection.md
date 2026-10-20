@@ -322,3 +322,21 @@ SelectorDefinition.Condition.value复用已有双代字段精确解码与HTTP Js
 资产UI未知/受限policy隐藏配置编辑器，不把空默认条件当原稿；保存/发布/启停成功先清旧正文/历史，再独立GET，重读失败明确操作已完成。未保存草稿先阻止同资产启停或选用，关闭需确认丢弃；重新读取/关闭/卸载清正文及请求generation，版本读取校验来源/版本/hash。历史摘要单独读取精确版本，不通过历史权限绕过定义权限。
 
 当前仅编译/构建，默认MVC精确输入/输出、inactive历史不允许创建、各grant/source/hash/SQL/浏览器仍待验收。其他Pipeline/Scheme配置/复核副本与完整I1–I7仍未完成。
+
+## 流水线配置与发布历史（2026-10-20）
+
+复用SensitiveReadAccessService.current、ResultReadProjection及既有组织scope；不创建ACL、tenant表或第二套配置模型。PipelineAsset与PipelineAssetVersion新增的privacy仅响应使用（TableField exist=false），不落库，不参与release/contentHash计算。
+
+| 端点 | 固定基础资源 | 正文规则 |
+| --- | --- | --- |
+| GET /pipelines | iqc:pipeline:view | 目录总是不带draftConfigJson |
+| GET /pipelines/{id} | iqc:pipeline:detail:view | 完整会话+PII+Prompt三项grant齐备才回原草稿字符串 |
+| GET /pipelines/{id}/versions | iqc:pipeline:versions:view | 三项齐备才回原snapshotJson与publicationDecisionJson |
+| POST /pipelines、PUT /pipelines/{id}、POST availability | 对应manage/update/availability | 回执不带草稿正文 |
+| POST publish、POST force-publish | 对应publish/force:publish | 回执不带版本/发布审计正文 |
+
+各路径先取当前授权再调用原业务服务；原服务继续组织数据权限检查。草稿/历史整段扣留，不做会损坏精确数值或发布hash的局部JSON改写；原字符串在权限齐备时原样返回。版本号/修订/摘要/发布指针仍可作为任务选择元数据；name复用现有PII遮蔽。无原始模型对象或数据库内容变更。专门读取审计只记录操作与业务ID，不收正文；回执路径也禁审计请求/响应正文。响应带private,no-store及nosniff。
+
+privacy使用iqc-pipeline-read-v1，含canonicalPayloadVisible、canReadFull/canReadPii/canReadPrompt、withheldFields。目录/命令回执即使有敏感权限也声明正文不可见。前端只在专门详情允许且正文有效时挂载编辑器；受限时清空旧正文与历史，禁保存/草稿试跑/发布界面，保留原发布版本和灰度任务操作。命令回执三项grant仍齐备时保留用户自己正在编辑的原输入，不从空回执生成草稿；若grant不足则清空编辑器。历史重新加载先清旧数据，unknown协议按受限处理。评测页面仅使用可见的草稿/版本正文解析节点，元数据仍可用于服务端冻结。
+
+后端本批skipTests test-compile原66329 terminal exit0。前端初轮40642因评测页旧非空类型假设exit2，已修复并另起最终构建；最终结果见协作台账。未运行Root测试/共享SQL/部署。B仍需独立覆盖8种敏感grant组合、撤权早拒绝/组织scope、命令回执不漏正文、原对象不变及历史hash、真实MVC/页面和迟到请求。其它Scheme/Agent/Rule/Skill/Model与复核副本仍未宣称全部完成。

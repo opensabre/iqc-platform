@@ -38,7 +38,7 @@
 | 17 所有对象版本与发布 / I3/I7 | 原各资产版本、Snapshot、Pipeline/灰度修订 | 多数对象已有版本；独立Prompt/Knowledge Base版本如何复用原资产仍需明确核对，不能只凭Pipeline整体hash视为每项全部完成。 |
 | 17 GRAY/FULL与P2 A/B / I7 | RolloutPolicy/Service/TaskService/ExecutionGuard、Benchmark | 显式IDs灰度新请求/原请求重放已编码；0/10000/回退为同一政策语义。调度/Selector灰度、生产AB归因及真实激活回退验收按实际需求继续，不能只做预览。 |
 | 18 Trace/监控/审计 / I1/I7 | executionTrace、ModelMonitoring、公共审计starter | 节点/模型轨迹与部分监控已编码；Finding分布/人工修改率/Action失败率等运营指标与真实审计切面未整体证明。 |
-| 19 功能/数据/敏感权限 / I7 | IqcDataScope、SensitiveReadAccessService、ResultReadProjection及组织迁移 | 多项会话/任务/样本/评测/Selector等投影已有；Pipeline/Scheme/Agent/Rule/Skill/Model配置与人工复核等剩余敏感副本仍须收口，真实四角色/网关验收待做。 |
+| 19 功能/数据/敏感权限 / I7 | IqcDataScope、SensitiveReadAccessService、ResultReadProjection及组织迁移 | 多项会话/任务/样本/评测/Selector等投影已有；本批Pipeline草稿/历史/目录/命令回执已接原敏感投影，独立验证待；Scheme/Agent/Rule/Skill/Model配置与人工复核等剩余敏感副本仍须收口，真实四角色/网关验收待做。 |
 | 20–21 逻辑表/API / 全部 | 沿现有领域表/明确新职责表与原Controller扩展 | PRD是逻辑建议，不复制已有表/API；逐项行为由对应功能验收，不要求照抄示意路径覆盖旧语义。 |
 | 22 异步/背压/优先级/恢复 / I4 | 原持久化worker、任务/EID租约、预算等待与自动重试 | 已编码机制；真实重启/重复投递/跨实例恢复、外部MQ传输与压力结果待验。外部MQ不是文本完成事件/API的唯一实现方式。 |
 | 23 性能/可用性 / I4/I7 | 原TaskItem/worker/分页索引及预算机制 | 显式批次上限1000；百万规模分片/恢复与容量基线尚无充分证据，不能声明指标达成。 |

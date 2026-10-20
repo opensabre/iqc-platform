@@ -651,4 +651,28 @@ public final class ResultReadProjection {
                 canonical?source.definition():null,source.contentHash(),source.ownerGroupId(),body,selectorPrivacy(access,canonical,List.of("definition","definitionJson")),source.availableForNewTasks());
     }
 
+    private Map<String,Object> pipelinePrivacy(SensitiveReadAccessService.Access access,boolean canonical,List<String> withheld){
+        var metadata=new LinkedHashMap<String,Object>();metadata.put("policyVersion","iqc-pipeline-read-v1");
+        metadata.put("canonicalPayloadVisible",canonical);metadata.put("canReadFull",access.fullConversation());
+        metadata.put("canReadPii",access.pii());metadata.put("canReadPrompt",access.prompt());
+        metadata.put("withheldFields",canonical?List.of():withheld);return metadata;
+    }
+    public io.github.opensabre.iqc.pipelineasset.model.PipelineAsset pipelineAsset(
+            io.github.opensabre.iqc.pipelineasset.model.PipelineAsset source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.pipelineasset.model.PipelineAsset();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&access.prompt();
+        copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        if(!canonical)copy.setDraftConfigJson(null);
+        copy.setPrivacy(pipelinePrivacy(access,canonical,List.of("draftConfigJson")));return copy;
+    }
+    public io.github.opensabre.iqc.pipelineasset.model.PipelineAssetVersion pipelineVersion(
+            io.github.opensabre.iqc.pipelineasset.model.PipelineAssetVersion source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.pipelineasset.model.PipelineAssetVersion();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&access.prompt();
+        if(!canonical){copy.setSnapshotJson(null);copy.setPublicationDecisionJson(null);}
+        copy.setPrivacy(pipelinePrivacy(access,canonical,List.of("snapshotJson","publicationDecisionJson")));return copy;
+    }
+
 }
