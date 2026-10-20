@@ -340,3 +340,16 @@ SelectorDefinition.Condition.value复用已有双代字段精确解码与HTTP Js
 privacy使用iqc-pipeline-read-v1，含canonicalPayloadVisible、canReadFull/canReadPii/canReadPrompt、withheldFields。目录/命令回执即使有敏感权限也声明正文不可见。前端只在专门详情允许且正文有效时挂载编辑器；受限时清空旧正文与历史，禁保存/草稿试跑/发布界面，保留原发布版本和灰度任务操作。命令回执三项grant仍齐备时保留用户自己正在编辑的原输入，不从空回执生成草稿；若grant不足则清空编辑器。历史重新加载先清旧数据，unknown协议按受限处理。评测页面仅使用可见的草稿/版本正文解析节点，元数据仍可用于服务端冻结。
 
 后端本批skipTests test-compile原66329 terminal exit0。前端初轮40642因评测页旧非空类型假设exit2，已修复并另起最终构建；最终结果见协作台账。未运行Root测试/共享SQL/部署。B仍需独立覆盖8种敏感grant组合、撤权早拒绝/组织scope、命令回执不漏正文、原对象不变及历史hash、真实MVC/页面和迟到请求。其它Scheme/Agent/Rule/Skill/Model与复核副本仍未宣称全部完成。
+
+## Skill配置与历史（2026-10-20）
+
+复用原IqcSkillController/list/versions和SensitiveReadAccessService，不增加平行详情API、资产模型或ACL。当前Skill为原全局可复用资产，由原skill:view/manage授权；没有新建ownerGroupId或冒称已具备组织归属。配置读取与命令都先刷新固定原grant；原服务、不可变版本、回滚及Agent/流水线依赖选择不变。
+
+- GET agent-assets/skills是当前唯一配置读取：FULL+PII+PROMPT齐备时才回原description/instructions/inputSchemaJson/outputSchemaJson；否则四字段为null，保留原ID/code/version/status和沿原文本策略遮蔽的name，供原依赖选择。
+- GET skills/{id}/versions按同三grant返回原历史四字段或整段扣留，不改变存储的原指令、Schema或历史。
+- create/update/enable/disable/rollback回执总是扣留四正文，即使有敏感grant；写操作本身仍按原业务权限，不增加敏感读取作为写权限。
+- IqcSkill/Version只加exist=false且null省略的响应privacy；iqc-skill-read-v1复用流水线已采用的私有configurationPrivacy元数据构造，不新增通用starter或全局mapper。专门查询Audit与命令Audit均不取正文，响应no-store/nosniff。
+
+Skill页面未知/受限协议或缺失instructions时只显示元数据，不挂编辑表单或保存空配置。写回执不替换原草稿；成功后关闭并清空表单，再独立刷新列表，失败明确重读未获结果。重读先清旧列表及打开的既有资产正文，关闭/卸载清表单，迟到读取/写回执不更新卸载组件或产生提示。创建者仍能按原manage权限输入新配置。Schema保持原字符串，页面解析仅用于JSON对象校验，不将解析结果近似回写。
+
+本批后端原77870与前端原99858均terminal exit0（skipTests test-compile / vue-tsc+Vite，1m7s，既有体积提示）；未运行Root测试/SQL/部署。八grant组合、原对象/历史不变、资源撤权及真实HTTP/browser/每路由注册仍待B独立验收，不能用原共享skill:manage资源声明本身证明网关每条URL已可达。Scheme/Agent/Rule/Model/复核配置副本继续按原完整计划收口。

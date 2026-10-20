@@ -651,8 +651,8 @@ public final class ResultReadProjection {
                 canonical?source.definition():null,source.contentHash(),source.ownerGroupId(),body,selectorPrivacy(access,canonical,List.of("definition","definitionJson")),source.availableForNewTasks());
     }
 
-    private Map<String,Object> pipelinePrivacy(SensitiveReadAccessService.Access access,boolean canonical,List<String> withheld){
-        var metadata=new LinkedHashMap<String,Object>();metadata.put("policyVersion","iqc-pipeline-read-v1");
+    private Map<String,Object> configurationPrivacy(String policyVersion,SensitiveReadAccessService.Access access,boolean canonical,List<String> withheld){
+        var metadata=new LinkedHashMap<String,Object>();metadata.put("policyVersion",policyVersion);
         metadata.put("canonicalPayloadVisible",canonical);metadata.put("canReadFull",access.fullConversation());
         metadata.put("canReadPii",access.pii());metadata.put("canReadPrompt",access.prompt());
         metadata.put("withheldFields",canonical?List.of():withheld);return metadata;
@@ -664,7 +664,7 @@ public final class ResultReadProjection {
         boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&access.prompt();
         copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
         if(!canonical)copy.setDraftConfigJson(null);
-        copy.setPrivacy(pipelinePrivacy(access,canonical,List.of("draftConfigJson")));return copy;
+        copy.setPrivacy(configurationPrivacy("iqc-pipeline-read-v1",access,canonical,List.of("draftConfigJson")));return copy;
     }
     public io.github.opensabre.iqc.pipelineasset.model.PipelineAssetVersion pipelineVersion(
             io.github.opensabre.iqc.pipelineasset.model.PipelineAssetVersion source,SensitiveReadAccessService.Access access,boolean detailRead){
@@ -672,7 +672,28 @@ public final class ResultReadProjection {
         var copy=new io.github.opensabre.iqc.pipelineasset.model.PipelineAssetVersion();BeanUtils.copyProperties(source,copy);
         boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&access.prompt();
         if(!canonical){copy.setSnapshotJson(null);copy.setPublicationDecisionJson(null);}
-        copy.setPrivacy(pipelinePrivacy(access,canonical,List.of("snapshotJson","publicationDecisionJson")));return copy;
+        copy.setPrivacy(configurationPrivacy("iqc-pipeline-read-v1",access,canonical,List.of("snapshotJson","publicationDecisionJson")));return copy;
+    }
+
+    public io.github.opensabre.iqc.skill.model.IqcSkill skill(
+            io.github.opensabre.iqc.skill.model.IqcSkill source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.skill.model.IqcSkill();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&access.prompt();
+        copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        if(!canonical){copy.setDescription(null);copy.setInstructions(null);copy.setInputSchemaJson(null);copy.setOutputSchemaJson(null);}
+        copy.setPrivacy(configurationPrivacy("iqc-skill-read-v1",access,canonical,
+                List.of("description","instructions","inputSchemaJson","outputSchemaJson")));return copy;
+    }
+    public io.github.opensabre.iqc.skill.model.IqcSkillVersion skillVersion(
+            io.github.opensabre.iqc.skill.model.IqcSkillVersion source,SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.skill.model.IqcSkillVersion();BeanUtils.copyProperties(source,copy);
+        boolean canonical=access.fullConversation()&&access.pii()&&access.prompt();
+        copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        if(!canonical){copy.setDescription(null);copy.setInstructions(null);copy.setInputSchemaJson(null);copy.setOutputSchemaJson(null);}
+        copy.setPrivacy(configurationPrivacy("iqc-skill-read-v1",access,canonical,
+                List.of("description","instructions","inputSchemaJson","outputSchemaJson")));return copy;
     }
 
 }

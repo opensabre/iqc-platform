@@ -399,3 +399,7 @@ CREATE_RISK_EVENT v1引用原冻结生产结果/动作账本，稳定幂等事�
 ## Pipeline敏感配置批次（2026-10-20）
 
 沿用单租户组织scope、原FULL/PII/PROMPT授权与ResultReadProjection，流水线目录/草稿/历史及保存/发布/启停回执按专门读取和元数据回执投影；仅三项敏感grant齐备的专门详情/历史回原完整正文，非持久privacy记录扣留状态。UI受限草稿不建空编辑器，不误覆盖，已发布任务能力保留；历史重读先清旧数据，评测页兼容空正文。端点/边界/证据见iqc-sensitive-read-projection.md及协作台账。当前仅编译/构建，不称实际角色/PDP/浏览器验收；其它配置副本与I1–I7继续。
+
+## Skill敏感配置批次（2026-10-20）
+
+原唯一list配置读和版本历史按FULL/PII/PROMPT三grant投影，命令回执不带指令/Schema/说明；ID/code/version/status保留供原Agent/流水线选用，不新增API/表/ACL。UI受限不加载空表单、不保存覆盖，成功后清表单独立重读，卸载隔离迟到响应。后端77870/前端99858构建均exit0，Root没有新增/运行测试；B独立授权/HTTP/真实角色验收待，全部适用I1–I7继续。详情见iqc-sensitive-read-projection.md。
