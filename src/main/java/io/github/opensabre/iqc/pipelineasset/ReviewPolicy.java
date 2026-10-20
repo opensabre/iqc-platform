@@ -98,7 +98,10 @@ public record ReviewPolicy(String schemaVersion,String seed,UnknownHandling unkn
         if(fact==null||fact.state()!=Finding.State.KNOWN||fusion.method()!=FusionPolicy.Method.CONFIDENCE||fusion.confidenceCalibrationId()==null||fusion.confidenceCalibrationId().isBlank()||fact.selectedIds().isEmpty())return null;
         BigDecimal minimum=null;int count=0;
         for(var raw:fact.rawFindings())if(fact.selectedIds().contains(raw.id())){if(raw.state()!=Finding.State.KNOWN||raw.confidence()==null||!fusion.calibratedNodeIds().contains(raw.source().nodeId()))return null;count++;minimum=minimum==null?raw.confidence():minimum.min(raw.confidence());}
-        return count==fact.selectedIds().size()?minimum:null;
+        if(count!=fact.selectedIds().size())return null;
+        // Legacy frozen results omit the field; still derive from their original calibrated sources.
+        if(fact.finalConfidence()==null)return minimum;
+        return minimum!=null&&fact.finalConfidence().compareTo(minimum)==0?fact.finalConfidence():null;
     }
     private static BigDecimal decimal(String value){new PipelineRelease.NumericPredicate(io.github.opensabre.iqc.pipeline.PipelineDefinition.Operator.EQUALS,value);return new BigDecimal(value);}
     private static void probability(String value){var number=decimal(value);if(number.signum()<0||number.compareTo(BigDecimal.ONE)>0)throw new IllegalArgumentException("Probability must be within 0..1");}
