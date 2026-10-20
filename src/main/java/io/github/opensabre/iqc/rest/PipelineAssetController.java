@@ -35,6 +35,12 @@ public class PipelineAssetController {
     }
     @org.springframework.beans.factory.annotation.Autowired
     private io.github.opensabre.iqc.selector.SelectorAssetService selectorAssets;
+    @GetMapping("/fusion-strategies")
+    @ResourcePermission(code="iqc:pipeline:fusion:strategy:view",name="查看融合扩展目录",type="iqc",description="读取部署安装的精确融合扩展版本与实现摘要")
+    @Audit(operationType=OperationType.QUERY,description="读取融合扩展目录",module="IQC_PIPELINE",request=false,response=false)
+    public List<io.github.opensabre.iqc.fusion.FusionExtensionRegistry.Descriptor> fusionStrategies(){
+        access("iqc:pipeline:fusion:strategy:view");return io.github.opensabre.iqc.fusion.FusionExtensionRegistry.system().descriptors();
+    }
     @GetMapping
     @ResourcePermission(code="iqc:pipeline:view",name="查看流水线目录",type="iqc",description="查询可见流水线")
     @Audit(operationType=OperationType.QUERY,description="读取流水线目录",module="IQC_PRIVACY",request=false,response=false)

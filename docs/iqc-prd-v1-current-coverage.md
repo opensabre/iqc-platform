@@ -23,7 +23,7 @@
 | 9 Finding/Catalog/Evidence / I1 | Finding、FindingCatalogService、原轨迹与结果投影 | 已编码；source/version及证据反查、全部引擎一致性待场景验证。 |
 | 10.2 基础四种融合 / I2 | FusionPolicy、FindingFusion | PRIORITY/CONFIDENCE/VOTING/OVERRIDE已有实现与正式语义。 |
 | 10.2 WEIGHTED / I2 | 同一FusionPolicy/FindingFusion及原配置编辑器 | 复核确认原先缺失，本批补严格加权多数；尚须独立行为/协议兼容/发布重算验证。 |
-| 10.2 CUSTOM扩展 / I2/I6 | 当前FusionPolicy枚举未提供CUSTOM执行/版本化扩展绑定 | 仍是明确缺口，不能把default抛错当扩展能力，也不能开放任意代码执行。 |
+| 10.2 CUSTOM扩展 / I2/I6 | FusionPolicy.custom、FusionExtension/Registry和UNANIMOUS v1、原编辑器与只读策略目录 | 本批已编码精确id/version/class摘要/参数绑定与真实一致同意实现，复用原fuse及缺失来源重算；可信部署SPI，不接受客户端代码。独立算法/协议/发布/重放/角色/UI验证待，不能凭编译算验收完成。 |
 | 10.3 融合输出 / I2 | FindingFusion.Result保存原始/选中/拒绝/Evidence/解释与政策版本 | 结果可追溯字段已编码；本批新增可空finalConfidence，仅KNOWN且CONFIDENCE政策的已校准选中来源输出；其它策略及人工改判为空。旧结果兼容及当前行为仍待独立验证，校准工件真实性不由字段本身证明。 |
 | 11 Score/Label/Risk/Review / I2/I5 | InspectionScoring、FindingLabelPolicy、RiskPolicy、ReviewPolicy、DecisionRevisionController | 高级评分、独立风险/复核与重算已有实现；完整原事实不变/不调模型/复核后重算及真实持久化仍需证明。 |
 | 12 九种Action / I5 | action包、ExternalActionBeans、通知/复核/候选/风险适配 | 工单、辅导、Webhook代码已存在，不重复开发；外部真实渠道、接收方幂等契约、确认/失败补偿验收仍待。默认关闭不能称实际投递成功。 |

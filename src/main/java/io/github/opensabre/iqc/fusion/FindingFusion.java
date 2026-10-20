@@ -91,6 +91,27 @@ public final class FindingFusion {
                 if (selected.isEmpty()) return result(code, raw, selected, Finding.State.NOT_EVALUATED, null, policy,
                         explanation + " produced no observation");
             }
+            case CUSTOM -> {
+                var binding=policy.custom();var provider=FusionExtensionRegistry.system().require(binding);
+                var outcome=Objects.requireNonNull(provider.evaluate(List.copyOf(raw),binding.parameters()),"Custom fusion outcome required");
+                var sourceIds=new java.util.HashSet<>(outcome.selectedIds());
+                if(sourceIds.isEmpty()||sourceIds.size()!=outcome.selectedIds().size()
+                        ||!raw.stream().map(Finding::id).toList().containsAll(sourceIds))
+                    throw new IllegalArgumentException("Custom fusion must select distinct original observation IDs");
+                selected=raw.stream().filter(finding->sourceIds.contains(finding.id())).toList();
+                if(outcome.state()==Finding.State.KNOWN&&selected.stream().anyMatch(finding->finding.state()!=Finding.State.KNOWN)
+                        ||outcome.state()==Finding.State.NOT_EVALUATED&&selected.stream().anyMatch(finding->finding.state()!=Finding.State.NOT_EVALUATED)
+                        ||outcome.state()==Finding.State.ERROR&&selected.stream().noneMatch(finding->finding.state()==Finding.State.ERROR))
+                    throw new IllegalArgumentException("Custom fusion state contradicts selected source states");
+                if(outcome.state()==Finding.State.KNOWN&&raw.getFirst().valueType()==Finding.ValueType.ENUM
+                        &&selected.stream().noneMatch(finding->sameValue(finding.value(),outcome.value())))
+                    throw new IllegalArgumentException("Custom fusion cannot introduce an unproven enum directory value");
+                // Reuse the original typed value validator; never return this validation-only observation.
+                var anchor=selected.getFirst();new Finding("custom-value-validation",code,anchor.category(),anchor.valueType(),
+                        outcome.value(),outcome.state(),null,Finding.Severity.NONE,"Custom value validation",List.of(),anchor.source());
+                return result(code,raw,selected,outcome.state(),outcome.value(),policy,
+                        "CUSTOM "+binding.strategyId()+"/v"+binding.version()+" ["+binding.implementationHash()+"] "+outcome.explanation());
+            }
             case WEIGHTED -> {
                 if(raw.stream().map(f->f.source().nodeId()).distinct().count()!=raw.size())
                     throw new IllegalArgumentException("weighted fusion requires one observation per source node; aggregate repeat runs first");
@@ -138,7 +159,7 @@ public final class FindingFusion {
     private static java.math.BigDecimal weight(Finding finding,FusionPolicy policy){
         return new java.math.BigDecimal(policy.nodeWeights().get(finding.source().nodeId()));
     }
-    private static Finding.State resolve(List<Finding> selected) {
+    static Finding.State resolve(List<Finding> selected) {
         var known = selected.stream().filter(f -> f.state() == Finding.State.KNOWN).toList();
         if (selected.stream().anyMatch(f -> f.state() == Finding.State.CONFLICT)
                 || known.stream().anyMatch(f -> !sameValue(f.value(), known.getFirst().value()))) return Finding.State.CONFLICT;

@@ -125,15 +125,16 @@ public class DecisionRevisionService {
             if(!json.valueToTree(originalReview).equals(json.valueToTree(trace.reviewDecision())))throw IqcException.invalidState("源复核决定与冻结输入/政策不一致");
             var target = assets.publishedRelease(targetPipelineId,targetVersion);
             List<Finding> policyInputs=raw;
-            if(target.release().fusion().method()==io.github.opensabre.iqc.fusion.FusionPolicy.Method.WEIGHTED){
+            if(target.release().fusion().method()==io.github.opensabre.iqc.fusion.FusionPolicy.Method.WEIGHTED
+                    ||target.release().fusion().method()==io.github.opensabre.iqc.fusion.FusionPolicy.Method.CUSTOM){
                 var withMissing=new ArrayList<>(raw);
                 for(var node:target.release().pipeline().nodes()){
                     var definition=json.treeToValue(node.config().path("findingDefinition"),io.github.opensabre.iqc.finding.FindingDefinition.class);
                     if(raw.stream().anyMatch(finding->node.nodeId().equals(finding.source().nodeId())&&definition.code().equals(finding.code())))continue;
-                    String identity=hash(Arrays.asList("weighted-policy-unavailable-v1",result.getId(),target.pipelineId(),target.versionNo(),node.nodeId(),definition.code()));
+                    String identity=hash(Arrays.asList(target.release().fusion().method()==io.github.opensabre.iqc.fusion.FusionPolicy.Method.WEIGHTED?"weighted-policy-unavailable-v1":"custom-policy-unavailable-v1",result.getId(),target.pipelineId(),target.versionNo(),node.nodeId(),definition.code()));
                     withMissing.add(new Finding(identity,definition.code(),definition.category(),definition.valueType(),null,
                             Finding.State.NOT_EVALUATED,null,definition.defaultSeverity(),
-                            "Target weighted policy source was not observed; detectors were not rerun",List.of(),
+                            "Target "+target.release().fusion().method().name().toLowerCase(java.util.Locale.ROOT)+" policy source was not observed; detectors were not rerun",List.of(),
                             new Finding.Source(node.nodeId(),node.type(),node.version(),1,null)));
                 }
                 policyInputs=withMissing;
