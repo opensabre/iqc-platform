@@ -32,7 +32,7 @@ public final class ReviewSampleInputValidator {
             }).toList();
             com.fasterxml.jackson.databind.JsonNode businessContext=null;
             String actual;
-            var snapshot=task==null?null:json.readTree(task.getRuleSnapshotJson());
+            var snapshot=task==null?null:PipelineAssetService.readFrozenTree(json,task.getRuleSnapshotJson());
             if(snapshot!=null && snapshot.has("productionInputs")) {
                 if(!"iqc-pipeline-execution-v1".equals(trace.path("schemaVersion").asText()))throw new IllegalArgumentException();
                 var prepared=new io.github.opensabre.iqc.conversation.ProductionInputSnapshotService(null,null,null,json).prepare(task,snapshot);
@@ -42,7 +42,7 @@ public final class ReviewSampleInputValidator {
                     throw new IllegalArgumentException();
                 businessContext=prepared.businessContext(conversationId);
                 var input=json.createObjectNode();input.set("messages",json.valueToTree(frozen));input.set("businessContext",businessContext);
-                actual=PipelineAssetService.hash(input.toString());
+                actual=io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.executionInputHash(prepared.releaseSchema(),input);
             } else actual = switch (trace.path("schemaVersion").asText()) {
                 case "iqc-route-execution-trace-v1" -> RouteExecutionTrace.inputHash(normalized);
                 case "iqc-pipeline-execution-v1" -> {

@@ -51,6 +51,13 @@ public class PipelineConversationEvaluator {
         if(businessContext!=null) input.set("businessContext",businessContext.deepCopy());
         return input;
     }
+    /** Input identity is selected by the frozen release protocol, never by incidental input fields. */
+    public static String executionInputHash(String releaseSchema,com.fasterxml.jackson.databind.JsonNode input) {
+        if(PipelineRelease.EXACT_SCHEMA.equals(releaseSchema))
+            return io.github.opensabre.iqc.selector.SelectorAssetService.hash(input.toString());
+        if(PipelineRelease.SCHEMA.equals(releaseSchema))return PipelineAssetService.hash(input.toString());
+        throw new IllegalArgumentException("Unsupported frozen pipeline input hash protocol");
+    }
     public static String samplingInputHash(PipelineRelease release,List<ConversationMessage> messages,com.fasterxml.jackson.databind.JsonNode businessContext,ObjectMapper json) {
         return release.reviewPolicy()!=null&&io.github.opensabre.iqc.pipelineasset.ReviewPolicy.EXACT_SCHEMA.equals(release.reviewPolicy().schemaVersion())?samplingInputHash(messages,businessContext,json):null;
     }
@@ -99,7 +106,7 @@ public class PipelineConversationEvaluator {
         }
         var score=PipelineDecisionEvaluator.evaluate(release,fused,businessContext);
         var riskDecision=PipelineDecisionEvaluator.riskDecision(release,fused,score,businessContext);
-        String inputHash=PipelineAssetService.hash(input.toString());
+        String inputHash=executionInputHash(release.schemaVersion(),input);
         String risk=riskDecision==null?PipelineDecisionEvaluator.riskLevel(release.items(),fused,score):riskDecision.level();
         var review=PipelineDecisionEvaluator.reviewDecision(release,fused,score,risk,PipelineDecisionEvaluator.resultStatus(run,items,score),inputHash,businessContext,release.reviewPolicy()!=null&&io.github.opensabre.iqc.pipelineasset.ReviewPolicy.EXACT_SCHEMA.equals(release.reviewPolicy().schemaVersion())?io.github.opensabre.iqc.selector.SelectorAssetService.hash(input.toString()):null,json);
         return new Evaluation("iqc-pipeline-execution-v1",inputHash,run,fused,List.copyOf(items),score,risk,mode,riskDecision,review);
