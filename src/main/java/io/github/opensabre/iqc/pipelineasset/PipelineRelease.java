@@ -101,6 +101,9 @@ public record PipelineRelease(String schemaVersion, PipelineDefinition pipeline,
     public PipelineRelease {
         if (!SCHEMA.equals(schemaVersion)) throw new IllegalArgumentException("unsupported pipeline release schema");
         Objects.requireNonNull(pipeline); Objects.requireNonNull(fusion); Objects.requireNonNull(scoring);
+        if(fusion.method()==FusionPolicy.Method.WEIGHTED&&!fusion.nodeWeights().keySet().equals(
+                pipeline.nodes().stream().map(PipelineDefinition.Node::nodeId).collect(java.util.stream.Collectors.toSet())))
+            throw new IllegalArgumentException("weighted fusion must declare exactly the pipeline source node weights");
         if(reviewPolicy!=null)ReviewPolicy.validateRouting(actionPolicy);
         else if(actionPolicy!=null&&actionPolicy.actions().stream().anyMatch(action->ReviewPolicy.readsReview(action.condition())))
             throw new IllegalArgumentException("Review action condition requires a review policy");
