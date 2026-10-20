@@ -19,7 +19,7 @@
 | 8.2 Metric/Session / I6 | TranscriptTimingMetrics、TranscriptMetricEngine、SessionAggregationEngine | 复用已处理消息时间/业务上下文，不生成语音转写；语义范围及真实会话指标验收待核对。不能把片段时间指标直接称声学测量。 |
 | 8.2 SmallModel/Skill/API / I6 | SmallModelDetectorEngine/Contract、Skill API、原资产版本与引用 | 相关适配已编码，不能继续按旧迭代表称SmallModel未集成；真实外部服务/降级/成本契约待验。 |
 | 8.3–8.4 串并行/条件/级联/短路/Fallback / I2/I6 | PipelineRuntime、ParallelCompletionPolicy、原条件与备用节点 | 已编码，局部回归不等于全部组合/真实并行运行通过。 |
-| 8.5 设计器 / I6 | PipelineReleaseEditor、PipelineDependencyGraph、editGraphEdge | 列表、属性及依赖图编辑已编码；PRD允许V1先列表+分支；已接受I6中的完整拖拽DAG仍须核对并补齐，不能把依赖图编辑直接算作完整拖拽交付。真实使用与发布路径待验。 |
+| 8.5 设计器 / I6 | PipelineReleaseEditor、PipelineDependencyGraph、editGraphEdge | 列表、节点库/端口连线/属性及依赖图编辑已有；本批补节点主体拖动、缩放、键盘与落点，布局仅本次会话，不改变Release。真实SVG/browser及完整保存发布路径待验，不凭构建认定设计器验收完成。 |
 | 9 Finding/Catalog/Evidence / I1 | Finding、FindingCatalogService、原轨迹与结果投影 | 已编码；source/version及证据反查、全部引擎一致性待场景验证。 |
 | 10.2 基础四种融合 / I2 | FusionPolicy、FindingFusion | PRIORITY/CONFIDENCE/VOTING/OVERRIDE已有实现与正式语义。 |
 | 10.2 WEIGHTED / I2 | 同一FusionPolicy/FindingFusion及原配置编辑器 | 复核确认原先缺失，本批补严格加权多数；尚须独立行为/协议兼容/发布重算验证。 |
