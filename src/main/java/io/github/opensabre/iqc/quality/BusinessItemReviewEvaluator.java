@@ -252,7 +252,7 @@ public final class BusinessItemReviewEvaluator {
                     && !trace.run().findings().contains(fact))
                 throw IqcException.invalidState("确定事实没有对应原始节点输出");
         }
-        var fusion = io.github.opensabre.iqc.fusion.FindingFusion.fuse(raw, release.fusion());
+        var fusion = io.github.opensabre.iqc.fusion.FindingFusion.reproduce(raw, release.fusion(), trace.fusion());
         if (!fusion.equals(trace.fusion())) throw IqcException.invalidState("流水线融合事实无法由原始输出再现");
         var statuses = io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.decisions(release.items(), fusion)
                 .stream().collect(Collectors.toMap(InspectionScoring.Decision::itemCode, InspectionScoring.Decision::status));

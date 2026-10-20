@@ -14,11 +14,23 @@ public final class FindingFusion {
     public record Result(String code, Finding.ValueType valueType, Finding.State state, JsonNode value,
                          Finding.Severity severity, List<Finding> rawFindings, List<String> selectedIds,
                          List<String> rejectedIds, List<Finding.Evidence> evidence, String explanation,
-                         String policyId, int policyVersion) {
+                         String policyId, int policyVersion,
+                         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                         java.math.BigDecimal finalConfidence) {
+        public Result(String code, Finding.ValueType valueType, Finding.State state, JsonNode value,
+                      Finding.Severity severity, List<Finding> rawFindings, List<String> selectedIds,
+                      List<String> rejectedIds, List<Finding.Evidence> evidence, String explanation,
+                      String policyId, int policyVersion) {
+            this(code,valueType,state,value,severity,rawFindings,selectedIds,rejectedIds,evidence,
+                    explanation,policyId,policyVersion,null);
+        }
         public Result {
             rawFindings = List.copyOf(rawFindings); selectedIds = List.copyOf(selectedIds);
             rejectedIds = List.copyOf(rejectedIds); evidence = List.copyOf(evidence);
             value = value == null || value.isNull() ? null : value.deepCopy();
+            if(finalConfidence!=null&&(state!=Finding.State.KNOWN||finalConfidence.signum()<0
+                    ||finalConfidence.compareTo(java.math.BigDecimal.ONE)>0))
+                throw new IllegalArgumentException("final confidence requires a known result and probability within 0..1");
         }
         @Override public JsonNode value() { return value == null ? null : value.deepCopy(); }
     }
@@ -31,6 +43,16 @@ public final class FindingFusion {
         var results = new ArrayList<Result>();
         byCode.forEach((code, raw) -> results.add(fuseCode(code, raw, policy)));
         return List.copyOf(results);
+    }
+    /** Reproduce legacy traces without adding a field absent from their frozen result shape.
+     * Callers must still compare the returned complete results against the recorded results. */
+    public static List<Result> reproduce(List<Finding> findings,FusionPolicy policy,List<Result> recorded){
+        var legacyCodes=new java.util.HashSet<String>();
+        for(var result:recorded)if(result.finalConfidence()==null)legacyCodes.add(result.code());
+        return fuse(findings,policy).stream().map(result->legacyCodes.contains(result.code())
+                ?new Result(result.code(),result.valueType(),result.state(),result.value(),result.severity(),
+                    result.rawFindings(),result.selectedIds(),result.rejectedIds(),result.evidence(),
+                    result.explanation(),result.policyId(),result.policyVersion()):result).toList();
     }
     private static Result fuseCode(String code, List<Finding> raw, FusionPolicy policy) {
         if (raw.stream().map(Finding::valueType).distinct().count() != 1
@@ -145,6 +167,12 @@ public final class FindingFusion {
         var severity = selected.stream().map(Finding::severity).max(Comparator.naturalOrder()).orElse(Finding.Severity.NONE);
         return new Result(code, raw.getFirst().valueType(), state, value, severity, raw, ids,
                 raw.stream().map(Finding::id).filter(id -> !ids.contains(id)).toList(), List.copyOf(evidence.values()),
-                explanation, policy.id(), policy.version());
+                explanation, policy.id(), policy.version(), calibratedConfidence(state,selected,policy));
+    }
+    private static java.math.BigDecimal calibratedConfidence(Finding.State state,List<Finding> selected,FusionPolicy policy){
+        if(state!=Finding.State.KNOWN||policy.method()!=FusionPolicy.Method.CONFIDENCE||selected.isEmpty())return null;
+        if(selected.stream().anyMatch(f->f.state()!=Finding.State.KNOWN||f.confidence()==null
+                ||!policy.calibratedNodeIds().contains(f.source().nodeId())))return null;
+        return selected.stream().map(Finding::confidence).min(Comparator.naturalOrder()).orElse(null);
     }
 }

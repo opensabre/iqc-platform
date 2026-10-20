@@ -99,7 +99,7 @@ public class DecisionRevisionService {
                 throw IqcException.invalidArgument("当前重算仅支持流水线事实结果");
             var raw = new ArrayList<Finding>();
             trace.fusion().forEach(value -> raw.addAll(value.rawFindings()));
-            var originalFusion = FindingFusion.fuse(raw,release.fusion());
+            var originalFusion = FindingFusion.reproduce(raw,release.fusion(),trace.fusion());
             var preparedInput=inputs.prepare(task,snapshot);
             com.fasterxml.jackson.databind.JsonNode businessContext=null;
             if(preparedInput!=null) {
