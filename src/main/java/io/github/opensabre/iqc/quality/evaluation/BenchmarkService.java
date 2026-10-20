@@ -162,7 +162,7 @@ public class BenchmarkService {
     private BigDecimal difference(BigDecimal candidate,BigDecimal baseline){return candidate==null || baseline==null?null:candidate.subtract(baseline);}
     private JsonNode parse(String value) {
         if(value==null || value.getBytes(StandardCharsets.UTF_8).length>16*1024*1024) throw IqcException.invalidState("实验快照为空或超限");
-        try{return json.readTree(value);}catch(com.fasterxml.jackson.core.JsonProcessingException failure){throw IqcException.invalidState("实验快照格式无效");}
+        try{return PipelineAssetService.readFrozenTree(json,value);}catch(com.fasterxml.jackson.core.JsonProcessingException failure){throw IqcException.invalidState("实验快照格式无效");}
     }
     private <T>T read(JsonNode value,Class<T> type) {
         try{return json.treeToValue(value,type);}catch(com.fasterxml.jackson.core.JsonProcessingException failure){throw IqcException.invalidState("实验选择协议无效");}

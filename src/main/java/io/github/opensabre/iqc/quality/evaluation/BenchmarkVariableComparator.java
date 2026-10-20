@@ -25,25 +25,29 @@ public final class BenchmarkVariableComparator {
     public static Comparison compare(PipelineRelease baseline, PipelineRelease candidate, Selection selection, ObjectMapper mapper) {
         if (baseline == null || candidate == null || selection == null || selection.dimension() == null || mapper == null)
             throw invalid("Benchmark 两侧配置和变量声明不能为空");
+        // Both sides must use the same frozen identity protocol; do not silently upgrade old experiments.
+        if (!baseline.schemaVersion().equals(candidate.schemaVersion())) throw invalid("Benchmark 两侧冻结数值协议不一致");
+        boolean exact=PipelineRelease.EXACT_SCHEMA.equals(baseline.schemaVersion());
         var left = project(baseline, selection, mapper);
         var right = project(candidate, selection, mapper);
         if (!left.invariant().equals(right.invariant()) || !left.paths().equals(right.paths()))
             throw invalid("Benchmark 发现声明变量之外的配置变化");
-        String leftVariable = hash(left.variable(), mapper), rightVariable = hash(right.variable(), mapper);
+        String leftVariable = hash(left.variable(), mapper, exact), rightVariable = hash(right.variable(), mapper, exact);
         if (leftVariable.equals(rightVariable)) throw invalid("Benchmark 变量没有实际语义变化");
-        String leftPrompt = left.prompt() == null ? null : hash(mapper.getNodeFactory().textNode(left.prompt()), mapper);
-        String rightPrompt = right.prompt() == null ? null : hash(mapper.getNodeFactory().textNode(right.prompt()), mapper);
+        String leftPrompt = left.prompt() == null ? null : hash(mapper.getNodeFactory().textNode(left.prompt()), mapper, exact);
+        String rightPrompt = right.prompt() == null ? null : hash(mapper.getNodeFactory().textNode(right.prompt()), mapper, exact);
         if ((selection.dimension() == Dimension.PROMPT || selection.dimension() == Dimension.SKILL)
                 && leftPrompt!=null && leftPrompt.equals(rightPrompt)) throw invalid("Benchmark 变量未改变实际有效提示");
-        return new Comparison(selection, left.paths(), hash(left.invariant(), mapper), leftVariable, rightVariable,
-                hash(releaseProjection(baseline,mapper), mapper), hash(releaseProjection(candidate,mapper), mapper), leftPrompt, rightPrompt);
+        return new Comparison(selection, left.paths(), hash(left.invariant(), mapper, exact), leftVariable, rightVariable,
+                hash(releaseProjection(baseline,mapper), mapper, exact), hash(releaseProjection(candidate,mapper), mapper, exact), leftPrompt, rightPrompt);
     }
 
     private static Projection project(PipelineRelease release, Selection selection, ObjectMapper mapper) {
+        boolean exact=PipelineRelease.EXACT_SCHEMA.equals(release.schemaVersion());
         ObjectNode root = releaseProjection(release,mapper);
         ArrayNode nodes = (ArrayNode) root.path("pipeline").path("nodes");
         // All configurations remain schema 3 and tool-free, including a composite PIPELINE variable.
-        for (JsonNode node : nodes) if ("LLM".equals(node.path("type").asText())) configuration(node, mapper);
+        for (JsonNode node : nodes) if ("LLM".equals(node.path("type").asText())) configuration(node, mapper, exact);
         Dimension dimension = selection.dimension();
         if (dimension == Dimension.FUSION || dimension == Dimension.PIPELINE) {
             if (selection.nodeId() != null || selection.slot() != null) throw invalid("该变量维度不能指定节点或槽位");
@@ -66,7 +70,7 @@ public final class BenchmarkVariableComparator {
         if(selection.dimension()==Dimension.MODEL && "SMALL_MODEL".equals(nodes.get(index).path("type").asText()))return smallModelProjection(root,nodes,index,selection,mapper);
         if(!"LLM".equals(nodes.get(index).path("type").asText()))throw invalid("该变量维度不支持此节点类型");
         ObjectNode node = (ObjectNode) nodes.get(index), config = (ObjectNode) node.get("config");
-        ObjectNode agent = (ObjectNode) config.get("agentSnapshot"), agentConfig = configuration(node, mapper);
+        ObjectNode agent = (ObjectNode) config.get("agentSnapshot"), agentConfig = configuration(node, mapper, exact);
         String prompt = effectivePrompt(agentConfig);
         String prefix = "/pipeline/nodes/" + index + "/config/agentSnapshot/configJson";
         List<String> paths = new ArrayList<>();
@@ -152,13 +156,15 @@ public final class BenchmarkVariableComparator {
         return new Projection(root,variable,null,List.of(prefix+"/modelReference/id",prefix+"/modelReference/versionNo",prefix+"/modelSnapshot",prefix+"/agentReference/versionNo"));
     }
 
-    private static ObjectNode configuration(JsonNode node, ObjectMapper mapper) {
+    private static ObjectNode configuration(JsonNode node, ObjectMapper mapper, boolean exact) {
         JsonNode raw = node.path("config").path("agentSnapshot").path("configJson");
         JsonNode value;
         try {
             if (raw.isTextual()) {
                 if (raw.asText().length() > 1024 * 1024) throw invalid("智能体配置超出比较上限");
-                value = mapper.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(raw.asText());
+                var reader=mapper.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+                if(exact) reader=reader.with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
+                value = reader.readTree(raw.asText());
             } else value = raw.deepCopy();
         } catch (Exception ex) { throw invalid("智能体冻结配置不是有效 JSON"); }
         if (!(value instanceof ObjectNode object) || !"3.0".equals(value.path("schemaVersion").asText())
@@ -179,8 +185,11 @@ public final class BenchmarkVariableComparator {
         if (prompt.length() > 8000) throw invalid("Benchmark 节点提示会发生 8000 字符截断");
         return prompt.toString();
     }
-    private static String hash(JsonNode value, ObjectMapper mapper) {
-        try { return PipelineAssetService.hash(mapper.writeValueAsString(value)); }
+    private static String hash(JsonNode value, ObjectMapper mapper, boolean exact) {
+        try {
+            String body=mapper.writeValueAsString(value);
+            return exact ? io.github.opensabre.iqc.selector.SelectorAssetService.hash(body) : PipelineAssetService.hash(body);
+        }
         catch (Exception ex) { throw invalid("Benchmark 配置摘要失败"); }
     }
     private static ObjectNode releaseProjection(PipelineRelease release,ObjectMapper mapper) {
