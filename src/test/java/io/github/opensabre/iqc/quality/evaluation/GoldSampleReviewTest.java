@@ -213,4 +213,12 @@ class GoldSampleReviewTest {
         assertThat(mapper.treeToValue(legacy,GoldConversation.Message.class)).isEqualTo(message);
     }
 
+
+    @Test void unknownCandidateProtocolCannotSelectALegacyHashFallback() throws Exception {
+        var request=annotation(json.nullNode());
+        sample.setContentSnapshot(sample.getContentSnapshot().replace("iqc-conversation-candidate-input-v1","iqc-conversation-candidate-input-v99"));
+        assertThatThrownBy(()->service.annotate("sample",request)).hasMessageContaining("来源摘要无效");
+        assertThatThrownBy(()->io.github.opensabre.iqc.quality.BusinessReviewSampleService.candidateInputHash(
+                json.readTree(sample.getContentSnapshot()))).hasMessageContaining("不支持");
+    }
 }

@@ -31,6 +31,17 @@ import java.util.Set;
 @Service
 @RequiredArgsConstructor
 public class BusinessReviewSampleService {
+    /** Explicit candidate identity for exact-number pipeline sources; old candidate versions remain unchanged. */
+    public static final String EXACT_INPUT_SCHEMA="iqc-conversation-candidate-input-v3";
+    /** Replays the hash selected by the immutable candidate body protocol; unknown versions fail closed. */
+    public static String candidateInputHash(JsonNode input) {
+        return switch(input.path("schemaVersion").asText()) {
+            case "iqc-conversation-candidate-input-v1", "iqc-conversation-candidate-input-v2" -> PipelineAssetService.hash(input.toString());
+            case EXACT_INPUT_SCHEMA -> io.github.opensabre.iqc.selector.SelectorAssetService.hash(input.toString());
+            default -> throw IqcException.invalidState("不支持的会话候选输入协议");
+        };
+    }
+
     private final QualitySampleMapper samples;
     private final ResultReviewMapper reviews;
     private final ConversationInspectionResultMapper results;
@@ -124,8 +135,10 @@ public class BusinessReviewSampleService {
         var verifiedInput = io.github.opensabre.iqc.result.ReviewSampleInputValidator.validateInput(
                 source.getExecutionTraceJson(), transcript, task, source.getConversationId(), json);
         String executionInputHash = verifiedInput.executionInputHash();
+        var snapshot = parse(task.getRuleSnapshotJson());
+        boolean exact=PipelineRelease.EXACT_SCHEMA.equals(snapshot.path("pipelineSnapshot").path("release").path("schemaVersion").asText());
         boolean aligned = transcript.stream().anyMatch(message -> message.getStartMs()!=null || message.getEndMs()!=null || message.getConfidence()!=null);
-        var input = json.createObjectNode().put("schemaVersion", aligned ? "iqc-conversation-candidate-input-v2" : "iqc-conversation-candidate-input-v1")
+        var input = json.createObjectNode().put("schemaVersion", exact ? EXACT_INPUT_SCHEMA : aligned ? "iqc-conversation-candidate-input-v2" : "iqc-conversation-candidate-input-v1")
                 .put("conversationId", source.getConversationId()).put("channel", conversation.getChannel())
                 .put("sourceType", conversation.getSourceType()).put("businessType", conversation.getBusinessType())
                 .put("employeeId", conversation.getEmployeeId()).put("employeeGroupId", conversation.getEmployeeGroupId())
@@ -147,7 +160,6 @@ public class BusinessReviewSampleService {
             if(message.getEndMs()!=null)segment.put("endMs",message.getEndMs());
             if(message.getConfidence()!=null)segment.put("confidence",message.getConfidence());
         }
-        var snapshot = parse(task.getRuleSnapshotJson());
         boolean pipeline = snapshot.has("pipelineSnapshot");
         var marker = snapshot.path(pipeline ? "pipelineSnapshot" : "schemeSnapshot");
         Object scoring;
@@ -163,7 +175,7 @@ public class BusinessReviewSampleService {
                 .put("requestFingerprint", fingerprint).put("sourceResultId", resultId).put("taskId", task.getId())
                 .put("executionId", source.getExecutionId()).put("reviewId", reviewId).put("reviewRevision", review.getReviewRevision())
                 .put("reviewerId", review.getReviewerId()).put("reviewedTime", review.getReviewedTime().toString())
-                .put("sourceHash", review.getSourceHash()).put("inputHash", hash(input)).put("executionInputHash", executionInputHash);
+                .put("sourceHash", review.getSourceHash()).put("inputHash", candidateInputHash(input)).put("executionInputHash", executionInputHash);
         expected.set("expected", json.valueToTree(projection.reviewed()));
         expected.set("humanDecisions", json.valueToTree(projection.decisions()));
         if(projection.workflow()!=null)expected.set("reviewWorkflow",json.valueToTree(projection.workflow()));
@@ -220,7 +232,7 @@ public class BusinessReviewSampleService {
         return tags;
     }
     private JsonNode parse(String value) {
-        try { var node = json.readTree(value); if (node == null) throw new IllegalArgumentException(); return node; }
+        try { var node = PipelineAssetService.readFrozenTree(json,value); if (node == null) throw new IllegalArgumentException(); return node; }
         catch (Exception exception) { throw IqcException.invalidState("会话候选快照JSON无效"); }
     }
     private String hash(JsonNode value) { return PipelineAssetService.hash(value.toString()); }

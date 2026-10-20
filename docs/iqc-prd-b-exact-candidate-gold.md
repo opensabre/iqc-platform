@@ -1,0 +1,15 @@
+# Exact reviewed candidate source and Gold input
+
+Baseline B0436d01; processed conversations only. This batch extends the existing QualitySample/Gold path and tables; no speech conversion, service, parallel persistence model or global mapper is added.
+
+BusinessReviewSampleService issues `iqc-conversation-candidate-input-v3` only when its persisted source task contains an explicit PipelineRelease v2. It retains v1/v2 candidate bodies for existing sources. The candidate body schema selects its input hash: v3 reuses SelectorAssetService.hash, while v1/v2 keep the historical pipeline hash. Unknown schemas reject. A single public candidateInputHash function is shared with GoldSampleService; no mutable extra algorithm field can disagree with the body version.
+
+Source task decoding reuses PipelineAssetService.readFrozenTree, preserving the release precision while validating the original policy-source hash. Existing immutable retry logic and access scope remain. Gold reads candidate bodies using its existing exact JSON reader; v3 supports the same optional processed-message timing coordinates as v2, without generating any transcript.
+
+The service test assembles a frozen v2 task and production inputs, invokes actual candidate creation and Gold annotate/review services, and verifies exact context in the candidate, Gold draft and approved Gold body. Changing 0.900000000000000001 to 0.900000000000000002 while retaining candidate lineage must reject before another annotation is stored. A separate test rejects an unknown body protocol. Existing legacy and annotation/dataset tests are retained.
+
+Fixture limits: source business review validation is mocked, the input trace hash is assembled using the shared hash contract, archive and persistence Mappers are mocks. The frozen PipelineRelease fixture has no runtime nodes; this test does not prove publication/runtime validation. Real runtime input validation was separately exercised in the preceding batch. These are service-boundary tests, not SQL transactional or real-role evidence.
+
+Still open: Gold approval/rejection version's own contentHash and DatasetSnapshot's whole-body hash retain their legacy numeric protocol. This batch protects the candidate-source identity and preserves exact Gold values, but does not claim those later content identities distinguish adjacent numbers. They need a versioned repair and historical compatibility tests before activation of the overall v2 default. Action copies, evaluation snapshots, full real SQL workflows and A's CUSTOM integration also remain open.
+
+Verification: session 25510 terminal exit 0, `/tmp/iqc-b-exact-candidate-gold.log`; full Maven `test` lifecycle rebuilt main sources. Three fresh XML reports, 26 tests, zero failures/errors/skips: BusinessReviewSampleService10, GoldSampleReview13, ExactPipelineExecutionInput3. The new cross-service candidate→Gold test and unknown-schema rejection passed together with existing legacy cases. No SQL or full production end-to-end claim follows from these counts.

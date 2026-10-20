@@ -184,4 +184,54 @@ class BusinessReviewSampleServiceTest {
         verify(samples,times(1)).insert(any(QualitySample.class));
     }
 
+
+    @Test void exactPipelineCandidateSurvivesGoldApprovalAndRejectsAdjacentContextTampering() throws Exception {
+        json.findAndRegisterModules();
+        String decimal="0.900000000000000001";
+        var scoring=json.treeToValue(json.readTree(task.getRuleSnapshotJson()).at("/schemeSnapshot/release/definition/scoring"),InspectionScoring.Policy.class);
+        var release=new io.github.opensabre.iqc.pipelineasset.PipelineRelease(
+                io.github.opensabre.iqc.pipelineasset.PipelineRelease.EXACT_SCHEMA,
+                new io.github.opensabre.iqc.pipeline.PipelineDefinition(io.github.opensabre.iqc.pipeline.PipelineDefinition.SCHEMA,List.of()),
+                new io.github.opensabre.iqc.fusion.FusionPolicy("f",1,io.github.opensabre.iqc.fusion.FusionPolicy.Method.PRIORITY,
+                        java.util.Map.of(),java.util.Map.of(),null,java.util.Set.of()),scoring,
+                List.of(new io.github.opensabre.iqc.pipelineasset.PipelineRelease.ItemMapping("a","COMPLIANCE",io.github.opensabre.iqc.scheme.SchemeDefinition.HitMeaning.VIOLATION)));
+        var context=json.createObjectNode().put("value",new java.math.BigDecimal(decimal));
+        var frozen=transcript.stream().map(m->new io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Message(
+                m.getId(),m.getSequenceNo(),m.getSpeakerRole(),m.getContent(),m.getRelativeTime())).toList();
+        var body=json.valueToTree(List.of(new io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Input("conversation","f",context,frozen)));
+        var root=json.createObjectNode();root.putObject("executionStrategy").put("mode","PIPELINE");
+        root.putObject("pipelineSnapshot").put("pipelineId","p").put("versionNo",1)
+                .put("contentHash",PipelineAssetService.hash(json.writeValueAsString(release))).set("release",json.valueToTree(release));
+        root.putObject("productionInputs").put("schemaVersion","iqc-production-inputs-v1").put("hashAlgorithm","selector-decimal-sha256-v1")
+                .put("contentHash",io.github.opensabre.iqc.selector.SelectorAssetService.hash(body.toString())).set("conversations",body);
+        task.setTaskType("PIPELINE");task.setStatus("SUCCEEDED");task.setTotalMessages(2);task.setConversationIdsJson("[\"conversation\"]");
+        task.setRuleSnapshotJson(root.toString());
+        var prepared=new io.github.opensabre.iqc.conversation.ProductionInputSnapshotService(null,null,null,json).prepare(task,root);
+        var executionInput=io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.executionInput(prepared.messages().get("conversation"),context,json);
+        result.setExecutionTraceJson(json.createObjectNode().put("schemaVersion","iqc-pipeline-execution-v1")
+                .put("inputHash",io.github.opensabre.iqc.selector.SelectorAssetService.hash(executionInput.toString())).toString());
+        var sample=create();String original=sample.getContentSnapshot();
+        var input=new ObjectMapper().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readTree(original);
+        assertThat(input.path("schemaVersion").asText()).isEqualTo(BusinessReviewSampleService.EXACT_INPUT_SCHEMA);
+        assertThat(input.at("/businessContext/value").decimalValue()).isEqualByComparingTo(decimal);
+        assertThat(json.readTree(sample.getExpectedJson()).path("inputHash").asText())
+                .isEqualTo(io.github.opensabre.iqc.selector.SelectorAssetService.hash(original));
+        when(samples.selectOne(any())).thenReturn(sample);when(scope.canView("creator","group")).thenReturn(true);
+        var versions=mock(io.github.opensabre.iqc.quality.dao.QualitySampleVersionMapper.class);
+        var gold=new io.github.opensabre.iqc.quality.evaluation.GoldSampleService(samples,versions,null,null,scope,json);
+        var finding=new io.github.opensabre.iqc.quality.evaluation.GoldFinding("COMPLIANCE",io.github.opensabre.iqc.finding.Finding.ValueType.BOOLEAN,
+                io.github.opensabre.iqc.finding.Finding.State.KNOWN,json.getNodeFactory().booleanNode(false),List.of("m1"));
+        gold.annotate(sample.getId(),new io.github.opensabre.iqc.quality.evaluation.GoldSampleService.Annotation(0,List.of(finding),null,List.of(),
+                io.github.opensabre.iqc.quality.evaluation.GoldConversation.Difficulty.BASIC,null));
+        var draft=gold.read(sample.getGoldDraftJson(),io.github.opensabre.iqc.quality.evaluation.GoldDraft.class);
+        assertThat(draft.businessContext().at("/conversation/businessContext/value").decimalValue()).isEqualByComparingTo(decimal);
+        sample.setContentSnapshot(original.replace(decimal,"0.900000000000000002"));
+        assertThatThrownBy(()->gold.annotate(sample.getId(),new io.github.opensabre.iqc.quality.evaluation.GoldSampleService.Annotation(1,List.of(finding),null,List.of(),
+                io.github.opensabre.iqc.quality.evaluation.GoldConversation.Difficulty.BASIC,null))).hasMessageContaining("来源摘要无效");
+        sample.setContentSnapshot(original);when(scope.owner()).thenReturn("independent-reviewer");
+        var approved=gold.review(sample.getId(),1,true,"checked exact input");
+        assertThat(gold.read(approved.getSnapshotJson(),io.github.opensabre.iqc.quality.evaluation.GoldConversation.class)
+                .businessContext().at("/conversation/businessContext/value").decimalValue()).isEqualByComparingTo(decimal);
+        assertThat(sample.getContentSnapshot()).isEqualTo(original);
+    }
 }
