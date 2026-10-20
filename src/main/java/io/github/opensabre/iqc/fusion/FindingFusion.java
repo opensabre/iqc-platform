@@ -69,6 +69,27 @@ public final class FindingFusion {
                 if (selected.isEmpty()) return result(code, raw, selected, Finding.State.NOT_EVALUATED, null, policy,
                         explanation + " produced no observation");
             }
+            case WEIGHTED -> {
+                if(raw.stream().map(f->f.source().nodeId()).distinct().count()!=raw.size())
+                    throw new IllegalArgumentException("weighted fusion requires one observation per source node; aggregate repeat runs first");
+                if(raw.stream().anyMatch(f->!policy.nodeWeights().containsKey(f.source().nodeId())))
+                    throw new IllegalArgumentException("weighted fusion requires an explicit weight for every observed source");
+                var total=raw.stream().map(f->weight(f,policy)).reduce(java.math.BigDecimal.ZERO,java.math.BigDecimal::add);
+                selected=List.of();var accepted=java.math.BigDecimal.ZERO;
+                for(var candidate:raw){
+                    if(candidate.state()!=Finding.State.KNOWN)continue;
+                    var supporters=raw.stream().filter(f->f.state()==Finding.State.KNOWN&&sameValue(f.value(),candidate.value())).toList();
+                    var support=supporters.stream().map(f->weight(f,policy)).reduce(java.math.BigDecimal.ZERO,java.math.BigDecimal::add);
+                    if(support.multiply(java.math.BigDecimal.valueOf(2)).compareTo(total)>0){selected=supporters;accepted=support;break;}
+                }
+                if(selected.isEmpty()){
+                    var known=raw.stream().filter(f->f.state()==Finding.State.KNOWN).toList();
+                    boolean conflict=known.stream().anyMatch(f->!sameValue(f.value(),known.getFirst().value()));
+                    return result(code,raw,raw,conflict?Finding.State.CONFLICT:incompleteState(raw),null,policy,
+                            "No strict weighted majority across observed source weight "+total.toPlainString()+"; incomplete observations abstain");
+                }
+                explanation="Strict weighted majority "+accepted.toPlainString()+" / "+total.toPlainString()+"; source weights are not calibrated confidence";
+            }
             case VOTING -> {
                 if (raw.stream().map(f -> f.source().nodeId()).distinct().count() != raw.size())
                     throw new IllegalArgumentException("voting requires one observation per source node; aggregate repeat runs first");
@@ -91,6 +112,9 @@ public final class FindingFusion {
         Finding.State state = resolve(selected);
         JsonNode value = state == Finding.State.KNOWN ? selected.getFirst().value() : null;
         return result(code, raw, selected, state, value, policy, explanation);
+    }
+    private static java.math.BigDecimal weight(Finding finding,FusionPolicy policy){
+        return new java.math.BigDecimal(policy.nodeWeights().get(finding.source().nodeId()));
     }
     private static Finding.State resolve(List<Finding> selected) {
         var known = selected.stream().filter(f -> f.state() == Finding.State.KNOWN).toList();
