@@ -101,7 +101,7 @@ public class ActionProductionSourceValidator {
 
     private Validated validateFacts(Reference reference,InspectionTask task,ConversationInspectionResult result,boolean historical) {
         try {
-            var snapshot=json.readTree(task.getRuleSnapshotJson());
+            var snapshot=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenTree(json,task.getRuleSnapshotJson());
             boolean rollout=io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.requiresEvidence(task.getId())
                     ||snapshot!=null&&snapshot.has("rolloutSnapshot");
             if(rollout)snapshot=json.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
@@ -119,7 +119,7 @@ public class ActionProductionSourceValidator {
             var prepared=inputs.prepare(task,snapshot);
             if(prepared==null)throw IqcException.invalidState("动作来源缺少冻结生产输入");
             var messages=prepared.messages().get(reference.conversationId());
-            var trace=json.readValue(result.getExecutionTraceJson(),PipelineConversationEvaluator.Evaluation.class);
+            var trace=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenValue(json,result.getExecutionTraceJson(),PipelineConversationEvaluator.Evaluation.class,release);
             if(trace==null || !"iqc-pipeline-execution-v1".equals(trace.schemaVersion())
                     || trace.run()==null || trace.run().status()==null || trace.fusion()==null || trace.items()==null || trace.scoring()==null)
                 throw IqcException.invalidState("动作来源执行轨迹不完整");

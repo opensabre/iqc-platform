@@ -23,3 +23,7 @@ Required repair constraints:
 5. Reject unknown protocols; verify neighboring decimals cannot bypass published-source/task evidence checks. Include original historical fixtures and the current gray/worker/decision-revision validations.
 
 No production fix, migration, shared SQL, framework change, push or deployment was performed in this diagnostic batch. The two red assertions describe desired precision; the eventual versioned API may require routing the identity assertion through the explicit new protocol while retaining the legacy guard unchanged.
+
+## Subsequent staged repair
+
+A later B core batch introduces explicit release v2 and reruns the precision requirements against that protocol, retaining explicit v1 behavior and the original failure evidence. See `iqc-pipeline-numeric-protocol-v2.md`. The core batch is green for its 27 selected tests; default v1 creation has not been upgraded, and full persisted workflows remain open. The earlier paragraph describing red branch state applies to diagnostic commit a4ed4c8, not subsequent staged commits.

@@ -522,13 +522,34 @@ public class PipelineAssetService {
         try{return json.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readTree(value);}
         catch(Exception invalid){throw IqcException.invalidState("流水线JSON无效");}
     }
-    private JsonNode parse(String value) { try { return json.readTree(value); } catch(Exception ex) { throw IqcException.invalidState("流水线JSON无效"); } }
+    private JsonNode parse(String value) { try { return readFrozenTree(json,value); } catch(Exception ex) { throw IqcException.invalidState("流水线JSON无效"); } }
     public String write(Object value) { try { return json.writeValueAsString(value); } catch(Exception ex) { throw IqcException.invalidState("无法冻结流水线配置"); } }
     public static String hash(String value) {
         try {
-            JsonNode parsed=new ObjectMapper().readTree(value);
+            JsonNode parsed=readFrozenTree(new ObjectMapper(),value);
+            if(usesExactNumbers(parsed))return io.github.opensabre.iqc.selector.SelectorAssetService.hash(value);
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical(parsed).toString().getBytes(StandardCharsets.UTF_8)));
         } catch(Exception ex) { throw new IllegalStateException("Invalid frozen JSON",ex); }
+    }
+    /** Dispatches only recognized release envelopes; arbitrary nested user fields cannot opt into v2. */
+    public static boolean usesExactNumbers(JsonNode value) {
+        if(value==null)return false;
+        return PipelineRelease.EXACT_SCHEMA.equals(value.path("schemaVersion").asText())
+                || PipelineRelease.EXACT_SCHEMA.equals(value.path("release").path("schemaVersion").asText())
+                || PipelineRelease.EXACT_SCHEMA.equals(value.path("pipelineSnapshot").path("release").path("schemaVersion").asText());
+    }
+    /** Reads persisted release/task JSON without changing historical v1 number representation. */
+    public static JsonNode readFrozenTree(ObjectMapper mapper,String body) throws com.fasterxml.jackson.core.JsonProcessingException {
+        JsonNode exact=mapper.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readTree(body);
+        return usesExactNumbers(exact)?exact:mapper.readTree(body);
+    }
+    /** Trace decoding follows its frozen release, never a current mutable configuration. */
+    public static <T> T readFrozenValue(ObjectMapper mapper,String body,Class<T> type,PipelineRelease release)
+            throws com.fasterxml.jackson.core.JsonProcessingException {
+        var reader=mapper.readerFor(type);
+        if(PipelineRelease.EXACT_SCHEMA.equals(release.schemaVersion()))
+            reader=reader.with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
+        return reader.readValue(body);
     }
     private static JsonNode canonical(JsonNode value) {
         var factory=com.fasterxml.jackson.databind.node.JsonNodeFactory.instance;

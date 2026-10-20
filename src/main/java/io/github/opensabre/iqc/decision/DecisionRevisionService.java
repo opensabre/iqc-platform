@@ -85,14 +85,14 @@ public class DecisionRevisionService {
         if (result == null || !task.getId().equals(result.getTaskId()))
             throw IqcException.invalidState("源结果已变化");
         try {
-            var snapshot = json.readTree(task.getRuleSnapshotJson());
+            var snapshot = io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenTree(json,task.getRuleSnapshotJson());
             if (snapshot == null || !snapshot.isObject() || !snapshot.path("pipelineSnapshot").isObject())
                 throw IqcException.invalidArgument("当前重算仅支持流水线事实结果");
             var marker = snapshot.path("pipelineSnapshot");
             var release = json.treeToValue(marker.path("release"), PipelineRelease.class);
             if (!hash(release).equals(marker.path("contentHash").asText()))
                 throw IqcException.invalidState("源流水线快照摘要不一致");
-            var trace = json.readValue(result.getExecutionTraceJson(), PipelineConversationEvaluator.Evaluation.class);
+            var trace = io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenValue(json,result.getExecutionTraceJson(), PipelineConversationEvaluator.Evaluation.class,release);
             if (trace == null || trace.fusion() == null || trace.scoring() == null)
                 throw IqcException.invalidState("源执行轨迹不完整");
             if (!"iqc-pipeline-execution-v1".equals(trace.schemaVersion()))

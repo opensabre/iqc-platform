@@ -1651,7 +1651,7 @@ public class InspectionExecutionService {
     private JsonNode readSnapshot(String snapshot) {
         if (snapshot == null || snapshot.isBlank()) return null;
         try {
-            var tree=objectMapper.readTree(snapshot);
+            var tree=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenTree(objectMapper,snapshot);
             return tree!=null&&tree.has("rolloutSnapshot")?objectMapper.reader()
                     .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readTree(snapshot):tree;
         }
