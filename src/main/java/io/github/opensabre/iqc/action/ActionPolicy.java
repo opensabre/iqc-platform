@@ -22,7 +22,9 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
     public enum Kind {ALWAYS,ALL,ANY,NOT,FINDING_EQUALS,FINDING_STATE,ITEM_STATUS,RISK_AT_LEAST,FINAL_SCORE_BELOW,RESULT_STATUS,LABEL_EQUALS,BUSINESS_EQUALS,REVIEW_REQUIRED}
     public record Action(String actionId,ActionExecutionContract.Type type,Condition condition,
                          Idempotency idempotency,AutomaticRetryPolicy retry,FailureHandling failureHandling,
-                         JsonNode configuration,
+                         @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class)
+            @tools.jackson.databind.annotation.JsonSerialize(using=io.github.opensabre.iqc.quality.evaluation.BenchmarkService.HttpTreeSerializer.class)
+            JsonNode configuration,
                          @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
                          Integer adapterVersion) {
         public Action(String actionId,ActionExecutionContract.Type type,Condition condition,
@@ -41,9 +43,12 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
         @Override public JsonNode configuration(){return configuration.deepCopy();}
         public int effectiveAdapterVersion(){return adapterVersion==null?1:adapterVersion;}
     }
-    public record Condition(Kind kind,String code,JsonNode value,List<Condition> children,
+    public record Condition(Kind kind,String code,@tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class)
+            @tools.jackson.databind.annotation.JsonSerialize(using=io.github.opensabre.iqc.quality.evaluation.BenchmarkService.HttpTreeSerializer.class)
+            JsonNode value,List<Condition> children,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
             @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.DecimalThresholdDeserializer.class)
+            @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.HttpDecimalThresholdDeserializer.class)
             String decimalOperand) {
         public Condition(Kind kind,String code,JsonNode value,List<Condition> children) {
             this(kind,code,value,children,null);

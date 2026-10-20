@@ -66,7 +66,8 @@ public record PipelineRelease(String schemaVersion, PipelineDefinition pipeline,
     }
     /** Exact threshold data reuses the pipeline comparator; absent fields retain legacy boolean mapping. */
     public record NumericPredicate(PipelineDefinition.Operator operator,
-            @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=DecimalThresholdDeserializer.class) String threshold) {
+            @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=DecimalThresholdDeserializer.class)
+            @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.HttpDecimalThresholdDeserializer.class) String threshold) {
         public NumericPredicate {
             if(operator==null || operator==PipelineDefinition.Operator.EXISTS || threshold==null || threshold.length()>64
                     || !threshold.matches("[-+]?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?"))
@@ -86,6 +87,14 @@ public record PipelineRelease(String schemaVersion, PipelineDefinition pipeline,
             if(!parser.hasToken(com.fasterxml.jackson.core.JsonToken.VALUE_STRING))
                 throw com.fasterxml.jackson.databind.JsonMappingException.from(parser,"Numeric threshold must be a decimal JSON string");
             return parser.getText();
+        }
+    }
+    /** Same strict decimal-string contract at the default Jackson 3 MVC boundary. */
+    public static final class HttpDecimalThresholdDeserializer extends tools.jackson.databind.ValueDeserializer<String> {
+        @Override public String deserialize(tools.jackson.core.JsonParser parser,tools.jackson.databind.DeserializationContext context){
+            if(!parser.hasToken(tools.jackson.core.JsonToken.VALUE_STRING))
+                return context.reportInputMismatch(String.class,"Numeric threshold must be a decimal JSON string");
+            return parser.getString();
         }
     }
     public void validateFindingTypes(java.util.Map<String,io.github.opensabre.iqc.finding.Finding.ValueType> types) {

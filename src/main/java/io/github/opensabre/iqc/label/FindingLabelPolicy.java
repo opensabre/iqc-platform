@@ -8,7 +8,9 @@ import java.util.Set;
 
 /** Frozen catalog metadata is embedded in the existing Pipeline release, never a parallel label version store. */
 public record FindingLabelPolicy(String schemaVersion,List<Binding> bindings,
-        @JsonInclude(JsonInclude.Include.NON_NULL) JsonNode directory) {
+        @JsonInclude(JsonInclude.Include.NON_NULL) @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class)
+            @tools.jackson.databind.annotation.JsonSerialize(using=io.github.opensabre.iqc.quality.evaluation.BenchmarkService.HttpTreeSerializer.class)
+            JsonNode directory) {
     public static final String SCHEMA="iqc-finding-label-policy-v1";
     public record Binding(String labelId,int labelVersion,String valueCode,String findingCode) {
         public Binding {

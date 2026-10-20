@@ -395,3 +395,15 @@ CREATE_RISK_EVENT v1引用原冻结生产结果/动作账本，稳定幂等事�
 复用FindingFusion.Result增加可空finalConfidence，原12参构造及空字段省略兼容；仅CONFIDENCE政策的KNOWN结果从已声明校准的选中来源输出精确值，WEIGHTED等策略不产生概率。ReviewPolicy核对原来源后消费；人工改判清空机器置信度。动作来源/人工复核/原政策重算严格复现旧轨迹时保留原字段缺省，其他字段继续完整比较；新生产/评测/目标政策重算生成新字段。前端结果详情展示并校验范围/KNOWN状态。
 
 后端原96021及最终47485均terminal exit0（skipTests test-compile）；前端原97925 terminal exit0（vue-tsc+Vite，1m9s，体积提示）。未新增/运行测试、共享SQL或部署；独立行为/两代codec/旧hash与重放兼容仍交B验证，不视为全PRD完成。
+
+## Pipeline敏感配置批次（2026-10-20）
+
+沿用单租户组织scope、原FULL/PII/PROMPT授权与ResultReadProjection，流水线目录/草稿/历史及保存/发布/启停回执按专门读取和元数据回执投影；仅三项敏感grant齐备的专门详情/历史回原完整正文，非持久privacy记录扣留状态。UI受限草稿不建空编辑器，不误覆盖，已发布任务能力保留；历史重读先清旧数据，评测页兼容空正文。端点/边界/证据见iqc-sensitive-read-projection.md及协作台账。当前仅编译/构建，不称实际角色/PDP/浏览器验收；其它配置副本与I1–I7继续。
+
+## Skill敏感配置批次（2026-10-20）
+
+原唯一list配置读和版本历史按FULL/PII/PROMPT三grant投影，命令回执不带指令/Schema/说明；ID/code/version/status保留供原Agent/流水线选用，不新增API/表/ACL。UI受限不加载空表单、不保存覆盖，成功后清表单独立重读，卸载隔离迟到响应。后端77870/前端99858构建均exit0，Root没有新增/运行测试；B独立授权/HTTP/真实角色验收待，全部适用I1–I7继续。详情见iqc-sensitive-read-projection.md。
+
+## 完整PipelineRelease HTTP字段桥接批次（2026-10-20）
+
+复用已有本地HTTP精确树decoder/serializer接六个实际嵌套请求字段；新增单一Jackson3严格十进制JSON字符串guard接原数值谓词/Action/Review/高级评分字段。Jackson2/全局mapper/framework/旧摘要算法不改，后端98028 skipTests test-compile terminal0。B原基线完整MVC复现与修复后回归待，存储和摘要精度/旧hash兼容单列后续验证；完整适用I1–I7继续。

@@ -139,9 +139,12 @@ public final class InspectionScoring {
                 new Coverage(policy.items().size(), completed, notApplicable, pending));
     }
     public record ItemAdjustment(String itemCode,
-            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class) String weight,
-            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class) String passAdjustment,
-            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class) String failAdjustment,
+            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class)
+            @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.HttpDecimalThresholdDeserializer.class) String weight,
+            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class)
+            @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.HttpDecimalThresholdDeserializer.class) String passAdjustment,
+            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class)
+            @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.HttpDecimalThresholdDeserializer.class) String failAdjustment,
             String dimensionCode,ActionPolicy.Condition appliesWhen) {
         public ItemAdjustment {
             identity(itemCode);range(weight,BigDecimal.ZERO,BigDecimal.valueOf(100),false);
@@ -152,18 +155,23 @@ public final class InspectionScoring {
         }
     }
     public record Dimension(String code,int baseScore,int passingScore,
-            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class) String lowerBound,
-            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class) String upperBound) {
+            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class)
+            @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.HttpDecimalThresholdDeserializer.class) String lowerBound,
+            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class)
+            @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.HttpDecimalThresholdDeserializer.class) String upperBound) {
         public Dimension {identity(code);bounds(lowerBound,upperBound);if(baseScore<1 || baseScore>100
                 || BigDecimal.valueOf(passingScore).compareTo(decimal(lowerBound))<0 || BigDecimal.valueOf(passingScore).compareTo(decimal(upperBound))>0)
             throw IqcException.invalidArgument("维度基础分或合格线无效");}
     }
-    public record Grade(String code,@JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class) String minimumScore) {
+    public record Grade(String code,@JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class)
+            @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.HttpDecimalThresholdDeserializer.class) String minimumScore) {
         public Grade {identity(code);range(minimumScore,BigDecimal.ZERO,BigDecimal.valueOf(100),true);}
     }
     public record Advanced(String schemaVersion,
-            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class) String lowerBound,
-            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class) String upperBound,
+            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class)
+            @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.HttpDecimalThresholdDeserializer.class) String lowerBound,
+            @JsonDeserialize(using=PipelineRelease.DecimalThresholdDeserializer.class)
+            @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.HttpDecimalThresholdDeserializer.class) String upperBound,
             List<ItemAdjustment> items,List<Dimension> dimensions,List<Grade> grades) {
         public static final String SCHEMA="iqc-score-advanced-v1";
         public Advanced {

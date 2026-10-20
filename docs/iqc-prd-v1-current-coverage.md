@@ -14,7 +14,7 @@
 | 6.1 批量/定时/事件/API / I4 | InspectionTaskService、PeriodicScheduleService、TaskTriggerController、EventSubscriptionController | 已编码；实际触发/恢复、真实身份与供应商联调待验。排除语音流，不排除业务完成事件。 |
 | 6.2–6.4 表单/状态/幂等 / I1/I4 | 现有tasks页、Pipeline任务表单、TaskExecution、队列与自动重试、灰度TaskEvidence | 原任务/请求重放已编码；当前用户表单是否覆盖全部建议项、跨重启/并发和取消恢复仍须场景证明。 |
 | 7 条件/7种抽样/预览 / I4 | selector包、SelectorAssetService、ConversationSelectorController及原SelectorEditor | 已编码，B有授权投影/精确版本专项；真实数据分布与调度联动待验。 |
-| 8.1 节点协议/错误/映射 / I1/I2 | PipelineDefinition、PipelineRuntime、PipelineConversationEvaluator | 已编码；节点输入/输出、重试/超时/失败非阴性与恢复须完整行为证据。 |
+| 8.1 节点协议/错误/映射 / I1/I2 | PipelineDefinition、PipelineRuntime、PipelineConversationEvaluator | 已编码；本批补完整PipelineRelease嵌套HTTP树/精确字符串接线（独立MVC验证待）；节点输入/输出、重试/超时/失败非阴性与恢复须完整行为证据。 |
 | 8.2 Rule/Regex/LLM / I1/I2 | RuleMatcher、ItemRouteRunner、原LLM适配与Gateway | 已编码；实际模型输出/证据及旧路线对照待统一验收。 |
 | 8.2 Metric/Session / I6 | TranscriptTimingMetrics、TranscriptMetricEngine、SessionAggregationEngine | 复用已处理消息时间/业务上下文，不生成语音转写；语义范围及真实会话指标验收待核对。不能把片段时间指标直接称声学测量。 |
 | 8.2 SmallModel/Skill/API / I6 | SmallModelDetectorEngine/Contract、Skill API、原资产版本与引用 | 相关适配已编码，不能继续按旧迭代表称SmallModel未集成；真实外部服务/降级/成本契约待验。 |
@@ -35,7 +35,7 @@
 | 14.6 反馈回归 / I3/I5 | BusinessReviewSampleService、原候选动作/审批/Dataset版本 | 相关闭环已编码；从误判修正到下一版本回归的场景E仍需端到端证据。 |
 | 15 已处理会话 / I1 | Conversation/Message、ProductionInputSnapshotService、ConversationQueryController | 消息与时间证据/来源固化已有；语音转换不再列待办；输入/附件/业务上下文及授权证据待核对。 |
 | 16 Registry/Gateway / I6/I7 | 模型资产、Gateway、预算/费用/限流/对账与调用诊断 | 已编码多项；实际供应商超时/Fallback、Token/成本和调用归属/并发预算待统一证明。 |
-| 17 所有对象版本与发布 / I3/I7 | 原各资产版本、Snapshot、Pipeline/灰度修订 | 多数对象已有版本；独立Prompt/Knowledge Base版本如何复用原资产仍需明确核对，不能只凭Pipeline整体hash视为每项全部完成。 |
+| 17 所有对象版本与发布 / I3/I7 | 原各资产版本、Snapshot、Pipeline/灰度修订 | 多数对象已有版本；Pipeline存储/摘要高精度数值及旧hash兼容须独立验证，HTTP桥接不替代该证据；独立Prompt/Knowledge Base版本如何复用原资产仍需明确核对，不能只凭Pipeline整体hash视为每项全部完成。 |
 | 17 GRAY/FULL与P2 A/B / I7 | RolloutPolicy/Service/TaskService/ExecutionGuard、Benchmark | 显式IDs灰度新请求/原请求重放已编码；0/10000/回退为同一政策语义。调度/Selector灰度、生产AB归因及真实激活回退验收按实际需求继续，不能只做预览。 |
 | 18 Trace/监控/审计 / I1/I7 | executionTrace、ModelMonitoring、公共审计starter | 节点/模型轨迹与部分监控已编码；Finding分布/人工修改率/Action失败率等运营指标与真实审计切面未整体证明。 |
 | 19 功能/数据/敏感权限 / I7 | IqcDataScope、SensitiveReadAccessService、ResultReadProjection及组织迁移 | 多项会话/任务/样本/评测/Selector等投影已有；Pipeline/Scheme/Agent/Rule/Skill/Model配置与人工复核等剩余敏感副本仍须收口，真实四角色/网关验收待做。 |
