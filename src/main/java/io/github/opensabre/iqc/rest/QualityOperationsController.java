@@ -76,10 +76,12 @@ public class QualityOperationsController {
     /** Scoped, paginated label rounds for the quality operator's worklist. */
     @GetMapping("/label-reviews")
     @ResourcePermission(code="iqc:review:label:queue", name="查看标签值复核待办", type="iqc", description="按任务范围查询标签复核轮次")
-    public io.github.opensabre.iqc.shared.IqcPage<io.github.opensabre.iqc.label.model.LabelReviewQueueItem> labelReviewQueue(
+    @Audit(operationType=OperationType.QUERY,description="读取标签复核队列",module="IQC_PRIVACY",request=false,response=false)
+    public io.github.opensabre.iqc.privacy.ResultReadProjection.ReviewQueuePage<io.github.opensabre.iqc.label.model.LabelReviewQueueItem> labelReviewQueue(
             @RequestParam(required=false) String status, @RequestParam(required=false) String taskId,
             @RequestParam(defaultValue="1") int current, @RequestParam(defaultValue="20") int size) {
-        return labelReviews.queue(status, taskId, current, size);
+        var access=readAccess("iqc:review:label:queue");
+        return resultProjection.labelReviewQueue(labelReviews.queue(status, taskId, current, size),access);
     }
 
     @PostMapping("/label-reviews/{reviewId}/decision")
@@ -144,7 +146,7 @@ public class QualityOperationsController {
         }
         if ("QUEUE".equals(view)) {
             if (!business(targetType) || resultId != null) throw IqcException.invalidArgument("待办视图只支持业务复核，不能指定单结果历史");
-            return businessReviews.queue(status, taskId, current, size);
+            return resultProjection.businessReviewQueue(businessReviews.queue(status, taskId, current, size),access);
         }
         if (!"HISTORY".equals(view) || taskId != null) throw IqcException.invalidArgument("不支持的复核视图或筛选");
         if (business(targetType)) {

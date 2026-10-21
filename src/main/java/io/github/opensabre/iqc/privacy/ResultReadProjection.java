@@ -732,6 +732,29 @@ public final class ResultReadProjection {
                 configurationPrivacy("iqc-finding-review-context-read-v1",access,canonical,List.of("findings","messages")));
     }
 
+    public record ReviewQueuePage<T>(List<T> records,long current,long size,long total,Map<String,Object> privacy) { }
+    public ReviewQueuePage<io.github.opensabre.iqc.quality.model.BusinessReviewQueueItem> businessReviewQueue(
+            io.github.opensabre.iqc.shared.IqcPage<io.github.opensabre.iqc.quality.model.BusinessReviewQueueItem> source,SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(source);Objects.requireNonNull(access);boolean reveal=access.fullConversation()&&access.pii();
+        var rows=source.records().stream().map(row->new io.github.opensabre.iqc.quality.model.BusinessReviewQueueItem(
+                row.reviewId(),row.resultId(),row.taskId(),text(row.taskName(),reveal),row.conversationId(),row.reviewRevision(),row.status(),
+                reveal?row.requestComment():null,text(row.createdBy(),reveal),row.createdTime(),row.taskStatus(),row.currentResult(),row.stage())).toList();
+        return new ReviewQueuePage<>(rows,source.current(),source.size(),source.total(),
+                configurationPrivacy("iqc-review-queue-read-v1",access,reveal,List.of("records.requestComment")));
+    }
+    public ReviewQueuePage<io.github.opensabre.iqc.label.model.LabelReviewQueueItem> labelReviewQueue(
+            io.github.opensabre.iqc.shared.IqcPage<io.github.opensabre.iqc.label.model.LabelReviewQueueItem> source,SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(source);Objects.requireNonNull(access);boolean reveal=access.fullConversation()&&access.pii();
+        var rows=source.records().stream().map(row->{
+            var copy=new io.github.opensabre.iqc.label.model.LabelReviewQueueItem();BeanUtils.copyProperties(row,copy);
+            copy.setTaskName(text(row.getTaskName(),reveal));copy.setLabelName(text(row.getLabelName(),reveal));
+            copy.setValueDescription(text(row.getValueDescription(),reveal));copy.setCreatedBy(text(row.getCreatedBy(),reveal));
+            if(!reveal)copy.setRequestComment(null);return copy;
+        }).toList();
+        return new ReviewQueuePage<>(rows,source.current(),source.size(),source.total(),
+                configurationPrivacy("iqc-review-queue-read-v1",access,reveal,List.of("records.requestComment")));
+    }
+
     private Map<String,Object> configurationPrivacy(String policyVersion,SensitiveReadAccessService.Access access,boolean canonical,List<String> withheld){
         var metadata=new LinkedHashMap<String,Object>();metadata.put("policyVersion",policyVersion);
         metadata.put("canonicalPayloadVisible",canonical);metadata.put("canReadFull",access.fullConversation());
