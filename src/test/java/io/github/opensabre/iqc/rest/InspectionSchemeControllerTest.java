@@ -34,6 +34,7 @@ class InspectionSchemeControllerTest {
         var gate = mock(SchemePublicationService.class);
         var tasks = mock(SchemeTaskService.class);
         var controller = controller(schemes, gate, tasks);
+        when(schemes.history("s1",7)).thenReturn(new InspectionSchemeService.VersionHistory(List.of(),null));
         controller.history("s1", 7);
         verify(schemes).history("s1", 7);
         verifyNoInteractions(gate, tasks);
@@ -142,6 +143,8 @@ class InspectionSchemeControllerTest {
 
     /** Protected entry points use current grants and a real response projection. */
     private InspectionSchemeController controller(InspectionSchemeService schemes, SchemePublicationService publication, SchemeTaskService tasks) {
+        when(publication.publish(anyString(),anyInt(),anyString(),anyBoolean())).thenReturn(new io.github.opensabre.iqc.scheme.model.InspectionSchemeVersion());
+        when(schemes.changeVersionArchive(anyString(),anyInt(),anyInt(),anyBoolean())).thenReturn(new io.github.opensabre.iqc.scheme.model.InspectionSchemeVersion());
         var grants=mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
         when(grants.current(anySet())).thenReturn(new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test",false,false,false,java.time.Instant.now()));
         return new InspectionSchemeController(schemes,publication,tasks,grants,

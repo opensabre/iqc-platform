@@ -430,3 +430,10 @@ CREATE_RISK_EVENT v1引用原冻结生产结果/动作账本，稳定幂等事�
 ## Rule敏感读取批次（2026-10-21）
 
 原Rule列表/历史、命令回执、测试与DLS导入诊断接原当前授权和响应副本；非LLM正文用FULL+PII，LLM再需PROMPT，识别含空白/大小写。结构状态/ID/版本/计数保持，UI受限不创建空版本、异步代次/关闭清理，原规则匹配/证据/评分和API路径不变。81613/93991及最终36835/95124编译构建均exit0，未运行Root测试/SQL/browser/部署；规则集仍另列，实际角色/网关/状态与来源不变验证交B，完整适用I1–I7保持。详见iqc-sensitive-read-projection.md。
+
+
+## RuleSet 读取边界（2026-10-21）
+
+复用既有规则业务授权及当前敏感授权，RuleSet list/history仅FULL+PII齐备返回原description；所有命令回执扣留description。响应副本使用iqc-rule-set-read-v1，非持久privacy为null时省略；ruleIdsJson原顺序、aggregationMode、ID/code/version/status保留，不改变检测或内部快照。页面仅保存成员选择所需元数据，关闭清理新建表单，刷新代次/卸载阻断迟到响应，创建提交复制输入，禁止提交期间关闭。页面本来没有历史编辑入口，未添加空描述覆盖路径。
+
+当前批次仅编译/前端构建；实际grant组合、源对象不变、内部JSON兼容、网关逐URL注册及浏览器生命周期仍待独立验证。单租户组织范围不变，完整I1–I7未完成。

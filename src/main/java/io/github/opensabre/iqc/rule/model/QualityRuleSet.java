@@ -10,6 +10,9 @@ import lombok.EqualsAndHashCode;
 @TableName("iqc_quality_rule_set")
 @EqualsAndHashCode(callSuper = true)
 public class QualityRuleSet extends BasePo {
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private java.util.Map<String, Object> privacy;
     private String name;
     private String code;
     private String description;

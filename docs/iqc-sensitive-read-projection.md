@@ -516,3 +516,40 @@ privacy使用iqc-rule-read-v1及现有canReadFull/canReadPii/canReadPrompt/canon
 UI从受限/未知协议响应清理正文，不把null构造为可保存空版本；版本列表保留摘要，表格明确正文未展示，编辑/保存入口受限。测试/导入诊断受限时不显示原片段/证据/消息，状态和计数仍可用；DLS表格按响应序号设key避免遮蔽后的名称碰撞。读取/测试/导入用generation隔离；关闭/卸载清正文、测试输入、历史及File引用，迟到响应不写旧组件。写操作固定发起目标与原始输入，失败提示先核对已有草稿/状态；导航不会撤销已发出的服务器写入，未发起的后续提交会停止。原规则选用无需获得表达式正文。
 
 首轮后端81613/前端93991及最终36835/95124均terminal exit0（skipTests test-compile / vue-tsc+Vite，最终51.16s，既有体积提示）。Root未新增/运行测试、SQL/browser/部署，不能凭编译判权限或业务正确。B待验证非LLM四种FULL/PII组合与LLM八grant组合（含大小写/空白）、撤权早拒绝服务、原实体/原字符串/证据/计数不变，命令回执不漏，ERROR/NOT_SUPPORTED、诊断扣留、受限不空存、关闭/卸载和实际网关角色。Scheme/RuleSet/Model及复核等副本、全部适用I1–I7继续。
+
+
+## RuleSet 读取边界（2026-10-21）
+
+复用既有规则业务授权及当前敏感授权，RuleSet list/history仅FULL+PII齐备返回原description；所有命令回执扣留description。响应副本使用iqc-rule-set-read-v1，非持久privacy为null时省略；ruleIdsJson原顺序、aggregationMode、ID/code/version/status保留，不改变检测或内部快照。页面仅保存成员选择所需元数据，关闭清理新建表单，刷新代次/卸载阻断迟到响应，创建提交复制输入，禁止提交期间关闭。页面本来没有历史编辑入口，未添加空描述覆盖路径。
+
+当前批次仅编译/前端构建；实际grant组合、源对象不变、内部JSON兼容、网关逐URL注册及浏览器生命周期仍待独立验证。单租户组织范围不变，完整I1–I7未完成。
+
+
+## Scheme审计正文边界（2026-10-21）
+
+现有Audit.request默认true（framework治理注解只读确认），Scheme创建/修订此前会将DraftRequest完整definition记录到审计。三个原有创建/修订/发布注解显式request=false,response=false；修订和发布保留目标id，操作类型/module不变。不改framework、业务请求或持久快照。
+
+Scheme整体读取边界尚未完成：published模板及专家history的ReleaseSnapshot携带dependencies和variantDependencies，包含规则expression及Agent configJson；不能只清理dependencies而遗漏变体副本。现有UI依赖snapshot.definition的executionVariants/runLimits及历史diff/派生，需专门安全选用元数据及受限编辑/历史展示联动，不能简单置空snapshot。ReleaseSnapshot构造校验要求变体集合与选中dependencies一致，投影不能制造假发布Release或参与hash。内部Release记录不应为显示投影改写。
+
+
+## 已发布Scheme普通读取投影（2026-10-21）
+
+GET /schemes/published目录及schemeId游标历史先检查当前scheme:view并设置no-store，查询审计不收正文。独立PublishedSchemeRead响应封装，不修改ReleaseSnapshot/内部快照/摘要。FULL+PII+PROMPT全部具备可回原发布正文；其它组合只回业务definition（item/评分/上限/variant/引用），自由名称沿原PII mask、描述扣留，dependencies仅executionMode和规则id/version/name，agent/label/route plan/variantDependencies不复制；policyVersion=iqc-scheme-template-read-v1。contentHash始终原发布物身份，不能用展示投影重算校验。
+
+普通前端API即使有全部权限，也只保留任务选择所需依赖元数据，不保存检测器正文；描述需已知协议全部grant方保留。原TemplateWizard仍按原definition/推荐变体/上限/执行模式及版本创建任务。专家draft/history/preview和发布回执仍待独立收口，不把普通模板路径完成当成整个Scheme域完成。实际权限组合/源快照不变/普通任务与历史/浏览器/网关注册待独立验证，本批仅编译构建。
+
+
+## Scheme专家读取与命令回执（2026-10-21）
+
+草稿list在原scheme:manage当前授权后复制实体，正文description/draftConfigJson仅FULL+PII+PROMPT齐备读取；命令回执始终扣留正文和presentation。非持久null省略的privacy和schemePresentation不改变原内部快照。专门草稿读取另给iqc-scheme-presentation-v1 typed业务definition（检测器ID/版本引用、评分、执行变体、上限），自由名称/说明走既有PII mask，非法定义显示UNAVAILABLE而不补默认。该展示数据供原试跑选用，不能作原草稿编辑。
+
+专家历史复用独立发布投影，保留来源修订/试跑/归档元数据；原Release/hash不改。preview仍执行原完整依赖校验，但仅返回schemeId/draftRevision/validated，不返回冻结检测器。发布/版本归档返回SchemeVersionReceipt元数据，无snapshotJson。创建/修订/停启用返回无正文草稿回执。各入口在调用业务前检查原资源码，no-store，查询审计无正文。
+
+页面受限/未知协议草稿禁止编辑/保存，合法选用presentation供试跑；派生按原服务端冻结引用创建，回执不直接当可编辑草稿，重读后有权限才打开。历史完整正文不足时禁差异比较并显示正文未展示，查看和派生/归档仍沿原业务权限。刷新/编辑代次及卸载清理用于阻止迟到回填；关闭编辑清配置。权限组合、内部旧JSON、真实Audit/网关/撤权/浏览器/试跑发布仍待独立验收，本批仅编译构建。
+
+
+## Model/MCP现有边界与审计修复（2026-10-21）
+
+IqcModelProfileController已用ModelView：不返回secretRef，仅secretConfigured；保留选择/管理需要的provider/model/endpoint/限额/价格等字段。ModelConnectionTestService返回固定安全诊断，不返回供应商异常原文。MCP现有secretRef为平台密钥引用，管理页面用于编辑，不能误称实际密钥或直接删除导致更新失效。未凭这些字段新增Prompt授权或另一套配置模型。
+
+IqcMcpServerController四个现有命令原Audit.request默认true，会复制name/description/endpoint/secretRef/allowedToolsJson请求。现均显式request=false,response=false；update/enable/disable保留目标#id，create保留原操作和模块。仅关闭额外审计正文，不改资产持久化/版本/Agent冻结引用/运行配置。模型与MCP接口当前业务授权/组织适用边界、响应中的自由描述及MCP实际请求/凭据规则仍须独立完整审查；不能把审计修复称为整个域隐私验收。
