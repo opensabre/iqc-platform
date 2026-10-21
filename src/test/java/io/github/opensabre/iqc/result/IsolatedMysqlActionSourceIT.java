@@ -46,8 +46,12 @@ class IsolatedMysqlActionSourceIT {
     @BeforeEach void fixture() throws Exception { fixture("SAVE_RESULT"); }
     void fixture(String type) throws Exception {fixture(type,null);}
     void fixture(String type,java.time.LocalTime relativeTime) throws Exception {
+        fixture(type,relativeTime,PipelineRelease.SCHEMA);
+    }
+    void fixture(String type,java.time.LocalTime relativeTime,String schema) throws Exception {
         jdbc.update("DELETE FROM iqc_inspection_conversation_result");jdbc.update("DELETE FROM iqc_task_execution");jdbc.update("DELETE FROM iqc_inspection_task");
-        var release=json.readValue("""
+        var release=json.readerFor(PipelineRelease.class)
+                .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).<PipelineRelease>readValue("""
           {"schemaVersion":"iqc-pipeline-release-v1","pipeline":{"schemaVersion":"iqc-pipeline-v1","nodes":[
           {"nodeId":"llm","type":"LLM","version":"1","enabled":true,"config":{"findingDefinition":
           {"schemaVersion":"iqc-finding-definition-v1","name":"Risk","code":"RISK","category":"risk","valueType":"BOOLEAN",
@@ -58,8 +62,11 @@ class IsolatedMysqlActionSourceIT {
           "idempotency":"PRODUCTION_SOURCE_V1","failureHandling":"RECORD_ONLY","configuration":{}}]}}
           """.replace("\"type\":\"SAVE_RESULT\"", "\"type\":\""+type+"\"")
           .replace("\"configuration\":{}", "CREATE_REVIEW".equals(type)?"\"configuration\":{\"reason\":\"automated review\"}":
-                  "ADD_TO_EVALUATION_CANDIDATE".equals(type)?"\"configuration\":{\"sampleType\":\"FALSE_POSITIVE\",\"reviewRevision\":1}":"\"configuration\":{}"),PipelineRelease.class);
-        var input=new ProductionInputSnapshotService.Input("conversation","revision",json.createObjectNode().put("businessType","frozen"),
+                  "ADD_TO_EVALUATION_CANDIDATE".equals(type)?"\"configuration\":{\"sampleType\":\"FALSE_POSITIVE\",\"reviewRevision\":1}":"\"configuration\":{}")
+          .replace(PipelineRelease.SCHEMA,schema));
+        var business=json.createObjectNode().put("businessType","frozen");
+        if(PipelineRelease.EXACT_SCHEMA.equals(schema))business.put("amount",new java.math.BigDecimal("0.900000000000000001"));
+        var input=new ProductionInputSnapshotService.Input("conversation","revision",business,
                 List.of(new ProductionInputSnapshotService.Message("message",1,"agent","frozen text",relativeTime)));
         var body=json.valueToTree(List.of(input));var root=json.createObjectNode();root.putObject("executionStrategy").put("mode","PIPELINE");
         root.putObject("productionInputs").put("schemaVersion",ProductionInputSnapshotService.SCHEMA).put("hashAlgorithm","selector-decimal-sha256-v1")
@@ -85,6 +92,19 @@ class IsolatedMysqlActionSourceIT {
         source=new ActionProductionSourceValidator(tasks,executions,results,assets,inputs,json);
     }
     private ActionProductionSourceValidator.Validated validate() {return tx.execute(status->source.validate(reference));}
+    @Test void exactV2PersistedSourceRetainsBusinessConditionIdentityAndRejectsTampering() throws Exception {
+        fixture("SAVE_RESULT",null,PipelineRelease.EXACT_SCHEMA);
+        var actual=validate();
+        assertEquals(new java.math.BigDecimal("0.900000000000000001"),actual.context().businessContext().path("amount").decimalValue());
+        assertEquals(ActionPolicy.Match.MATCH,ActionPolicy.evaluate(new ActionPolicy.Condition(ActionPolicy.Kind.BUSINESS_EQUALS,
+                "/amount",null,List.of(),"0.900000000000000001"),actual.context()));
+        assertEquals(ActionPolicy.Match.NO_MATCH,ActionPolicy.evaluate(new ActionPolicy.Condition(ActionPolicy.Kind.BUSINESS_EQUALS,
+                "/amount",null,List.of(),"0.900000000000000002"),actual.context()));
+        // Replace raw stored text: JSON_SET itself would coerce the exact numeric literal.
+        jdbc.update("UPDATE iqc_inspection_task SET rule_snapshot_json=REPLACE(rule_snapshot_json,?,?) WHERE id='task'",
+                "0.900000000000000001","0.900000000000000002");
+        assertThrows(RuntimeException.class,this::validate);
+    }
     @Test void actualFrozenInputAndDeterministicProjectionProduceBoundActionSource() throws Exception {
         var actual=validate();assertEquals("user",actual.ownerBound().userId());assertEquals("result",actual.decisionReference());
         assertEquals(SelectorAssetService.hash(actual.inputSnapshotJson()),actual.inputSnapshotHash());
