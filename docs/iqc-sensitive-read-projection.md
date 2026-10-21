@@ -395,3 +395,10 @@ privacy使用iqc-rule-read-v1及现有canReadFull/canReadPii/canReadPrompt/canon
 UI从受限/未知协议响应清理正文，不把null构造为可保存空版本；版本列表保留摘要，表格明确正文未展示，编辑/保存入口受限。测试/导入诊断受限时不显示原片段/证据/消息，状态和计数仍可用；DLS表格按响应序号设key避免遮蔽后的名称碰撞。读取/测试/导入用generation隔离；关闭/卸载清正文、测试输入、历史及File引用，迟到响应不写旧组件。写操作固定发起目标与原始输入，失败提示先核对已有草稿/状态；导航不会撤销已发出的服务器写入，未发起的后续提交会停止。原规则选用无需获得表达式正文。
 
 首轮后端81613/前端93991及最终36835/95124均terminal exit0（skipTests test-compile / vue-tsc+Vite，最终51.16s，既有体积提示）。Root未新增/运行测试、SQL/browser/部署，不能凭编译判权限或业务正确。B待验证非LLM四种FULL/PII组合与LLM八grant组合（含大小写/空白）、撤权早拒绝服务、原实体/原字符串/证据/计数不变，命令回执不漏，ERROR/NOT_SUPPORTED、诊断扣留、受限不空存、关闭/卸载和实际网关角色。Scheme/RuleSet/Model及复核等副本、全部适用I1–I7继续。
+
+
+## RuleSet 读取边界（2026-10-21）
+
+复用既有规则业务授权及当前敏感授权，RuleSet list/history仅FULL+PII齐备返回原description；所有命令回执扣留description。响应副本使用iqc-rule-set-read-v1，非持久privacy为null时省略；ruleIdsJson原顺序、aggregationMode、ID/code/version/status保留，不改变检测或内部快照。页面仅保存成员选择所需元数据，关闭清理新建表单，刷新代次/卸载阻断迟到响应，创建提交复制输入，禁止提交期间关闭。页面本来没有历史编辑入口，未添加空描述覆盖路径。
+
+当前批次仅编译/前端构建；实际grant组合、源对象不变、内部JSON兼容、网关逐URL注册及浏览器生命周期仍待独立验证。单租户组织范围不变，完整I1–I7未完成。

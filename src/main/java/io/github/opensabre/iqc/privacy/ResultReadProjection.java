@@ -772,6 +772,22 @@ public final class ResultReadProjection {
         if(!canonical){copy.setExpression(null);copy.setDescription(null);}
         copy.setPrivacy(configurationPrivacy("iqc-rule-read-v1",access,canonical,List.of("expression","description")));return copy;
     }
+    public io.github.opensabre.iqc.rule.model.QualityRuleSet ruleSet(io.github.opensabre.iqc.rule.model.QualityRuleSet source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.rule.model.QualityRuleSet();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii();
+        copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        if(!canonical)copy.setDescription(null);
+        copy.setPrivacy(configurationPrivacy("iqc-rule-set-read-v1",access,canonical,List.of("description")));return copy;
+    }
+    public io.github.opensabre.iqc.rule.model.QualityRuleSetVersion ruleSetVersion(io.github.opensabre.iqc.rule.model.QualityRuleSetVersion source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.rule.model.QualityRuleSetVersion();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii();
+        copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        if(!canonical)copy.setDescription(null);
+        copy.setPrivacy(configurationPrivacy("iqc-rule-set-read-v1",access,canonical,List.of("description")));return copy;
+    }
     public io.github.opensabre.iqc.rule.QualityRuleService.RuleTestResult ruleTest(io.github.opensabre.iqc.rule.QualityRuleService.RuleTestResult source,SensitiveReadAccessService.Access access){
         Objects.requireNonNull(access);if(source==null)return null;
         boolean canonical=access.fullConversation()&&access.pii();
