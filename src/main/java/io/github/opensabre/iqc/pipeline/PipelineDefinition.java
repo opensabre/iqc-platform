@@ -36,7 +36,8 @@ public record PipelineDefinition(String schemaVersion, List<Node> nodes,
             dependsOn = dependsOn == null ? List.of() : List.copyOf(dependsOn);
             inputMapping = inputMapping == null ? Map.of() : Map.copyOf(inputMapping);
             config = config == null ? null : config.deepCopy();
-            outputSchema = outputSchema == null ? null : outputSchema.deepCopy();
+            // JSON null and an absent optional schema represent the same frozen contract.
+            outputSchema = outputSchema == null || outputSchema.isNull() ? null : outputSchema.deepCopy();
         }
         @Override public JsonNode config() { return config == null ? null : config.deepCopy(); }
         @Override public JsonNode outputSchema() { return outputSchema == null ? null : outputSchema.deepCopy(); }

@@ -16,7 +16,20 @@ class TranscriptMetricEngineTest {
  JsonNode messages() throws Exception{return json.readTree("[{\"id\":\"a\",\"conversationId\":\"c\",\"speakerRole\":\"customer\",\"startMs\":0,\"endMs\":100},{\"id\":\"b\",\"conversationId\":\"c\",\"speakerRole\":\"agent\",\"startMs\":200,\"endMs\":300}]");}
  @Test void productionAndEvaluationProduceSameSourceBoundNumericFact() throws Exception {
  var engine=new TranscriptMetricEngine(json);var source=messages();var production=engine.execute(context(source,json.createObjectNode(),PipelineRuntime.Mode.PRODUCTION));var evaluation=engine.execute(context(source,json.createObjectNode(),PipelineRuntime.Mode.EVALUATION));
- assertEquals(production.findings(),evaluation.findings());var fact=production.findings().getFirst();assertEquals(100,fact.value().intValue());assertEquals(Finding.State.KNOWN,fact.state());assertEquals(Finding.EvidenceType.METRIC,fact.evidence().getFirst().type());assertEquals("ms",fact.evidence().getFirst().details().path("unit").asText());assertEquals(2,fact.evidence().getFirst().details().path("messageIds").size());
+ assertEquals(production.findings(),evaluation.findings());var fact=production.findings().getFirst();
+ assertEquals(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(json.writeValueAsString("execution:c:timing:1")),fact.id());assertEquals(100,fact.value().intValue());assertEquals(Finding.State.KNOWN,fact.state());assertEquals(Finding.EvidenceType.METRIC,fact.evidence().getFirst().type());assertEquals("ms",fact.evidence().getFirst().details().path("unit").asText());assertEquals(2,fact.evidence().getFirst().details().path("messageIds").size());
+ }
+ @Test void distinctExecutionAttemptsCannotReuseMetricFactIdentity() throws Exception {
+ var engine=new TranscriptMetricEngine(json);var original=context(messages(),json.createObjectNode(),PipelineRuntime.Mode.EVALUATION);
+ var retried=new NodeContext(original.node(),original.input(),original.variables(),Map.of(),original.mode(),2);
+ var variables=new HashMap<>(original.variables());variables.put("__task",json.createObjectNode().put("currentExecutionId","later-execution"));
+ var later=new NodeContext(original.node(),original.input(),variables,Map.of(),original.mode(),1);
+ var first=engine.execute(original).findings().getFirst();
+ assertNotEquals(first.id(),engine.execute(retried).findings().getFirst().id());
+ assertNotEquals(first.id(),engine.execute(later).findings().getFirst().id());
+ }
+ @Test void emptyManifestCannotProduceAnUnboundMetricFact() {
+ assertThrows(IllegalArgumentException.class,()->new TranscriptMetricEngine(json).execute(context(json.createArrayNode(),json.createObjectNode(),PipelineRuntime.Mode.PRODUCTION)));
  }
  @Test void mappedSubsetCannotReplaceTrustedManifest() throws Exception {
  var source=messages();var input=json.createObjectNode();input.set("messages",json.createArrayNode().add(source.get(0)));assertThrows(IllegalArgumentException.class,()->new TranscriptMetricEngine(json).execute(context(source,input,PipelineRuntime.Mode.PRODUCTION)));

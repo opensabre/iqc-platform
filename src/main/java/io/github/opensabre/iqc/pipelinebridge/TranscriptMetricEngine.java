@@ -37,7 +37,7 @@ public final class TranscriptMetricEngine implements EngineAdapter {
         validateConfiguration(context.node().version(),config,definition);
         var metric=TranscriptTimingMetrics.Metric.valueOf(config.path("metric").asText());
         var manifest=context.variables().get("__messages");
-        if(manifest==null || !manifest.isArray() || manifest.size()>10000)
+        if(manifest==null || !manifest.isArray() || manifest.isEmpty() || manifest.size()>10000)
             throw new IllegalArgumentException("Complete trusted transcript manifest required");
         if(context.input().has("messages") && !manifest.equals(context.input().get("messages")))
             throw new IllegalArgumentException("Metric input cannot replace or subset the trusted transcript manifest");
@@ -47,8 +47,10 @@ public final class TranscriptMetricEngine implements EngineAdapter {
         var task=context.variables().get("__task");
         if(task==null || !task.path("currentExecutionId").isTextual() || task.path("currentExecutionId").asText().isBlank())
             throw new IllegalArgumentException("Trusted metric execution identity required");
-        String id=PipelineAssetService.hash(json.writeValueAsString(List.of(task.path("currentExecutionId").asText(),
-                context.node().nodeId(),VERSION,metric.name(),context.attempt(),hash)));
+        // Use the shared execution/conversation/node/attempt identity checked by persisted evaluation.
+        String identity=task.path("currentExecutionId").asText()+":"+messages.getFirst().getConversationId()
+                +":"+context.node().nodeId()+":"+context.attempt();
+        String id=PipelineAssetService.hash(json.writeValueAsString(identity));
         var evidence=new ArrayList<Finding.Evidence>();
         if(measured.state()==Finding.State.KNOWN) {
             var details=json.createObjectNode().put("schemaVersion","iqc-transcript-timing-evidence-v1")
