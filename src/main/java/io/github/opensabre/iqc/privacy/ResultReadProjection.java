@@ -719,6 +719,43 @@ public final class ResultReadProjection {
                 configurationPrivacy("iqc-scheme-template-read-v1",access,false,List.of("snapshot.description","snapshot.dependencies.detectorBodies","snapshot.dependencies.labels","snapshot.dependencies.itemExecutionPlan","snapshot.variantDependencies")));
     }
 
+    public record FindingReviewContextRead(String sourceResultId,String sourceHash,boolean available,String message,
+            java.util.List<io.github.opensabre.iqc.quality.BusinessItemReviewService.FindingEntry> findings,
+            List<Map<String,Object>> messages,Map<String,Object> privacy) { }
+    public FindingReviewContextRead findingReviewContext(io.github.opensabre.iqc.quality.BusinessItemReviewService.FindingContext source,
+            SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(source);Objects.requireNonNull(access);
+        boolean canonical=access.fullConversation()&&access.pii();
+        return new FindingReviewContextRead(source.sourceResultId(),source.sourceHash(),canonical&&source.available(),
+                canonical?source.message():"完整会话及事实值未展示，需要完整会话和PII读取权限后重新读取，不能据此提交事实裁决。",
+                canonical?source.findings():List.of(),canonical?json.convertValue(source.messages(),
+                        new com.fasterxml.jackson.core.type.TypeReference<List<Map<String,Object>>>(){}):List.of(),
+                configurationPrivacy("iqc-finding-review-context-read-v1",access,canonical,List.of("findings","messages")));
+    }
+
+    public record ReviewQueuePage<T>(List<T> records,long current,long size,long total,Map<String,Object> privacy) { }
+    public ReviewQueuePage<io.github.opensabre.iqc.quality.model.BusinessReviewQueueItem> businessReviewQueue(
+            io.github.opensabre.iqc.shared.IqcPage<io.github.opensabre.iqc.quality.model.BusinessReviewQueueItem> source,SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(source);Objects.requireNonNull(access);boolean reveal=access.fullConversation()&&access.pii();
+        var rows=source.records().stream().map(row->new io.github.opensabre.iqc.quality.model.BusinessReviewQueueItem(
+                row.reviewId(),row.resultId(),row.taskId(),text(row.taskName(),reveal),row.conversationId(),row.reviewRevision(),row.status(),
+                reveal?row.requestComment():null,text(row.createdBy(),reveal),row.createdTime(),row.taskStatus(),row.currentResult(),row.stage())).toList();
+        return new ReviewQueuePage<>(rows,source.current(),source.size(),source.total(),
+                configurationPrivacy("iqc-review-queue-read-v1",access,reveal,List.of("records.requestComment")));
+    }
+    public ReviewQueuePage<io.github.opensabre.iqc.label.model.LabelReviewQueueItem> labelReviewQueue(
+            io.github.opensabre.iqc.shared.IqcPage<io.github.opensabre.iqc.label.model.LabelReviewQueueItem> source,SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(source);Objects.requireNonNull(access);boolean reveal=access.fullConversation()&&access.pii();
+        var rows=source.records().stream().map(row->{
+            var copy=new io.github.opensabre.iqc.label.model.LabelReviewQueueItem();BeanUtils.copyProperties(row,copy);
+            copy.setTaskName(text(row.getTaskName(),reveal));copy.setLabelName(text(row.getLabelName(),reveal));
+            copy.setValueDescription(text(row.getValueDescription(),reveal));copy.setCreatedBy(text(row.getCreatedBy(),reveal));
+            if(!reveal)copy.setRequestComment(null);return copy;
+        }).toList();
+        return new ReviewQueuePage<>(rows,source.current(),source.size(),source.total(),
+                configurationPrivacy("iqc-review-queue-read-v1",access,reveal,List.of("records.requestComment")));
+    }
+
     private Map<String,Object> configurationPrivacy(String policyVersion,SensitiveReadAccessService.Access access,boolean canonical,List<String> withheld){
         var metadata=new LinkedHashMap<String,Object>();metadata.put("policyVersion",policyVersion);
         metadata.put("canonicalPayloadVisible",canonical);metadata.put("canReadFull",access.fullConversation());

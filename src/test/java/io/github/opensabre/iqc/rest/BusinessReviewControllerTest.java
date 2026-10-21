@@ -14,7 +14,17 @@ class BusinessReviewControllerTest {
     private final BusinessItemReviewService business = mock(BusinessItemReviewService.class);
     private final BusinessQualityReportService reports = mock(BusinessQualityReportService.class);
     private final LabelResultReviewService labels = mock(LabelResultReviewService.class);
-    private final QualityOperationsController controller = new QualityOperationsController(legacy, business, reports, labels);
+    private final io.github.opensabre.iqc.privacy.SensitiveReadAccessService grants = mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
+    private final QualityOperationsController controller = new QualityOperationsController(legacy, business, reports, labels, null,
+            grants, new io.github.opensabre.iqc.privacy.ResultReadProjection(new com.fasterxml.jackson.databind.ObjectMapper()));
+    @org.junit.jupiter.api.BeforeEach void responseFixtures() {
+        when(grants.current(anySet())).thenReturn(new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access(
+                "test", true, true, false, java.time.Instant.now()));
+        when(labels.queue(any(), any(), anyInt(), anyInt())).thenReturn(new io.github.opensabre.iqc.shared.IqcPage<>(List.of(),2,10,0));
+        when(business.queue(any(), any(), anyInt(), anyInt())).thenReturn(new io.github.opensabre.iqc.shared.IqcPage<>(List.of(),2,10,0));
+        when(business.findingContext("result")).thenReturn(new BusinessItemReviewService.FindingContext(
+                "result","hash",false,"historical input absent",List.of(),new com.fasterxml.jackson.databind.ObjectMapper().createArrayNode()));
+    }
 
     @Test
     void labelReviewUsesDedicatedResultIdentityWithoutChangingLegacyContract() {

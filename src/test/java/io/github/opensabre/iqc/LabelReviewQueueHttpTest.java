@@ -174,7 +174,7 @@ class LabelReviewQueueHttpTest {
             return Result.success(new IqcOrganizationClient.SchedulerAccess("iqc-scheduler-access-v1",id,
                     "a".equals(id)?"alice":admin?"admin":"other",true,"a".equals(id)?"g1":"g2",
                     admin?java.util.Set.of("ADMIN"):java.util.Set.of(),
-                    java.util.Set.of("iqc:result:business:view"),java.time.Instant.now()));
+                    java.util.Set.of("iqc:result:business:view","iqc:review:label:queue","iqc:scheme:manage"),java.time.Instant.now()));
         });
     }
 
@@ -205,9 +205,8 @@ class LabelReviewQueueHttpTest {
     @Test
     void organizationLookupFailureCannotRevealTeamOrForeignTasks() throws Exception {
         when(organization.getUserByUniqueId("alice")).thenThrow(new IllegalStateException("organization unavailable"));
-        JsonNode queue = data(get(token("alice", List.of()), ""));
-        assertThat(queue.path("total").asInt()).isEqualTo(1);
-        assertThat(queue.path("records").get(0).path("reviewId").asText()).isEqualTo("r1");
+        // Current sensitive-read identity cannot be resolved; even owner-only data must stay withheld.
+        assertCurrentIdentityUnavailable(get(token("alice", List.of()), ""));
     }
 
     @Test
@@ -277,6 +276,16 @@ class LabelReviewQueueHttpTest {
         assertDeniedHistory(business(alice,"?size=1"));
     }
 
+    @Test
+    void labelQueueRevocationAppliesToTheSameSignedIdentityBeforeReadingSql() throws Exception {
+        String alice = token("alice", List.of());
+        assertThat(data(get(alice, "?size=1")).path("total").asInt()).isEqualTo(2);
+        when(organization.currentActionAccess("a")).thenReturn(Result.success(new IqcOrganizationClient.SchedulerAccess(
+                "iqc-scheduler-access-v1","a","alice",true,"g1",java.util.Set.of(),
+                java.util.Set.of("iqc:review:view","iqc:review:label:history"),java.time.Instant.now())));
+        assertDeniedHistory(get(alice, "?size=1"));
+    }
+
     private String token(String username, List<String> roles) {
         return tokens.issue(new InternalTokenRequest("iqc-platform", username, username, "iqc-platform",
                 List.of(), roles, List.of(), 0, null, null, Map.of()));
@@ -294,9 +303,15 @@ class LabelReviewQueueHttpTest {
         assertThat(data(request(token("admin", List.of("ADMIN")),
                 "/api/iqc/schemes/foreign-scheme/versions")).path("versions")).isEmpty();
         when(organization.getUserByUniqueId("alice")).thenThrow(new IllegalStateException("organization unavailable"));
-        assertThat(data(request(alice, "/api/iqc/schemes/own-scheme/versions")).path("versions")).isEmpty();
-        HttpResponse<String> team = request(alice, "/api/iqc/schemes/team-scheme/versions");
-        assertDeniedHistory(team);
+        assertCurrentIdentityUnavailable(request(alice, "/api/iqc/schemes/own-scheme/versions"));
+        assertCurrentIdentityUnavailable(request(alice, "/api/iqc/schemes/team-scheme/versions"));
+    }
+
+    private void assertCurrentIdentityUnavailable(HttpResponse<String> response) throws Exception {
+        assertThat(response.statusCode()).isEqualTo(200);
+        var error = mapper.readTree(response.body());
+        assertThat(error.path("code").asText()).isEqualTo("IQC-1006");
+        assertThat(error.has("data")).isFalse();
     }
 
     private void assertDeniedHistory(HttpResponse<String> response) throws Exception {

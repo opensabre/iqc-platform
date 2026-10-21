@@ -76,10 +76,12 @@ public class QualityOperationsController {
     /** Scoped, paginated label rounds for the quality operator's worklist. */
     @GetMapping("/label-reviews")
     @ResourcePermission(code="iqc:review:label:queue", name="查看标签值复核待办", type="iqc", description="按任务范围查询标签复核轮次")
-    public io.github.opensabre.iqc.shared.IqcPage<io.github.opensabre.iqc.label.model.LabelReviewQueueItem> labelReviewQueue(
+    @Audit(operationType=OperationType.QUERY,description="读取标签复核队列",module="IQC_PRIVACY",request=false,response=false)
+    public io.github.opensabre.iqc.privacy.ResultReadProjection.ReviewQueuePage<io.github.opensabre.iqc.label.model.LabelReviewQueueItem> labelReviewQueue(
             @RequestParam(required=false) String status, @RequestParam(required=false) String taskId,
             @RequestParam(defaultValue="1") int current, @RequestParam(defaultValue="20") int size) {
-        return labelReviews.queue(status, taskId, current, size);
+        var access=responseAccess("iqc:review:label:queue");
+        return resultProjection.labelReviewQueue(labelReviews.queue(status, taskId, current, size),access);
     }
 
     @PostMapping("/label-reviews/{reviewId}/decision")
@@ -123,6 +125,7 @@ public class QualityOperationsController {
     }
     @GetMapping("/reviews")
     @ResourcePermission(code="iqc:review:view", name="查看人工复核", type="iqc", description="查询人工复核工作台")
+    @Audit(operationType=OperationType.QUERY,description="读取人工复核视图",module="IQC_PRIVACY",request=false,response=false,key="#resultId")
     public Object reviews(@RequestParam(required=false) String status,
                                       @RequestParam(defaultValue="MESSAGE") String targetType,
                                       @RequestParam(required=false) String resultId,
@@ -130,6 +133,7 @@ public class QualityOperationsController {
                                       @RequestParam(required=false) String taskId,
                                       @RequestParam(defaultValue="1") int current,
                                       @RequestParam(defaultValue="20") int size) {
+        var access=responseAccess("iqc:review:view");
         if("SCORE_CONTEXT".equals(view)){
             if(!business(targetType)||resultId==null||resultId.isBlank()||status!=null||taskId!=null)
                 throw IqcException.invalidArgument("评分复核上下文必须指定单一业务结果");
@@ -138,11 +142,11 @@ public class QualityOperationsController {
         if("FINDING_CONTEXT".equals(view)){
             if(!business(targetType)||resultId==null||resultId.isBlank()||status!=null||taskId!=null)
                 throw IqcException.invalidArgument("事实复核上下文必须指定单一业务结果");
-            return businessReviews.findingContext(resultId);
+            return resultProjection.findingReviewContext(businessReviews.findingContext(resultId),access);
         }
         if ("QUEUE".equals(view)) {
             if (!business(targetType) || resultId != null) throw IqcException.invalidArgument("待办视图只支持业务复核，不能指定单结果历史");
-            return businessReviews.queue(status, taskId, current, size);
+            return resultProjection.businessReviewQueue(businessReviews.queue(status, taskId, current, size),access);
         }
         if (!"HISTORY".equals(view) || taskId != null) throw IqcException.invalidArgument("不支持的复核视图或筛选");
         if (business(targetType)) {
