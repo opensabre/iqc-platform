@@ -123,6 +123,7 @@ public class QualityOperationsController {
     }
     @GetMapping("/reviews")
     @ResourcePermission(code="iqc:review:view", name="查看人工复核", type="iqc", description="查询人工复核工作台")
+    @Audit(operationType=OperationType.QUERY,description="读取人工复核视图",module="IQC_PRIVACY",request=false,response=false,key="#resultId")
     public Object reviews(@RequestParam(required=false) String status,
                                       @RequestParam(defaultValue="MESSAGE") String targetType,
                                       @RequestParam(required=false) String resultId,
@@ -130,6 +131,7 @@ public class QualityOperationsController {
                                       @RequestParam(required=false) String taskId,
                                       @RequestParam(defaultValue="1") int current,
                                       @RequestParam(defaultValue="20") int size) {
+        var access=readAccess("iqc:review:view");
         if("SCORE_CONTEXT".equals(view)){
             if(!business(targetType)||resultId==null||resultId.isBlank()||status!=null||taskId!=null)
                 throw IqcException.invalidArgument("评分复核上下文必须指定单一业务结果");
@@ -138,7 +140,7 @@ public class QualityOperationsController {
         if("FINDING_CONTEXT".equals(view)){
             if(!business(targetType)||resultId==null||resultId.isBlank()||status!=null||taskId!=null)
                 throw IqcException.invalidArgument("事实复核上下文必须指定单一业务结果");
-            return businessReviews.findingContext(resultId);
+            return resultProjection.findingReviewContext(businessReviews.findingContext(resultId),access);
         }
         if ("QUEUE".equals(view)) {
             if (!business(targetType) || resultId != null) throw IqcException.invalidArgument("待办视图只支持业务复核，不能指定单结果历史");

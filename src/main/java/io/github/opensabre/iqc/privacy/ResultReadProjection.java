@@ -719,6 +719,19 @@ public final class ResultReadProjection {
                 configurationPrivacy("iqc-scheme-template-read-v1",access,false,List.of("snapshot.description","snapshot.dependencies.detectorBodies","snapshot.dependencies.labels","snapshot.dependencies.itemExecutionPlan","snapshot.variantDependencies")));
     }
 
+    public record FindingReviewContextRead(String sourceResultId,String sourceHash,boolean available,String message,
+            java.util.List<io.github.opensabre.iqc.quality.BusinessItemReviewService.FindingEntry> findings,
+            com.fasterxml.jackson.databind.JsonNode messages,Map<String,Object> privacy) { }
+    public FindingReviewContextRead findingReviewContext(io.github.opensabre.iqc.quality.BusinessItemReviewService.FindingContext source,
+            SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(source);Objects.requireNonNull(access);
+        boolean canonical=access.fullConversation()&&access.pii();
+        return new FindingReviewContextRead(source.sourceResultId(),source.sourceHash(),canonical&&source.available(),
+                canonical?source.message():"完整会话及事实值未展示，需要完整会话和PII读取权限后重新读取，不能据此提交事实裁决。",
+                canonical?source.findings():List.of(),canonical?source.messages():json.createArrayNode(),
+                configurationPrivacy("iqc-finding-review-context-read-v1",access,canonical,List.of("findings","messages")));
+    }
+
     private Map<String,Object> configurationPrivacy(String policyVersion,SensitiveReadAccessService.Access access,boolean canonical,List<String> withheld){
         var metadata=new LinkedHashMap<String,Object>();metadata.put("policyVersion",policyVersion);
         metadata.put("canonicalPayloadVisible",canonical);metadata.put("canReadFull",access.fullConversation());

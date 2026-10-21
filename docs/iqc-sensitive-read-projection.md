@@ -432,3 +432,10 @@ GET /schemes/published目录及schemeId游标历史先检查当前scheme:view并
 IqcModelProfileController已用ModelView：不返回secretRef，仅secretConfigured；保留选择/管理需要的provider/model/endpoint/限额/价格等字段。ModelConnectionTestService返回固定安全诊断，不返回供应商异常原文。MCP现有secretRef为平台密钥引用，管理页面用于编辑，不能误称实际密钥或直接删除导致更新失效。未凭这些字段新增Prompt授权或另一套配置模型。
 
 IqcMcpServerController四个现有命令原Audit.request默认true，会复制name/description/endpoint/secretRef/allowedToolsJson请求。现均显式request=false,response=false；update/enable/disable保留目标#id，create保留原操作和模块。仅关闭额外审计正文，不改资产持久化/版本/Agent冻结引用/运行配置。模型与MCP接口当前业务授权/组织适用边界、响应中的自由描述及MCP实际请求/凭据规则仍须独立完整审查；不能把审计修复称为整个域隐私验收。
+
+
+## Finding人工复核上下文（2026-10-21）
+
+实际BusinessItemReviewService.findingContext返回冻结messages.content和Finding值/允许值/证据引用，原reviews?view=FINDING_CONTEXT直接返回。现reviews入口先刷新固定iqc:review:view当前授权/no-store/无正文QUERY审计，仍由原业务服务按task组织范围与来源hash完整校验；仅该上下文响应走独立FindingReviewContextRead。FULL+PII同时具备保留原精确值/证据/消息；否则available=false、固定权限提示、findings/messages为空，并给iqc-finding-review-context-read-v1元数据。保留sourceResultId/sourceHash，源对象和复核存储不改，不把未展示解释为无事实。无需Prompt授权。
+
+现有HumanFindingReviewEditor已在available=false时仅显示message，表单不渲染且save handler拒绝，未新增另一套前端流程。当前只能由编译证明契约可编译，仍待四种grant/撤权前置拒绝/原精确值与消息不变/浏览器真实验证。其它reviews HISTORY/QUEUE/SCORE_CONTEXT仍未完成字段投影：ResultReview的reviewedResultJson/评论，以及scoreContext.manualScore.reason、队列自由文本需后续连同安全工作流stage和UI处理，不能直接扣留JSON后将缺正文当损坏或INITIAL。
