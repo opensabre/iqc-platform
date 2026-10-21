@@ -773,6 +773,17 @@ public final class ResultReadProjection {
                 source.computedScore(),manual,configurationPrivacy("iqc-score-review-context-read-v1",access,reveal,List.of("manualScore.adjustment.reason")));
     }
 
+    public io.github.opensabre.iqc.quality.model.ResultReview labelReview(
+            io.github.opensabre.iqc.quality.model.ResultReview source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(source);Objects.requireNonNull(access);
+        var copy=new io.github.opensabre.iqc.quality.model.ResultReview();BeanUtils.copyProperties(source,copy);
+        boolean reveal=detailRead&&access.fullConversation()&&access.pii();
+        copy.setCreatedBy(text(source.getCreatedBy(),access.fullConversation()&&access.pii()));
+        copy.setReviewerId(text(source.getReviewerId(),access.fullConversation()&&access.pii()));
+        if(!reveal){copy.setRequestComment(null);copy.setReviewComment(null);copy.setReviewedResultJson(null);}
+        copy.setPrivacy(configurationPrivacy("iqc-label-review-read-v1",access,reveal,List.of("requestComment","reviewComment","reviewedResultJson")));return copy;
+    }
+
     private Map<String,Object> configurationPrivacy(String policyVersion,SensitiveReadAccessService.Access access,boolean canonical,List<String> withheld){
         var metadata=new LinkedHashMap<String,Object>();metadata.put("policyVersion",policyVersion);
         metadata.put("canonicalPayloadVisible",canonical);metadata.put("canReadFull",access.fullConversation());

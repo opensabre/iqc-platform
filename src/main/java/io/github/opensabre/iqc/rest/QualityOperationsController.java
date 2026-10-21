@@ -62,15 +62,18 @@ public class QualityOperationsController {
     @ResourcePermission(code="iqc:review:label:create", name="发起标签值复核", type="iqc", description="为冻结标签值发起复核")
     @Audit(operationType=OperationType.CREATE, description="发起 IQC 标签值复核", module="IQC_REVIEW", request=false, response=false, key="#labelResultId")
     public ResultReview requestLabelReview(@PathVariable String labelResultId, @RequestBody LabelReviewRequest request) {
+        var access=readAccess("iqc:review:label:create");
         if (request == null || request.expectedRevision() == null)
             throw IqcException.invalidArgument("标签复核必须指定预期修订");
-        return labelReviews.request(labelResultId, request.expectedRevision(), request.requestId(), request.comment());
+        return resultProjection.labelReview(labelReviews.request(labelResultId, request.expectedRevision(), request.requestId(), request.comment()),access,false);
     }
 
     @GetMapping("/label-results/{labelResultId}/reviews")
     @ResourcePermission(code="iqc:review:label:history", name="查看标签值复核", type="iqc", description="查看标签值复核轮次")
+    @Audit(operationType=OperationType.QUERY,description="读取标签复核历史",module="IQC_PRIVACY",request=false,response=false,key="#labelResultId")
     public List<ResultReview> labelReviewHistory(@PathVariable String labelResultId) {
-        return labelReviews.history(labelResultId);
+        var access=readAccess("iqc:review:label:history");
+        return labelReviews.history(labelResultId).stream().map(row->resultProjection.labelReview(row,access,true)).toList();
     }
 
     /** Scoped, paginated label rounds for the quality operator's worklist. */
@@ -88,11 +91,12 @@ public class QualityOperationsController {
     @ResourcePermission(code="iqc:review:label:decide", name="处理标签值复核", type="iqc", description="修正或退回标签值复核")
     @Audit(operationType=OperationType.UPDATE, description="处理 IQC 标签值复核", module="IQC_REVIEW", request=false, response=false, key="#reviewId")
     public ResultReview decideLabelReview(@PathVariable String reviewId, @RequestBody LabelReviewDecision request) {
+        var access=readAccess("iqc:review:label:decide");
         if (request == null || request.expectedRevision() == null
                 || (!"COMPLETED".equals(request.decision()) && !"REJECTED".equals(request.decision())))
             throw IqcException.invalidArgument("标签复核必须指定修订与完成/退回决定");
-        return labelReviews.decide(reviewId, request.expectedRevision(), "REJECTED".equals(request.decision()),
-                request.labelDecision(), request.comment());
+        return resultProjection.labelReview(labelReviews.decide(reviewId, request.expectedRevision(), "REJECTED".equals(request.decision()),
+                request.labelDecision(), request.comment()),access,false);
     }
 
     @PostMapping("/results/{resultId}/feedback")
