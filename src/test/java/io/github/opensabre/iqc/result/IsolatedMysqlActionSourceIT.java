@@ -53,7 +53,7 @@ class IsolatedMysqlActionSourceIT {
         var release=json.readerFor(PipelineRelease.class)
                 .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).<PipelineRelease>readValue("""
           {"schemaVersion":"iqc-pipeline-release-v1","pipeline":{"schemaVersion":"iqc-pipeline-v1","nodes":[
-          {"nodeId":"llm","type":"LLM","version":"1","enabled":true,"config":{"findingDefinition":
+          {"nodeId":"llm","type":"LLM","version":"1","enabled":true,"timeoutMs":1000,"retries":0,"onError":"FAIL_PIPELINE","config":{"findingDefinition":
           {"schemaVersion":"iqc-finding-definition-v1","name":"Risk","code":"RISK","category":"risk","valueType":"BOOLEAN",
           "defaultSeverity":"HIGH","evidenceRequired":true,"evidenceTypes":["CONVERSATION"]},"ruleSnapshot":{"id":"rule","versionNo":1}}}]},
           "fusion":{"id":"fusion","version":1,"method":"PRIORITY"},"items":[{"itemCode":"risk","findingCode":"RISK","hitMeaning":"VIOLATION"}],
@@ -80,9 +80,23 @@ class IsolatedMysqlActionSourceIT {
         var inputs=new ProductionInputSnapshotService(null,null,null,json);var prepared=inputs.prepare(task,root);
         var fact=new Finding("fact","RISK","risk",Finding.ValueType.BOOLEAN,json.valueToTree(true),Finding.State.KNOWN,null,Finding.Severity.HIGH,
                 "risk",List.of(new Finding.Evidence("evidence",Finding.EvidenceType.CONVERSATION,"message",null)),new Finding.Source("llm","LLM","1",1,null));
-        var runtime=mock(PipelineRuntime.class);
-        when(runtime.execute(any(),any(),any(),any(),any())).thenReturn(new PipelineRuntime.Run(PipelineRuntime.Status.SUCCESS,List.of(),List.of(fact),Map.of(),false));
-        var evaluation=new PipelineConversationEvaluator(runtime,json,tasks).evaluate(task,release,prepared.messages().get("conversation"),PipelineRuntime.Mode.PRODUCTION,prepared.businessContext("conversation"));
+        PipelineConversationEvaluator.Evaluation evaluation;
+        if(PipelineRelease.EXACT_SCHEMA.equals(schema)) {
+            // Exercise runtime scheduling/trace production as well as SQL source replay; no provider call.
+            EngineAdapter adapter=new EngineAdapter(){
+                public String type(){return "LLM";}
+                public NodeResult execute(NodeContext context){return new NodeResult(NodeResult.Status.SUCCESS,List.of(fact),Map.of(),Map.of(),null);}
+            };
+            try(var runtime=new PipelineRuntime(List.of(adapter),1,4)) {
+                evaluation=new PipelineConversationEvaluator(runtime,json,tasks).evaluate(task,release,prepared.messages().get("conversation"),PipelineRuntime.Mode.PRODUCTION,prepared.businessContext("conversation"));
+                assertEquals(PipelineRuntime.Status.SUCCESS,evaluation.run().status());
+                assertEquals(1,evaluation.run().findings().size());
+            }
+        } else {
+            var runtime=mock(PipelineRuntime.class);
+            when(runtime.execute(any(),any(),any(),any(),any())).thenReturn(new PipelineRuntime.Run(PipelineRuntime.Status.SUCCESS,List.of(),List.of(fact),Map.of(),false));
+            evaluation=new PipelineConversationEvaluator(runtime,json,tasks).evaluate(task,release,prepared.messages().get("conversation"),PipelineRuntime.Mode.PRODUCTION,prepared.businessContext("conversation"));
+        }
         var row=new ConversationInspectionResult();row.setId("result");row.setTaskId("task");row.setExecutionId("execution");row.setConversationId("conversation");
         row.setAggregationMode("PIPELINE");row.setReason("isolated source");row.setExecutionTraceJson(json.writeValueAsString(evaluation));
         row.setScoringResultJson(json.writeValueAsString(evaluation.scoring()));row.setBusinessItemResultsJson(json.writeValueAsString(evaluation.items()));
