@@ -756,4 +756,38 @@ public final class ResultReadProjection {
                 canonical?source.changedConfigPaths():List.of(),configurationPrivacy("iqc-agent-read-v1",access,canonical,List.of("changedConfigPaths")));
     }
 
+    public io.github.opensabre.iqc.rule.model.QualityRule rule(io.github.opensabre.iqc.rule.model.QualityRule source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.rule.model.QualityRule();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&(!(source.getRuleType()!=null&&"LLM".equalsIgnoreCase(source.getRuleType().trim()))||access.prompt());
+        copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        if(!canonical){copy.setExpression(null);copy.setDescription(null);}
+        copy.setPrivacy(configurationPrivacy("iqc-rule-read-v1",access,canonical,List.of("expression","description")));return copy;
+    }
+    public io.github.opensabre.iqc.rule.model.QualityRuleVersion ruleVersion(io.github.opensabre.iqc.rule.model.QualityRuleVersion source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.rule.model.QualityRuleVersion();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&(!(source.getRuleType()!=null&&"LLM".equalsIgnoreCase(source.getRuleType().trim()))||access.prompt());
+        copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        if(!canonical){copy.setExpression(null);copy.setDescription(null);}
+        copy.setPrivacy(configurationPrivacy("iqc-rule-read-v1",access,canonical,List.of("expression","description")));return copy;
+    }
+    public io.github.opensabre.iqc.rule.QualityRuleService.RuleTestResult ruleTest(io.github.opensabre.iqc.rule.QualityRuleService.RuleTestResult source,SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(access);if(source==null)return null;
+        boolean canonical=access.fullConversation()&&access.pii();
+        // This endpoint never executes LLM rules: NOT_SUPPORTED is an existing constant public explanation.
+        boolean publicReason="NOT_SUPPORTED".equals(source.resultStatus());
+        return new io.github.opensabre.iqc.rule.QualityRuleService.RuleTestResult(source.matched(),source.resultStatus(),canonical?source.matchedText():null,
+                canonical||publicReason?source.reason():"测试回执正文未提供",canonical?source.evidence():List.of(),
+                configurationPrivacy("iqc-rule-read-v1",access,canonical,publicReason?List.of("matchedText","evidence"):List.of("matchedText","reason","evidence")));
+    }
+    public io.github.opensabre.iqc.rule.dls.DlsImportService.ImportResult dlsImport(io.github.opensabre.iqc.rule.dls.DlsImportService.ImportResult source,SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(access);if(source==null)return null;boolean canonical=access.fullConversation()&&access.pii();
+        var items=source.items().stream().map(item->new io.github.opensabre.iqc.rule.dls.DlsImportService.ImportItem(
+                text(item.sheetName(),canonical),text(item.ruleName(),canonical),item.ruleCode(),item.status(),item.ruleId(),item.definitionCount(),item.executableRuleCount(),
+                canonical?item.warnings():List.of(),canonical?item.message():"诊断正文未提供")).toList();
+        return new io.github.opensabre.iqc.rule.dls.DlsImportService.ImportResult(fileName(source.fileName(),canonical),source.preview(),source.sheetCount(),source.createdCount(),source.validCount(),source.skippedCount(),source.failedCount(),items,
+                configurationPrivacy("iqc-rule-read-v1",access,canonical,List.of("items.warnings","items.message")));
+    }
+
 }

@@ -380,3 +380,18 @@ Agent页面受限或配置无效不创建默认编辑器、不能空存；刷新
 该统计仍为原task.agentId直连的持久结果口径，不是金标准确率、整个Pipeline多Agent节点使用分析或完整I7运营指标。原记录/分数/证据不改，无模型调用。Agent资产本身继续原全局资源模型，不伪造不存在的ownerGroupId；效果业务数据使用原组织可见任务范围。
 
 本批首轮后端97948/前端39271及最终39734/54477均terminal exit0（skipTests test-compile / vue-tsc+Vite，最终1m15s，既有体积提示）。编译覆盖已提交bf6d92e测试源码集成，Root未新增/运行测试、SQL、browser或部署；中断旧编译未知exit不算通过。B需补八grant/原对象原字节、能力元数据不漏正文但仍能选用、unknown协议、受限不空存/旧1.0、关闭/卸载和实际Controller路径；效果旧AgentEffectServiceTest须注入真实scope fixture，验证本人/同组/跨组/all/空组/缺身份/零分母及实际SQL，不能保留旧无scope构造绕过授权。其余Scheme/Rule/Model/复核副本、完整PDP/网关/角色及I1–I7继续。
+
+## Rule表达式、测试回执与DLS导入诊断（2026-10-21）
+
+复用QualityConfigController原Rule路由、SensitiveReadAccessService及ResultReadProjection，不新增表/端点。QualityRule/Version仅加exist=false且null省略的privacy；RuleTestResult/ImportResult加可空privacy并保留旧5参/8参构造。内部原快照字段缺省不变，原表达式/评分/证据与DLS执行未修改。RuleSet路由未接本投影，不能把整个Config Controller视为已收口。
+
+- list/versions：非LLM表达式和描述在FULL+PII齐备时返回原字符串；LLM另需PROMPT。LLM识别对齐既有校验的首尾空白/大小写语义，避免保存的` LLM `绕过Prompt读取。名称沿原PII规则；ID/code/type/version/status、扣分/风险/veto等结构元数据保留，原任务/方案/流水线继续按引用使用。
+- create/submit/approve/reject/createVersion：先刷新对应固定原业务grant，回执总扣留expression/description；不把敏感读取当写权限。原审批/版本服务和存储对象不改。
+- test：当前端点明确不执行LLM（NOT_SUPPORTED固定公共解释）。FULL+PII齐备回原matchedText/reason/evidence，否则保留matched/resultStatus，隐藏命中片段和证据及动态原因；NOT_SUPPORTED保留原固定提示。ERROR仍是ERROR，不把错误当未命中。测试Audit只业务ID、不取输入或回执正文。
+- import-dls：先刷新原import grant。FULL+PII显示原warnings/message，否则扣留诊断、沿原策略遮蔽文件/表/规则名称；预检/创建状态、ID/code、所有计数/顺序保持。没有改导入、匹配、审批、评分或新建请求模型。
+
+privacy使用iqc-rule-read-v1及现有canReadFull/canReadPii/canReadPrompt/canonicalPayloadVisible/withheldFields。查询/测试及原写命令Audit不取正文，响应no-store/nosniff。现有同code多URL实际注册、真实角色及AOP仍需验收；旧无敏感组件的Controller构造不能绕过读取保护。
+
+UI从受限/未知协议响应清理正文，不把null构造为可保存空版本；版本列表保留摘要，表格明确正文未展示，编辑/保存入口受限。测试/导入诊断受限时不显示原片段/证据/消息，状态和计数仍可用；DLS表格按响应序号设key避免遮蔽后的名称碰撞。读取/测试/导入用generation隔离；关闭/卸载清正文、测试输入、历史及File引用，迟到响应不写旧组件。写操作固定发起目标与原始输入，失败提示先核对已有草稿/状态；导航不会撤销已发出的服务器写入，未发起的后续提交会停止。原规则选用无需获得表达式正文。
+
+首轮后端81613/前端93991及最终36835/95124均terminal exit0（skipTests test-compile / vue-tsc+Vite，最终51.16s，既有体积提示）。Root未新增/运行测试、SQL/browser/部署，不能凭编译判权限或业务正确。B待验证非LLM四种FULL/PII组合与LLM八grant组合（含大小写/空白）、撤权早拒绝服务、原实体/原字符串/证据/计数不变，命令回执不漏，ERROR/NOT_SUPPORTED、诊断扣留、受限不空存、关闭/卸载和实际网关角色。Scheme/RuleSet/Model及复核等副本、全部适用I1–I7继续。

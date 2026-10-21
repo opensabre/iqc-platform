@@ -421,3 +421,7 @@ CREATE_RISK_EVENT v1引用原冻结生产结果/动作账本，稳定幂等事�
 ## Agent敏感配置与组织范围统计（2026-10-21）
 
 原Agent list/versions/compare及命令回执接现有敏感投影，不写原配置；独立schema/模型Skill/MCP ID版本与工具名元数据供受限角色继续选用，页面不从缺正文建默认草稿，1.0原始JSON新版本编辑保留。AgentEffect原全任务查询补owner/group/all及空组防护，零分母/无评分返回null、BigDecimal一位指标，统计口径仍为原直连Agent任务。首轮97948/39271与最终39734/54477编译构建均exit0，Root未运行测试；细则/角色/源码不变与实际SQL等验收交B，见iqc-sensitive-read-projection.md。B独占精确v2相关源不动/默认入口未切换，CUSTOM三仓提交与bf6d92e集成已在恢复后确认。完整适用I1–I7继续。
+
+## Rule敏感读取批次（2026-10-21）
+
+原Rule列表/历史、命令回执、测试与DLS导入诊断接原当前授权和响应副本；非LLM正文用FULL+PII，LLM再需PROMPT，识别含空白/大小写。结构状态/ID/版本/计数保持，UI受限不创建空版本、异步代次/关闭清理，原规则匹配/证据/评分和API路径不变。81613/93991及最终36835/95124编译构建均exit0，未运行Root测试/SQL/browser/部署；规则集仍另列，实际角色/网关/状态与来源不变验证交B，完整适用I1–I7保持。详见iqc-sensitive-read-projection.md。
