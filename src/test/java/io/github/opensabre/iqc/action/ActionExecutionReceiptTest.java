@@ -44,6 +44,29 @@ class ActionExecutionReceiptTest {
         when(adapters.require(any())).thenReturn(new ActionAdapterRegistry.Binding(definition,adapter));
         when(settlements.settle(eq(request),eq(1L),eq(token),any())).thenReturn(true);
     }
+    @Test void v2StandalonePolicyKeepsExactConditionAtExecutionRegistryBoundary() throws Exception {
+        var condition=new ActionPolicy.Condition(ActionPolicy.Kind.BUSINESS_EQUALS,"/amount",
+                json.getNodeFactory().numberNode(new java.math.BigDecimal("0.900000000000000001")),List.of());
+        var action=new ActionPolicy.Action("save",ActionExecutionContract.Type.SAVE_RESULT,condition,
+                ActionPolicy.Idempotency.PRODUCTION_SOURCE_V1,null,ActionPolicy.FailureHandling.RECORD_ONLY,json.createObjectNode());
+        String body=json.writeValueAsString(new ActionPolicy(ActionPolicy.SCHEMA,List.of(action)));
+        var source=new ActionExecutionContract.Source("task","execution","conversation","result","result",SelectorAssetService.hash(body),"save","alice");
+        var definition=request.adapter();
+        String task="{\"pipelineSnapshot\":{\"release\":{\"schemaVersion\":\"iqc-pipeline-release-v2\"}}}";
+        String input=json.createObjectNode().put("schemaVersion","iqc-action-production-input-v1").put("taskSnapshotJson",task).toString();
+        id=source.idempotencyKey(definition.type());
+        request=new ActionAdapter.Request(id,id,source,definition,1,input,SelectorAssetService.hash(input),body);
+        when(claims.claim(id,0,actor)).thenReturn(new ActionClaimService.Claim(request,1,token));
+        when(rows.selectById(id)).thenReturn(row);
+        when(settlements.settle(eq(request),eq(1L),eq(token),any())).thenReturn(true);
+        when(adapter.execute(request)).thenReturn(success());
+        assertEquals(ActionExecutionService.Dispatch.SETTLED,service.execute(id,0,actor));
+        var capture=ArgumentCaptor.forClass(ActionPolicy.Action.class);
+        verify(adapters).require(capture.capture());
+        assertEquals(0,new java.math.BigDecimal("0.900000000000000001").compareTo(capture.getValue().condition().value().decimalValue()));
+        assertEquals(ActionExecutionContract.Outcome.CONFIRMED_SUCCESS,recorded().outcome());
+    }
+
     private ActionAdapter.Receipt success() {
         return new ActionAdapter.Receipt(id,ActionExecutionContract.Outcome.CONFIRMED_SUCCESS,"receipt","result",null);
     }

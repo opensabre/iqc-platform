@@ -26,7 +26,7 @@ public class SavedResultActionAdapter implements ActionAdapter {
         if(!DEFINITION.equals(request.adapter()))throw new IllegalArgumentException("SAVE_RESULT adapter version mismatch");
         try {
             var source=request.source();
-            var policy=json.readValue(request.policySnapshotJson(),ActionPolicy.class);
+            var policy=ActionFrozenPolicy.readFrozen(json,request.policySnapshotJson(),request.inputSnapshotJson());
             var configured=policy.actions().stream().filter(action->source.actionId().equals(action.actionId())).findFirst().orElse(null);
             if(configured==null || configured.type()!=DEFINITION.type() || configured.effectiveAdapterVersion()!=DEFINITION.version())
                 return unknown(request,"ACTION_POLICY_MISMATCH");

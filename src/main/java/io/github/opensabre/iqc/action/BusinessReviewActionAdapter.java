@@ -34,7 +34,7 @@ public class BusinessReviewActionAdapter implements ActionAdapter {
         Objects.requireNonNull(request);
         if(!DEFINITION.equals(request.adapter()))throw new IllegalArgumentException("CREATE_REVIEW adapter version mismatch");
         try {
-            var policy=json.readValue(request.policySnapshotJson(),ActionPolicy.class);
+            var policy=ActionFrozenPolicy.readFrozen(json,request.policySnapshotJson(),request.inputSnapshotJson());
             var action=policy.actions().stream().filter(value->request.source().actionId().equals(value.actionId())).findFirst().orElseThrow();
             if(action.type()!=DEFINITION.type() || action.effectiveAdapterVersion()!=DEFINITION.version())
                 throw new IllegalArgumentException("CREATE_REVIEW policy mismatch");

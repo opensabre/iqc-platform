@@ -102,7 +102,7 @@ public class ActionReconciliationService {
                 || row.getAttemptCount()==null || row.getAttemptCount()<1 || row.getClaimedAtUtc()==null)
             throw IqcException.invalidState("动作缺少原始领取证据");
         try {
-            var policy=json.readValue(row.getPolicySnapshotJson(),ActionPolicy.class);
+            var policy=ActionFrozenPolicy.readFrozen(json,row.getPolicySnapshotJson(),row.getInputSnapshotJson());
             var action=policy.actions().stream().filter(value->row.getActionId().equals(value.actionId())).findFirst().orElseThrow();
             if(!action.type().name().equals(row.getActionType()))throw IqcException.invalidState("动作类型与冻结政策不一致");
             var binding=adapters.require(action);
