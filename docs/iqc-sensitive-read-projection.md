@@ -425,3 +425,10 @@ GET /schemes/published目录及schemeId游标历史先检查当前scheme:view并
 专家历史复用独立发布投影，保留来源修订/试跑/归档元数据；原Release/hash不改。preview仍执行原完整依赖校验，但仅返回schemeId/draftRevision/validated，不返回冻结检测器。发布/版本归档返回SchemeVersionReceipt元数据，无snapshotJson。创建/修订/停启用返回无正文草稿回执。各入口在调用业务前检查原资源码，no-store，查询审计无正文。
 
 页面受限/未知协议草稿禁止编辑/保存，合法选用presentation供试跑；派生按原服务端冻结引用创建，回执不直接当可编辑草稿，重读后有权限才打开。历史完整正文不足时禁差异比较并显示正文未展示，查看和派生/归档仍沿原业务权限。刷新/编辑代次及卸载清理用于阻止迟到回填；关闭编辑清配置。权限组合、内部旧JSON、真实Audit/网关/撤权/浏览器/试跑发布仍待独立验收，本批仅编译构建。
+
+
+## Model/MCP现有边界与审计修复（2026-10-21）
+
+IqcModelProfileController已用ModelView：不返回secretRef，仅secretConfigured；保留选择/管理需要的provider/model/endpoint/限额/价格等字段。ModelConnectionTestService返回固定安全诊断，不返回供应商异常原文。MCP现有secretRef为平台密钥引用，管理页面用于编辑，不能误称实际密钥或直接删除导致更新失效。未凭这些字段新增Prompt授权或另一套配置模型。
+
+IqcMcpServerController四个现有命令原Audit.request默认true，会复制name/description/endpoint/secretRef/allowedToolsJson请求。现均显式request=false,response=false；update/enable/disable保留目标#id，create保留原操作和模块。仅关闭额外审计正文，不改资产持久化/版本/Agent冻结引用/运行配置。模型与MCP接口当前业务授权/组织适用边界、响应中的自由描述及MCP实际请求/凭据规则仍须独立完整审查；不能把审计修复称为整个域隐私验收。
