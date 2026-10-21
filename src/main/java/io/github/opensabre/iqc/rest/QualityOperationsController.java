@@ -137,7 +137,7 @@ public class QualityOperationsController {
         if("SCORE_CONTEXT".equals(view)){
             if(!business(targetType)||resultId==null||resultId.isBlank()||status!=null||taskId!=null)
                 throw IqcException.invalidArgument("评分复核上下文必须指定单一业务结果");
-            return businessReviews.scoreContext(resultId);
+            return resultProjection.scoreReviewContext(businessReviews.scoreContext(resultId),access);
         }
         if("FINDING_CONTEXT".equals(view)){
             if(!business(targetType)||resultId==null||resultId.isBlank()||status!=null||taskId!=null)

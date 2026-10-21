@@ -755,6 +755,24 @@ public final class ResultReadProjection {
                 configurationPrivacy("iqc-review-queue-read-v1",access,reveal,List.of("records.requestComment")));
     }
 
+    public record ScoreReviewContextRead(String sourceResultId,String sourceHash,String computedScoringHash,String computedScoreStatus,
+            String computedScore,Object manualScore,Map<String,Object> privacy) { }
+    public ScoreReviewContextRead scoreReviewContext(io.github.opensabre.iqc.quality.BusinessItemReviewService.ScoreContext source,
+            SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(source);Objects.requireNonNull(access);boolean reveal=access.fullConversation()&&access.pii();
+        Object manual=source.manualScore();
+        if(!reveal&&source.manualScore()!=null){
+            var original=source.manualScore();var adjustment=original.adjustment();
+            var safeAdjustment=new LinkedHashMap<String,Object>();
+            safeAdjustment.put("sourceResultId",adjustment.sourceResultId());safeAdjustment.put("expectedScoringHash",adjustment.expectedScoringHash());
+            safeAdjustment.put("finalScore",adjustment.finalScore());safeAdjustment.put("reason",null);
+            var safe=new LinkedHashMap<String,Object>();safe.put("adjustment",safeAdjustment);safe.put("status",original.status());
+            safe.put("computedScoringHash",original.computedScoringHash());safe.put("effectiveScore",original.effectiveScore());manual=safe;
+        }
+        return new ScoreReviewContextRead(source.sourceResultId(),source.sourceHash(),source.computedScoringHash(),source.computedScoreStatus(),
+                source.computedScore(),manual,configurationPrivacy("iqc-score-review-context-read-v1",access,reveal,List.of("manualScore.adjustment.reason")));
+    }
+
     private Map<String,Object> configurationPrivacy(String policyVersion,SensitiveReadAccessService.Access access,boolean canonical,List<String> withheld){
         var metadata=new LinkedHashMap<String,Object>();metadata.put("policyVersion",policyVersion);
         metadata.put("canonicalPayloadVisible",canonical);metadata.put("canReadFull",access.fullConversation());
