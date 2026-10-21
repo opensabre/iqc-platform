@@ -36,4 +36,22 @@ mvn -o -q -Dtest=IsolatedMysqlMeasuredPublicationIT,PipelineNodeSchemaRoundTripT
 
 组织授权 IqcDataScope 使用受控测试身份；初始候选是夹具，未证明真实复核产生候选。未使用外部模型供应商；指标来自现有处理后会话的时间坐标。此单场景通过不能证明生产数据集质量、容量或性能 SLO。
 
-本测试不含复核重算、Action派发/对账、外部渠道、真实PDP/collector/浏览器。未激活默认v2，未前移B主树、未修改A工作树/framework/gateway、未push或部署。完整适用I1–I7继续active。
+3cc7d30 时本测试尚不含复核重算、Action派发/对账；后续扩展见下一节。外部渠道、真实PDP/collector/浏览器仍未验证。未激活默认v2，未前移B主树、未修改A工作树/framework/gateway、未push或部署。完整适用I1–I7继续active。
+
+
+## 后续扩展：动作、复核重算和候选回流
+
+基线3cc7d30上扩展同一SQL链路，仅修改测试配置与断言，没有新增或修改生产服务。
+
+- 原发布草稿纳入SAVE_RESULT、CREATE_REVIEW策略；策略随实际评测、试跑、普通测量发布和正式任务冻结流转。
+- 显式调用真实ActionEnqueueService工作流入口，真实发布资产/输入/来源校验通过；重复入队返回相同两个ID，数据库仅两条动作。由ActionExecutionService实际领取、适配及结算；SAVE_RESULT确认既有持久结果，不创建另一份结果。
+- CREATE_REVIEW调用真实BusinessReviewActionService，在独立事务中创建一条待办。测试专属MySQL BEFORE UPDATE触发器只拒绝这条动作从RUNNING转COMPLETE，令回执落库失败。实际runner返回SETTLEMENT_PENDING，复核已提交而动作仍RUNNING；finally移除测试触发器。
+- 无用户上下文调用真实ActionDispatchStateService将该失联领取隔离为REQUIRES_RECONCILIATION/UNKNOWN；随后实际ActionReconciliationService经适配器只读查找原复核产物，原动作转COMPLETE/CONFIRMED_SUCCESS。持久核对尝试有且仅有一个CONFIRMED，重复旧版本核对为STALE_OBSERVATION，复核仍只有一条。领取次数保持1，旧版本execute不再领取。
+- 独立受控reviewer经真实BusinessItemReviewService提交FAIL→PASS，原分80/复核分100；相同裁决重试保持原快照。原机器trace、scoring、items三个存储JSON逐字节不变。
+- 真实BusinessReviewSampleService拒绝捕获已漂移的原会话；恢复测试专属原输入后捕获候选，重复请求保持同ID/单条记录。候选为精确v3，保留真实复核ID与重算100分。
+
+原75176终态1：testCompile通过，隔离配置未接现有创建人填充器，正式任务缺createdBy，动作来源守卫正确拒绝。测试接入框架已有PoMetaObjectHandler与受控UserContextHolder，不修改框架或生产来源校验。原50082终态0，`/tmp/iqc-b-measured-review-actions-second.log`；compiler:testCompile/surefire:test，当轮XML一项组合场景零失败错误跳过，30.08s。生产沿用3cc7d30已完整编译版本；之前30项回归属于该基线，本次不宣称重跑全部30项。
+
+本机脚本 `/private/tmp/iqc-b-measured-review-actions-validation.sh` 沿用隔离目录/端口guard及正常关闭；75迁移校验通过，schema1.1.74当前，结束后pid/socket不存在。测试触发器是故障注入，不是生产迁移。
+
+身份授权仍是受控seam：IqcDataScope及ScheduledActorAccessService.capture为mock，固定四个资源grant；没有真实PDP/current grant撤权或HTTP授权证据。调用实际内部工作流和runner，不是定时扫描器tick/自动发现验收。复核确认没有外部发送；不证明真实外部模型、渠道、浏览器、容量SLO。真实候选已产生，但该候选后续Gold审核→数据集→再次评测尚未覆盖。全适用I1–I7继续active。
