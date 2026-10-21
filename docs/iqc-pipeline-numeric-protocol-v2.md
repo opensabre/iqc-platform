@@ -32,3 +32,5 @@ Evaluation stage: task/release reads, execution input checks, stored trace decod
 Benchmark stage: fragment comparisons and string-encoded Agent config parsing now follow the common frozen release protocol; mixed protocols are rejected and legacy experiments keep old digest behavior. See `iqc-prd-b-exact-benchmark.md` for red evidence and final31-test verification. This closes the comparator precision item documented in the preceding evaluation stage, not the persisted end-to-end Benchmark gate.
 
 Standalone Action policy stage: eight policy-copy readers now share ActionFrozenPolicy.readFrozen and inherit the source task Release protocol. See `iqc-prd-b-exact-action-policy.md` for original red evidence,78-test verification and remaining source-context/adapter/full-persistence gates. Default activation remains pending.
+
+Action context stage: source replay now reuses PipelineDecisionEvaluator.inputContext instead of discarding frozen business data and labels. See `iqc-prd-b-action-source-context.md` for two original business failures and final70-test evidence. This fixes context assembly; full SQL/action dispatch and default activation remain pending.

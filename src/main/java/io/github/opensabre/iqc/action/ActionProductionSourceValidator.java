@@ -129,7 +129,8 @@ public class ActionProductionSourceValidator {
             var fused=FindingFusion.reproduce(raw,release.fusion(),trace.fusion());
             var score=PipelineDecisionEvaluator.evaluate(release,fused,prepared.businessContext(reference.conversationId()));
             var decisions=new java.util.HashMap<String,InspectionScoring.ItemStatus>();
-            PipelineDecisionEvaluator.decisions(release.items(),fused).forEach(value->decisions.put(value.itemCode(),value.status()));
+            var itemDecisions=PipelineDecisionEvaluator.decisions(release.items(),fused);
+            itemDecisions.forEach(value->decisions.put(value.itemCode(),value.status()));
             var seen=new java.util.HashSet<String>();
             for(var item:trace.items()) {
                 if(item==null || !seen.add(item.itemCode()) || !Objects.equals(decisions.get(item.itemCode()),item.status()))
@@ -161,8 +162,10 @@ public class ActionProductionSourceValidator {
                     .put("scoringResultJson",result.getScoringResultJson()).put("businessItemResultsJson",result.getBusinessItemResultsJson())
                     .put("resultStatus",result.getResultStatus()).put("riskLevel",risk);
             String body=json.writeValueAsString(frozen);
-            var facts=new java.util.HashMap<String,FindingFusion.Result>();fused.forEach(fact->facts.put(fact.code(),fact));
-            var context=new ActionPolicy.Context(facts,decisions,score.scoreStatus(),score.finalScore(),risk,result.getResultStatus(),java.util.Map.of(),null,review==null?null:review.status().name());
+            // Reuse the same frozen label and business inputs used by scoring/risk/review decisions.
+            var frozenContext=PipelineDecisionEvaluator.inputContext(release,fused,itemDecisions,prepared.businessContext(reference.conversationId()));
+            var context=new ActionPolicy.Context(frozenContext.findings(),frozenContext.items(),score.scoreStatus(),score.finalScore(),risk,
+                    result.getResultStatus(),frozenContext.labels(),frozenContext.businessContext(),review==null?null:review.status().name());
             return new Validated(reference,task.getOwnerGroupId(),result.getId(),body,PipelineAssetService.hash(body),
                     release.actionPolicy(),context,ownerBound,task.getStatus());
         } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException failure) {
