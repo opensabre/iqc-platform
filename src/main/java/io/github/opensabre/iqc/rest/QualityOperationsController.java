@@ -122,8 +122,8 @@ public class QualityOperationsController {
         var access=readAccess("iqc:review:create");
         if (request != null && business(request.targetType())) {
             if (request.expectedRevision() == null) throw IqcException.invalidArgument("业务复核必须指定预期修订");
-            if(request.stage()!=null||request.parentReviewId()!=null)return businessReviews.request(resultId,request.expectedRevision(),request.requestId(),request.comment(),request.stage(),request.parentReviewId());
-            return businessReviews.request(resultId, request.expectedRevision(), request.requestId(), request.comment());
+            if(request.stage()!=null||request.parentReviewId()!=null)return resultProjection.businessReview(businessReviews.request(resultId,request.expectedRevision(),request.requestId(),request.comment(),request.stage(),request.parentReviewId()),access,false);
+            return resultProjection.businessReview(businessReviews.request(resultId, request.expectedRevision(), request.requestId(), request.comment()),access,false);
         }
         if(request!=null&&(request.stage()!=null||request.parentReviewId()!=null))throw IqcException.invalidArgument("消息复核不接受业务阶段升级");
         return resultProjection.messageReview(service.requestReview(resultId, request == null ? null : request.comment()),access,false);
@@ -157,7 +157,7 @@ public class QualityOperationsController {
         if (business(targetType)) {
             if (resultId == null || resultId.isBlank()) throw IqcException.invalidArgument("业务复核历史必须指定会话结果");
             if (status != null) throw IqcException.invalidArgument("业务复核历史按完整轮次返回，不支持状态筛选");
-            return businessReviews.history(resultId);
+            return businessReviews.history(resultId).stream().map(row->resultProjection.businessReview(row,access,true)).toList();
         }
         return service.reviews(status).stream().map(row->resultProjection.messageReview(row,access,true)).toList();
     }
@@ -171,9 +171,9 @@ public class QualityOperationsController {
                 throw IqcException.invalidArgument("业务复核必须指定修订与完成/退回决定");
             if (request.finalScore() != null || request.finalStatus() != null || request.finalRiskLevel() != null)
                 throw IqcException.invalidArgument("业务复核不能手工覆盖总分、整体状态或风险");
-            if(request.scoreAdjustment()!=null)return businessReviews.decide(reviewId,request.expectedRevision(),"REJECTED".equals(request.decision()),
-                    request.items(),request.findingDecisions(),request.scoreAdjustment(),request.comment());
-            return businessReviews.decide(reviewId, request.expectedRevision(), "REJECTED".equals(request.decision()), request.items(),request.findingDecisions(),request.comment());
+            if(request.scoreAdjustment()!=null)return resultProjection.businessReview(businessReviews.decide(reviewId,request.expectedRevision(),"REJECTED".equals(request.decision()),
+                    request.items(),request.findingDecisions(),request.scoreAdjustment(),request.comment()),access,false);
+            return resultProjection.businessReview(businessReviews.decide(reviewId, request.expectedRevision(), "REJECTED".equals(request.decision()), request.items(),request.findingDecisions(),request.comment()),access,false);
         }
         if(request.scoreAdjustment()!=null)throw IqcException.invalidArgument("消息复核不接受业务人工改分命令");
         if(request.findingDecisions()!=null&&!request.findingDecisions().isEmpty())throw IqcException.invalidArgument("消息复核不接受Finding裁决");

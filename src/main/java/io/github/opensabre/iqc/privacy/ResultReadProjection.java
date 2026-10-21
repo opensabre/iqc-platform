@@ -782,10 +782,32 @@ public final class ResultReadProjection {
             io.github.opensabre.iqc.quality.model.ResultReview source,SensitiveReadAccessService.Access access,boolean detailRead){
         return reviewRead(source,access,detailRead,"iqc-message-review-read-v1");
     }
+    public io.github.opensabre.iqc.quality.model.ResultReview businessReview(
+            io.github.opensabre.iqc.quality.model.ResultReview source,SensitiveReadAccessService.Access access,boolean detailRead){
+        var copy=reviewRead(source,access,detailRead,"iqc-business-review-read-v1");
+        if(!detailRead)return copy;
+        var display=new LinkedHashMap<String,Object>();display.put("policyVersion","iqc-review-workflow-presentation-v1");
+        try{
+            if(source.getReviewRevision()==null||source.getReviewRevision()<1)throw new IllegalArgumentException();
+            var raw=source.getReviewedResultJson();
+            com.fasterxml.jackson.databind.JsonNode workflow=null;
+            if(raw!=null&&!raw.isBlank()){
+                var root=json.readTree(raw);if(root==null||!root.isObject())throw new IllegalArgumentException();
+                workflow="COMPLETED".equals(source.getStatus())?root.get("workflow"):root;
+            }else if("COMPLETED".equals(source.getStatus()))throw new IllegalArgumentException();
+            io.github.opensabre.iqc.quality.BusinessItemReviewEvaluator.ReviewWorkflow checked=null;
+            if(workflow!=null&&!workflow.isNull()){
+                checked=json.treeToValue(workflow,io.github.opensabre.iqc.quality.BusinessItemReviewEvaluator.ReviewWorkflow.class);
+                if(checked.parentRevision()!=null&&checked.parentRevision()>=source.getReviewRevision())throw new IllegalArgumentException();
+            }
+            display.put("state","AVAILABLE");display.put("stage",checked==null?"INITIAL":checked.stage().name());display.put("workflow",checked==null||checked.stage()==io.github.opensabre.iqc.quality.BusinessItemReviewEvaluator.ReviewStage.INITIAL?null:checked);
+        }catch(Exception invalid){display.put("state","UNAVAILABLE");display.put("stage","INVALID");}
+        copy.setReviewPresentation(display);return copy;
+    }
     private io.github.opensabre.iqc.quality.model.ResultReview reviewRead(
             io.github.opensabre.iqc.quality.model.ResultReview source,SensitiveReadAccessService.Access access,boolean detailRead,String policy){
         Objects.requireNonNull(source);Objects.requireNonNull(access);
-        var copy=new io.github.opensabre.iqc.quality.model.ResultReview();BeanUtils.copyProperties(source,copy);
+        var copy=new io.github.opensabre.iqc.quality.model.ResultReview();BeanUtils.copyProperties(source,copy);copy.setReviewPresentation(null);
         boolean reveal=detailRead&&access.fullConversation()&&access.pii();
         copy.setCreatedBy(text(source.getCreatedBy(),access.fullConversation()&&access.pii()));
         copy.setReviewerId(text(source.getReviewerId(),access.fullConversation()&&access.pii()));

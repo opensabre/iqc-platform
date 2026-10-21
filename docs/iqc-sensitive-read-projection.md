@@ -472,3 +472,10 @@ LabelValueReviewPanel区分未展示和损坏：存在但未知/受限privacy清
 ## B消息HTTP序列化修复集成（2026-10-22）
 
 从B已提交e0ed424精确取FindingReviewContextRead/findingReviewContext响应代码和ReviewContextQueueHttpPrivacyTest。响应messages由Jackson2 JsonNode改普通List<Map>，仅授权时转换；未授权仍空列表，冻结service上下文不变。B默认MVC实测此前节点bean属性而非消息数组，修复后八grant及队列共13项通过；连同其其它套件/签名H2共53项结果归B当时组合分支，见协作台账。Root集成保留最新score/label/message保护，当前仅skipTests test-compile，不重跑或夸大为全部HTTP/组织/浏览器验收。
+
+
+## 业务复核历史与安全工作流展示（2026-10-22）
+
+业务history及request/decide各已有分支统一接入businessReview，复用reviewRead响应copy规则；history FULL+PII才回原评论/reviewedResultJson，命令永扣正文，不需Prompt。新增ResultReview.reviewPresentation非持久null省略字段；历史专门响应仅含iqc-review-workflow-presentation-v1、AVAILABLE/UNAVAILABLE、阶段及原ReviewWorkflow元数据。复用既有ReviewWorkflow构造校验，额外保持parentRevision小于当前轮次，初审无上游workflow；坏JSON/错误协议不自动补INITIAL。只解析显示用元数据，不重写裁决/源JSON/hash，原服务的锁/独立审核人/范围/计算/升级逻辑不改。
+
+BusinessReviewPanel正文受限时不解析为坏投影，显示未展示并禁止基于不完整历史变更；读取已知有效presentation保留二审/仲裁/终局含义，异常presentation禁操作。完整正文原评分/证据验证保留，无privacy历史旧接口兼容。命令后仍原刷新history；卸载清历史/输入/命令并失效代次，迟到命令响应不刷新。实际四grant/初审二审仲裁/坏协议/源字节/旧JSON、当前授权与组织SQL/浏览器仍待独立验收，本批仅编译构建，完整I1–I7未完成。
