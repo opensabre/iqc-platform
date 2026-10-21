@@ -34,3 +34,5 @@ Benchmark stage: fragment comparisons and string-encoded Agent config parsing no
 Standalone Action policy stage: eight policy-copy readers now share ActionFrozenPolicy.readFrozen and inherit the source task Release protocol. See `iqc-prd-b-exact-action-policy.md` for original red evidence,78-test verification and remaining source-context/adapter/full-persistence gates. Default activation remains pending.
 
 Action context stage: source replay now reuses PipelineDecisionEvaluator.inputContext instead of discarding frozen business data and labels. See `iqc-prd-b-action-source-context.md` for two original business failures and final70-test evidence. This fixes context assembly; full SQL/action dispatch and default activation remain pending.
+
+Finding label stage: frozen task/directory decoding and stored projection replay now preserve their declared numeric protocols. Historical projection comparison reuses the existing exact canonical hash against reproduced production facts. See `iqc-prd-b-exact-finding-label-read.md` for two original red failures,81-test evidence and remaining actual SQL/action/activation gates.

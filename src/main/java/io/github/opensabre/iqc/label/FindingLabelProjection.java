@@ -58,6 +58,13 @@ public final class FindingLabelProjection {
         }
         @Override public JsonNode value(){return value==null?null:value.deepCopy();}
     }
+    /** Stored projections already use Selector exact hashes, independently of the source Release version. */
+    public static Projection read(com.fasterxml.jackson.databind.ObjectMapper json,String body)
+            throws com.fasterxml.jackson.core.JsonProcessingException {
+        return json.readerFor(Projection.class)
+                .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readValue(body);
+    }
+
     public static Projection project(Binding binding,FindingFusion.Result source) {
         Objects.requireNonNull(binding);
         if(source==null)return new Projection(SCHEMA,binding,Status.NOT_EVALUATED,null,"FINDING_MISSING",null,null,List.of(),List.of(),List.of());

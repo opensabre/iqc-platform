@@ -22,7 +22,7 @@ public class FindingLabelActionAdapter implements ActionAdapter {
             var input=json.readTree(source.inputSnapshotJson());
             if(input==null || !"iqc-action-production-input-v1".equals(input.path("schemaVersion").asText())
                     || !input.path("taskSnapshotJson").isTextual())return false;
-            var snapshot=json.readTree(input.path("taskSnapshotJson").asText());
+            var snapshot=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenTree(json,input.path("taskSnapshotJson").asText());
             var node=snapshot==null?null:snapshot.path("pipelineSnapshot").path("release").get("labelPolicy");
             if(node==null || node.isNull())return false;
             var policy=json.treeToValue(node,FindingLabelPolicy.class);
