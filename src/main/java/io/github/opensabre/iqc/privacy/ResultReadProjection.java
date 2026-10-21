@@ -651,6 +651,39 @@ public final class ResultReadProjection {
                 canonical?source.definition():null,source.contentHash(),source.ownerGroupId(),body,selectorPrivacy(access,canonical,List.of("definition","definitionJson")),source.availableForNewTasks());
     }
 
+    /** Display-only envelope: never reconstituted as a ReleaseSnapshot or used for content hashing. */
+    public record PublishedSchemeRead(String schemeId,int versionNo,String contentHash,Object snapshot,Map<String,Object> privacy) { }
+    public PublishedSchemeRead publishedScheme(io.github.opensabre.iqc.scheme.InspectionSchemeService.PublishedTemplate source,
+            SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(access);Objects.requireNonNull(source);
+        boolean canonical=access.fullConversation()&&access.pii()&&access.prompt();
+        if(canonical)return new PublishedSchemeRead(source.schemeId(),source.versionNo(),source.contentHash(),source.snapshot(),
+                configurationPrivacy("iqc-scheme-template-read-v1",access,true,List.of()));
+        var original=source.snapshot();
+        var display=new LinkedHashMap<String,Object>();
+        display.put("name",text(original.name(),access.fullConversation()&&access.pii()));
+        display.put("code",original.code());display.put("description",null);
+        display.put("businessScene",text(original.businessScene(),access.fullConversation()&&access.pii()));
+        // Definition contains business controls and version references, never detector bodies.
+        com.fasterxml.jackson.databind.node.ObjectNode definition=json.valueToTree(original.definition());
+        for(var item:definition.path("items"))if(item.isObject()&&item.path("name").isTextual())
+            ((com.fasterxml.jackson.databind.node.ObjectNode)item).put("name",text(item.path("name").textValue(),access.fullConversation()&&access.pii()));
+        for(var variant:definition.path("executionVariants").path("variants"))if(variant.isObject())
+            for(String field:List.of("name","coverage","cost"))if(variant.path(field).isTextual())
+                ((com.fasterxml.jackson.databind.node.ObjectNode)variant).put(field,text(variant.path(field).textValue(),access.fullConversation()&&access.pii()));
+        display.put("definition",definition);display.put("selectedVariantCode",original.selectedVariantCode());
+        var dependencies=new LinkedHashMap<String,Object>();dependencies.put("executionMode",original.dependencies().executionMode());
+        var rules=new java.util.ArrayList<Map<String,Object>>();
+        for(var rule:original.dependencies().rules()){
+            var metadata=new LinkedHashMap<String,Object>();
+            metadata.put("id",rule.path("id").asText());metadata.put("versionNo",rule.path("versionNo").asInt());
+            metadata.put("name",text(rule.path("name").asText(),access.fullConversation()&&access.pii()));rules.add(metadata);
+        }
+        dependencies.put("rules",rules);display.put("dependencies",dependencies);
+        return new PublishedSchemeRead(source.schemeId(),source.versionNo(),source.contentHash(),display,
+                configurationPrivacy("iqc-scheme-template-read-v1",access,false,List.of("snapshot.description","snapshot.dependencies.detectorBodies","snapshot.dependencies.labels","snapshot.dependencies.itemExecutionPlan","snapshot.variantDependencies")));
+    }
+
     private Map<String,Object> configurationPrivacy(String policyVersion,SensitiveReadAccessService.Access access,boolean canonical,List<String> withheld){
         var metadata=new LinkedHashMap<String,Object>();metadata.put("policyVersion",policyVersion);
         metadata.put("canonicalPayloadVisible",canonical);metadata.put("canReadFull",access.fullConversation());

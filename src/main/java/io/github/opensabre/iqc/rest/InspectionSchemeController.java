@@ -58,14 +58,19 @@ public class InspectionSchemeController {
 
     @GetMapping("/published")
     @ResourcePermission(code="iqc:scheme:view", name="查看业务模板", type="iqc", description="查询已发布业务方案模板")
+    @Audit(operationType=OperationType.QUERY, description="读取已发布方案模板", module="IQC_PRIVACY", request=false, response=false, key="#schemeId")
     public Object templates(@RequestParam(required=false) String schemeId,
                             @RequestParam(required=false) Integer beforeVersion) {
+        var access=access("iqc:scheme:view");
         if (schemeId == null) {
             if (beforeVersion != null) throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("查询历史版本时必须指定方案 ID");
-            return schemes.templates();
+            return schemes.templates().stream().map(row->projection.publishedScheme(row,access)).toList();
         }
-        return schemes.publishedHistory(schemeId, beforeVersion);
+        var history=schemes.publishedHistory(schemeId, beforeVersion);
+        return new PublishedHistoryRead(history.versions().stream().map(row->projection.publishedScheme(row,access)).toList(),history.nextBeforeVersion());
     }
+
+    public record PublishedHistoryRead(java.util.List<io.github.opensabre.iqc.privacy.ResultReadProjection.PublishedSchemeRead> versions,Integer nextBeforeVersion) { }
 
     @GetMapping("/{id}/versions")
     @Operation(summary="查看专家发布历史", description="按版本倒序，每次最多 20 个；使用正版本号游标读取更早标准，停用历史仍可读，不改变可用版本")

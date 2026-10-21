@@ -409,3 +409,10 @@ UI从受限/未知协议响应清理正文，不把null构造为可保存空版�
 现有Audit.request默认true（framework治理注解只读确认），Scheme创建/修订此前会将DraftRequest完整definition记录到审计。三个原有创建/修订/发布注解显式request=false,response=false；修订和发布保留目标id，操作类型/module不变。不改framework、业务请求或持久快照。
 
 Scheme整体读取边界尚未完成：published模板及专家history的ReleaseSnapshot携带dependencies和variantDependencies，包含规则expression及Agent configJson；不能只清理dependencies而遗漏变体副本。现有UI依赖snapshot.definition的executionVariants/runLimits及历史diff/派生，需专门安全选用元数据及受限编辑/历史展示联动，不能简单置空snapshot。ReleaseSnapshot构造校验要求变体集合与选中dependencies一致，投影不能制造假发布Release或参与hash。内部Release记录不应为显示投影改写。
+
+
+## 已发布Scheme普通读取投影（2026-10-21）
+
+GET /schemes/published目录及schemeId游标历史先检查当前scheme:view并设置no-store，查询审计不收正文。独立PublishedSchemeRead响应封装，不修改ReleaseSnapshot/内部快照/摘要。FULL+PII+PROMPT全部具备可回原发布正文；其它组合只回业务definition（item/评分/上限/variant/引用），自由名称沿原PII mask、描述扣留，dependencies仅executionMode和规则id/version/name，agent/label/route plan/variantDependencies不复制；policyVersion=iqc-scheme-template-read-v1。contentHash始终原发布物身份，不能用展示投影重算校验。
+
+普通前端API即使有全部权限，也只保留任务选择所需依赖元数据，不保存检测器正文；描述需已知协议全部grant方保留。原TemplateWizard仍按原definition/推荐变体/上限/执行模式及版本创建任务。专家draft/history/preview和发布回执仍待独立收口，不把普通模板路径完成当成整个Scheme域完成。实际权限组合/源快照不变/普通任务与历史/浏览器/网关注册待独立验证，本批仅编译构建。
