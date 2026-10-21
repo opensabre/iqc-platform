@@ -651,6 +651,46 @@ public final class ResultReadProjection {
                 canonical?source.definition():null,source.contentHash(),source.ownerGroupId(),body,selectorPrivacy(access,canonical,List.of("definition","definitionJson")),source.availableForNewTasks());
     }
 
+    public io.github.opensabre.iqc.scheme.model.InspectionScheme schemeDraft(
+            io.github.opensabre.iqc.scheme.model.InspectionScheme source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.scheme.model.InspectionScheme();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&access.prompt();
+        copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        copy.setBusinessScene(text(copy.getBusinessScene(),access.fullConversation()&&access.pii()));
+        copy.setSourceSchemeName(text(copy.getSourceSchemeName(),access.fullConversation()&&access.pii()));
+        copy.setSchemePresentation(null);
+        if(detailRead){
+            var presentation=new LinkedHashMap<String,Object>();presentation.put("policyVersion","iqc-scheme-presentation-v1");
+            try{
+                // Typed business definition has references, never the resolved detector bodies.
+                var definition=json.readValue(source.getDraftConfigJson(),io.github.opensabre.iqc.scheme.SchemeDefinition.class);
+                presentation.put("definition",schemeDefinitionDisplay(definition,access));presentation.put("state","AVAILABLE");
+            }catch(Exception invalid){presentation.put("state","UNAVAILABLE");}
+            copy.setSchemePresentation(presentation);
+        }
+        if(!canonical){copy.setDescription(null);copy.setDraftConfigJson(null);}
+        copy.setPrivacy(configurationPrivacy("iqc-scheme-draft-read-v1",access,canonical,List.of("description","draftConfigJson")));return copy;
+    }
+    private com.fasterxml.jackson.databind.node.ObjectNode schemeDefinitionDisplay(io.github.opensabre.iqc.scheme.SchemeDefinition source,SensitiveReadAccessService.Access access){
+        com.fasterxml.jackson.databind.node.ObjectNode definition=json.valueToTree(source);
+        for(var item:definition.path("items"))if(item.isObject()&&item.path("name").isTextual())
+            ((com.fasterxml.jackson.databind.node.ObjectNode)item).put("name",text(item.path("name").textValue(),access.fullConversation()&&access.pii()));
+        for(var variant:definition.path("executionVariants").path("variants"))if(variant.isObject())
+            for(String field:List.of("name","coverage","cost"))if(variant.path(field).isTextual())
+                ((com.fasterxml.jackson.databind.node.ObjectNode)variant).put(field,text(variant.path(field).textValue(),access.fullConversation()&&access.pii()));
+        return definition;
+    }
+    public record SchemeVersionReceipt(String id,String schemeId,Integer versionNo,Integer sourceDraftRevision,String sourceTrialTaskId,String contentHash,Boolean archived) { }
+    public SchemeVersionReceipt schemeVersionReceipt(io.github.opensabre.iqc.scheme.model.InspectionSchemeVersion source){
+        return new SchemeVersionReceipt(source.getId(),source.getSchemeId(),source.getVersionNo(),source.getSourceDraftRevision(),source.getSourceTrialTaskId(),source.getContentHash(),source.getArchived());
+    }
+    public record ReleasedSchemeRead(int versionNo,Integer sourceDraftRevision,String sourceTrialTaskId,String contentHash,Object snapshot,boolean archived,Map<String,Object> privacy) { }
+    public ReleasedSchemeRead releasedScheme(String schemeId,io.github.opensabre.iqc.scheme.InspectionSchemeService.ReleasedVersion source,SensitiveReadAccessService.Access access){
+        var display=publishedScheme(new io.github.opensabre.iqc.scheme.InspectionSchemeService.PublishedTemplate(schemeId,source.versionNo(),source.contentHash(),source.snapshot()),access);
+        return new ReleasedSchemeRead(source.versionNo(),source.sourceDraftRevision(),source.sourceTrialTaskId(),source.contentHash(),display.snapshot(),source.archived(),display.privacy());
+    }
+
     /** Display-only envelope: never reconstituted as a ReleaseSnapshot or used for content hashing. */
     public record PublishedSchemeRead(String schemeId,int versionNo,String contentHash,Object snapshot,Map<String,Object> privacy) { }
     public PublishedSchemeRead publishedScheme(io.github.opensabre.iqc.scheme.InspectionSchemeService.PublishedTemplate source,
@@ -665,12 +705,7 @@ public final class ResultReadProjection {
         display.put("code",original.code());display.put("description",null);
         display.put("businessScene",text(original.businessScene(),access.fullConversation()&&access.pii()));
         // Definition contains business controls and version references, never detector bodies.
-        com.fasterxml.jackson.databind.node.ObjectNode definition=json.valueToTree(original.definition());
-        for(var item:definition.path("items"))if(item.isObject()&&item.path("name").isTextual())
-            ((com.fasterxml.jackson.databind.node.ObjectNode)item).put("name",text(item.path("name").textValue(),access.fullConversation()&&access.pii()));
-        for(var variant:definition.path("executionVariants").path("variants"))if(variant.isObject())
-            for(String field:List.of("name","coverage","cost"))if(variant.path(field).isTextual())
-                ((com.fasterxml.jackson.databind.node.ObjectNode)variant).put(field,text(variant.path(field).textValue(),access.fullConversation()&&access.pii()));
+        var definition=schemeDefinitionDisplay(original.definition(),access);
         display.put("definition",definition);display.put("selectedVariantCode",original.selectedVariantCode());
         var dependencies=new LinkedHashMap<String,Object>();dependencies.put("executionMode",original.dependencies().executionMode());
         var rules=new java.util.ArrayList<Map<String,Object>>();

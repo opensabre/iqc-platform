@@ -41,7 +41,7 @@ public class InspectionSchemeController {
         this(schemes,publication,tasks,null,null);
     }
     private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access access(String resource){
-        if(sensitive==null || projection==null)throw io.github.opensabre.iqc.governance.IqcException.invalidState("方案任务响应授权组件不可用");
+        if(sensitive==null || projection==null)throw io.github.opensabre.iqc.governance.IqcException.invalidState("方案响应授权组件不可用");
         var access=sensitive.current(java.util.Set.of(resource));
         if(org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()
                 instanceof org.springframework.web.context.request.ServletRequestAttributes servlet && servlet.getResponse()!=null){
@@ -54,7 +54,8 @@ public class InspectionSchemeController {
 
     @GetMapping
     @ResourcePermission(code="iqc:scheme:manage", name="维护业务方案", type="iqc", description="查询业务方案草稿")
-    public List<InspectionScheme> drafts() { return schemes.list(); }
+    @Audit(operationType=OperationType.QUERY,description="读取业务方案草稿",module="IQC_PRIVACY",request=false,response=false)
+    public List<InspectionScheme> drafts() { var access=access("iqc:scheme:manage");return schemes.list().stream().map(row->projection.schemeDraft(row,access,true)).toList(); }
 
     @GetMapping("/published")
     @ResourcePermission(code="iqc:scheme:view", name="查看业务模板", type="iqc", description="查询已发布业务方案模板")
@@ -75,28 +76,34 @@ public class InspectionSchemeController {
     @GetMapping("/{id}/versions")
     @Operation(summary="查看专家发布历史", description="按版本倒序，每次最多 20 个；使用正版本号游标读取更早标准，停用历史仍可读，不改变可用版本")
     @ResourcePermission(code="iqc:scheme:manage", name="维护业务方案", type="iqc", description="查询业务方案草稿")
-    public InspectionSchemeService.VersionHistory history(@PathVariable String id,
+    @Audit(operationType=OperationType.QUERY,description="读取专家方案历史",module="IQC_PRIVACY",request=false,response=false,key="#id")
+    public ExpertHistoryRead history(@PathVariable String id,
                                                           @RequestParam(required=false) Integer beforeVersion) {
-        return schemes.history(id, beforeVersion);
+        var access=access("iqc:scheme:manage");var history=schemes.history(id,beforeVersion);
+        return new ExpertHistoryRead(history.versions().stream().map(row->projection.releasedScheme(id,row,access)).toList(),history.nextBeforeVersion());
     }
+
+    public record ExpertHistoryRead(java.util.List<io.github.opensabre.iqc.privacy.ResultReadProjection.ReleasedSchemeRead> versions,Integer nextBeforeVersion) { }
 
     @PostMapping
     @ResourcePermission(code="iqc:scheme:create", name="创建业务方案", type="iqc", description="创建业务方案草稿")
     @Audit(operationType=OperationType.CREATE, description="创建业务质检方案", module="IQC_SCHEME", request=false, response=false)
-    public InspectionScheme create(@RequestBody InspectionSchemeService.DraftRequest request) { return schemes.create(request); }
+    public InspectionScheme create(@RequestBody InspectionSchemeService.DraftRequest request) { var access=access("iqc:scheme:create");return projection.schemeDraft(schemes.create(request),access,false); }
 
     @PutMapping("/{id}")
     @ResourcePermission(code="iqc:scheme:update", name="修订业务方案", type="iqc", description="修订业务方案草稿")
     @Audit(operationType=OperationType.UPDATE, description="修订业务质检方案", module="IQC_SCHEME", request=false, response=false, key="#id")
     public InspectionScheme revise(@PathVariable String id, @RequestBody @Valid RevisionRequest request) {
-        return schemes.revise(id, request.expectedRevision(), request.draft());
+        var access=access("iqc:scheme:update");return projection.schemeDraft(schemes.revise(id, request.expectedRevision(), request.draft()),access,false);
     }
 
     @PostMapping("/{id}/preview")
     @Operation(summary="检查方案依赖", description="仅结构与依赖检查，不替代真实试跑")
     @ResourcePermission(code="iqc:scheme:preview", name="检查业务方案", type="iqc", description="检查草稿结构和依赖")
-    public InspectionSchemeService.ReleaseSnapshot preview(@PathVariable String id, @RequestBody @Valid Revision request) {
-        return schemes.preview(id, request.expectedRevision());
+    @Audit(operationType=OperationType.QUERY,description="检查业务方案依赖",module="IQC_PRIVACY",request=false,response=false,key="#id")
+    public java.util.Map<String,Object> preview(@PathVariable String id, @RequestBody @Valid Revision request) {
+        access("iqc:scheme:preview");schemes.preview(id, request.expectedRevision());
+        return java.util.Map.of("schemeId",id,"draftRevision",request.expectedRevision(),"validated",true);
     }
 
     @PostMapping("/{id}/trials")
@@ -123,21 +130,22 @@ public class InspectionSchemeController {
     @ResourcePermission(code="iqc:scheme:publish", name="发布业务方案", type="iqc", description="确认发布、切换模板可用性及归档发布版本")
     @Audit(operationType=OperationType.UPDATE, description="管理业务质检模板发布与可用性", module="IQC_SCHEME", request=false, response=false, key="#id")
     public Object publish(@PathVariable String id, @RequestBody @Valid PublishRequest request) {
+        var access=access("iqc:scheme:publish");
         String action = request.action() == null ? "PUBLISH" : request.action();
         if ("DISABLE".equals(action) || "ENABLE".equals(action)) {
             if (request.trialTaskId() != null || request.resultsReviewed() || request.versionNo() != null)
                 throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("停用或恢复不能混入发布试跑或版本参数");
-            return schemes.changeAvailability(id, request.expectedRevision(), "ENABLE".equals(action));
+            return projection.schemeDraft(schemes.changeAvailability(id, request.expectedRevision(), "ENABLE".equals(action)),access,false);
         }
         if ("ARCHIVE_VERSION".equals(action) || "RESTORE_VERSION".equals(action)) {
             if (request.trialTaskId() != null || request.resultsReviewed() || request.versionNo() == null)
                 throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("版本归档或恢复必须只指定目标版本");
-            return schemes.changeVersionArchive(id, request.expectedRevision(), request.versionNo(), "ARCHIVE_VERSION".equals(action));
+            return projection.schemeVersionReceipt(schemes.changeVersionArchive(id, request.expectedRevision(), request.versionNo(), "ARCHIVE_VERSION".equals(action)));
         }
         if (!"PUBLISH".equals(action) || request.trialTaskId() == null || request.trialTaskId().isBlank())
             throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("发布动作或试跑记录无效");
         if (request.versionNo() != null) throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("发布动作不能指定历史版本号");
-        return publication.publish(id, request.expectedRevision(), request.trialTaskId(), request.resultsReviewed());
+        return projection.schemeVersionReceipt(publication.publish(id, request.expectedRevision(), request.trialTaskId(), request.resultsReviewed()));
     }
 
     @PostMapping("/{id}/versions/{versionNo}/tasks")

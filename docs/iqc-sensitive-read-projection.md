@@ -416,3 +416,12 @@ Scheme整体读取边界尚未完成：published模板及专家history的Release
 GET /schemes/published目录及schemeId游标历史先检查当前scheme:view并设置no-store，查询审计不收正文。独立PublishedSchemeRead响应封装，不修改ReleaseSnapshot/内部快照/摘要。FULL+PII+PROMPT全部具备可回原发布正文；其它组合只回业务definition（item/评分/上限/variant/引用），自由名称沿原PII mask、描述扣留，dependencies仅executionMode和规则id/version/name，agent/label/route plan/variantDependencies不复制；policyVersion=iqc-scheme-template-read-v1。contentHash始终原发布物身份，不能用展示投影重算校验。
 
 普通前端API即使有全部权限，也只保留任务选择所需依赖元数据，不保存检测器正文；描述需已知协议全部grant方保留。原TemplateWizard仍按原definition/推荐变体/上限/执行模式及版本创建任务。专家draft/history/preview和发布回执仍待独立收口，不把普通模板路径完成当成整个Scheme域完成。实际权限组合/源快照不变/普通任务与历史/浏览器/网关注册待独立验证，本批仅编译构建。
+
+
+## Scheme专家读取与命令回执（2026-10-21）
+
+草稿list在原scheme:manage当前授权后复制实体，正文description/draftConfigJson仅FULL+PII+PROMPT齐备读取；命令回执始终扣留正文和presentation。非持久null省略的privacy和schemePresentation不改变原内部快照。专门草稿读取另给iqc-scheme-presentation-v1 typed业务definition（检测器ID/版本引用、评分、执行变体、上限），自由名称/说明走既有PII mask，非法定义显示UNAVAILABLE而不补默认。该展示数据供原试跑选用，不能作原草稿编辑。
+
+专家历史复用独立发布投影，保留来源修订/试跑/归档元数据；原Release/hash不改。preview仍执行原完整依赖校验，但仅返回schemeId/draftRevision/validated，不返回冻结检测器。发布/版本归档返回SchemeVersionReceipt元数据，无snapshotJson。创建/修订/停启用返回无正文草稿回执。各入口在调用业务前检查原资源码，no-store，查询审计无正文。
+
+页面受限/未知协议草稿禁止编辑/保存，合法选用presentation供试跑；派生按原服务端冻结引用创建，回执不直接当可编辑草稿，重读后有权限才打开。历史完整正文不足时禁差异比较并显示正文未展示，查看和派生/归档仍沿原业务权限。刷新/编辑代次及卸载清理用于阻止迟到回填；关闭编辑清配置。权限组合、内部旧JSON、真实Audit/网关/撤权/浏览器/试跑发布仍待独立验收，本批仅编译构建。

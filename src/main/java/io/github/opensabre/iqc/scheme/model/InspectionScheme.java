@@ -10,6 +10,12 @@ import lombok.EqualsAndHashCode;
 @EqualsAndHashCode(callSuper = true)
 @TableName("iqc_inspection_scheme")
 public class InspectionScheme extends BasePo {
+    @com.baomidou.mybatisplus.annotation.TableField(exist=false)
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private java.util.Map<String,Object> privacy;
+    @com.baomidou.mybatisplus.annotation.TableField(exist=false)
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private java.util.Map<String,Object> schemePresentation;
     private String name;
     private String code;
     private String description;
