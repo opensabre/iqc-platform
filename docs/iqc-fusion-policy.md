@@ -8,7 +8,7 @@
 
 ## 冻结政策
 
-`FusionPolicy(id, version, method, nodePriority, overrideNodeByCode, confidenceCalibrationId, calibratedNodeIds, nodeWeights)`（保留原7参构造） 必须作为方案依赖一起冻结。版本从 1 起；优先级数值越大越优先；未配置节点优先级为 0。
+`FusionPolicy(id, version, method, nodePriority, overrideNodeByCode, confidenceCalibrationId, calibratedNodeIds, nodeWeights, custom)`（保留原7/8参构造） 必须作为方案依赖一起冻结。版本从 1 起；优先级数值越大越优先；未配置节点优先级为 0。
 
 | 方法 | 判定语义 |
 | --- | --- |
@@ -40,7 +40,7 @@ VOTING 无严格多数时，有不同已知值为 CONFLICT；否则保留不完�
 4. 在会话结果快照内保存冻结政策、输入事实和融合结果；避免只保存终值丢失反证。当前模块没有新增持久化，调用方需接入既有结果事务。
 5. 旧标签事实链保持其说话人和证据验证，再通过显式适配接入，不能把任意 Finding 自动视为合格标签事实。
 
-原Pipeline发布/生产/评测/政策重算与配置编辑器复用该函数，本批不增加平行端点或结果表。CUSTOM扩展及统一finalConfidence投影仍待后续补齐。当前WEIGHTED仅编码/编译构建，独立行为与兼容验收见协作交接，不能据此认定完整I2完成。
+原Pipeline发布/生产/评测/政策重算与配置编辑器复用该函数，本批不增加平行端点或结果表。CUSTOM扩展及统一finalConfidence投影已有编码，独立验证按各批次边界继续。当前WEIGHTED仅编码/编译构建，独立行为与兼容验收见协作交接，不能据此认定完整I2完成。
 
 
 ## WEIGHTED 精确权重（2026-10-20）
@@ -76,3 +76,29 @@ Result增加可空finalConfidence，精确BigDecimal，范围0..1。仅CONFIDENC
 保留原12参Result构造，旧JSON缺字段读取为空，null字段序列化省略。新增非空字段使新结果内容hash自然变化，不重写历史结果/发布快照。人工复核置信度门禁读取新字段前仍核对原始选中来源与冻结校准政策；字段与来源不一致则UNKNOWN；旧结果缺字段沿原来源推导，不导致历史门禁失效。HumanFindingReviewEvaluator继续用原构造产生空置信度且无机器选中来源，人工值不继承机器校准。字段存在不证明离线校准工件真实有效，仍须发布/校准验收。
 
 动作来源、人工复核和政策重算的历史完整性检查复用reproduce：仍从原raw+policy重新融合，只对旧记录未提供的finalConfidence保留字段缺省，其他字段继续完整比较；旧记录已有非空字段时不消除它，不一致仍拒绝。该兼容分支不改旧数据库内容，新生产/评测/目标政策重算继续使用fuse生成新字段。
+
+## CUSTOM：部署安装的纯融合扩展（2026-10-20）
+
+复用原fuse、结果/证据和发布/生产/评测/重算路径，新增FusionExtension SPI和不可变FusionExtensionRegistry，不借用有副作用的ActionAdapter或外部Skill执行，不新建表。复用与差异见ADR20261020-custom-fusion-extensions。
+
+### 绑定与目录
+
+FusionPolicy.custom仅CUSTOM可非空，绑定strategyId、正int版本、provider class原字节SHA256的implementationHash和字符串parameters；两代局部codec均拒绝未知字段、非整数/越界版本、非字符串参数，线格式四字段齐备。id为2..64字符的大写标识；hash为64位小写hex；最多64参数、key最多64且字母开头、字符串值最多512且无控制字符。旧7/8参构造不带custom，null省略保留旧JSON。
+
+GET /api/iqc/pipelines/fusion-strategies复用当前授权与no-store/nosniff，固定新资源iqc:pipeline:fusion:strategy:view；只回部署安装的id/version/hash/name/defaultParameters，不执行融合或加载客户端实现。原Controller缺授权组件仍拒绝。组织资源/按钮900270与V20261020_01迁移只提供只读目录权限，四个既有IQC角色可读，不授予创建/发布或系统ADMIN；当前只写脚本，未执行SQL。
+
+Registry默认安装UNANIMOUS v1，另外通过Java ServiceLoader加载随应用构建分发的实现（SPI资源名META-INF/services/io.github.opensabre.iqc.fusion.FusionExtension），至多64个版本。重复id/version拒绝；注册后无动态替换，无latest回退。require校验冻结class摘要、定义不变和参数。升级以新class/version并存，保留旧实现，否则原冻结任务拒绝执行。class摘要仅绑定provider本身字节，并非整个传递依赖/完整JVM沙箱证明；实现属于可信部署代码，必须纯函数、无模型/动作/外部I/O/时钟副作用。
+
+### 输出与实际算法
+
+插件接收不可变原Finding列表和冻结参数，返回Outcome(selectedIds,state,value,explanation)。公共层拒绝空/重复/未知原ID；KNOWN选中项必须全部KNOWN，NOT_EVALUATED不能选择已执行项，ERROR必须有真实ERROR来源。复用原Finding typed-value约束；ENUM的KNOWN值必须在选中已知来源中出现，避免绕过冻结语义目录；其它typed值可由已知来源派生。全部raw与证据并集照旧保留，严重度沿原选中来源最大值，finalConfidence为空。相同证据ID不同内容仍拒绝，不允许自造证据/分数/标签/动作。解释包含扩展id/版本/hash及有界算法原因。
+
+UNANIMOUS v1有真实实现：每个事实code内每来源节点一次观测，默认minimumSources='1'，允许参数仅minimumSources（1..200整数字符串）。所有输入均KNOWN且同值、来源数达标才KNOWN；原resolve保留CONFLICT/ERROR/全部NOT_EVALUATED/其它UNKNOWN；KNOWN但数量不足降为UNKNOWN。数值1与1.0沿原比较同值，显式false是合法值，不作多数投票或平均。minimumSources按事实code计算，不按整条流水线节点总数计算。
+
+CUSTOM目标政策重算也在原raw副本中按目标冻结定义补缺失来源NOT_EVALUATED；不重跑检测/模型，不写回原事实。WEIGHTED原缺失来源identity/原因不变，CUSTOM用独立custom-policy-unavailable-v1身份。原目标变更导致类型/类别不兼容仍拒绝，不伪造新增来源已知值。
+
+### 配置与证据边界
+
+原PipelineReleaseEditor增加CUSTOM选项，按目录明确选择id/version/hash，参数以JSON字符串对象编辑。刷新不替换已冻结绑定；未知/缺失版本提示并要求重新试跑/评测/发布，页面不自动升级。切回其它方法不发送残留custom或nodeWeights。发布后被冻结的CUSTOM仍由同一个fuse执行；失去目录读取权限不改已有原绑定，服务端始终校验部署可用性。
+
+后端原12690及最终29380 skipTests test-compile均terminal exit0；前端首轮63145 vue-tsc+Vite通过（2m4s），最终补当前绑定不可用提示的构建以协作台账为准。未新增/运行Root测试、共享SQL或部署。B须覆盖两codec/旧JSON、注册冲突与hash不符、真实一致同意/未知/false/不足来源、恶意输出/证据冲突、缺失来源重算原数据不变、目录fresh权限和角色迁移、前端精确选择/切换/刷新/卸载及完整发布/评测/重算实际路径。源码/构建不证明全PRD或可信插件纯度已验收。

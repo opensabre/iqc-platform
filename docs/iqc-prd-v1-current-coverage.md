@@ -19,11 +19,11 @@
 | 8.2 Metric/Session / I6 | TranscriptTimingMetrics、TranscriptMetricEngine、SessionAggregationEngine | 复用已处理消息时间/业务上下文，不生成语音转写；语义范围及真实会话指标验收待核对。不能把片段时间指标直接称声学测量。 |
 | 8.2 SmallModel/Skill/API / I6 | SmallModelDetectorEngine/Contract、Skill API、原资产版本与引用 | 相关适配已编码，不能继续按旧迭代表称SmallModel未集成；真实外部服务/降级/成本契约待验。 |
 | 8.3–8.4 串并行/条件/级联/短路/Fallback / I2/I6 | PipelineRuntime、ParallelCompletionPolicy、原条件与备用节点 | 已编码，局部回归不等于全部组合/真实并行运行通过。 |
-| 8.5 设计器 / I6 | PipelineReleaseEditor、PipelineDependencyGraph、editGraphEdge | 列表、属性及依赖图编辑已编码；PRD允许V1先列表+分支；已接受I6中的完整拖拽DAG仍须核对并补齐，不能把依赖图编辑直接算作完整拖拽交付。真实使用与发布路径待验。 |
+| 8.5 设计器 / I6 | PipelineReleaseEditor、PipelineDependencyGraph、editGraphEdge | 列表、节点库/端口连线/属性及依赖图编辑已有；本批补节点主体拖动、缩放、键盘与落点，布局仅本次会话，不改变Release。真实SVG/browser及完整保存发布路径待验，不凭构建认定设计器验收完成。 |
 | 9 Finding/Catalog/Evidence / I1 | Finding、FindingCatalogService、原轨迹与结果投影 | 已编码；source/version及证据反查、全部引擎一致性待场景验证。 |
 | 10.2 基础四种融合 / I2 | FusionPolicy、FindingFusion | PRIORITY/CONFIDENCE/VOTING/OVERRIDE已有实现与正式语义。 |
 | 10.2 WEIGHTED / I2 | 同一FusionPolicy/FindingFusion及原配置编辑器 | 复核确认原先缺失，本批补严格加权多数；尚须独立行为/协议兼容/发布重算验证。 |
-| 10.2 CUSTOM扩展 / I2/I6 | 当前FusionPolicy枚举未提供CUSTOM执行/版本化扩展绑定 | 仍是明确缺口，不能把default抛错当扩展能力，也不能开放任意代码执行。 |
+| 10.2 CUSTOM扩展 / I2/I6 | FusionPolicy.custom、FusionExtension/Registry和UNANIMOUS v1、原编辑器与只读策略目录 | 本批已编码精确id/version/class摘要/参数绑定与真实一致同意实现，复用原fuse及缺失来源重算；可信部署SPI，不接受客户端代码。独立算法/协议/发布/重放/角色/UI验证待，不能凭编译算验收完成。 |
 | 10.3 融合输出 / I2 | FindingFusion.Result保存原始/选中/拒绝/Evidence/解释与政策版本 | 结果可追溯字段已编码；本批新增可空finalConfidence，仅KNOWN且CONFIDENCE政策的已校准选中来源输出；其它策略及人工改判为空。旧结果兼容及当前行为仍待独立验证，校准工件真实性不由字段本身证明。 |
 | 11 Score/Label/Risk/Review / I2/I5 | InspectionScoring、FindingLabelPolicy、RiskPolicy、ReviewPolicy、DecisionRevisionController | 高级评分、独立风险/复核与重算已有实现；完整原事实不变/不调模型/复核后重算及真实持久化仍需证明。 |
 | 12 九种Action / I5 | action包、ExternalActionBeans、通知/复核/候选/风险适配 | 工单、辅导、Webhook代码已存在，不重复开发；外部真实渠道、接收方幂等契约、确认/失败补偿验收仍待。默认关闭不能称实际投递成功。 |
@@ -39,6 +39,7 @@
 | 17 GRAY/FULL与P2 A/B / I7 | RolloutPolicy/Service/TaskService/ExecutionGuard、Benchmark | 显式IDs灰度新请求/原请求重放已编码；0/10000/回退为同一政策语义。调度/Selector灰度、生产AB归因及真实激活回退验收按实际需求继续，不能只做预览。 |
 | 18 Trace/监控/审计 / I1/I7 | executionTrace、ModelMonitoring、公共审计starter | 节点/模型轨迹与部分监控已编码；Finding分布/人工修改率/Action失败率等运营指标与真实审计切面未整体证明。 |
 | 19 功能/数据/敏感权限 / I7 | IqcDataScope、SensitiveReadAccessService、ResultReadProjection及组织迁移 | 多项会话/任务/样本/评测/Selector等投影已有；Pipeline/Scheme/Agent/Rule/Skill/Model配置与人工复核等剩余敏感副本仍须收口，真实四角色/网关验收待做。 |
+| 19 功能/数据/敏感权限 / I7 | IqcDataScope、SensitiveReadAccessService、ResultReadProjection及组织迁移 | 多项会话/任务/样本/评测/Selector等投影已有；Pipeline草稿/历史/目录/命令回执及Skill指令/Schema/历史/回执已接原敏感投影，独立验证待；Agent配置/历史/比较/回执与独立能力元数据已编码，效果统计补可见任务范围；Rule表达式/历史/测试与DLS导入诊断已编码投影（独立验收待）；Scheme/RuleSet/Model配置与人工复核等剩余敏感副本仍须收口，真实四角色/网关验收待做。 |
 | 20–21 逻辑表/API / 全部 | 沿现有领域表/明确新职责表与原Controller扩展 | PRD是逻辑建议，不复制已有表/API；逐项行为由对应功能验收，不要求照抄示意路径覆盖旧语义。 |
 | 22 异步/背压/优先级/恢复 / I4 | 原持久化worker、任务/EID租约、预算等待与自动重试 | 已编码机制；真实重启/重复投递/跨实例恢复、外部MQ传输与压力结果待验。外部MQ不是文本完成事件/API的唯一实现方式。 |
 | 23 性能/可用性 / I4/I7 | 原TaskItem/worker/分页索引及预算机制 | 显式批次上限1000；百万规模分片/恢复与容量基线尚无充分证据，不能声明指标达成。 |

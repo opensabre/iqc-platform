@@ -167,5 +167,11 @@ public class QualityRuleService {
 
     public record TestMessage(String id, Integer sequenceNo, String speakerRole, String content) { }
     public record RuleTestResult(boolean matched, String resultStatus, String matchedText, String reason,
-                                 List<DlsEngine.Hit> evidence) { }
+                                 List<DlsEngine.Hit> evidence,
+                                 @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                                 java.util.Map<String,Object> privacy) {
+        public RuleTestResult(boolean matched,String resultStatus,String matchedText,String reason,List<DlsEngine.Hit> evidence){
+            this(matched,resultStatus,matchedText,reason,evidence,null);
+        }
+    }
 }

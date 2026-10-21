@@ -10,15 +10,22 @@ public record FusionPolicy(String id, int version, Method method, Map<String, In
                            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
                            @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=WeightsCodec.class)
                            @tools.jackson.databind.annotation.JsonDeserialize(using=HttpWeightsCodec.class)
-                           Map<String,String> nodeWeights) {
-    public enum Method { PRIORITY, CONFIDENCE, VOTING, OVERRIDE, WEIGHTED }
+                           Map<String,String> nodeWeights,
+                           @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                           FusionExtensionBinding custom) {
+    public enum Method { PRIORITY, CONFIDENCE, VOTING, OVERRIDE, WEIGHTED, CUSTOM }
+    public FusionPolicy(String id,int version,Method method,Map<String,Integer> nodePriority,
+            Map<String,String> overrideNodeByCode,String confidenceCalibrationId,Set<String> calibratedNodeIds,Map<String,String> nodeWeights){
+        this(id,version,method,nodePriority,overrideNodeByCode,confidenceCalibrationId,calibratedNodeIds,nodeWeights,null);
+    }
     public FusionPolicy(String id,int version,Method method,Map<String,Integer> nodePriority,
             Map<String,String> overrideNodeByCode,String confidenceCalibrationId,Set<String> calibratedNodeIds){
-        this(id,version,method,nodePriority,overrideNodeByCode,confidenceCalibrationId,calibratedNodeIds,null);
+        this(id,version,method,nodePriority,overrideNodeByCode,confidenceCalibrationId,calibratedNodeIds,null,null);
     }
     public FusionPolicy {
         if (id == null || id.isBlank() || version < 1 || method == null)
             throw new IllegalArgumentException("fusion policy requires id, positive version and method");
+        if((method==Method.CUSTOM)!=(custom!=null))throw new IllegalArgumentException("Custom binding must be present only for CUSTOM fusion");
         nodePriority = Map.copyOf(nodePriority == null ? Map.of() : nodePriority);
         overrideNodeByCode = Map.copyOf(overrideNodeByCode == null ? Map.of() : overrideNodeByCode);
         calibratedNodeIds = Set.copyOf(calibratedNodeIds == null ? Set.of() : calibratedNodeIds);

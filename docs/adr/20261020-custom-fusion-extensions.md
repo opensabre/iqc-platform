@@ -1,0 +1,9 @@
+# CUSTOM纯融合扩展
+
+PRD10.2要求CUSTOM扩展，现有五种固定融合算法不能绑定已安装的独立版本。已检查原FindingFusion/FusionPolicy、ActionAdapterRegistry与Skill API；动作适配负责外部副作用和收据，Skill调用外部服务，不能复用其执行模型完成不调模型/动作的决策重算。复用原精确版本查找/不可变注册模式，而不复用副作用适配器或新建融合结果表。
+
+扩展使用部署时安装的Java SPI。冻结strategyId、正版本、provider class字节SHA256和有界字符串参数。无动态注册、客户端脚本/类名、latest回退或网络查配置；找不到指定版本/字节摘要不符拒绝执行。内置UNANIMOUS v1提供实际一致同意算法；新增版本须并存旧provider class/artifact，不修改旧实现再沿用旧绑定。
+
+原FindingFusion.fuse仍是唯一入口。插件接收不可变原Finding列表和参数，返回选中原Finding IDs、状态、typed值和解释；公共层验证来源ID/类型/状态与值，KNOWN必须来自已知选中观测，保留全部原始Finding/证据及原严重度规则。允许已知来源的派生typed值；不声明校准finalConfidence。CUSTOM新目标重算缺失来源补NOT_EVALUATED，不重新检测。
+
+实现class摘要绑定provider自身字节，不是完整传递依赖或JVM沙箱证明。部署的SPI属于可信程序，必须确定、无副作用且遵守冻结版本；发布/重放与供应链仍需独立验收。原7/8参policy构造、非CUSTOM路径及null省略的旧JSON保留；不全局改变存储解码/历史hash。

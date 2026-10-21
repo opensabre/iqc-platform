@@ -92,3 +92,6 @@ GatewayCallDataBehaviorTest已按未部署的新协议调整：真实解密后�
 原handle4294退出0，日志 `/tmp/iqc-call-data-mysql-final.log`；本轮XML 5+4=9项零失败、错误、跳过。MySQL8.0.34目录 `/private/tmp/iqc-mysql-validation.J0Pl2x`，随机归档库finally删除，服务器正常关闭，pid/socket均消失。旧迁移测试固定库仅存在该已关闭临时datadir。
 
 布局检查脚本仍退出1：旧V1.1.64触发器定义内INSERT被其逐行DML检测误判，已人工核对，未改旧SQL或隐藏失败；检查器改进仍待。该批不证明真实PDP/供应商、HTTP到数据库完整链路、浏览器或全部PRD；无语音转换工作。
+## 模型身份键的非JSON输入修复
+
+ModelIdentity.key以UTF-8字节长度对provider/规范化endpoint/modelName做无歧义分帧。该输入是普通分帧文本，不能传给SelectorAssetService.hash的JSON解析/规范化流程。已集成B78d37c0的生产局部修复：直接对分帧UTF-8字节SHA256，保留原字段框定及模型端点规范化，不改Selector/定价JSON摘要或重写历史账本。当前组合仅test-compile通过；B原64171的58项包含固定模型身份键与归档隔离，但属早期归档格式，不外推当前信封读取验收。当前信封、历史model_key/预算来源和真实供应商/数据库兼容仍待独立核验。

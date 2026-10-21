@@ -113,6 +113,20 @@ QualityConfigController的18个配置审计入口（Agent七项、规则/导入�
 
 这样保留原操作者、时间、模块、操作类型、路径目标与结果，避免完整Prompt/表达式/模型配置被复制到未具独立敏感授权的通用审计载荷。原服务、角色权限、审批与不可变版本继续执行；没有关闭原领域配置/冻结输入存储，没有修改framework或发起实际审计发送。预算配置原显式审计及已冻结发布原因不在本批改动，亦不由此推断其它端点安全完成。构建和独立回归状态见协作记录。
 
+
+## 业务结果分页与批次汇总副本
+
+原/results/business与/tasks/{id}/result-summary也返回归档文件名，不能绕过详情投影。现复用ResultReadProjection复制原BusinessConversationRow/IqcPage和BatchResultSummary/ConversationResultSummary；文件名沿原CUSTOM字段规则，任务名沿原自由文本规则，只有完整+PII双授权返回原展示文本。ID、状态、原BigDecimal分数（含0/null）、分页current/size/total、会话及各类统计保持，不重新计算或修改原对象。
+
+两个入口在原service查询前刷新固定基础授权：业务分页只要求其已有iqc:result:business:view，不额外误要求legacy result:view；批次汇总仍result:view。保留原Task数据范围，不新增资源或路由；成功返回no-store/nosniff。查询Audit只记录目标/元数据，不含请求/响应正文；缺敏感组件的嵌入构造fail-closed。标签聚合等其他副本仍待独立核验，不以本批声明全读取面已保护。Root未新增或执行测试，构建及B验证以协作记录为准。
+
+
+## 金标精确数值与展示回写前置边界
+
+金标原始值和完整输入不可因脱敏展示或浏览器浮点改变。GoldFinding.value、GoldDecision.labels及Gold草稿/审核/标注的businessContext复用现有人工复核ExactValueDeserializer，仅为这些JsonNode入口启用精确树，不改全局mapper/数据模型/协议。GoldDecision.score原BigDecimal绑定保留。
+
+金标编辑器对已有无法由浏览器无损表示的草稿保持原JSON只读，历史快照不经浮点美化；新NUMBER/业务分数先保留用户输入文本，保存前复用精度检查，OBJECT/业务上下文/高级标签JSON亦检查。不能精确表示的值明确拒绝表单保存，不悄悄舍入；后端原标注接口可接收原始精确JSON。更完整的精确可视化编辑与金标隐私投影/回放防护仍待，不以这个前置保护宣称完成Gold/I7。
+
 ## 配置审计真实切面回归与规则解析错误（2026-10-17）
 
 集成8f9a89b等价本地提交58cfc6b：原QualityConfigController18个配置动作、IqcModelProfileController4个模型动作关闭请求和响应审计正文，路径ID与Agent回滚版本作为目标键，四个规则集生命周期保留审计。ConfigurationAuditPayloadTest显式列22方法，每方法成功/失败两种共44项，通过真实已安装AuditAspect、实际Controller注解及SpEL参数名生成事件；领域proceed与本地事件sink隔离，验证无配置canary且操作者/目标键/操作/URL/耗时/失败元数据保留。不是HTTP/PDP/领域事务或EDA落库验收，预算接口沿原独立审计行为。
@@ -123,6 +137,18 @@ QualityConfigController的18个配置审计入口（Agent七项、规则/导入�
 
 其它Prompt/配置读取面、任意服务异常、日志保留、真实权限/HTTP/审计落库及完整I1–I7仍待，不据此声明I7完成。
 
+
+## 金标HTTP展示与独立功能权限
+
+GoldSampleController的草稿、版本、历史、标注和审核在原service前刷新各自原有固定基础权限；原样本/版本数据范围继续由服务验证。GET审计关闭正文，写接口沿原无正文审计，成功响应no-store/nosniff；旧单依赖嵌入构造缺敏感组件时fail-closed。
+
+金标专用读取只有完整+PII双grant才返回未经投影的原goldDraftJson及版本snapshotJson；其它模式不返回可误当原始输入的opaque字段。独立GoldSampleReadProjection复用既有ConversationReadProjection，从原冻结GoldDraft/GoldConversation构建完整脱敏或前三条/200字符预览；只显示Finding code/type/state/证据ID元数据，值和业务上下文不返回。样本及会话身份必须与快照绑定，损坏/缺省快照仅返回明确状态，不能视作无事实。没有读取当前会话替换旧输入；候选policySource已核实仅公共版本身份，不含节点配置/Prompt。
+
+泛样本sample/samples投影可按原sample:view+双grant展示候选内容，但始终不附带完整goldDraftJson，需独立Gold读取功能权限；没有双grant时源contentSnapshot/expectedJson/tagsJson也withheld。审核历史只给原版本摘要，始终不附snapshotJson，不能绕过独立gold:version:view；无完整权限时审核原因也withheld，防止其复制全文，完整但无PII时沿原文本规则处理原因。原ID、修订、状态、hash、分页及操作者身份保留。
+
+标注/审核写响应仅返回身份、修订、状态等回执，不把写权限当作完整读取权限；原写命令与角色、独立审核、CAS和原始存储不改变。编辑器保存后另走已授权GET重新取得草稿，失败明确提示已保存但加载失败并清除旧展示；受限预览不能回写或被当原始金标审核。QualitySample/Version的privacy为exist=false且null不序列化，不改原领域JSON或冻结hash；预览永不重算原hash。
+
+其它样本列表/创建入口由协作开发者接同一sample/samples/sampleMetadata投影，未接入前仍是已知旁路；候选、数据集、评测和其它副本仍需逐项核验。当前是HTTP读取/回执投影，不声明完整I7、任意无标签PII识别、真实角色/数据库/浏览器验收完成。Root未新增或执行测试、SQL或部署。
 ### 反馈响应副本保护
 
 反馈列表与提交返回值复用SensitiveReadAccessService和ResultReadProjection；分别刷新既有result:view、result:feedback基础权限后才调用领域服务，缺少接线直接拒绝。原结果归属和数据范围校验保留。两个响应均private,no-store与nosniff，查询审计不记录正文。
@@ -197,6 +223,11 @@ GoldSampleHttpContractTest通过默认MockMvc路由/转换器执行GET样本与G
 
 17259中间回归30项29通过/1失败：字段级readTree默认尾随检查把下一个同层属性误当多余文档。仅局部HTTP字段mapper关闭FAIL_ON_TRAILING_TOKENS，外层MVC保持严格；新增完整请求后追加第二JSON文档返回400且授权/领域均未访问的回归。最终74757 exit0：GoldSampleHttpContractTest7、GoldSamplePrivacyTest5、GoldSampleReviewTest12、EvaluationDatasetVersionTest7，共31项，无失败/错误/跳过，日志/tmp/iqc-gold-sample-http-fragment-final.log。此为默认MockMvc契约及既有领域专项，不冒称真实PDP或完整全套验收。
 
+### 通用样本入口接线
+
+通用samples GET在查询前刷新原sample:view，复用samples投影，即使双敏感grant也不返回goldDraftJson；创建POST在写入前刷新原sample:manage，只返回sampleMetadata。原业务候选/消息样本领域校验及数据范围保持，不新增写权限，不因写授权返回冻结正文。共享反馈授权接线改名readAccess，仍仅接受控制器内部固定资源码；缺少组件拒绝，成功no-store/nosniff。样本列表审计不记录正文。此接线收口此前通用样本已知旁路，其他读取面及行为验收仍待。
+
+
 ### 数据集与离线评测写操作审计
 
 EvaluationDatasetController创建、更新、冻结、可用性四个写操作及PipelineEvaluationController创建评测均显式关闭审计请求与响应正文。已核对框架Audit默认request=true、response=false：本次实际关闭数据集草稿、名称等请求正文，显式保留响应关闭；冻结响应含完整金标snapshotJson、评测创建响应含冻结任务配置，继续禁止其进入审计正文；更新/冻结/可用性保留路径id目标，创建不使用未生成ID作审计键。沿用既有Audit事件及权限和领域调用，不新增日志表，不改变冻结内容或hash。此处仅减少审计正文；原HTTP数据集和评测返回值仍须另行实施读取投影与实际权限验收。
@@ -229,6 +260,12 @@ PipelineEvaluationController分页与详情在原service前分别刷新固定eva
 在ca0ae01上接A62c061b为876d8c1，新增EvaluationCommandHttpPrivacyTest。八种FULL/PII/Prompt组合下，创建回执始终移除冻结Agent/Rule/Label、Prompt、触发请求、重试策略/错误及筛选/集合JSON，保留任务身份、状态、零计数及请求hash；敏感原对象不变。报告HTTP保留缺失样本、来源轮次、完整分母、零召回及精确小数；固定当前grant失败与缺接线均阻止领域调用。
 
 首轮79724为32项31通过/1error：独立MVC夹具漏注册框架默认BaseException处理器，缺接线IqcException未转换响应。只读核对并补测试DefaultWebMvcExceptionHandlerAdvice注册，未改框架/生产异常逻辑。最终85879 exit0，/tmp/iqc-evaluation-command-http-privacy-final.log：EvaluationCommandHttpPrivacyTest11、DatasetEvaluationHttpPrivacyTest14、GoldSampleHttpContractTest7，共32项，无失败/错误/跳过。领域与组织授权仍mock，不证明真实PDP/SQL/browser；本批未包含Benchmark后续增量，不称整个I7或默认全套完成。
+84131专项最终exit0，逐XML确认GoldSamplePrivacyTest5、FeedbackPrivacyTest4、BusinessReviewControllerTest10、GoldSampleReviewTest12、EvaluationDatasetVersionTest7，共38 run、0 failures/errors/skipped；日志/tmp/iqc-gold-sample-privacy.log。本轮为直接Controller与投影/领域服务既有测试组合，未重新执行默认完整套件，也未验证本批HTTP/PDP/UI路径。
+
+### 默认MVC金标请求的跨代树绑定
+
+GoldSampleHttpContractTest通过默认MockMvc路由/转换器执行GET样本与Gold的四敏感grant组合、预览条数/200字符、no-store/nosniff、源对象保持，以及PUT标注精确值和POST样本元数据回执。领域与组织授权为mock，不代表网络服务器/PDP/数据库验收。
+
 41055首轮11项中10通过、1 error：默认Jackson3 MVC转换器无法实例化GoldFinding.value的Jackson2 JsonNode，PUT请求在进入service前失败；单独用Jackson2 ObjectMapper读请求的既有测试不能覆盖此问题。已核对应用与framework WebMvc配置，未注册专用Jackson2 HTTP转换器，不修改框架或通过测试强制换转换器绕过。
 
 应用层复用HumanFindingReviewEvaluator原精确解码位置，新增HttpExactValueDeserializer用于金标请求字段：Jackson3局部精确数字树转成原Jackson2精确领域树。仅给GoldFinding.value、GoldDecision.labels内容、GoldSampleService.Annotation.businessContext补Jackson3字段注解，保留原Jackson2解码注解、持久化模型、共享mapper和历史hash。当前结果以协作记录终态为准；其它使用Jackson2树的HTTP请求面仍需逐项核验，不声称已全局迁移。
@@ -282,6 +319,12 @@ InspectionSchemeController trial/trials/task分别在领域调用前刷新原sch
 在d4e2e91接A0363666为f5427d8，新增SchemeTaskPresentationHttpTest，四FULL/PII组合覆盖POST trials、GET trials、BATCH/SCHEDULED默认/指定variant四任务分支，以及run/resume回执。验证不返回冻结正文，保留schema/kind/labelOnly/hasLabels/正整数draftRevision/格式受限variant，原任务JSON与派生字段不被修改、原异步executionId保持。坏或歧义快照保留UNKNOWN，非整数修订/非法variant不生成公开证据，固定基础grant拒绝先于domain。既有InspectionSchemeControllerTest补当前授权+真实projection构造夹具，原参数/校验断言保留。
 
 首83843为36项31通过/5失败，原因是新增测试误用POST /trial，既有生产路由为/trials。只修测试路径，不改生产路由/权限。最终90721 exit0，/tmp/iqc-scheme-task-presentation-http-final.log；按日志创建时间核对四份XML均为本轮：SchemeTaskPresentationHttpTest6、InspectionSchemeControllerTest9、TaskCommandHttpPrivacyTest10、EvaluationCommandHttpPrivacyTest11，共36项，0 failures/errors/skipped。默认MVC/真实投影，领域/PDP/worker mock，不代表浏览器未知元数据发布保护或真实组织/SQL验收；通用任务GET仍在另一批，完整I1–I7未完成。
+### Benchmark及数据集草稿MVC验证与跨代输出修复
+
+从3cccf3b接A0fd6b7c/ea80b68为a1b17af/a52561d，保留既有投影/精确绑定。BenchmarkDraftHttpPrivacyTest八种敏感grant覆盖create/pair/report双侧任务无冻结正文、选择与比较树完整相等、数据集身份/零值/高精度差值/原对象保持；四数据集grant覆盖独立详情正文、受限成员引用、目录和三写回执无草稿、损坏状态与固定基础grant拒绝先于领域调用。默认MockMvc、真实投影，领域/PDP mock。
+
+首轮68072为46项38通过/8失败：默认Jackson3把Jackson2 ObjectNode当普通POJO，仅返回节点属性而丢失selection/comparison内容。基于测试实际classpath独立复现/tmp/IqcTreeSerialization.java确认。仅BenchmarkService.Pair两个HTTP JSON字段新增HttpTreeSerializer，以局部精确Jackson3树writeTree输出；保留Jackson2领域类型、原比较算法/存储/历史hash/全局converter，不改framework。此补丁不代表所有跨代HTTP树均已验证。
+
 最终68868 exit0，/tmp/iqc-benchmark-draft-http-privacy-final.log；逐XML BenchmarkDraftHttpPrivacyTest14、EvaluationCommandHttpPrivacyTest11、DatasetEvaluationHttpPrivacyTest14、GoldSampleHttpContractTest7，共46项，0 failures/errors/skipped。无SQL/浏览器/真实组织验收，未重跑默认完整套件，整体I1–I7仍未完成。
 
 ### 通用任务读取及跨页面公共导航
@@ -401,3 +444,75 @@ SelectorDefinition.Condition.value复用已有双代字段精确解码与HTTP Js
 `SelectorAssetVersionBehaviorTest` 五项使用真实资产服务/hash/parser，DAO/选数校验/范围隔离：停用资产可查看精确版本且 availableForNewTasks=false，published 与带 FOR UPDATE 的 publishedForTask 均拒绝新用、不查版本；活动内部 Prepared 仍只序列化原六字段，新展示属性不进入冻结JSON。原范围拒绝先于版本读取，坏hash先于选数校验，精确decimal与规范hash保留。
 
 原35241首轮45项2失败仅新夹具默认Json2读取把高精度值舍入为9007199254740994；只启用测试mapper USE_BIG_DECIMAL_FOR_FLOATS，生产无修复。主源未改，最终compiler:testCompile surefire:test原92022退出0，日志`/tmp/iqc-selector-asset-http-privacy-final.log`。四份本轮XML HTTP12+真实服务5+预览14+周期19=50项，零失败/错误/跳过。当前组合默认全套、真实角色/SQL/浏览器仍待；无语音转换。
+## 流水线配置与发布历史（2026-10-20）
+
+复用SensitiveReadAccessService.current、ResultReadProjection及既有组织scope；不创建ACL、tenant表或第二套配置模型。PipelineAsset与PipelineAssetVersion新增的privacy仅响应使用（TableField exist=false），不落库，不参与release/contentHash计算。
+
+| 端点 | 固定基础资源 | 正文规则 |
+| --- | --- | --- |
+| GET /pipelines | iqc:pipeline:view | 目录总是不带draftConfigJson |
+| GET /pipelines/{id} | iqc:pipeline:detail:view | 完整会话+PII+Prompt三项grant齐备才回原草稿字符串 |
+| GET /pipelines/{id}/versions | iqc:pipeline:versions:view | 三项齐备才回原snapshotJson与publicationDecisionJson |
+| POST /pipelines、PUT /pipelines/{id}、POST availability | 对应manage/update/availability | 回执不带草稿正文 |
+| POST publish、POST force-publish | 对应publish/force:publish | 回执不带版本/发布审计正文 |
+
+各路径先取当前授权再调用原业务服务；原服务继续组织数据权限检查。草稿/历史整段扣留，不做会损坏精确数值或发布hash的局部JSON改写；原字符串在权限齐备时原样返回。版本号/修订/摘要/发布指针仍可作为任务选择元数据；name复用现有PII遮蔽。无原始模型对象或数据库内容变更。专门读取审计只记录操作与业务ID，不收正文；回执路径也禁审计请求/响应正文。响应带private,no-store及nosniff。
+
+privacy使用iqc-pipeline-read-v1，含canonicalPayloadVisible、canReadFull/canReadPii/canReadPrompt、withheldFields。目录/命令回执即使有敏感权限也声明正文不可见。前端只在专门详情允许且正文有效时挂载编辑器；受限时清空旧正文与历史，禁保存/草稿试跑/发布界面，保留原发布版本和灰度任务操作。命令回执三项grant仍齐备时保留用户自己正在编辑的原输入，不从空回执生成草稿；若grant不足则清空编辑器。历史重新加载先清旧数据，unknown协议按受限处理。评测页面仅使用可见的草稿/版本正文解析节点，元数据仍可用于服务端冻结。
+
+后端本批skipTests test-compile原66329 terminal exit0。前端初轮40642因评测页旧非空类型假设exit2，已修复并另起最终构建；最终结果见协作台账。未运行Root测试/共享SQL/部署。B仍需独立覆盖8种敏感grant组合、撤权早拒绝/组织scope、命令回执不漏正文、原对象不变及历史hash、真实MVC/页面和迟到请求。其它Scheme/Agent/Rule/Skill/Model与复核副本仍未宣称全部完成。
+
+## Skill配置与历史（2026-10-20）
+
+复用原IqcSkillController/list/versions和SensitiveReadAccessService，不增加平行详情API、资产模型或ACL。当前Skill为原全局可复用资产，由原skill:view/manage授权；没有新建ownerGroupId或冒称已具备组织归属。配置读取与命令都先刷新固定原grant；原服务、不可变版本、回滚及Agent/流水线依赖选择不变。
+
+- GET agent-assets/skills是当前唯一配置读取：FULL+PII+PROMPT齐备时才回原description/instructions/inputSchemaJson/outputSchemaJson；否则四字段为null，保留原ID/code/version/status和沿原文本策略遮蔽的name，供原依赖选择。
+- GET skills/{id}/versions按同三grant返回原历史四字段或整段扣留，不改变存储的原指令、Schema或历史。
+- create/update/enable/disable/rollback回执总是扣留四正文，即使有敏感grant；写操作本身仍按原业务权限，不增加敏感读取作为写权限。
+- IqcSkill/Version只加exist=false且null省略的响应privacy；iqc-skill-read-v1复用流水线已采用的私有configurationPrivacy元数据构造，不新增通用starter或全局mapper。专门查询Audit与命令Audit均不取正文，响应no-store/nosniff。
+
+Skill页面未知/受限协议或缺失instructions时只显示元数据，不挂编辑表单或保存空配置。写回执不替换原草稿；成功后关闭并清空表单，再独立刷新列表，失败明确重读未获结果。重读先清旧列表及打开的既有资产正文，关闭/卸载清表单，迟到读取/写回执不更新卸载组件或产生提示。创建者仍能按原manage权限输入新配置。Schema保持原字符串，页面解析仅用于JSON对象校验，不将解析结果近似回写。
+
+本批后端原77870与前端原99858均terminal exit0（skipTests test-compile / vue-tsc+Vite，1m7s，既有体积提示）；未运行Root测试/SQL/部署。八grant组合、原对象/历史不变、资源撤权及真实HTTP/browser/每路由注册仍待B独立验收，不能用原共享skill:manage资源声明本身证明网关每条URL已可达。Scheme/Agent/Rule/Model/复核配置副本继续按原完整计划收口。
+
+## Agent配置、版本与组织范围效果（2026-10-21）
+
+沿用原QualityConfigController的Agent路由、QualityAgentService工作流、SensitiveReadAccessService和ResultReadProjection，不新增Agent表/主数据/详情API或租户字段。QualityAgent/Version只增加exist=false且null省略的privacy/agentPresentation响应字段，比较DTO增加可空privacy并保留原4参构造；内部原模型未设响应字段时旧JSON保持。Rules/RuleSet路由本批未接投影，不能把整Config Controller视为已收口。
+
+### 正文与回执
+
+- Agent list是原唯一当前配置读取；历史versions同样只有FULL+PII+PROMPT三grant齐备才返回原description/configJson字符串，否则扣留，不局部改写成可编辑假配置。复制响应实体，原配置/历史/模型字段不写回，不解密凭据引用。
+- create/submit/approve/reject/disable/createVersion/rollback在原服务前刷新固定原业务grant；回执总是扣留两正文，敏感读取不代替写权限。
+- compare保留原from/to版本和changedFields结构字段，详细changedConfigPaths仅三grant齐备显示；受限时空列表配withheldFields明确扣留，不代表没有配置变化。
+- 查询Audit不收正文，版本/比较/效果目标只用ID及版本；命令沿原request/response=false，返回no-store/nosniff。既有共享view资源码每URL网关注册及真实角色仍须独立验收，不用注解或编译代替。
+
+### 独立能力元数据保留使用
+
+agentPresentation用iqc-agent-presentation-v1，声明AVAILABLE/UNAVAILABLE、真实根schemaVersion/已声明mode及能力可用状态；不把缺失/未知配置当默认模式。仅提取原冻结assetSnapshots的id/code/name/versionNo及MCP白名单中的工具名字符串，模型主/备用顺序保留；不包含systemPrompt、Skill指令/Schema、模型或MCP endpoint/secretRef/定价等正文。name沿原PII遮蔽，结构ID/版本/code/工具标识不改，防止错误引用。无伪造/截断能力计数；无可识别原配置或元数据无效则明确UNAVAILABLE。
+
+SkillApiConfigurationEditor优先用该元数据选择冻结Skill/MCP/模型，schemes Agent版本筛选用真实schema元数据，普通任务继续原Agent ID选择。未知privacy/元数据协议不回退解析正文；仅旧无privacy部署兼容原读取。选择器不因缺Prompt权限自动丢失正常已发布能力，后端原版本/可用性/只读工具校验仍权威。
+
+Agent页面受限或配置无效不创建默认编辑器、不能空存；刷新/关闭/卸载清旧列表/正文和资产，异步响应按代次隔离。写回执只作确认，成功后关闭再独立读取，失败不伪造已完成。管理配置用原2/3协议向导；1.0内嵌配置用原始JSON新版本编辑，不把内嵌旧配置悄悄替换为新默认值或近似数字。前端提交/停用/版本保存按钮和处理函数对齐原submit/disable/version:manage业务资源。
+
+### 效果统计组织范围
+
+源码确认AgentEffectService原先按Agent ID读取全部任务。本批复用BatchResultQueryService的IqcDataScope owner/group/all查询模式，在查询时限制可见任务，再按原Agent快照版本及其持久InspectionResult聚合。空/空白组不组成组范围，缺当前身份或scope拒绝；旧4参构造仅保持源码可编译，不提供无范围读取。版本须为正整数。分数/比率用BigDecimal计算并按原1位HALF_UP口径输出，无可评分样本/零分母返回null，避免把未测量当0。
+
+该统计仍为原task.agentId直连的持久结果口径，不是金标准确率、整个Pipeline多Agent节点使用分析或完整I7运营指标。原记录/分数/证据不改，无模型调用。Agent资产本身继续原全局资源模型，不伪造不存在的ownerGroupId；效果业务数据使用原组织可见任务范围。
+
+本批首轮后端97948/前端39271及最终39734/54477均terminal exit0（skipTests test-compile / vue-tsc+Vite，最终1m15s，既有体积提示）。编译覆盖已提交bf6d92e测试源码集成，Root未新增/运行测试、SQL、browser或部署；中断旧编译未知exit不算通过。B需补八grant/原对象原字节、能力元数据不漏正文但仍能选用、unknown协议、受限不空存/旧1.0、关闭/卸载和实际Controller路径；效果旧AgentEffectServiceTest须注入真实scope fixture，验证本人/同组/跨组/all/空组/缺身份/零分母及实际SQL，不能保留旧无scope构造绕过授权。其余Scheme/Rule/Model/复核副本、完整PDP/网关/角色及I1–I7继续。
+
+## Rule表达式、测试回执与DLS导入诊断（2026-10-21）
+
+复用QualityConfigController原Rule路由、SensitiveReadAccessService及ResultReadProjection，不新增表/端点。QualityRule/Version仅加exist=false且null省略的privacy；RuleTestResult/ImportResult加可空privacy并保留旧5参/8参构造。内部原快照字段缺省不变，原表达式/评分/证据与DLS执行未修改。RuleSet路由未接本投影，不能把整个Config Controller视为已收口。
+
+- list/versions：非LLM表达式和描述在FULL+PII齐备时返回原字符串；LLM另需PROMPT。LLM识别对齐既有校验的首尾空白/大小写语义，避免保存的` LLM `绕过Prompt读取。名称沿原PII规则；ID/code/type/version/status、扣分/风险/veto等结构元数据保留，原任务/方案/流水线继续按引用使用。
+- create/submit/approve/reject/createVersion：先刷新对应固定原业务grant，回执总扣留expression/description；不把敏感读取当写权限。原审批/版本服务和存储对象不改。
+- test：当前端点明确不执行LLM（NOT_SUPPORTED固定公共解释）。FULL+PII齐备回原matchedText/reason/evidence，否则保留matched/resultStatus，隐藏命中片段和证据及动态原因；NOT_SUPPORTED保留原固定提示。ERROR仍是ERROR，不把错误当未命中。测试Audit只业务ID、不取输入或回执正文。
+- import-dls：先刷新原import grant。FULL+PII显示原warnings/message，否则扣留诊断、沿原策略遮蔽文件/表/规则名称；预检/创建状态、ID/code、所有计数/顺序保持。没有改导入、匹配、审批、评分或新建请求模型。
+
+privacy使用iqc-rule-read-v1及现有canReadFull/canReadPii/canReadPrompt/canonicalPayloadVisible/withheldFields。查询/测试及原写命令Audit不取正文，响应no-store/nosniff。现有同code多URL实际注册、真实角色及AOP仍需验收；旧无敏感组件的Controller构造不能绕过读取保护。
+
+UI从受限/未知协议响应清理正文，不把null构造为可保存空版本；版本列表保留摘要，表格明确正文未展示，编辑/保存入口受限。测试/导入诊断受限时不显示原片段/证据/消息，状态和计数仍可用；DLS表格按响应序号设key避免遮蔽后的名称碰撞。读取/测试/导入用generation隔离；关闭/卸载清正文、测试输入、历史及File引用，迟到响应不写旧组件。写操作固定发起目标与原始输入，失败提示先核对已有草稿/状态；导航不会撤销已发出的服务器写入，未发起的后续提交会停止。原规则选用无需获得表达式正文。
+
+首轮后端81613/前端93991及最终36835/95124均terminal exit0（skipTests test-compile / vue-tsc+Vite，最终51.16s，既有体积提示）。Root未新增/运行测试、SQL/browser/部署，不能凭编译判权限或业务正确。B待验证非LLM四种FULL/PII组合与LLM八grant组合（含大小写/空白）、撤权早拒绝服务、原实体/原字符串/证据/计数不变，命令回执不漏，ERROR/NOT_SUPPORTED、诊断扣留、受限不空存、关闭/卸载和实际网关角色。Scheme/RuleSet/Model及复核等副本、全部适用I1–I7继续。

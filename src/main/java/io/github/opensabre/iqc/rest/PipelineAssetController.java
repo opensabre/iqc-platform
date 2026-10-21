@@ -24,7 +24,7 @@ public class PipelineAssetController {
     }
     public PipelineAssetController(PipelineAssetService assets,InspectionTaskService tasks){this(assets,tasks,null,null);}
     private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access access(String resource){
-        if(sensitive==null || projection==null)throw io.github.opensabre.iqc.governance.IqcException.invalidState("流水线任务响应授权组件不可用");
+        if(sensitive==null || projection==null)throw io.github.opensabre.iqc.governance.IqcException.invalidState("流水线响应授权组件不可用");
         var access=sensitive.current(java.util.Set.of(resource));
         if(org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()
                 instanceof org.springframework.web.context.request.ServletRequestAttributes servlet && servlet.getResponse()!=null){
@@ -35,27 +35,36 @@ public class PipelineAssetController {
     }
     @org.springframework.beans.factory.annotation.Autowired
     private io.github.opensabre.iqc.selector.SelectorAssetService selectorAssets;
+    @GetMapping("/fusion-strategies")
+    @ResourcePermission(code="iqc:pipeline:fusion:strategy:view",name="查看融合扩展目录",type="iqc",description="读取部署安装的精确融合扩展版本与实现摘要")
+    @Audit(operationType=OperationType.QUERY,description="读取融合扩展目录",module="IQC_PIPELINE",request=false,response=false)
+    public List<io.github.opensabre.iqc.fusion.FusionExtensionRegistry.Descriptor> fusionStrategies(){
+        access("iqc:pipeline:fusion:strategy:view");return io.github.opensabre.iqc.fusion.FusionExtensionRegistry.system().descriptors();
+    }
     @GetMapping
     @ResourcePermission(code="iqc:pipeline:view",name="查看流水线目录",type="iqc",description="查询可见流水线")
-    public IqcPage<PipelineAsset> page(@RequestParam(defaultValue="1") long current,@RequestParam(defaultValue="20") long size) { return assets.page(current,size); }
+    @Audit(operationType=OperationType.QUERY,description="读取流水线目录",module="IQC_PRIVACY",request=false,response=false)
+    public IqcPage<PipelineAsset> page(@RequestParam(defaultValue="1") long current,@RequestParam(defaultValue="20") long size) { var access=access("iqc:pipeline:view");var page=assets.page(current,size);return new IqcPage<>(page.records().stream().map(row->projection.pipelineAsset(row,access,false)).toList(),page.current(),page.size(),page.total()); }
     @GetMapping("/{id}")
     @ResourcePermission(code="iqc:pipeline:detail:view",name="查看流水线",type="iqc",description="查询流水线草稿和发布指针")
-    public PipelineAsset get(@PathVariable String id) { return assets.get(id); }
+    @Audit(operationType=OperationType.QUERY,description="读取流水线草稿",module="IQC_PRIVACY",request=false,response=false,key="#id")
+    public PipelineAsset get(@PathVariable String id) { var access=access("iqc:pipeline:detail:view");return projection.pipelineAsset(assets.get(id),access,true); }
     @PostMapping
     @ResourcePermission(code="iqc:pipeline:manage",name="创建流水线",type="iqc",description="创建流水线草稿")
     @Audit(operationType=OperationType.CREATE,description="创建流水线",module="IQC_PIPELINE", request=false, response=false)
-    public PipelineAsset create(@RequestBody Create body) { return assets.create(body.code(),body.name(),body.release()); }
+    public PipelineAsset create(@RequestBody Create body) { var access=access("iqc:pipeline:manage");return projection.pipelineAsset(assets.create(body.code(),body.name(),body.release()),access,false); }
     @PutMapping("/{id}")
     @ResourcePermission(code="iqc:pipeline:update",name="更新流水线",type="iqc",description="按修订更新流水线草稿")
     @Audit(operationType=OperationType.UPDATE,description="更新流水线",module="IQC_PIPELINE", request=false, response=false, key="#id")
-    public PipelineAsset update(@PathVariable String id,@RequestBody Update body) { return assets.update(id,body.expectedRevision(),body.name(),body.release()); }
+    public PipelineAsset update(@PathVariable String id,@RequestBody Update body) { var access=access("iqc:pipeline:update");return projection.pipelineAsset(assets.update(id,body.expectedRevision(),body.name(),body.release()),access,false); }
     @PostMapping("/{id}/availability")
     @ResourcePermission(code="iqc:pipeline:availability",name="设置流水线可用性",type="iqc",description="启停流水线")
-    @Audit(operationType=OperationType.UPDATE,description="设置流水线可用性",module="IQC_PIPELINE")
-    public PipelineAsset availability(@PathVariable String id,@RequestBody Availability body) { return assets.availability(id,body.enabled()); }
+    @Audit(operationType=OperationType.UPDATE,description="设置流水线可用性",module="IQC_PIPELINE",request=false,response=false,key="#id")
+    public PipelineAsset availability(@PathVariable String id,@RequestBody Availability body) { var access=access("iqc:pipeline:availability");return projection.pipelineAsset(assets.availability(id,body.enabled()),access,false); }
     @GetMapping("/{id}/versions")
     @ResourcePermission(code="iqc:pipeline:versions:view",name="查看流水线历史",type="iqc",description="查询不可变历史版本")
-    public List<PipelineAssetVersion> history(@PathVariable String id) { return assets.history(id); }
+    @Audit(operationType=OperationType.QUERY,description="读取流水线历史",module="IQC_PRIVACY",request=false,response=false,key="#id")
+    public List<PipelineAssetVersion> history(@PathVariable String id) { var access=access("iqc:pipeline:versions:view");return assets.history(id).stream().map(row->projection.pipelineVersion(row,access,true)).toList(); }
     @PostMapping("/{id}/trial")
     @ResourcePermission(code="iqc:pipeline:execute",name="试跑流水线",type="iqc",description="创建冻结草稿试跑任务")
     @Audit(operationType=OperationType.CREATE,description="创建流水线试跑任务",module="IQC_PIPELINE",request=false,response=false,key="#id")
@@ -67,9 +76,11 @@ public class PipelineAssetController {
     @ResourcePermission(code="iqc:pipeline:publish",name="发布流水线",type="iqc",description="经真实试跑确认发布流水线版本")
     @Audit(operationType=OperationType.UPDATE,description="发布流水线",module="IQC_PIPELINE",response=false,key="#id", request=false)
     public PipelineAssetVersion publish(@PathVariable String id,@RequestBody Publish body) {
-        if(body.qualityEvidence()==null && body.regressionEvidence()==null && body.forceReason()==null)
-            return assets.publish(id,body.expectedRevision(),body.trialTaskId(),body.resultsReviewed());
-        return assets.publishMeasured(id,body.expectedRevision(),body.trialTaskId(),body.resultsReviewed(),body.qualityEvidence(),body.regressionEvidence(),false,body.forceReason());
+        var access=access("iqc:pipeline:publish");
+        var published=body.qualityEvidence()==null && body.regressionEvidence()==null && body.forceReason()==null
+                ?assets.publish(id,body.expectedRevision(),body.trialTaskId(),body.resultsReviewed())
+                :assets.publishMeasured(id,body.expectedRevision(),body.trialTaskId(),body.resultsReviewed(),body.qualityEvidence(),body.regressionEvidence(),false,body.forceReason());
+        return projection.pipelineVersion(published,access,false);
     }
     @GetMapping("/{id}/publication-gate")
     @ResourcePermission(code="iqc:pipeline:gate:view",name="查看流水线发布门禁",type="iqc",description="按冻结评测产物计算准入")
@@ -83,7 +94,7 @@ public class PipelineAssetController {
     @ResourcePermission(code="iqc:pipeline:force:publish",name="管理员例外发布流水线",type="iqc",description="保留未通过门禁及管理员原因")
     @Audit(operationType=OperationType.UPDATE,description="管理员例外发布流水线",module="IQC_PIPELINE",response=false,key="#id", request=false)
     public PipelineAssetVersion forcePublish(@PathVariable String id,@RequestBody Publish body) {
-        return assets.publishMeasured(id,body.expectedRevision(),body.trialTaskId(),body.resultsReviewed(),body.qualityEvidence(),body.regressionEvidence(),true,body.forceReason());
+        var access=access("iqc:pipeline:force:publish");return projection.pipelineVersion(assets.publishMeasured(id,body.expectedRevision(),body.trialTaskId(),body.resultsReviewed(),body.qualityEvidence(),body.regressionEvidence(),true,body.forceReason()),access,false);
     }
     @PostMapping("/{id}/tasks")
     @ResourcePermission(code="iqc:pipeline:task:create",name="创建流水线任务",type="iqc",description="使用不可变已发布流水线创建任务")

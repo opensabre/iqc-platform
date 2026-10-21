@@ -30,7 +30,7 @@ public class QualityOperationsController {
     private final io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive;
     private final io.github.opensabre.iqc.privacy.ResultReadProjection resultProjection;
 
-    /** Preserve embedded callers; feedback endpoints require the complete authorization wiring. */
+    /** Preserve embedded callers; sensitive response endpoints require the complete authorization wiring. */
     public QualityOperationsController(QualityOperationsService service, BusinessItemReviewService businessReviews,
             BusinessQualityReportService businessReports, LabelResultReviewService labelReviews,
             io.github.opensabre.iqc.quality.BusinessReviewSampleService businessSamples) {

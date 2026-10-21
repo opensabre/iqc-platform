@@ -40,17 +40,6 @@ public final class ResultReadProjection {
         this.gold = new GoldSampleReadProjection(this.json);
     }
 
-    /** Copy feedback before masking; every evidence key is untrusted user payload. */
-    public io.github.opensabre.iqc.quality.model.ResultFeedback feedback(
-            io.github.opensabre.iqc.quality.model.ResultFeedback source, SensitiveReadAccessService.Access access) {
-        var copy = new io.github.opensabre.iqc.quality.model.ResultFeedback();
-        BeanUtils.copyProperties(source, copy);
-        boolean reveal = access.fullConversation() && access.pii();
-        copy.setComment(text(source.getComment(), reveal));
-        copy.setEvidenceJson(jsonText(source.getEvidenceJson(), reveal, true));
-        return copy;
-    }
-
     public io.github.opensabre.iqc.shared.IqcPage<BatchResultQueryService.BusinessConversationRow> businessPage(
             io.github.opensabre.iqc.shared.IqcPage<BatchResultQueryService.BusinessConversationRow> source,
             SensitiveReadAccessService.Access access) {
@@ -70,6 +59,17 @@ public final class ResultReadProjection {
         return new BatchResultQueryService.BatchResultSummary(source.taskId(), source.status(), source.conversationCount(),
                 source.totalMessages(), source.processedMessages(), source.failedMessages(), source.averageScore(), source.hitCount(),
                 source.highRiskCount(), source.conversations().stream().map(row -> summary(row, revealPii)).toList());
+    }
+
+    /** Copy feedback before masking; every evidence key is untrusted user payload. */
+    public io.github.opensabre.iqc.quality.model.ResultFeedback feedback(
+            io.github.opensabre.iqc.quality.model.ResultFeedback source, SensitiveReadAccessService.Access access) {
+        var copy = new io.github.opensabre.iqc.quality.model.ResultFeedback();
+        BeanUtils.copyProperties(source, copy);
+        boolean reveal = access.fullConversation() && access.pii();
+        copy.setComment(text(source.getComment(), reveal));
+        copy.setEvidenceJson(jsonText(source.getEvidenceJson(), reveal, true));
+        return copy;
     }
 
     public Map<String, Object> conversationDetail(ConversationResultDetail source, SensitiveReadAccessService.Access access) {
@@ -649,6 +649,145 @@ public final class ResultReadProjection {
         catch(com.fasterxml.jackson.core.JsonProcessingException invalid){throw io.github.opensabre.iqc.governance.IqcException.invalidState("选择器定义展示不可用");}
         return new io.github.opensabre.iqc.selector.SelectorAssetService.Prepared(source.selectorId(),source.versionNo(),source.sourceDraftRevision(),
                 canonical?source.definition():null,source.contentHash(),source.ownerGroupId(),body,selectorPrivacy(access,canonical,List.of("definition","definitionJson")),source.availableForNewTasks());
+    }
+
+    private Map<String,Object> configurationPrivacy(String policyVersion,SensitiveReadAccessService.Access access,boolean canonical,List<String> withheld){
+        var metadata=new LinkedHashMap<String,Object>();metadata.put("policyVersion",policyVersion);
+        metadata.put("canonicalPayloadVisible",canonical);metadata.put("canReadFull",access.fullConversation());
+        metadata.put("canReadPii",access.pii());metadata.put("canReadPrompt",access.prompt());
+        metadata.put("withheldFields",canonical?List.of():withheld);return metadata;
+    }
+    public io.github.opensabre.iqc.pipelineasset.model.PipelineAsset pipelineAsset(
+            io.github.opensabre.iqc.pipelineasset.model.PipelineAsset source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.pipelineasset.model.PipelineAsset();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&access.prompt();
+        copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        if(!canonical)copy.setDraftConfigJson(null);
+        copy.setPrivacy(configurationPrivacy("iqc-pipeline-read-v1",access,canonical,List.of("draftConfigJson")));return copy;
+    }
+    public io.github.opensabre.iqc.pipelineasset.model.PipelineAssetVersion pipelineVersion(
+            io.github.opensabre.iqc.pipelineasset.model.PipelineAssetVersion source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.pipelineasset.model.PipelineAssetVersion();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&access.prompt();
+        if(!canonical){copy.setSnapshotJson(null);copy.setPublicationDecisionJson(null);}
+        copy.setPrivacy(configurationPrivacy("iqc-pipeline-read-v1",access,canonical,List.of("snapshotJson","publicationDecisionJson")));return copy;
+    }
+
+    public io.github.opensabre.iqc.skill.model.IqcSkill skill(
+            io.github.opensabre.iqc.skill.model.IqcSkill source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.skill.model.IqcSkill();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&access.prompt();
+        copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        if(!canonical){copy.setDescription(null);copy.setInstructions(null);copy.setInputSchemaJson(null);copy.setOutputSchemaJson(null);}
+        copy.setPrivacy(configurationPrivacy("iqc-skill-read-v1",access,canonical,
+                List.of("description","instructions","inputSchemaJson","outputSchemaJson")));return copy;
+    }
+    public io.github.opensabre.iqc.skill.model.IqcSkillVersion skillVersion(
+            io.github.opensabre.iqc.skill.model.IqcSkillVersion source,SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.skill.model.IqcSkillVersion();BeanUtils.copyProperties(source,copy);
+        boolean canonical=access.fullConversation()&&access.pii()&&access.prompt();
+        copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        if(!canonical){copy.setDescription(null);copy.setInstructions(null);copy.setInputSchemaJson(null);copy.setOutputSchemaJson(null);}
+        copy.setPrivacy(configurationPrivacy("iqc-skill-read-v1",access,canonical,
+                List.of("description","instructions","inputSchemaJson","outputSchemaJson")));return copy;
+    }
+
+    private Map<String,Object> agentPresentation(String body,SensitiveReadAccessService.Access access){
+        var unavailable=Map.<String,Object>of("policyVersion","iqc-agent-presentation-v1","state","UNAVAILABLE");
+        try{
+            var root=json.readTree(body);if(root==null||!root.path("schemaVersion").isTextual())return unavailable;String schema=root.path("schemaVersion").textValue();
+            if(!root.isObject()||!Set.of("1.0","2.0","3.0").contains(schema))return unavailable;
+            var result=new LinkedHashMap<String,Object>();result.put("policyVersion","iqc-agent-presentation-v1");result.put("state","AVAILABLE");result.put("schemaVersion",schema);
+            String mode=root.path("mode").asText();if(Set.of("RULE_ONLY","RULE_THEN_LLM","LLM_THEN_RULE","AGENT_LLM").contains(mode))result.put("mode",mode);
+            var assets=root.path("assetSnapshots");
+            if("3.0".equals(schema)&&assets.isObject()&&assets.path("skills").isArray()&&assets.path("mcpServers").isArray()){
+                var models=new ArrayList<Map<String,Object>>();
+                if(assets.path("primaryModel").isObject())models.add(agentCapability(assets.path("primaryModel"),access,false));
+                if(assets.path("fallbackModels").isArray())for(var model:assets.path("fallbackModels"))models.add(agentCapability(model,access,false));
+                result.put("models",List.copyOf(models));result.put("skills",agentCapabilities(assets.path("skills"),access,false));
+                result.put("mcpServers",agentCapabilities(assets.path("mcpServers"),access,true));result.put("capabilitiesState","AVAILABLE");
+            }else result.put("capabilitiesState","UNAVAILABLE");
+            return result;
+        }catch(Exception invalid){return unavailable;}
+    }
+    private List<Map<String,Object>> agentCapabilities(JsonNode values,SensitiveReadAccessService.Access access,boolean tools) throws java.io.IOException{
+        if(!values.isArray())throw new IllegalArgumentException();
+        var result=new ArrayList<Map<String,Object>>();for(var value:values)result.add(agentCapability(value,access,tools));return List.copyOf(result);
+    }
+    private Map<String,Object> agentCapability(JsonNode source,SensitiveReadAccessService.Access access,boolean tools) throws java.io.IOException{
+        if(!source.isObject()||!source.path("id").isTextual()||source.path("id").textValue().isBlank()
+                ||!source.path("versionNo").isIntegralNumber()||!source.path("versionNo").canConvertToInt()||source.path("versionNo").intValue()<1)
+            throw new IllegalArgumentException();
+        var result=new LinkedHashMap<String,Object>();result.put("id",source.path("id").textValue());result.put("versionNo",source.path("versionNo").intValue());
+        if(source.path("code").isTextual())result.put("code",source.path("code").textValue());
+        if(source.path("name").isTextual())result.put("name",text(source.path("name").textValue(),access.fullConversation()&&access.pii()));
+        if(tools&&source.path("allowedToolsJson").isTextual()){
+            var allowed=json.readTree(source.path("allowedToolsJson").textValue());if(!allowed.isArray())throw new IllegalArgumentException();
+            var names=new ArrayList<String>();for(var value:allowed)if(value.isTextual())names.add(value.textValue());
+            result.put("allowedToolsJson",json.writeValueAsString(names));
+        }
+        return result;
+    }
+    public io.github.opensabre.iqc.agent.model.QualityAgent agent(io.github.opensabre.iqc.agent.model.QualityAgent source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.agent.model.QualityAgent();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&access.prompt();
+        copy.setAgentPresentation(agentPresentation(source.getConfigJson(),access));copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        if(!canonical){copy.setDescription(null);copy.setConfigJson(null);}
+        copy.setPrivacy(configurationPrivacy("iqc-agent-read-v1",access,canonical,List.of("description","configJson")));return copy;
+    }
+    public io.github.opensabre.iqc.agent.model.QualityAgentVersion agentVersion(io.github.opensabre.iqc.agent.model.QualityAgentVersion source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.agent.model.QualityAgentVersion();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&access.prompt();
+        copy.setAgentPresentation(agentPresentation(source.getConfigJson(),access));copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        if(!canonical){copy.setDescription(null);copy.setConfigJson(null);}
+        copy.setPrivacy(configurationPrivacy("iqc-agent-read-v1",access,canonical,List.of("description","configJson")));return copy;
+    }
+    public io.github.opensabre.iqc.agent.QualityAgentService.AgentVersionComparison agentComparison(
+            io.github.opensabre.iqc.agent.QualityAgentService.AgentVersionComparison source,SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(access);if(source==null)return null;
+        boolean canonical=access.fullConversation()&&access.pii()&&access.prompt();
+        return new io.github.opensabre.iqc.agent.QualityAgentService.AgentVersionComparison(source.fromVersion(),source.toVersion(),source.changedFields(),
+                canonical?source.changedConfigPaths():List.of(),configurationPrivacy("iqc-agent-read-v1",access,canonical,List.of("changedConfigPaths")));
+    }
+
+    public io.github.opensabre.iqc.rule.model.QualityRule rule(io.github.opensabre.iqc.rule.model.QualityRule source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.rule.model.QualityRule();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&(!(source.getRuleType()!=null&&"LLM".equalsIgnoreCase(source.getRuleType().trim()))||access.prompt());
+        copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        if(!canonical){copy.setExpression(null);copy.setDescription(null);}
+        copy.setPrivacy(configurationPrivacy("iqc-rule-read-v1",access,canonical,List.of("expression","description")));return copy;
+    }
+    public io.github.opensabre.iqc.rule.model.QualityRuleVersion ruleVersion(io.github.opensabre.iqc.rule.model.QualityRuleVersion source,SensitiveReadAccessService.Access access,boolean detailRead){
+        Objects.requireNonNull(access);if(source==null)return null;
+        var copy=new io.github.opensabre.iqc.rule.model.QualityRuleVersion();BeanUtils.copyProperties(source,copy);
+        boolean canonical=detailRead&&access.fullConversation()&&access.pii()&&(!(source.getRuleType()!=null&&"LLM".equalsIgnoreCase(source.getRuleType().trim()))||access.prompt());
+        copy.setName(text(copy.getName(),access.fullConversation()&&access.pii()));
+        if(!canonical){copy.setExpression(null);copy.setDescription(null);}
+        copy.setPrivacy(configurationPrivacy("iqc-rule-read-v1",access,canonical,List.of("expression","description")));return copy;
+    }
+    public io.github.opensabre.iqc.rule.QualityRuleService.RuleTestResult ruleTest(io.github.opensabre.iqc.rule.QualityRuleService.RuleTestResult source,SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(access);if(source==null)return null;
+        boolean canonical=access.fullConversation()&&access.pii();
+        // This endpoint never executes LLM rules: NOT_SUPPORTED is an existing constant public explanation.
+        boolean publicReason="NOT_SUPPORTED".equals(source.resultStatus());
+        return new io.github.opensabre.iqc.rule.QualityRuleService.RuleTestResult(source.matched(),source.resultStatus(),canonical?source.matchedText():null,
+                canonical||publicReason?source.reason():"测试回执正文未提供",canonical?source.evidence():List.of(),
+                configurationPrivacy("iqc-rule-read-v1",access,canonical,publicReason?List.of("matchedText","evidence"):List.of("matchedText","reason","evidence")));
+    }
+    public io.github.opensabre.iqc.rule.dls.DlsImportService.ImportResult dlsImport(io.github.opensabre.iqc.rule.dls.DlsImportService.ImportResult source,SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(access);if(source==null)return null;boolean canonical=access.fullConversation()&&access.pii();
+        var items=source.items().stream().map(item->new io.github.opensabre.iqc.rule.dls.DlsImportService.ImportItem(
+                text(item.sheetName(),canonical),text(item.ruleName(),canonical),item.ruleCode(),item.status(),item.ruleId(),item.definitionCount(),item.executableRuleCount(),
+                canonical?item.warnings():List.of(),canonical?item.message():"诊断正文未提供")).toList();
+        return new io.github.opensabre.iqc.rule.dls.DlsImportService.ImportResult(fileName(source.fileName(),canonical),source.preview(),source.sheetCount(),source.createdCount(),source.validCount(),source.skippedCount(),source.failedCount(),items,
+                configurationPrivacy("iqc-rule-read-v1",access,canonical,List.of("items.warnings","items.message")));
     }
 
 }
