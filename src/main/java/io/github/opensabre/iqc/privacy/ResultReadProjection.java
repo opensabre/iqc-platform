@@ -775,13 +775,21 @@ public final class ResultReadProjection {
 
     public io.github.opensabre.iqc.quality.model.ResultReview labelReview(
             io.github.opensabre.iqc.quality.model.ResultReview source,SensitiveReadAccessService.Access access,boolean detailRead){
+        return reviewRead(source,access,detailRead,"iqc-label-review-read-v1");
+    }
+    public io.github.opensabre.iqc.quality.model.ResultReview messageReview(
+            io.github.opensabre.iqc.quality.model.ResultReview source,SensitiveReadAccessService.Access access,boolean detailRead){
+        return reviewRead(source,access,detailRead,"iqc-message-review-read-v1");
+    }
+    private io.github.opensabre.iqc.quality.model.ResultReview reviewRead(
+            io.github.opensabre.iqc.quality.model.ResultReview source,SensitiveReadAccessService.Access access,boolean detailRead,String policy){
         Objects.requireNonNull(source);Objects.requireNonNull(access);
         var copy=new io.github.opensabre.iqc.quality.model.ResultReview();BeanUtils.copyProperties(source,copy);
         boolean reveal=detailRead&&access.fullConversation()&&access.pii();
         copy.setCreatedBy(text(source.getCreatedBy(),access.fullConversation()&&access.pii()));
         copy.setReviewerId(text(source.getReviewerId(),access.fullConversation()&&access.pii()));
         if(!reveal){copy.setRequestComment(null);copy.setReviewComment(null);copy.setReviewedResultJson(null);}
-        copy.setPrivacy(configurationPrivacy("iqc-label-review-read-v1",access,reveal,List.of("requestComment","reviewComment","reviewedResultJson")));return copy;
+        copy.setPrivacy(configurationPrivacy(policy,access,reveal,List.of("requestComment","reviewComment","reviewedResultJson")));return copy;
     }
 
     private Map<String,Object> configurationPrivacy(String policyVersion,SensitiveReadAccessService.Access access,boolean canonical,List<String> withheld){

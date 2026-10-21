@@ -119,13 +119,14 @@ public class QualityOperationsController {
     @ResourcePermission(code="iqc:review:create", name="发起人工复核", type="iqc", description="为质检结果发起复核")
     @Audit(operationType=OperationType.CREATE, description="发起 IQC 人工复核", module="IQC_REVIEW", request=false, response=false, key="#resultId")
     public ResultReview requestReview(@PathVariable String resultId, @RequestBody(required=false) ReviewRequest request) {
+        var access=readAccess("iqc:review:create");
         if (request != null && business(request.targetType())) {
             if (request.expectedRevision() == null) throw IqcException.invalidArgument("业务复核必须指定预期修订");
             if(request.stage()!=null||request.parentReviewId()!=null)return businessReviews.request(resultId,request.expectedRevision(),request.requestId(),request.comment(),request.stage(),request.parentReviewId());
             return businessReviews.request(resultId, request.expectedRevision(), request.requestId(), request.comment());
         }
         if(request!=null&&(request.stage()!=null||request.parentReviewId()!=null))throw IqcException.invalidArgument("消息复核不接受业务阶段升级");
-        return service.requestReview(resultId, request == null ? null : request.comment());
+        return resultProjection.messageReview(service.requestReview(resultId, request == null ? null : request.comment()),access,false);
     }
     @GetMapping("/reviews")
     @ResourcePermission(code="iqc:review:view", name="查看人工复核", type="iqc", description="查询人工复核工作台")
@@ -158,12 +159,13 @@ public class QualityOperationsController {
             if (status != null) throw IqcException.invalidArgument("业务复核历史按完整轮次返回，不支持状态筛选");
             return businessReviews.history(resultId);
         }
-        return service.reviews(status);
+        return service.reviews(status).stream().map(row->resultProjection.messageReview(row,access,true)).toList();
     }
     @PostMapping("/reviews/{reviewId}/decision")
     @ResourcePermission(code="iqc:review:decide", name="处理人工复核", type="iqc", description="通过、修正或退回复核")
     @Audit(operationType=OperationType.UPDATE, description="处理 IQC 人工复核", module="IQC_REVIEW", request=false, response=false, key="#reviewId")
     public ResultReview decide(@PathVariable String reviewId, @RequestBody ReviewDecision request) {
+        var access=readAccess("iqc:review:decide");
         if (business(request.targetType())) {
             if (request.expectedRevision() == null || (!"COMPLETED".equals(request.decision()) && !"REJECTED".equals(request.decision())))
                 throw IqcException.invalidArgument("业务复核必须指定修订与完成/退回决定");
@@ -175,7 +177,7 @@ public class QualityOperationsController {
         }
         if(request.scoreAdjustment()!=null)throw IqcException.invalidArgument("消息复核不接受业务人工改分命令");
         if(request.findingDecisions()!=null&&!request.findingDecisions().isEmpty())throw IqcException.invalidArgument("消息复核不接受Finding裁决");
-        return service.decideReview(reviewId, request.decision(), request.finalStatus(), request.finalScore(), request.finalRiskLevel(), request.comment());
+        return resultProjection.messageReview(service.decideReview(reviewId, request.decision(), request.finalStatus(), request.finalScore(), request.finalRiskLevel(), request.comment()),access,false);
     }
 
     @PostMapping("/results/{resultId}/samples")
