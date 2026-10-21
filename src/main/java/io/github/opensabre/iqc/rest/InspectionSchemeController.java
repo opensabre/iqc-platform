@@ -77,12 +77,12 @@ public class InspectionSchemeController {
 
     @PostMapping
     @ResourcePermission(code="iqc:scheme:create", name="创建业务方案", type="iqc", description="创建业务方案草稿")
-    @Audit(operationType=OperationType.CREATE, description="创建业务质检方案", module="IQC_SCHEME")
+    @Audit(operationType=OperationType.CREATE, description="创建业务质检方案", module="IQC_SCHEME", request=false, response=false)
     public InspectionScheme create(@RequestBody InspectionSchemeService.DraftRequest request) { return schemes.create(request); }
 
     @PutMapping("/{id}")
     @ResourcePermission(code="iqc:scheme:update", name="修订业务方案", type="iqc", description="修订业务方案草稿")
-    @Audit(operationType=OperationType.UPDATE, description="修订业务质检方案", module="IQC_SCHEME")
+    @Audit(operationType=OperationType.UPDATE, description="修订业务质检方案", module="IQC_SCHEME", request=false, response=false, key="#id")
     public InspectionScheme revise(@PathVariable String id, @RequestBody @Valid RevisionRequest request) {
         return schemes.revise(id, request.expectedRevision(), request.draft());
     }
@@ -116,7 +116,7 @@ public class InspectionSchemeController {
     @PostMapping("/{id}/publish")
     @Operation(summary="管理业务模板发布状态", description="PUBLISH 要求完整试跑与专家确认；DISABLE/ENABLE 切换方案可用性；ARCHIVE_VERSION/RESTORE_VERSION 仅作用于已被取代的发布版本")
     @ResourcePermission(code="iqc:scheme:publish", name="发布业务方案", type="iqc", description="确认发布、切换模板可用性及归档发布版本")
-    @Audit(operationType=OperationType.UPDATE, description="管理业务质检模板发布与可用性", module="IQC_SCHEME")
+    @Audit(operationType=OperationType.UPDATE, description="管理业务质检模板发布与可用性", module="IQC_SCHEME", request=false, response=false, key="#id")
     public Object publish(@PathVariable String id, @RequestBody @Valid PublishRequest request) {
         String action = request.action() == null ? "PUBLISH" : request.action();
         if ("DISABLE".equals(action) || "ENABLE".equals(action)) {

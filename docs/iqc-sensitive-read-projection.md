@@ -402,3 +402,10 @@ UI从受限/未知协议响应清理正文，不把null构造为可保存空版�
 复用既有规则业务授权及当前敏感授权，RuleSet list/history仅FULL+PII齐备返回原description；所有命令回执扣留description。响应副本使用iqc-rule-set-read-v1，非持久privacy为null时省略；ruleIdsJson原顺序、aggregationMode、ID/code/version/status保留，不改变检测或内部快照。页面仅保存成员选择所需元数据，关闭清理新建表单，刷新代次/卸载阻断迟到响应，创建提交复制输入，禁止提交期间关闭。页面本来没有历史编辑入口，未添加空描述覆盖路径。
 
 当前批次仅编译/前端构建；实际grant组合、源对象不变、内部JSON兼容、网关逐URL注册及浏览器生命周期仍待独立验证。单租户组织范围不变，完整I1–I7未完成。
+
+
+## Scheme审计正文边界（2026-10-21）
+
+现有Audit.request默认true（framework治理注解只读确认），Scheme创建/修订此前会将DraftRequest完整definition记录到审计。三个原有创建/修订/发布注解显式request=false,response=false；修订和发布保留目标id，操作类型/module不变。不改framework、业务请求或持久快照。
+
+Scheme整体读取边界尚未完成：published模板及专家history的ReleaseSnapshot携带dependencies和variantDependencies，包含规则expression及Agent configJson；不能只清理dependencies而遗漏变体副本。现有UI依赖snapshot.definition的executionVariants/runLimits及历史diff/派生，需专门安全选用元数据及受限编辑/历史展示联动，不能简单置空snapshot。ReleaseSnapshot构造校验要求变体集合与选中dependencies一致，投影不能制造假发布Release或参与hash。内部Release记录不应为显示投影改写。
