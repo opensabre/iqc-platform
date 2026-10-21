@@ -721,14 +721,15 @@ public final class ResultReadProjection {
 
     public record FindingReviewContextRead(String sourceResultId,String sourceHash,boolean available,String message,
             java.util.List<io.github.opensabre.iqc.quality.BusinessItemReviewService.FindingEntry> findings,
-            com.fasterxml.jackson.databind.JsonNode messages,Map<String,Object> privacy) { }
+            List<Map<String,Object>> messages,Map<String,Object> privacy) { }
     public FindingReviewContextRead findingReviewContext(io.github.opensabre.iqc.quality.BusinessItemReviewService.FindingContext source,
             SensitiveReadAccessService.Access access){
         Objects.requireNonNull(source);Objects.requireNonNull(access);
         boolean canonical=access.fullConversation()&&access.pii();
         return new FindingReviewContextRead(source.sourceResultId(),source.sourceHash(),canonical&&source.available(),
                 canonical?source.message():"完整会话及事实值未展示，需要完整会话和PII读取权限后重新读取，不能据此提交事实裁决。",
-                canonical?source.findings():List.of(),canonical?source.messages():json.createArrayNode(),
+                canonical?source.findings():List.of(),canonical?json.convertValue(source.messages(),
+                        new com.fasterxml.jackson.core.type.TypeReference<List<Map<String,Object>>>(){}):List.of(),
                 configurationPrivacy("iqc-finding-review-context-read-v1",access,canonical,List.of("findings","messages")));
     }
 

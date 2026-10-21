@@ -467,3 +467,8 @@ LabelValueReviewPanel区分未展示和损坏：存在但未知/受限privacy清
 复用既有标签review响应copy字段处理为私有reviewRead，消息路径使用iqc-message-review-read-v1，不新增持久模型。消息history FULL+PII才回原评论/JSON，命令receipt始终扣留，原original/final数值、状态、风险、ID/hash保留，创建人/复核人沿原mask。request/decide入口在原业务分支前检查固定review:create/decide当前授权；history已有review:view/no-store/QUERY不收正文。原service范围与裁决不变；业务review JSON/工作流本批未扣留，仍待完整配套。
 
 旧质量运营页按当前tab及其原grant分别查询review/feedback/sample，report只在report:view具备时查询，不再无条件四接口联读。消息评论受限显示未展示，表单不填历史评论；提交固定目标/复制payload，handler检查decide并防重复，提交中禁止关闭/改动，关闭清表单/selected，卸载清列表/输入/代次，迟到响应不回填。字段保护和页面运行未独立验收，当前仅编译构建；原组织/role/PDP/browser与I1–I7保持待验。
+
+
+## B消息HTTP序列化修复集成（2026-10-22）
+
+从B已提交e0ed424精确取FindingReviewContextRead/findingReviewContext响应代码和ReviewContextQueueHttpPrivacyTest。响应messages由Jackson2 JsonNode改普通List<Map>，仅授权时转换；未授权仍空列表，冻结service上下文不变。B默认MVC实测此前节点bean属性而非消息数组，修复后八grant及队列共13项通过；连同其其它套件/签名H2共53项结果归B当时组合分支，见协作台账。Root集成保留最新score/label/message保护，当前仅skipTests test-compile，不重跑或夸大为全部HTTP/组织/浏览器验收。
