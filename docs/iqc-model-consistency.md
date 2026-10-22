@@ -31,3 +31,11 @@ comparisonCoverage=comparablePairs/expectedPairs；agreementRate=agreeingPairs/c
 服务层继承边界另由 `PipelineEvaluationReportTest` 覆盖：显式比较 retry/prior 两个 EID，retry 的样本实际继承 prior 产物时，归为 SAME_ARTIFACT，未生成独立比较；缺失样本继续保留 MISSING_ARTIFACT 分母。原 report 校验后 selectOne 已无产物时，拒绝返回比较报告。该层使用真实报告/产物校验逻辑、模拟 mapper，不是 SQL 继承场景证据。最终 `/tmp/iqc-b-consistency-inherited-final.log`，报告 20 +计算 5 共 25 项通过；首轮测试设桩 API 编译错误已修正，无生产代码变化。
 
 HTTP 合约由 `EvaluationCommandHttpPrivacyTest` 扩展两项：真实 MockMvc 参数绑定传递双方 Task/EID，响应保持缺测 null 和排除计数，返回 private/no-store、nosniff；当前授权服务失败时领域服务无调用。原评测命令/报告测试一并通过，最终 `/tmp/iqc-b-consistency-http.log`。该测试模拟领域服务与授权服务，不证明真实网关/PDP、SQL 或模型调用。
+
+## 受控模型桥接的真实持久化（2026-10-22）
+
+`controlledModelBridgePersistsIndependentComparableArtifacts` 复用原 `FrozenDetectorEngine`、`InspectionExecutionService`、评测工作器、Gold 独立审核/数据集冻结、SQL 结果表和一致性服务。规则及智能体版本为数据库夹具，事实通过目录发布，智能体资产校验器与模型适配器为 mock；适配器明确提供固定响应和固定调用指纹，不是路由器生成或真实供应商证据。
+
+两个独立 Task/EID 实际运行并落库后，读取结果得到 expected/comparable/agreeing=1，agreement=1；同一 Task/EID 比较归 SAME_ARTIFACT，不算独立执行。模型会话入口确切调用两次。该事实为无强制证据的普通低风险布尔项，未放宽高风险证据约束。
+
+最终 `/tmp/iqc-b-consistency-model-sql-final.log`、原2622 terminal0，testCompile/测试共27项通过（真实SQL2、计算5、报告20）。首轮已完整main编译；此前三轮分别暴露夹具必填relative_time缺失、高风险无证据、错误设桩单消息入口，均仅修测试夹具。最终MySQL脚本自动关闭。仍不包含真实模型供应商、SQL重试继承或浏览器整链证明。
