@@ -51,17 +51,28 @@ public class BusinessQualityReportService {
                               int notEvaluatedCount, int reviewRequiredCount, int errorCount, BigDecimal failureRate) { }
     public record ItemGroup(String itemCode, String name, boolean scored, Integer points, boolean veto,
                             ItemSummary machine, ItemSummary reviewed) { }
+    public record ReviewChangeSummary(String schemaVersion,String scope,int reviewedResults,int modifiedResults,
+                                      int itemOrScoreChangedResults,int findingChangedResults,int effectiveNumericScoreChangedResults,
+                                      BigDecimal modificationRate,BigDecimal reviewCoverage) { }
     public record PolicyGroup(String groupKey, String schemeId, String versionNo, String draftRevision, String kind,
                               String mode, int baseScore, int passingScore, List<String> taskIds, int conversationCount,
                               List<String> executionIds, int missingResultCount, int missingReviewCount, int pendingReviewCount,
                               ScoreSummary machine, ScoreSummary reviewed, List<ItemGroup> items,
                               @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-                              String pipelineId) {
+                              String pipelineId,
+                              @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                              ReviewChangeSummary reviewChanges) {
+        public PolicyGroup(String groupKey,String schemeId,String versionNo,String draftRevision,String kind,String mode,int baseScore,int passingScore,
+                List<String> taskIds,int conversationCount,List<String> executionIds,int missingResultCount,int missingReviewCount,int pendingReviewCount,
+                ScoreSummary machine,ScoreSummary reviewed,List<ItemGroup> items,String pipelineId){
+            this(groupKey,schemeId,versionNo,draftRevision,kind,mode,baseScore,passingScore,taskIds,conversationCount,executionIds,
+                    missingResultCount,missingReviewCount,pendingReviewCount,machine,reviewed,items,pipelineId,null);
+        }
         public PolicyGroup(String groupKey,String schemeId,String versionNo,String draftRevision,String kind,String mode,int baseScore,int passingScore,
                 List<String> taskIds,int conversationCount,List<String> executionIds,int missingResultCount,int missingReviewCount,int pendingReviewCount,
                 ScoreSummary machine,ScoreSummary reviewed,List<ItemGroup> items){
             this(groupKey,schemeId,versionNo,draftRevision,kind,mode,baseScore,passingScore,taskIds,conversationCount,executionIds,
-                    missingResultCount,missingReviewCount,pendingReviewCount,machine,reviewed,items,null);
+                    missingResultCount,missingReviewCount,pendingReviewCount,machine,reviewed,items,null,null);
         }
     }
     public record Report(String scope, String runPolicy, int taskCount, int conversationCount, List<PolicyGroup> groups) { }
@@ -145,7 +156,7 @@ public class BusinessQualityReportService {
         var groups = new LinkedHashMap<String, Group>();
         for (var candidate : candidates) {
             var selection = candidate.selection();
-            var group = groups.computeIfAbsent(selection.key(), ignored -> new Group(selection));
+            var group = groups.computeIfAbsent(selection.key(), ignored -> new Group(selection,mapper));
             group.taskIds.add(selection.task().getId());
             group.conversations++;
             var result = candidate.result();
@@ -160,7 +171,7 @@ public class BusinessQualityReportService {
             if (completed == null) group.missingReview++;
             else {
                 var projection=reviews.validatedProjection(completed,result,selection.task());
-                var reviewed=projection.reviewed();group.addManualScores(projection);
+                var reviewed=projection.reviewed();group.addManualScores(projection);group.addReviewChanges(projection);
                 group.reviewed.add(reviewed.scoring());
                 group.addItems(reviewed, true);
             }
@@ -228,12 +239,44 @@ public class BusinessQualityReportService {
     private record RunCandidate(Selection selection, String conversationId, ConversationInspectionResult result,
                                 java.util.Date effectiveTime) { }
     private static final class Group {
-        final Selection selection; final List<String> taskIds = new ArrayList<>();
+        final ObjectMapper json; final Selection selection; final List<String> taskIds = new ArrayList<>();
         final java.util.Set<String> executionIds = new java.util.LinkedHashSet<>();
         final Scores machine = new Scores(), reviewed = new Scores();
         final java.util.Map<String, ItemCounts> machineItems = new LinkedHashMap<>(), reviewedItems = new LinkedHashMap<>();
         int conversations, missingResult, missingReview, pendingReview;
         int manualApplied,manualStale,effectiveNumericCount;BigDecimal manualSum=BigDecimal.ZERO,effectiveSum=BigDecimal.ZERO;
+        int reviewedResults,modifiedResults,itemOrScoreChanged,findingChanged,effectiveScoreChanged;
+        private String digest(Object value){return io.github.opensabre.iqc.selector.SelectorAssetService.hash(json.valueToTree(value).toString());}
+        private Object businessMeaning(SchemeResultEvaluator.Evaluation evaluation){
+            var items=evaluation.items().stream().sorted(java.util.Comparator.comparing(SchemeResultEvaluator.ItemResult::itemCode))
+                    .map(item->java.util.Map.of("code",item.itemCode(),"status",item.status(),"evidence",new java.util.TreeSet<>(item.matchedMessageIds()))).toList();
+            return List.of(items,evaluation.scoring());
+        }
+        private Object findingMeaning(List<io.github.opensabre.iqc.fusion.FindingFusion.Result> facts){
+            return facts.stream().sorted(java.util.Comparator.comparing(io.github.opensabre.iqc.fusion.FindingFusion.Result::code)).map(fact->{
+                var value=new LinkedHashMap<String,Object>();value.put("code",fact.code());value.put("type",fact.valueType());value.put("state",fact.state());
+                value.put("value",fact.value());value.put("severity",fact.severity());
+                value.put("evidence",fact.evidence().stream().map(e->e.type().name()+":"+e.reference()).collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new)));
+                return value;
+            }).toList();
+        }
+        void addReviewChanges(BusinessItemReviewEvaluator.Projection projection){
+            reviewedResults++;
+            boolean item=!digest(businessMeaning(projection.original())).equals(digest(businessMeaning(projection.reviewed())));
+            boolean finding=projection.findingReview()!=null&&!digest(findingMeaning(projection.findingReview().findings().original()))
+                    .equals(digest(findingMeaning(projection.findingReview().findings().reviewed())));
+            var manual=projection.manualScore();var machineScore=projection.original().scoring().finalScore();
+            boolean numeric=manual!=null&&"APPLIED".equals(manual.status())
+                    &&(machineScore==null||manual.effectiveScore().compareTo(machineScore)!=0);
+            if(item)itemOrScoreChanged++;if(finding)findingChanged++;if(numeric)effectiveScoreChanged++;
+            if(item||finding||numeric)modifiedResults++;
+        }
+        ReviewChangeSummary reviewChanges(){
+            return new ReviewChangeSummary("iqc-business-review-changes-v1","LATEST_COMPLETED_BUSINESS_REVIEW_VS_MACHINE",reviewedResults,modifiedResults,
+                    itemOrScoreChanged,findingChanged,effectiveScoreChanged,
+                    reviewedResults==0?null:BigDecimal.valueOf(modifiedResults).divide(BigDecimal.valueOf(reviewedResults),6,RoundingMode.HALF_UP),
+                    conversations==0?null:BigDecimal.valueOf(reviewedResults).divide(BigDecimal.valueOf(conversations),6,RoundingMode.HALF_UP));
+        }
         void addManualScores(BusinessItemReviewEvaluator.Projection projection){
             var manual=projection.manualScore();BigDecimal numeric=null;
             if(manual!=null&&"APPLIED".equals(manual.status())){manualApplied++;numeric=manual.effectiveScore();manualSum=manualSum.add(numeric);}
@@ -247,8 +290,8 @@ public class BusinessQualityReportService {
             return new ScoreSummary(calculated.resultCount(),calculated.finalCount(),calculated.pendingCount(),calculated.notApplicableCount(),calculated.qualifiedCount(),
                     calculated.averageScore(),calculated.qualifiedRate(),manual);
         }
-        Group(Selection selection) {
-            this.selection = selection;
+        Group(Selection selection,ObjectMapper json) {
+            this.json=json;this.selection = selection;
             selection.items().forEach(item -> {
                 machineItems.put(item.itemCode(), new ItemCounts());
                 reviewedItems.put(item.itemCode(), new ItemCounts());
@@ -270,7 +313,7 @@ public class BusinessQualityReportService {
                         return new ItemGroup(item.itemCode(), item.name(), scoring != null,
                                 scoring == null ? null : scoring.points(), scoring != null && scoring.veto(),
                                 machineItems.get(item.itemCode()).view(), reviewedItems.get(item.itemCode()).view());
-                    }).toList(),marker.has("pipelineId")?marker.path("pipelineId").asText():null);
+                    }).toList(),marker.has("pipelineId")?marker.path("pipelineId").asText():null,reviewChanges());
         }
     }
     private static final class ItemCounts {

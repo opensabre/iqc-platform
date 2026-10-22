@@ -73,3 +73,8 @@
 ## 2026-10-22 模型层置信度误差诊断增量
 
 FindingEvaluationMetrics沿原金标/结果比较新增带协议的confidenceDiagnostics，经原Report进入评测页：coverage、Brier、ECE及10箱。没有finalConfidence的原结果不补零，空分母null。具体定义、旧Result构造/ReportEvidence摘要兼容风险及证据边界见iqc-confidence-diagnostics.md。当前仅代码/编译构建，数值/HTTP/旧JSON兼容待B验证；一致性、幻觉、真正校准工件真实性及其余层指标仍未因此完成。
+
+
+## 2026-10-22 业务人工修改率增量
+
+BusinessQualityReportService沿原选择/冻结标准/已验证最近完成复核，新增业务结果修改率和复核覆盖率、三个可重叠变更分类；细则见iqc-business-review-change-metrics.md。没有复核不填成未修改，无修改率分母时null，不混独立标签或旧消息复核，不改机器结果。当前仅编译构建，数值/来源/旧JSON/SQL/browser待独立验证。模型一致性仍缺真正重复同输入同版本Pipeline数据；旧方案投票轨迹不能替代，PRD其余指标及全I1–I7继续。
