@@ -100,6 +100,28 @@ class EvaluationCommandHttpPrivacyTest {
         verify(grants).current(Set.of("iqc:evaluation:report:view"));
         verify(service).consistency("t","selected","reference-task","reference-execution");
     }
+    @ParameterizedTest
+    @CsvSource(value={"NULL,reference,e", "selected,NULL,e", "selected,reference,NULL", "'',reference,e", "selected,'',e", "selected,reference,''"}, nullValues="NULL")
+    void incompleteComparisonIdentityIsRejectedWithoutFallingBackToOrdinaryReport(String selected,String reference,String referenceExecution) throws Exception {
+        allow(false,false,false);
+        var request=get("/api/iqc/evaluation/tasks/t/report");
+        if(selected!=null)request.param("executionId",selected);
+        if(reference!=null)request.param("referenceTaskId",reference);
+        if(referenceExecution!=null)request.param("referenceExecutionId",referenceExecution);
+        mvc().perform(request).andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("IQC-1003"))
+                .andExpect(jsonPath("$.data").doesNotExist())
+                .andExpect(header().string("Cache-Control","private, no-store"));
+        verify(grants).current(Set.of("iqc:evaluation:report:view"));
+        verifyNoInteractions(service);
+    }
+    @Test void authorizationPrecedesIncompleteComparisonValidation() throws Exception {
+        when(grants.current(anySet())).thenThrow(new IllegalStateException("unavailable"));
+        mvc().perform(get("/api/iqc/evaluation/tasks/t/report").param("referenceTaskId","reference"))
+                .andExpect(jsonPath("$.code").value("IQC-1006"))
+                .andExpect(jsonPath("$.data").doesNotExist());
+        verify(grants).current(Set.of("iqc:evaluation:report:view"));verifyNoInteractions(service);
+    }
     @Test void consistencyAuthorizationFailurePreventsAnyArtifactQuery() throws Exception {
         when(grants.current(anySet())).thenThrow(new IllegalStateException("unavailable"));
         mvc().perform(get("/api/iqc/evaluation/tasks/t/report")

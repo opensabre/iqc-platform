@@ -60,3 +60,9 @@ HTTP 合约由 `EvaluationCommandHttpPrivacyTest` 扩展两项：真实 MockMvc 
 ## A/B组合资源映射修订
 
 现有base_org_resource.code唯一且每条记录只有一个method/url。为避免report:view同时注册/report和/consistency而覆盖，组合分支复用GET /api/iqc/evaluation/tasks/{taskId}/report，显式executionId/referenceTaskId/referenceExecutionId选择一致性子报告。无reference参数仍原单轮报告，原两参Java方法/Report/ReportEvidence不变；半缺参数拒绝，不默认替换为当前轮次。无新表/权限码/框架更改。原B受控浏览器网络证据对应旧分支路径，不能外推为此新路径已浏览器验收。
+
+### B 2026-10-23 统一报告路由验证
+
+B快进至固定A59ce621（包含标签SQL提交b5ae66f），扩展原EvaluationCommandHttpPrivacyTest：六种缺失/空白selected EID/reference Task/reference EID均拒绝为IQC-1003、无data、不回退普通报告、不查询领域服务；半缺参数时授权服务故障优先失败且不查询产物。既有普通report分支、完整比较身份、null缺测和no-store/nosniff断言保留。静态控制器仅一个带report:view的GET /report映射，不再独立注册/consistency。
+
+原57126 terminal1仅新测试错误码期望写成IQC-1001，实际既有枚举IQC-1003，纠正断言；原96499 terminal0，`/tmp/iqc-b-report-route-final.log`，fresh XML 20项无失败/错误/跳过。首轮完整main/test编译，末轮testCompile+surerfire，diff检查通过。本轮真实MVC与响应包装，grants/domain mock；不是资源注册服务/PDP或真实socket浏览器证明，不替代统一路由SQL/MVC组合后续复验。
