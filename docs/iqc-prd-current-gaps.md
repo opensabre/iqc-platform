@@ -45,3 +45,9 @@ PRD14.3要求业务层标签准确率。当前 `PipelineEvaluationService.report
 在原PipelineEvaluationReportTest加入冻结BOOLEAN标签政策和规范Gold地址，使用实际evaluator/产物校验/报告组装验证：两标签一对一错accuracy=0.5且回归仅一条通过；缺一产物labelGold=2/comparable=1/accuracy=1、回归0.5且报告不完整；重试继承prior产物与当前产物都可比、准确率/回归为1、原sourceExecutionIds保留，读取报告不调用runtime。
 
 原41298 terminal1为新增缺产物场景Mockito嵌套设桩错误；拆开夹具创建后原51399 terminal0，`/tmp/iqc-b-label-report-final.log`，fresh XML纯标签4+报告23=27项无失败/错误/跳过。本轮是实际产物/领域报告组装，数据库读取与冻结输入准入仍隔离，不代表真实SQL标签继承或网络/PDP验证；这些仍待后续补齐。
+
+### 标签真实 SQL 继承验证（2026-10-23）
+
+既有IsolatedMysqlMeasuredPublicationIT模型场景接入真实FindingLabelFreezeService/LabelResolutionService与原标签mapper，已发布标签/规则绑定/BOOLEAN值定义为隔离SQL夹具；不mock目录解析或投影。真实Gold标注/独立审核/数据集冻结/worker产物落库：双样本首次第二条失败，report标签Gold=2、可比=1、accuracy=1；恢复adapter重试后Gold=2、可比=2、accuracy=1，首条source仍prior，当前执行SQL结果仅1行。原模型一致性与SQL/MVC组合断言仍通过。
+
+原6341终态0，`/tmp/iqc-b-label-sql.log`，fresh XML：隔离SQL2（94.309秒）+一致性计算5+报告23=30项无失败/错误/跳过；testCompile+surerfire及diff检查通过，专用127.0.0.1:34307脚本自动关闭。已发布标签等记录由测试初始化，未验证标签发布UI流程；scope/current grant/Agent资产validator/供应商ChatModel与网关账本仍受控，不外推真实PDP/供应商/浏览器网络链。纯标签4项沿上一轮证据，不叠加本轮数量。
