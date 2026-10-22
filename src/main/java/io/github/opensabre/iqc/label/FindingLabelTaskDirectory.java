@@ -13,7 +13,7 @@ public final class FindingLabelTaskDirectory {
     public static JsonNode expected(InspectionTask task,ObjectMapper json) {
         if(task==null || task.getRuleSnapshotJson()==null || !task.getRuleSnapshotJson().contains("\"pipelineSnapshot\""))return null;
         try {
-            var snapshot=json.readTree(task.getRuleSnapshotJson());
+            var snapshot=PipelineAssetService.readFrozenTree(json,task.getRuleSnapshotJson());
             var marker=snapshot==null?null:snapshot.get("pipelineSnapshot");
             var body=marker==null?null:marker.get("release");
             if(body==null || !body.hasNonNull("labelPolicy"))return null;
@@ -24,7 +24,7 @@ public final class FindingLabelTaskDirectory {
             var directory=release.labelPolicy().directory();
             // Tasks created before this field was mirrored can still use the verified release directory.
             if(task.getLabelScopeSnapshotJson()!=null && !task.getLabelScopeSnapshotJson().isBlank()
-                    && !directory.equals(json.readTree(task.getLabelScopeSnapshotJson())))
+                    && !directory.equals(PipelineAssetService.readFrozenValue(json,task.getLabelScopeSnapshotJson(),JsonNode.class,release)))
                 throw IqcException.invalidState("任务标签范围与流水线冻结目录不一致");
             return directory;
         } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException failure) {

@@ -101,7 +101,7 @@ public class ActionProductionSourceValidator {
 
     private Validated validateFacts(Reference reference,InspectionTask task,ConversationInspectionResult result,boolean historical) {
         try {
-            var snapshot=json.readTree(task.getRuleSnapshotJson());
+            var snapshot=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenTree(json,task.getRuleSnapshotJson());
             boolean rollout=io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.requiresEvidence(task.getId())
                     ||snapshot!=null&&snapshot.has("rolloutSnapshot");
             if(rollout)snapshot=json.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
@@ -119,7 +119,7 @@ public class ActionProductionSourceValidator {
             var prepared=inputs.prepare(task,snapshot);
             if(prepared==null)throw IqcException.invalidState("动作来源缺少冻结生产输入");
             var messages=prepared.messages().get(reference.conversationId());
-            var trace=json.readValue(result.getExecutionTraceJson(),PipelineConversationEvaluator.Evaluation.class);
+            var trace=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenValue(json,result.getExecutionTraceJson(),PipelineConversationEvaluator.Evaluation.class,release);
             if(trace==null || !"iqc-pipeline-execution-v1".equals(trace.schemaVersion())
                     || trace.run()==null || trace.run().status()==null || trace.fusion()==null || trace.items()==null || trace.scoring()==null)
                 throw IqcException.invalidState("动作来源执行轨迹不完整");
@@ -129,7 +129,8 @@ public class ActionProductionSourceValidator {
             var fused=FindingFusion.reproduce(raw,release.fusion(),trace.fusion());
             var score=PipelineDecisionEvaluator.evaluate(release,fused,prepared.businessContext(reference.conversationId()));
             var decisions=new java.util.HashMap<String,InspectionScoring.ItemStatus>();
-            PipelineDecisionEvaluator.decisions(release.items(),fused).forEach(value->decisions.put(value.itemCode(),value.status()));
+            var itemDecisions=PipelineDecisionEvaluator.decisions(release.items(),fused);
+            itemDecisions.forEach(value->decisions.put(value.itemCode(),value.status()));
             var seen=new java.util.HashSet<String>();
             for(var item:trace.items()) {
                 if(item==null || !seen.add(item.itemCode()) || !Objects.equals(decisions.get(item.itemCode()),item.status()))
@@ -161,8 +162,10 @@ public class ActionProductionSourceValidator {
                     .put("scoringResultJson",result.getScoringResultJson()).put("businessItemResultsJson",result.getBusinessItemResultsJson())
                     .put("resultStatus",result.getResultStatus()).put("riskLevel",risk);
             String body=json.writeValueAsString(frozen);
-            var facts=new java.util.HashMap<String,FindingFusion.Result>();fused.forEach(fact->facts.put(fact.code(),fact));
-            var context=new ActionPolicy.Context(facts,decisions,score.scoreStatus(),score.finalScore(),risk,result.getResultStatus(),java.util.Map.of(),null,review==null?null:review.status().name());
+            // Reuse the same frozen label and business inputs used by scoring/risk/review decisions.
+            var frozenContext=PipelineDecisionEvaluator.inputContext(release,fused,itemDecisions,prepared.businessContext(reference.conversationId()));
+            var context=new ActionPolicy.Context(frozenContext.findings(),frozenContext.items(),score.scoreStatus(),score.finalScore(),risk,
+                    result.getResultStatus(),frozenContext.labels(),frozenContext.businessContext(),review==null?null:review.status().name());
             return new Validated(reference,task.getOwnerGroupId(),result.getId(),body,PipelineAssetService.hash(body),
                     release.actionPolicy(),context,ownerBound,task.getStatus());
         } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException failure) {

@@ -34,7 +34,7 @@ public class ActionFailureEscalationDispatcher {
                 if(row==null || !Objects.equals(row.getVersion(),observed.getVersion()) || !"FAILED".equals(row.getStatus()))continue;
                 // Validate the existing frozen identity/hash before reading its policy.
                 var bound=dispatcher.ownerBound(row);
-                var policy=json.readValue(row.getPolicySnapshotJson(),ActionPolicy.class);
+                var policy=ActionFrozenPolicy.readFrozen(json,row.getPolicySnapshotJson(),row.getInputSnapshotJson());
                 var action=policy.actions().stream().filter(value->value.actionId().equals(row.getActionId())).findFirst().orElse(null);
                 if(action==null || action.failureHandling()!=ActionPolicy.FailureHandling.ESCALATE_REVIEW)continue;
                 var resources=new java.util.HashSet<>(ActionEnqueueService.REQUIRED_GRANTS);

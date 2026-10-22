@@ -76,7 +76,9 @@ public class ProductionInputSnapshotService {
         private final Map<String,Input> originals;
         private final String taskId;
         private final String snapshotJson;
-        private Prepared(List<Input> inputs,InspectionTask task) {
+        private final String releaseSchema;
+        private Prepared(List<Input> inputs,InspectionTask task,String releaseSchema) {
+            this.releaseSchema=releaseSchema;
             taskId=task.getId();snapshotJson=task.getRuleSnapshotJson();
             var originalsById=new LinkedHashMap<String,Input>();inputs.forEach(input->originalsById.put(input.conversationId(),input));
             originals=Collections.unmodifiableMap(originalsById);
@@ -96,6 +98,8 @@ public class ProductionInputSnapshotService {
                 row.setContent(value.content());row.setRelativeTime(value.relativeTime());row.setStartMs(value.startMs());row.setEndMs(value.endMs());row.setConfidence(value.confidence());return row;}).toList();
         }
         public Map<String,List<ConversationMessage>> messages(){return messages;}
+        /** Protocol comes from the persisted original task decoded during prepare. */
+        public String releaseSchema(){return releaseSchema;}
         /** Returns only the task's frozen attachment; the caller must authorize any byte access separately. */
         public Audio audio(String conversationId){var input=originals.get(conversationId);if(input==null)throw IqcException.invalidState("会话不在冻结输入中");return input.audio();}
         public JsonNode businessContext(String id){var value=contexts.get(id);if(value==null)throw IqcException.invalidState("会话不在冻结输入中");return value.deepCopy();}
@@ -162,7 +166,7 @@ public class ProductionInputSnapshotService {
         String id=messages.getFirst().getConversationId();var frozen=prepared.originalMessages(id);
         if(frozen==null || !json.valueToTree(frozen).equals(json.valueToTree(messages)))throw IqcException.invalidState("生产结果使用了不同的冻结输入");
         var input=json.createObjectNode();input.set("messages",json.valueToTree(frozen));input.set("businessContext",prepared.businessContext(id));
-        if(!io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(input.toString()).equals(evaluated.inputHash()))
+        if(!io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.executionInputHash(prepared.releaseSchema(),input).equals(evaluated.inputHash()))
             throw IqcException.invalidState("生产执行输入摘要与冻结文本/上下文不一致");
     }
     /** Read-only decision context reuses the original persisted-input and result fingerprint checks. */
@@ -214,7 +218,8 @@ public class ProductionInputSnapshotService {
             for(var input:values)for(var message:input.messages()){if(!messageIds.add(message.id()))throw IqcException.invalidState("生产冻结消息ID跨会话重复");count++;}
             if(count>100000 || task.getTotalMessages()==null || task.getTotalMessages()!=count
                     || (count==0 && !"NO_DATA".equals(task.getStatus())))throw IqcException.invalidState("生产冻结消息数与任务不一致");
-            return new Prepared(values,task);
+            return new Prepared(values,task,original.path("pipelineSnapshot").path("release").path("schemaVersion")
+                    .asText(io.github.opensabre.iqc.pipelineasset.PipelineRelease.SCHEMA));
         }catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException failure){throw IqcException.invalidState("生产冻结输入结构无效");}
     }
 }

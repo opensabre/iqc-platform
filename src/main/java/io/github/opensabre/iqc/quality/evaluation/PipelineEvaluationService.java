@@ -163,7 +163,7 @@ public class PipelineEvaluationService {
         validateActual(prepared, member, evaluated,executionId);
         var existing = results.selectOne(Wrappers.<EvaluationSampleResult>lambdaQuery().eq(EvaluationSampleResult::getTaskId, task.getId())
                 .eq(EvaluationSampleResult::getExecutionId, executionId).eq(EvaluationSampleResult::getSampleId, member.sampleId()));
-        String actual = write(evaluated), digest = PipelineAssetService.hash(actual);
+        String actual = write(evaluated), digest = artifactHash(prepared.release(), actual);
         var result = existing;
         if (existing != null && !digest.equals(existing.getActualHash())) throw IqcException.invalidState("同一评测执行不能覆盖既有样本结果");
         if (result == null) {
@@ -189,7 +189,8 @@ public class PipelineEvaluationService {
     }
     private void validateActual(Prepared prepared, DatasetSnapshot.Member member, PipelineConversationEvaluator.Evaluation actual,String executionId) {
         if (actual == null || actual.mode() != PipelineRuntime.Mode.EVALUATION
-                || !PipelineAssetService.hash(evaluator.executionInput(convert(member.gold()), member.gold().businessContext()).toString()).equals(actual.inputHash()))
+                || !PipelineConversationEvaluator.executionInputHash(prepared.release().schemaVersion(),
+                        evaluator.executionInput(convert(member.gold()), member.gold().businessContext())).equals(actual.inputHash()))
             throw IqcException.invalidState("评测模式或运行输入摘要无效");
         BusinessItemReviewEvaluator.evaluatePipeline("evaluation", prepared.release(), actual, actual.items(), List.of(),
                 member.gold().messages().stream().map(GoldConversation.Message::id).collect(Collectors.toSet()),member.gold().businessContext());
@@ -349,7 +350,10 @@ public class PipelineEvaluationService {
     private Long percentile(List<Long> values,double fraction){return values.isEmpty()?null:values.get((int)Math.ceil(values.size()*fraction)-1);}
     private PipelineConversationEvaluator.Evaluation validatedRow(InspectionTask task, Prepared prepared, EvaluationSampleResult row) {
         var member = prepared.member(row.getConversationId()); requireExecution(task, row.getExecutionId());
-        var actual = read(row.getActualJson(), PipelineConversationEvaluator.Evaluation.class);
+        validateSnapshotSize(row.getActualJson());
+        PipelineConversationEvaluator.Evaluation actual;
+        try { actual = PipelineAssetService.readFrozenValue(json,row.getActualJson(),PipelineConversationEvaluator.Evaluation.class,prepared.release()); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException exception) { throw IqcException.invalidState("评测轨迹格式无效"); }
         validateActual(prepared, member, actual,row.getExecutionId());
         boolean failed=actual.run().status()!=PipelineRuntime.Status.SUCCESS
                 || actual.items().stream().anyMatch(item->item.status()==InspectionScoring.ItemStatus.ERROR);
@@ -360,7 +364,7 @@ public class PipelineEvaluationService {
                 || !(failed?"ERROR":"SUCCESS").equals(row.getStatus())
                 || !member.sampleId().equals(row.getSampleId()) || !Objects.equals(member.versionNo(),row.getSampleVersion())
                 || !member.contentHash().equals(row.getGoldHash()) || !prepared.datasetHash().equals(row.getDatasetHash())
-                || !PipelineAssetService.hash(row.getActualJson()).equals(row.getActualHash())) throw IqcException.invalidState("评测结果来源或摘要无效");
+                || !artifactHash(prepared.release(),row.getActualJson()).equals(row.getActualHash())) throw IqcException.invalidState("评测结果来源或摘要无效");
         return actual;
     }
     private InspectionTask requireTask(String id) {
@@ -387,11 +391,24 @@ public class PipelineEvaluationService {
             return body;
         } catch (com.fasterxml.jackson.core.JsonProcessingException exception) { throw IqcException.invalidState("评测产物序列化失败"); }
     }
+    /** Stored artifacts inherit the immutable release protocol; no legacy retry after mismatch. */
+    private String artifactHash(PipelineRelease release, String body) {
+        return PipelineRelease.EXACT_SCHEMA.equals(release.schemaVersion())
+                ? io.github.opensabre.iqc.selector.SelectorAssetService.hash(body) : PipelineAssetService.hash(body);
+    }
     private JsonNode parse(String value) { return read(value, JsonNode.class); }
-    private <T> T read(String value, Class<T> type) {
+    /** Applies the same bound before both ordinary and protocol-specific decoding. */
+    private void validateSnapshotSize(String value) {
         if(value==null || value.getBytes(StandardCharsets.UTF_8).length>16*1024*1024)
             throw IqcException.invalidState("评测单个快照或轨迹为空或超过16MiB");
-        try { var result = json.readValue(value, type); if (result == null) throw IqcException.invalidState("评测快照为空"); return result; }
+    }
+    private <T> T read(String value, Class<T> type) {
+        validateSnapshotSize(value);
+        try {
+            T result;
+            if (type == JsonNode.class) result = type.cast(PipelineAssetService.readFrozenTree(json,value));
+            else if (type == PipelineRelease.class) result = json.treeToValue(PipelineAssetService.readFrozenTree(json,value),type);
+            else result = json.readValue(value, type); if (result == null) throw IqcException.invalidState("评测快照为空"); return result; }
         catch (com.fasterxml.jackson.core.JsonProcessingException exception) { throw IqcException.invalidState("评测快照格式无效"); }
     }
 }

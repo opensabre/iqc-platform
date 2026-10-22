@@ -55,7 +55,8 @@ public class GoldSampleService {
         }
         GoldDraft draft;
         try {
-            draft = new GoldDraft(GoldDraft.SCHEMA, sampleId, sample.getConversationId(), input.messages(),
+            draft = new GoldDraft(io.github.opensabre.iqc.quality.BusinessReviewSampleService.EXACT_INPUT_SCHEMA.equals(
+                    input.context().path("conversation").path("schemaVersion").asText()) ? GoldDraft.EXACT_SCHEMA : GoldDraft.SCHEMA, sampleId, sample.getConversationId(), input.messages(),
                     context, request.findings(), actor(), "RESULT:" + sample.getSourceResultId(),
                     request.tags(), request.difficulty(), request.decision());
         } catch (IllegalArgumentException | NullPointerException exception) {
@@ -105,12 +106,13 @@ public class GoldSampleService {
     private Input reviewedCandidate(QualitySample sample) {
         JsonNode input = read(sample.getContentSnapshot(), JsonNode.class);
         JsonNode lineage = read(sample.getExpectedJson(), JsonNode.class);
-        boolean aligned = "iqc-conversation-candidate-input-v2".equals(input.path("schemaVersion").asText());
+        boolean aligned = "iqc-conversation-candidate-input-v2".equals(input.path("schemaVersion").asText())
+                || io.github.opensabre.iqc.quality.BusinessReviewSampleService.EXACT_INPUT_SCHEMA.equals(input.path("schemaVersion").asText());
         if ((!aligned && !"iqc-conversation-candidate-input-v1".equals(input.path("schemaVersion").asText()))
                 || !"iqc-reviewed-business-candidate-v1".equals(lineage.path("schemaVersion").asText())
                 || !sample.getConversationId().equals(input.path("conversationId").asText())
                 || !Objects.equals(sample.getSourceResultId(), lineage.path("sourceResultId").asText())
-                || !PipelineAssetService.hash(input.toString()).equals(lineage.path("inputHash").asText())
+                || !io.github.opensabre.iqc.quality.BusinessReviewSampleService.candidateInputHash(input).equals(lineage.path("inputHash").asText())
                 || !input.path("segments").isArray() || input.path("segments").isEmpty() || input.path("segments").size() > 10000)
             throw IqcException.invalidState("会话候选冻结输入或来源摘要无效");
         var frozen = new java.util.ArrayList<GoldConversation.Message>();

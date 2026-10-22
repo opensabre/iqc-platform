@@ -37,7 +37,7 @@ public class ActionExecutionService {
             var current=executions.selectById(id);
             if(current==null || !"RUNNING".equals(current.getStatus()) || !Objects.equals(current.getVersion(),claim.version())
                     || !Objects.equals(current.getClaimToken(),claim.token()))return Dispatch.STALE_RECEIPT;
-            var policy=json.readValue(request.policySnapshotJson(),ActionPolicy.class);
+            var policy=ActionFrozenPolicy.readFrozen(json,request.policySnapshotJson(),request.inputSnapshotJson());
             var action=policy.actions().stream().filter(value->source.actionId().equals(value.actionId())).findFirst().orElse(null);
             if(action==null)throw IqcException.invalidState("执行缺少冻结动作");
             var binding=adapters.require(action);

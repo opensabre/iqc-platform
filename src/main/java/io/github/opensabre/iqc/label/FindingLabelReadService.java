@@ -72,7 +72,7 @@ public class FindingLabelReadService {
                     || !Objects.equals(task.getOwnerGroupId(),validated.ownerGroupId()))
                 throw IqcException.invalidState("Finding标签读取快照与持久任务不一致");
             if(FindingLabelTaskDirectory.expected(task,json)==null)throw IqcException.invalidState("Finding标签缺少冻结目录");
-            var release=json.treeToValue(json.readTree(task.getRuleSnapshotJson()).path("pipelineSnapshot").path("release"),PipelineRelease.class);
+            var release=json.treeToValue(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenTree(json,task.getRuleSnapshotJson()).path("pipelineSnapshot").path("release"),PipelineRelease.class);
             return new Prepared(validated,release,json.writeValueAsString(validated.policy()));
         } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException failure) {
             throw IqcException.invalidState("Finding标签生产政策损坏");
@@ -99,9 +99,9 @@ public class FindingLabelReadService {
             var release=prepared.release();
             var binding=FindingLabelActionConfiguration.requireBinding(release.labelPolicy(),declared.configuration());
             var expected=FindingLabelProjection.project(release.labelPolicy().projectionBinding(binding),validated.context().findings().get(binding.findingCode()));
-            var persisted=json.readValue(row.getValueJson(),FindingLabelProjection.Projection.class);
+            var persisted=FindingLabelProjection.read(json,row.getValueJson());
             String id="fl-"+SelectorAssetService.hash(json.writeValueAsString(List.of(result.getId(),binding.labelId(),binding.valueCode()))).substring(0,60);
-            if(!Objects.equals(id,row.getId()) || !json.valueToTree(expected).equals(json.readTree(row.getValueJson())))
+            if(!Objects.equals(id,row.getId()) || !SelectorAssetService.hash(json.writeValueAsString(expected)).equals(row.getSourceProjectionHash()))
                 throw IqcException.invalidState("Finding标签值或证据与实际生产融合结果不一致");
             return persisted;
         } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException | java.util.NoSuchElementException failure) {

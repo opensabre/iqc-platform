@@ -32,6 +32,7 @@ class PipelineEvaluationReportTest {
             tasks, executions, null, results, evaluator, json, scope));
     private final PipelineEvaluationService.Prepared prepared = mock(PipelineEvaluationService.Prepared.class);
     private final TaskExecution execution = new TaskExecution();
+    private boolean exactProtocol;
 
     @BeforeEach
     void frozenDatasetWithoutArtifacts() {
@@ -129,7 +130,7 @@ class PipelineEvaluationReportTest {
                  "items":[{"itemCode":"redline","findingCode":"REDLINE","hitMeaning":"VIOLATION"}],
                  "scoring":{"version":"iqc-score-v2","mode":"DEDUCTION","baseScore":100,"passingScore":80,
                   "items":[{"itemCode":"redline","points":20,"veto":false}]}}
-                """, PipelineRelease.class);
+                """.replace("iqc-pipeline-release-v1", exactProtocol ? PipelineRelease.EXACT_SCHEMA : PipelineRelease.SCHEMA), PipelineRelease.class);
         when(prepared.release()).thenReturn(release);
         var gold = prepared.dataset().members().stream().filter(m -> sampleId.equals(m.sampleId())).findFirst().orElseThrow();
         when(prepared.member(gold.gold().conversationId())).thenReturn(gold);
@@ -143,6 +144,7 @@ class PipelineEvaluationReportTest {
                 message.getId(), null)), new Finding.Source("llm", "LLM", "1", 1, null));
         var metrics = json.createObjectNode().put("schemaVersion", "iqc-llm-structured-metrics-v1")
                 .put("logicalInvocations", 1).put("validOutputs", failed ? 0 : 1).put("invalidOrFailedOutputs", failed ? 1 : 0);
+        if (exactProtocol) metrics.put("numericAudit",new BigDecimal("0.900000000000000001"));
         var output = new io.github.opensabre.iqc.pipeline.NodeResult(failed ? io.github.opensabre.iqc.pipeline.NodeResult.Status.ERROR : io.github.opensabre.iqc.pipeline.NodeResult.Status.SUCCESS,
                 failed ? List.of() : List.of(fact), Map.of(), Map.of("llmStructuredOutput", metrics), failed ? "model failed" : null);
         var run = new io.github.opensabre.iqc.pipeline.PipelineRuntime.Run(failed ? io.github.opensabre.iqc.pipeline.PipelineRuntime.Status.FAILED : io.github.opensabre.iqc.pipeline.PipelineRuntime.Status.SUCCESS,
@@ -150,15 +152,47 @@ class PipelineEvaluationReportTest {
                 failed ? List.of() : List.of(fact), Map.of(), false);
         when(runtime.execute(any(), any(), any(), any(), any())).thenReturn(run);
         var task = new InspectionTask(); task.setId("task"); task.setCurrentExecutionId(eid);
-        var actual = evaluator.evaluate(task, release, List.of(message), io.github.opensabre.iqc.pipeline.PipelineRuntime.Mode.EVALUATION, null);
+        var actual = evaluator.evaluate(task, release, List.of(message), io.github.opensabre.iqc.pipeline.PipelineRuntime.Mode.EVALUATION, gold.gold().businessContext());
         var row = new io.github.opensabre.iqc.quality.model.EvaluationSampleResult();
         row.setTaskId("task"); row.setExecutionId(eid); row.setConversationId(gold.gold().conversationId());
         row.setSampleId(sampleId); row.setSampleVersion(1); row.setGoldHash(gold.contentHash());
         row.setDatasetId("dataset"); row.setDatasetVersion(1); row.setDatasetHash("frozen-dataset");
         row.setStatus(failed ? "ERROR" : "SUCCESS"); row.setDurationMs(duration); row.setActualJson(json.writeValueAsString(actual));
-        row.setActualHash(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(row.getActualJson()));
+        row.setActualHash(exactProtocol ? io.github.opensabre.iqc.selector.SelectorAssetService.hash(row.getActualJson())
+                : io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(row.getActualJson()));
         return row;
     }
+    @Test
+    void exactStoredEvaluationReportUsesFrozenInputAndTraceProtocol() throws Exception {
+        exactProtocol=true;
+        var original=dataset(DatasetDraft.Type.REGRESSION);
+        var members=original.members().stream().map(member -> {
+            var g=member.gold();
+            var exactGold=new GoldConversation(GoldConversation.EXACT_SCHEMA,g.sourceSampleId(),g.conversationId(),g.messages(),
+                    json.createObjectNode().put("amount",new BigDecimal("0.900000000000000001")),g.findings(),
+                    g.annotatorId(),g.reviewerId(),g.source(),g.tags(),g.difficulty(),g.decision());
+            return new DatasetSnapshot.Member(member.sampleId(),member.versionNo(),member.draftRevision(),member.contentHash(),exactGold);
+        }).toList();
+        when(prepared.dataset()).thenReturn(new DatasetSnapshot(DatasetSnapshot.EXACT_SCHEMA,original.datasetId(),original.name(),original.type(),original.description(),members));
+        artifactSnapshot();
+        var row=artifact("first","execution",10);
+        when(results.selectList(any())).thenReturn(List.of(row));
+        assertThat(service.report("task","execution").availableSamples()).isEqualTo(1);
+        var altered=row.getActualJson().replace("0.900000000000000001","0.900000000000000002");
+        assertThat(io.github.opensabre.iqc.selector.SelectorAssetService.hash(altered)).isNotEqualTo(row.getActualHash());
+        row.setActualJson(altered);
+        assertThatThrownBy(() -> service.report("task","execution")).hasMessageContaining("摘要无效");
+    }
+
+    @Test
+    void protocolSpecificTraceReadRetainsSnapshotBounds() throws Exception {
+        artifactSnapshot();
+        var row=artifact("first","execution",10);
+        row.setActualJson(null);
+        when(results.selectList(any())).thenReturn(List.of(row));
+        assertThatThrownBy(() -> service.report("task","execution")).hasMessageContaining("为空或超过16MiB");
+    }
+
     private void artifactSnapshot() {
         var task = tasks.selectById("task");
         task.setRuleSnapshotJson("{\"evaluationSnapshot\":{\"versionNo\":1}}");

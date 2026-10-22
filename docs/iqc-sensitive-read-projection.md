@@ -183,6 +183,45 @@ GoldSampleController的草稿、版本、历史、标注和审核在原service�
 
 PipelineAssetService.hash仍沿历史普通树规范化，不能据hash保持断言证明它区分所有高精度差异；更换摘要协议和历史兼容需要独立处理，本批没有改全局算法。真实HTTP转换器、数据库持久化、UI与其它候选生产解析边界不在这条局部修复的证明范围。
 
+### 2026-10-18 当前累计后端默认全套回归
+
+552335d累计源（含反馈、业务分页/汇总和金标精度修复）首轮11754默认全套1139项有5项旧HTTP夹具失败。联合试跑仅提供旧result:view或缺当前grant，标签HTTP夹具无currentActionAccess，组织故障仍期待业务数据fallback。同步两类夹具到固定当前grant和稳定身份，不修改生产授权/数据范围；保留仅business:view可读、admin/本人/同组/外组及零分/null分检查。新用例复用同一有效令牌，在组织当前grant撤销后再次真实HTTP请求，确认IQC-1005无data；组织查询异常明确IQC-1006无data，旧标签队列fallback契约仍保持。成功响应检查no-store/nosniff，helper同时检查HTTP状态与业务成功码。
+
+67297专项59项仅剩旧文件名预期失败（实际无敏感grant正确返回******）；改为脱敏预期并通过H2 SELECT验证原文件名未变。最终35079默认全套进程exit0，按/tmp/iqc-current-full-final.log创建时刻筛选本轮新报告：154份XML、1140 tests、0 failures/errors/skipped，报告时间2026-10-18 07:44:12–07:48:23。包含LabelReviewQueueHttpTest10和JointLabelMaterializationTransactionTest49，非叠加旧MySQL IT报告；日志/tmp/iqc-current-full-final.log。命令沿离线mvn -o -q test并显式传入已安装ByteBuddy agent，真实HTTP随机本机端口、隔离H2，组织及限流依赖仍为测试替身。
+
+本结果不含随后A6c81569金标读取投影，不证明真实组织/网关角色、供应商、MySQL持久化、浏览器或整个I1–I7完成；不能把旧默认全套1067项或本轮1140项外推到尚未集成源。
+
+## 金标HTTP展示与独立功能权限
+
+GoldSampleController的草稿、版本、历史、标注和审核在原service前刷新各自原有固定基础权限；原样本/版本数据范围继续由服务验证。GET审计关闭正文，写接口沿原无正文审计，成功响应no-store/nosniff；旧单依赖嵌入构造缺敏感组件时fail-closed。
+
+金标专用读取只有完整+PII双grant才返回未经投影的原goldDraftJson及版本snapshotJson；其它模式不返回可误当原始输入的opaque字段。独立GoldSampleReadProjection复用既有ConversationReadProjection，从原冻结GoldDraft/GoldConversation构建完整脱敏或前三条/200字符预览；只显示Finding code/type/state/证据ID元数据，值和业务上下文不返回。样本及会话身份必须与快照绑定，损坏/缺省快照仅返回明确状态，不能视作无事实。没有读取当前会话替换旧输入；候选policySource已核实仅公共版本身份，不含节点配置/Prompt。
+
+泛样本sample/samples投影可按原sample:view+双grant展示候选内容，但始终不附带完整goldDraftJson，需独立Gold读取功能权限；没有双grant时源contentSnapshot/expectedJson/tagsJson也withheld。审核历史只给原版本摘要，始终不附snapshotJson，不能绕过独立gold:version:view；无完整权限时审核原因也withheld，防止其复制全文，完整但无PII时沿原文本规则处理原因。原ID、修订、状态、hash、分页及操作者身份保留。
+
+标注/审核写响应仅返回身份、修订、状态等回执，不把写权限当作完整读取权限；原写命令与角色、独立审核、CAS和原始存储不改变。编辑器保存后另走已授权GET重新取得草稿，失败明确提示已保存但加载失败并清除旧展示；受限预览不能回写或被当原始金标审核。QualitySample/Version的privacy为exist=false且null不序列化，不改原领域JSON或冻结hash；预览永不重算原hash。
+
+其它样本列表/创建入口由协作开发者接同一sample/samples/sampleMetadata投影，未接入前仍是已知旁路；候选、数据集、评测和其它副本仍需逐项核验。当前是HTTP读取/回执投影，不声明完整I7、任意无标签PII识别、真实角色/数据库/浏览器验收完成。Root未新增或执行测试、SQL或部署。
+
+### 通用样本读取与创建回执旁路
+
+集成A6c81569等价2b106d3后，QualityOperationsController的GET samples在原领域查询前刷新固定iqc:sample:view，用ResultReadProjection.samples返回副本。即使完整+PII双grant，通用列表也不返回goldDraftJson，完整金标仍须走独立Gold读取授权；候选contentSnapshot/expectedJson/tagsJson沿双grant判定。查询Audit无正文，也不把可空筛选作为目标键。
+
+POST results/{resultId}/samples在进入原消息/业务候选服务前刷新既有iqc:sample:manage，不引入新sample:create权限，保留原参数和来源/复核检查；结果只经sampleMetadata返回标识/修订等元数据，不靠写权限返回冻结正文。两入口复用反馈已有敏感响应helper与no-store/nosniff；缺敏感组件直接拒绝，旧嵌入构造不回退原始内容。原领域对象和数据库模型未新增持久化列。
+
+GoldSamplePrivacyTest使用真实投影及Controller直接调用，覆盖四grant组合、冻结消息预览、通用列表与金标专用读取边界、跨样本/会话和损坏快照拒绝预览、历史及写回执不含snapshot、原对象/Hash/分页保持及固定权限拒绝先于领域读写。服务隔离为mock；本批不代表HTTP/PDP/组织角色/数据库或前端迟到响应验收，运行终态见协作记录。先前1140默认全套仅属df525a4，不外推到新金标源。
+
+84131专项最终exit0，逐XML确认GoldSamplePrivacyTest5、FeedbackPrivacyTest4、BusinessReviewControllerTest10、GoldSampleReviewTest12、EvaluationDatasetVersionTest7，共38 run、0 failures/errors/skipped；日志/tmp/iqc-gold-sample-privacy.log。本轮为直接Controller与投影/领域服务既有测试组合，未重新执行默认完整套件，也未验证本批HTTP/PDP/UI路径。
+
+### 默认MVC金标请求的跨代树绑定
+
+GoldSampleHttpContractTest通过默认MockMvc路由/转换器执行GET样本与Gold的四敏感grant组合、预览条数/200字符、no-store/nosniff、源对象保持，以及PUT标注精确值和POST样本元数据回执。领域与组织授权为mock，不代表网络服务器/PDP/数据库验收。
+
+41055首轮11项中10通过、1 error：默认Jackson3 MVC转换器无法实例化GoldFinding.value的Jackson2 JsonNode，PUT请求在进入service前失败；单独用Jackson2 ObjectMapper读请求的既有测试不能覆盖此问题。已核对应用与framework WebMvc配置，未注册专用Jackson2 HTTP转换器，不修改框架或通过测试强制换转换器绕过。
+
+应用层复用HumanFindingReviewEvaluator原精确解码位置，新增HttpExactValueDeserializer用于金标请求字段：Jackson3局部精确数字树转成原Jackson2精确领域树。仅给GoldFinding.value、GoldDecision.labels内容、GoldSampleService.Annotation.businessContext补Jackson3字段注解，保留原Jackson2解码注解、持久化模型、共享mapper和历史hash。当前结果以协作记录终态为准；其它使用Jackson2树的HTTP请求面仍需逐项核验，不声称已全局迁移。
+
+17259中间回归30项29通过/1失败：字段级readTree默认尾随检查把下一个同层属性误当多余文档。仅局部HTTP字段mapper关闭FAIL_ON_TRAILING_TOKENS，外层MVC保持严格；新增完整请求后追加第二JSON文档返回400且授权/领域均未访问的回归。最终74757 exit0：GoldSampleHttpContractTest7、GoldSamplePrivacyTest5、GoldSampleReviewTest12、EvaluationDatasetVersionTest7，共31项，无失败/错误/跳过，日志/tmp/iqc-gold-sample-http-fragment-final.log。此为默认MockMvc契约及既有领域专项，不冒称真实PDP或完整全套验收。
 
 ### 通用样本入口接线
 
@@ -205,11 +244,22 @@ PipelineEvaluationController分页与详情在原service前分别刷新固定eva
 
 仅复制原EvaluationSampleResult，privacy字段exist=false/NON_NULL；原status/durationMs、dataset/gold/actual哈希与执行/样本身份不改、不重算。UI读取前清旧详情并拒绝迟到覆盖，未知policy不显示正文；受限摘要明确标记，完整产物按原字符串展示避免数值舍入。现有Prompt敏感资源的实际登记/授予仍待，不借系统ADMIN或JWT绕过；当前缺grant仅限制正文，不阻断原基础权限下元数据查看。评测create回执、report和通用task读取及数据集草稿仍需单独处理；当前仅构建检查，不代表真实组织/浏览器/数据库验收。
 
+### 冻结数据集及评测输出的默认MVC验收
+
+在215b034基础集成A审计ccfdfc6、数据集a8e24e7与评测a0b47d0（本树86ed3f9/319008a/2ee0897），保留反馈、通用样本及精确字段桥。DatasetEvaluationHttpPrivacyTest使用默认MockMvc、真实ResultReadProjection，领域/PDP依赖隔离mock；四种数据集FULL/PII组合与八种评测FULL/PII/Prompt组合验证独立详情读取、列表/历史/冻结回执永不含正文、冻结消息预览的3条/200字符限制、零时长和原对象不变、跨数据集/损坏快照及非法评测输出明确状态、当前授权失败先于领域访问。
+
+原59362 exit0，/tmp/iqc-dataset-evaluation-http-privacy.log；本轮逐XML为DatasetEvaluationHttpPrivacyTest14、GoldSampleHttpContractTest7、GoldSamplePrivacyTest5、EvaluationDatasetVersionTest7，共33项，0 failures/errors/skipped。本测试不证明真实组织/PDP/数据库/浏览器，不包含A后续评测创建回执和报告增量，不外推整个I7或默认完整回归。
 ### 评测创建任务回执及报告当前授权
 
 评测create在领域写入前刷新原evaluation:task:create，返回ResultReadProjection.taskReceipt副本：保留任务ID、状态及运行元数据，移除agent/rule/label快照、Prompt、触发请求、重试策略与错误、筛选JSON、会话/规则集合JSON。写grant不能充当读冻结输入grant，即使全敏感grant也不在创建回执附带这些内容。任务名称沿现有文本保护，领域存储不变；UI创建仅消费task.id，当前流程兼容。普通任务及Benchmark入口尚待独立接线。
 
 报告刷新原evaluation:report:view先于service，沿用原Task/Execution范围与完整金标分母、数值指标及原样本来源，不重算、不投影成空报告。查询Audit仅taskId且无正文，成功no-store/nosniff；缺接线拒绝。构建检查不能替代实际组织/HTTP/浏览器行为验收。
+
+### 评测创建回执和报告MVC专项
+
+在ca0ae01上接A62c061b为876d8c1，新增EvaluationCommandHttpPrivacyTest。八种FULL/PII/Prompt组合下，创建回执始终移除冻结Agent/Rule/Label、Prompt、触发请求、重试策略/错误及筛选/集合JSON，保留任务身份、状态、零计数及请求hash；敏感原对象不变。报告HTTP保留缺失样本、来源轮次、完整分母、零召回及精确小数；固定当前grant失败与缺接线均阻止领域调用。
+
+首轮79724为32项31通过/1error：独立MVC夹具漏注册框架默认BaseException处理器，缺接线IqcException未转换响应。只读核对并补测试DefaultWebMvcExceptionHandlerAdvice注册，未改框架/生产异常逻辑。最终85879 exit0，/tmp/iqc-evaluation-command-http-privacy-final.log：EvaluationCommandHttpPrivacyTest11、DatasetEvaluationHttpPrivacyTest14、GoldSampleHttpContractTest7，共32项，无失败/错误/跳过。领域与组织授权仍mock，不证明真实PDP/SQL/browser；本批未包含Benchmark后续增量，不称整个I7或默认全套完成。
 84131专项最终exit0，逐XML确认GoldSamplePrivacyTest5、FeedbackPrivacyTest4、BusinessReviewControllerTest10、GoldSampleReviewTest12、EvaluationDatasetVersionTest7，共38 run、0 failures/errors/skipped；日志/tmp/iqc-gold-sample-privacy.log。本轮为直接Controller与投影/领域服务既有测试组合，未重新执行默认完整套件，也未验证本批HTTP/PDP/UI路径。
 
 ### 默认MVC金标请求的跨代树绑定
@@ -232,6 +282,13 @@ BenchmarkController的create/pair/report分别在领域调用前刷新既有benc
 
 目录与所有写回执始终不附原草稿或成员预览，不能借列表/写权限绕过详情读取。privacy仅exist=false/NON_NULL，原版本、修订、成员、状态及存储不改。UI未知/受限展示只读，不能将遮罩名称/缺省说明重写为原数据；保存先消费元数据回执、清旧历史/快照并独立GET，读取失败明确“已保存但重新读取失败”，保留受限只读状态，不建议重复提交。原直接写命令不新增FULL/PII要求，服务范围和CAS保持。当前仅构建检查，角色/浏览器/HTTP验收及完整I1–I7仍待。
 
+### Benchmark及数据集草稿MVC验证与跨代输出修复
+
+从3cccf3b接A0fd6b7c/ea80b68为a1b17af/a52561d，保留既有投影/精确绑定。BenchmarkDraftHttpPrivacyTest八种敏感grant覆盖create/pair/report双侧任务无冻结正文、选择与比较树完整相等、数据集身份/零值/高精度差值/原对象保持；四数据集grant覆盖独立详情正文、受限成员引用、目录和三写回执无草稿、损坏状态与固定基础grant拒绝先于领域调用。默认MockMvc、真实投影，领域/PDP mock。
+
+首轮68072为46项38通过/8失败：默认Jackson3把Jackson2 ObjectNode当普通POJO，仅返回节点属性而丢失selection/comparison内容。基于测试实际classpath独立复现/tmp/IqcTreeSerialization.java确认。仅BenchmarkService.Pair两个HTTP JSON字段新增HttpTreeSerializer，以局部精确Jackson3树writeTree输出；保留Jackson2领域类型、原比较算法/存储/历史hash/全局converter，不改framework。此补丁不代表所有跨代HTTP树均已验证。
+
+最终68868 exit0，/tmp/iqc-benchmark-draft-http-privacy-final.log；逐XML BenchmarkDraftHttpPrivacyTest14、EvaluationCommandHttpPrivacyTest11、DatasetEvaluationHttpPrivacyTest14、GoldSampleHttpContractTest7，共46项，0 failures/errors/skipped。无SQL/浏览器/真实组织验收，未重跑默认完整套件，整体I1–I7仍未完成。
 ### 通用任务写回执
 
 InspectionTaskController.create/cancel/pause/priority复用taskReceipt，始终不返回任务冻结快照、Prompt、筛选/集合JSON、触发/重试请求或错误正文；保留原任务ID、状态、计数等回执元数据。五个写入口（含无返回值delete）在领域操作前刷新原task:create/cancel/execute/delete固定grant，缺敏感组件拒绝，不新增写命令的FULL/PII要求；成功no-store/nosniff。写Audit显式关闭请求/响应正文，路径操作保留id目标。原服务状态转换、任务范围、创建用量记录保持，响应仅副本，未改存储。已核对任务UI四写返回均未消费冻结配置，操作后走原refresh。list/get/executions以及执行/恢复等其它控制器仍待独立保护，不以此声明全部任务读取已收口；当前仅编译检查，不代表行为/角色/浏览器验收。
@@ -244,11 +301,24 @@ InspectionResultController.run/resume复用已有resultReadAccess固定task:exec
 
 PipelineAssetController.trial/task在访问冻结草稿、发布版本或Selector资产前刷新原pipeline:execute/task:create；返回统一taskReceipt，覆盖显式会话IDs、内联Selector与发布Selector资产分支。原互斥参数检查、冻结来源、请求幂等、数据范围及任务构造保持，任何敏感grant组合均不通过写响应附带快照/Prompt/筛选正文。成功no-store/nosniff，缺接线拒绝；两个写Audit仅id且关闭正文。已核对流水线页面创建后仅消费任务ID/名称/状态，无快照依赖。方案试跑页面仍从快照读取修订/标签类型，须先补公共展示元数据再收口，当前未误删该功能；其它流水线配置/历史读取与完整I1–I7仍待。仅编译检查，不代表实际角色/HTTP/浏览器验收。
 
+### 通用任务/执行与流水线任务写回执MVC专项
+
+在073653a接Ab28b909/070db8d/0ea8eca为5f90b02/58d68f6/a7dfd3d，保留原Worker/队列与用量行为。TaskCommandHttpPrivacyTest覆盖四FULL/PII组合下create/cancel/pause/priority/run/resume安全回执、delete无任务正文、两次异步提交使用原executionId、CREATE/RUN用量次数、固定基础grant拒绝先于domain/worker；Pipeline trial及发布后显式ID/内联Selector/Selector资产三分支无正文、源对象不变、Selector互斥仍拒绝。
+
+首轮64486为38项28通过/10失败：4项实际跨代绑定缺陷来自SelectorDefinition.Condition.value的Jackson2 JsonNode，默认Jackson3无法构造。仅该字段复用现有HttpExactValueDeserializer注解，保留领域类型、存储与全局转换器，精确NUMBER条件不经Double。其余6项更正夹具：delete沿框架既有void响应封装验证状态/缓存头/无敏感正文及真实删除调用；互斥参数码按IqcErrorType为1003；授权拒绝夹具提供有效原始int修订/版本，让绑定后实际执行授权。未改框架void响应协议或放宽输入校验。
+
+原InspectionTaskControllerTest创建夹具接当前固定grant和真实projection，改为响应副本身份断言，原RULE_ONLY参数与用量验证保留。最终48858 exit0，/tmp/iqc-task-command-http-privacy-final.log：TaskCommandHttpPrivacyTest10、InspectionTaskControllerTest3、BenchmarkDraftHttpPrivacyTest14、EvaluationCommandHttpPrivacyTest11，共38项，0 failures/errors/skipped。默认MVC与真实投影，领域/PDP/worker为mock，不称真实队列/SQL/browser验收；本批尚不包含Scheme元数据及通用任务读取保护，也未重跑默认全套，I1–I7仍未完成。
 ### 方案试跑公共元数据与任务回执
 
 InspectionTask新增taskPresentation仅exist=false/NON_NULL，由taskReceipt在HTTP副本上生成，复用已有iqc-task-presentation-v1任务类型/labelOnly判断，扩展hasLabels、正整数schemeDraftRevision及格式受限selectedVariantCode。无名称、Prompt、规则/变量或任意快照JSON。未知/损坏不伪造修订或标签类型，原存储/冻结序列化和hash不变；执行/恢复等原回执自动保留这些展示信息。
 
 InspectionSchemeController trial/trials/task分别在领域调用前刷新原scheme:trial:create/trial:view/use，缺接线拒绝，成功no-store/nosniff，无正文Audit及id目标。试跑创建/列表及正式模板任务的BATCH/SCHEDULED、默认/显式variant分支统一taskReceipt，不附原冻结正文。原请求幂等、修订、数据范围、任务参数互斥及发布证据验证保留。UI优先公共元数据，旧响应无元数据仍兼容原展示；新响应未知/不完整元数据明确提示并阻止确认发布，不回退私密快照。variant只显示受限代码，避免自由名称扩散。方案配置/模板读取、通用任务列表/详情等尚待；当前仅构建检查，不代替真实角色、HTTP、浏览器验收。
+
+### Scheme试跑公共元数据默认MVC专项
+
+在d4e2e91接A0363666为f5427d8，新增SchemeTaskPresentationHttpTest，四FULL/PII组合覆盖POST trials、GET trials、BATCH/SCHEDULED默认/指定variant四任务分支，以及run/resume回执。验证不返回冻结正文，保留schema/kind/labelOnly/hasLabels/正整数draftRevision/格式受限variant，原任务JSON与派生字段不被修改、原异步executionId保持。坏或歧义快照保留UNKNOWN，非整数修订/非法variant不生成公开证据，固定基础grant拒绝先于domain。既有InspectionSchemeControllerTest补当前授权+真实projection构造夹具，原参数/校验断言保留。
+
+首83843为36项31通过/5失败，原因是新增测试误用POST /trial，既有生产路由为/trials。只修测试路径，不改生产路由/权限。最终90721 exit0，/tmp/iqc-scheme-task-presentation-http-final.log；按日志创建时间核对四份XML均为本轮：SchemeTaskPresentationHttpTest6、InspectionSchemeControllerTest9、TaskCommandHttpPrivacyTest10、EvaluationCommandHttpPrivacyTest11，共36项，0 failures/errors/skipped。默认MVC/真实投影，领域/PDP/worker mock，不代表浏览器未知元数据发布保护或真实组织/SQL验收；通用任务GET仍在另一批，完整I1–I7未完成。
 ### Benchmark及数据集草稿MVC验证与跨代输出修复
 
 从3cccf3b接A0fd6b7c/ea80b68为a1b17af/a52561d，保留既有投影/精确绑定。BenchmarkDraftHttpPrivacyTest八种敏感grant覆盖create/pair/report双侧任务无冻结正文、选择与比较树完整相等、数据集身份/零值/高精度差值/原对象保持；四数据集grant覆盖独立详情正文、受限成员引用、目录和三写回执无草稿、损坏状态与固定基础grant拒绝先于领域调用。默认MockMvc、真实投影，领域/PDP mock。
@@ -271,6 +341,15 @@ PeriodicScheduleController/EventSubscriptionController.instances分别在原quer
 
 两个Controller的创建/修订/发布/可用性共8个写Audit均显式关闭请求/响应正文，路径操作保留id；原发布response=true会复制冻结配置，现仅保留审计事件元数据，不改领域发布/触发行为。配置/历史HTTP响应仍需独立读取保护。事件实例表格及任务详情对withheld triggerError明确显示原因未展示，不把缺省当作等待接入会话或空原因；其余UI原任务状态/链接依赖保持。当前仅构建检查，真实角色/HTTP/浏览器及完整I1–I7仍待。
 
+### 通用任务与调度实例 HTTP 边界回归（2026-10-18）
+
+新增 `TaskReadHttpPrivacyTest` 使用默认 MVC、真实 `ResultReadProjection` 与应用及框架原异常 advice；领域服务和当前权限查询为隔离 mock。八种 FULL/PII/Prompt 组合验证任务详情仅三权限齐全可读冻结快照，任务列表及周期/事件实例列表始终不附敏感输入；检查原分页、状态、事件/hash、公共会话计数和 Benchmark 导航。执行摘要按默认 HTTP mapper 比较完整响应，并单独比较日期 Instant，源任务序列化前后保持一致。
+
+当前授权拒绝在五个读取端点调用领域服务前生效；缺接线 fail closed。实例分别只要求原 schedule/subscription instances grant，不额外要求 task:view。缺失或损坏会话集合计数保持未知，已知空集合才为零；非法 Benchmark 标记不产生导航。反射检查两调度控制器八个写 Audit 均不记录正文，此项不等同实际审计切面运行验收。
+
+首轮32项中24通过、8失败均为新增夹具以 Jackson 2 毫秒日期与默认 Jackson 3 ISO 日期比较；修正测试基准并增加时间值断言，生产日期协议不变。最终运行结果另记。上述专项不证明真实组织角色、数据库、浏览器或完整 I1–I7 验收；语音转换/ASR/转写生成不在当前范围。
+
+最终原进程71725退出0，日志 `/tmp/iqc-task-read-http-privacy-final.log`。四份XML均为本轮新生成：TaskReadHttpPrivacyTest 13、InspectionTaskControllerTest 3、SchemeTaskPresentationHttpTest 6、TaskCommandHttpPrivacyTest 10，合计32项，0失败/错误/跳过。未运行新的默认全套。
 ### Prompt独立敏感资源的实际读取入口
 
 新增GET /api/iqc/tasks/{id}/configuration，ResourcePermission使用原SensitiveReadAccessService.PROMPT码iqc:sensitive:prompt:read。复用原任务Controller/授权服务/taskRead，不新增存储或ACL模型；先刷新固定task:view+Prompt基础资源，再要求FULL+PII+Prompt当前均有效，最后调用原taskService.get执行数据范围检查。仅原冻结快照，无实时配置替换；成功no-store/nosniff，审计无正文/id目标，限流沿原RateLimit。原通用task GET继续同三grant控制正文，不因新路由放宽。该实际功能入口解决此前只有常量、没有可登记Prompt资源的问题。
@@ -279,18 +358,39 @@ PeriodicScheduleController/EventSubscriptionController.instances分别在原quer
 
 任务页面提供独立敏感读取按钮，读取开始清旧快照，失败保持受限内容，切换任务/关闭详情/卸载均阻断迟到响应；菜单可见性不替代后端实时授权。当前仅编译/构建检查，不能宣称Prompt权限已在环境生效、或全I1–I7完成。
 
+### 独立配置入口默认 MVC 验证
+
+`TaskConfigurationHttpPrivacyTest` 覆盖八种 FULL/PII/Prompt 组合：仅三者齐备才返回冻结 agent/rule/label/autoExpandPrompt，保留原 triggerRequestHash，仍不附筛选与触发请求正文。所有缺失组合在任务服务调用前拒绝；固定基础资源是 task:view 与 PROMPT，不从客户端接受权限集合。原服务数据范围拒绝仍返回拒绝，测试只证明控制器保留此边界，不代替真实组织和数据库的范围验收。原对象序列化前后相同。
+
+缺授权组件与基础资源撤销均 fail closed。资源注解绑定原 PROMPT，限流声明为独立场景30次/60秒，审计声明仅id且无请求/响应正文；反射验证声明不代表实际限流/审计切面的运行证明。权限迁移未执行，浏览器清理旧快照与迟到响应拦截仍待实际交互验收。
+
+原64045退出0，日志 `/tmp/iqc-task-configuration-http-privacy.log`。五份本轮新XML：TaskConfigurationHttpPrivacyTest11、TaskReadHttpPrivacyTest13、InspectionTaskControllerTest3、SchemeTaskPresentationHttpTest6、TaskCommandHttpPrivacyTest10，共43项，0失败/错误/跳过。未运行新的默认全套，也未执行权限SQL。
 ### 模型容量与预算HTTP字段边界
 
 ModelGatewayController的ConfigureCapacity.concurrencyLimit/budget、ReconcileBudget.tokens/cost、RecoverBudget.budget五个JsonNode record字段复用已存在HumanFindingReviewEvaluator的ExactValueDeserializer和HttpExactValueDeserializer，分别支持Jackson2领域/历史调用和默认Jackson3 MVC字段绑定。局部转换保留整数、极长小数及字符串，不改变全局mapper/HTTP转换器、持久化类型或预算服务；原并发canConvertToInt、版本精确字符串、Token/金额字符串及证据/确认/状态校验保持，不放宽数值。
 
 该接线来自对已验证Gold跨代问题的同类输入面排查；本批仅test-compile，未在这些预算入口复现或执行HTTP测试，不宣称行为验收已通过。PRD§18.3和安全条款要求模型调用数据可配置落盘，现GatewayCall账本只有用量/费用/容量元数据，不含模型请求/响应正文；该日志配置需求仍待设计实施，不因字段绑定修复声明完成，也不新增重复日志表。
 
+### 模型容量与预算默认 HTTP 字段绑定验证
+
+`ModelBudgetHttpContractTest` 使用默认 MVC converter，隔离 GatewayCallService，覆盖 ConfigureCapacity 的 concurrencyLimit/budget、ReconcileBudget 的 tokens/cost、RecoverBudget 的 budget 五个跨代 JsonNode 字段。检查大于JS安全整数的版本号、Long上限Token、18位小数金额与完整嵌套预算原样传递；另以嵌套数字验证BigDecimal精度，外层第二JSON文档必须拒绝。
+
+并发非整型/int溢出、版本非规范或long溢出、Token非字符串/负数/非规范/溢出及金额非字符串/科学计数/超长值在调用领域服务前拒绝。供应商未确认与缺证据仅检查false/null原样传递，不将控制器mock测试当作实际供应商核验或预算政策校验。并发业务区间0–10000、完整政策字段、CAS和恢复隔离规则属于原GatewayCallService/GatewayBudgetPolicy，仍需领域或真实数据库验证。未改framework/全局转换器或放宽外层多文档校验。
+
+最终34265退出0，`/tmp/iqc-model-budget-http-contract-final.log`；三份本轮新XML：ModelBudgetHttpContractTest31、TaskConfigurationHttpPrivacyTest11、TaskReadHttpPrivacyTest13，共55项，0失败/错误/跳过。首68240为55项54通过/1失败，诊断54388确认外层第二文档已抛HttpMessageNotReadableException，真实框架advice按既有协议返回HTTP200/020000；测试改为该协议+解析异常+无领域调用，生产/框架未改。尚未进行真实服务预算校验、SQL/角色/browser或新默认完整套件。
 ### 模型调用账本列表自由证据
 
 ModelGatewayController.calls和TaskModelCallController.page在query前刷新各自原model-gateway:calls:view/task:model-calls:view，不追加错误的task:view要求，原全局管理员/任务数据范围检查保留；成功no-store/nosniff，无正文Audit，任务查询仅id目标。ResultReadProjection.gatewayCalls复制原CallView，人工capacityReleaseEvidence、budgetEvidenceRef、reconciliation.evidence仅FULL+PII+Prompt三grant齐全才原文，否则null；请求模型名/响应模型名/部署引用沿既有文本规则。操作者身份、状态、日期、全部Token及精确金额字符串、hash、版本、预算/容量事实不变，costSummary直接保留原对象，不重算统计。
 
 沿用原CallPage增加可空privacy并保留旧5参构造，不新建日志表/副作用，不修改GatewayCall存储或预算对账证据。UI提示凭据受限，隐藏不等于没有凭据；请求开始清旧列表/隐私状态并沿原generation防迟到。容量详情与写回执等其它读取面仍待，现有日志账本不含模型请求/响应正文，模型调用数据可配置落盘依然未实施；不能以本次列表投影声明完成该PRD要求或全I7。当前仅构建检查，默认MVC、真实账号/SQL/浏览器验收待协作补齐。
 
+### 调用账本默认 MVC 边界验证
+
+`ModelCallReadHttpPrivacyTest` 使用默认MVC与真实投影，八种FULL/PII/Prompt组合覆盖全局和Task两类列表。验证三个自由凭据字段仅三权限齐全可见、模型文本PII按同一组合保护，并逐字段比较其余日期、ID、hash、版本、Token和金额事实。用大于JS安全整数的Long及18位小数金额检查HTTP精度；costSummary完整节点相等，直接投影保留同一summary对象，源页序列化前后不变。
+
+原model-gateway:calls:view/task:model-calls:view分别先于query，不额外要求task:view；撤权与缺接线在领域调用前拒绝，原领域管理/Task scope拒绝仍透传。缺对账不生成对账、空页不生成记录或汇总。两读取Audit无正文仅反射声明检查。组织/PDP和领域服务隔离mock，不代表真实范围、审计切面、浏览器或模型调用正文落盘验收。后者由另一批负责，不能将账本读取投影当作日志正文全需求完成。
+
+原26063退出0，`/tmp/iqc-model-call-read-http-privacy.log`。四份本轮新XML：ModelCallReadHttpPrivacyTest13、ModelBudgetHttpContractTest31、TaskConfigurationHttpPrivacyTest11、TaskReadHttpPrivacyTest13，共68项，0失败/错误/跳过。未验证真实组织/SQL/浏览器或新默认全套，不扩大本专项结论。
 ### 周期与订阅配置/历史读取
 
 PeriodicScheduleController及EventSubscriptionController配置目录、详情、创建、更新、发布、启停、历史分别刷新各自原固定资源，先于服务调用；preview也刷新其原preview资源。原负责人/组范围、CAS、不可变发布、调度与事件触发不改，不新增写命令的FULL/PII/Prompt要求。查询审计无正文，路径操作仅id，成功no-store/nosniff；旧缺接线构造拒绝。
@@ -301,6 +401,13 @@ ResultReadProjection复用四个原PO响应副本：目录与所有写回执永�
 
 仅构建检查，真实角色/HTTP/浏览器与调度SQL仍待验收；其它Selector/Pipeline/Scheme配置/人工复核副本及全部I1–I7仍未完成。
 
+### B 周期与订阅默认 MVC 验证（2026-10-18）
+
+`ScheduleConfigurationHttpPrivacyTest` 使用真实投影与默认 MVC，领域/组织授权 mock。八种 FULL/PII/Prompt 组合验证两类目录、详情、历史：详情/历史仅三项齐全时显示配置原文；目录永不附正文/lastError，受限错误明确列入 withheldFields。创建、更新、发布、启停八组合回执均不带配置正文；写操作不额外要求敏感读权限，原 expectedRevision 参数保留。
+
+默认 HTTP 输出逐字段比较其余元数据、状态、修订、活动指针、计划/重试时间、原 contentHash 和分页；源对象序列化前后相同。当前固定基础权限逐接口核对，撤权与缺接线在业务服务调用前拒绝，原领域 scope 拒绝透传，响应 no-store/nosniff。该批不证明实际 PDP、数据库发布/调度、审计切面或浏览器交互。
+
+原15284首轮55项中2失败为新拒权夹具缺少原始类型必填字段，默认解析先返回020000；只补合法 expectedRevision/enabled，不放宽生产解析。主源与成功编译产物未变，最终显式 compiler:testCompile surefire:test。原57014退出0，`/tmp/iqc-schedule-config-http-privacy-final.log`；本轮XML ScheduleConfiguration19+TaskRead13+TaskConfiguration11+ModelDiagnostic12=55，零失败/错误/跳过。尚未执行当前组合的默认全套。
 ### Selector选数预览的PII副本
 
 ConversationSelectorController.preview和SelectorAssetController.preview分别在解析/查询前刷新原selector:preview、selector:asset:version:preview，保留原选数scope、定义解析/精确JSON、发布版本和限流。成功no-store/nosniff，查询Audit不含输入条件或输出正文；发布版仅id:version目标，缺接线拒绝。没有增加Prompt要求，因为预览不返回模型配置或Prompt。
@@ -309,6 +416,13 @@ ResultReadProjection.selectorPreview仅复制原Preview：FULL+PII双grant才显
 
 原Preview增加可空privacy且保留旧12参构造，null不序列化；领域内部旧预览保持原结构，不改Selection持久化/冻结hash或新建表。UI明确员工信息未展示不是没有员工，未知policy隐藏样本/分布明细；旧无privacy响应仅兼容历史部署。当前仅编译/构建检查，HTTP四grant、精确数值/source/分布不变及真实角色/browser仍待。Selector资产草稿/历史/Prepared定义读取尚未接本投影，不能声称整个Selector域已收口。
 
+### B Selector 预览默认 MVC 验证（2026-10-18）
+
+`SelectorPreviewHttpPrivacyTest` 的八种 FULL/PII/Prompt 组合同时覆盖 inline 与精确发布版本预览：仅 FULL+PII 就可见原身份，不额外要求 Prompt；受限 employeeId 和两个员工分布为 null，带 withheld 标记，不能改成空分布或合并掩码键。文件名/渠道不泄露原电话号码。组织结构 ID 和两类组织分布、每个其余计数/时间窗口/limited/定义 hash 与默认 HTTP 原值逐字段相等，源对象不变；无分布和空样本仍为未知/空样本。
+
+两种固定基础权限核对；撤权先于精确定义解析/查询，缺接线 failclosed，领域 scope 拒绝透传；definitionJson 原字符串和显式 previewSize 按授权->解析->选数顺序传递。此处资产解析和选数为 mock，只证明 HTTP 透传与投影，不证明实际解析或数据库选数；Audit/RateLimit 只核对无正文及20/60声明。
+
+原81216退出0，日志 `/tmp/iqc-selector-preview-http-privacy.log`；四份本轮XML SelectorPreview14+ScheduleConfiguration19+TaskRead13+ModelDiagnostic12=58项，零失败/错误/跳过。未覆盖 Selector 资产草稿/历史/Prepared 后续增量、真实PDP/浏览器或新默认全套。数据源为已处理会话，无语音转换。
 ### Selector资产正文与精确版本使用
 
 资产page/get/create/update/availability/history/publish/version各在原服务前刷新其原固定资源，复用原敏感接线/no-store/nosniff；配置写Audit显式关闭正文，路径操作仅id，查询Audit无正文。原scope/负责人/CAS/定义校验/发布幂等不改，不新增FULL/PII写命令要求。正文不含模型配置，故未额外要求Prompt。
@@ -323,6 +437,13 @@ SelectorDefinition.Condition.value复用已有双代字段精确解码与HTTP Js
 
 当前仅编译/构建，默认MVC精确输入/输出、inactive历史不允许创建、各grant/source/hash/SQL/浏览器仍待验收。其他Pipeline/Scheme配置/复核副本与完整I1–I7仍未完成。
 
+### B Selector 资产与历史版本验证（2026-10-19）
+
+`SelectorAssetHttpPrivacyTest` 八种 FULL/PII/Prompt 组合验证目录、详情、历史、精确版本和四类写回执。FULL+PII 才显示详情/版本正文，不额外需要 Prompt；目录、历史列表及写回执永远不返回配置原文。逐字段比较其余状态/修订/版本/hash/分页与 source 不变，核对原固定基础权限；撤权或缺组件先于所有服务/解析调用拒绝。默认 HTTP 大整数加18位小数的条件值绑定及输出精确，Audit 声明无请求/响应正文。HTTP领域和PDP为mock，不证明实际角色或数据库。
+
+`SelectorAssetVersionBehaviorTest` 五项使用真实资产服务/hash/parser，DAO/选数校验/范围隔离：停用资产可查看精确版本且 availableForNewTasks=false，published 与带 FOR UPDATE 的 publishedForTask 均拒绝新用、不查版本；活动内部 Prepared 仍只序列化原六字段，新展示属性不进入冻结JSON。原范围拒绝先于版本读取，坏hash先于选数校验，精确decimal与规范hash保留。
+
+原35241首轮45项2失败仅新夹具默认Json2读取把高精度值舍入为9007199254740994；只启用测试mapper USE_BIG_DECIMAL_FOR_FLOATS，生产无修复。主源未改，最终compiler:testCompile surefire:test原92022退出0，日志`/tmp/iqc-selector-asset-http-privacy-final.log`。四份本轮XML HTTP12+真实服务5+预览14+周期19=50项，零失败/错误/跳过。当前组合默认全套、真实角色/SQL/浏览器仍待；无语音转换。
 ## 流水线配置与发布历史（2026-10-20）
 
 复用SensitiveReadAccessService.current、ResultReadProjection及既有组织scope；不创建ACL、tenant表或第二套配置模型。PipelineAsset与PipelineAssetVersion新增的privacy仅响应使用（TableField exist=false），不落库，不参与release/contentHash计算。

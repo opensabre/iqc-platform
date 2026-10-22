@@ -31,7 +31,8 @@ public record PipelineRolloutPolicy(String schemaVersion,String pipelineId,Integ
             throw IqcException.invalidArgument("灰度预览缺少稳定身份或有效请求键");
         requireVersion(baseline,baselineVersionNo);requireVersion(candidate,candidateVersionNo);
         var comparison=BenchmarkVariableComparator.compare(baseline.release(),candidate.release(),variable,json);
-        String policyHash=io.github.opensabre.iqc.selector.SelectorAssetService.hash(json.valueToTree(this).toString());
+        // Use the same policy digest protocol as persisted revisions and frozen task evidence.
+        String policyHash=PipelineAssetService.hash(json.valueToTree(this).toString());
         String cohortHash=cohortHash(actorId,requestKey);
         int bucket=new java.math.BigInteger(cohortHash,16).mod(java.math.BigInteger.valueOf(10000)).intValueExact();
         boolean useCandidate=state==State.ACTIVE && bucket<candidateBasisPoints;

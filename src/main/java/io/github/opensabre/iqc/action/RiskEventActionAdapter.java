@@ -28,7 +28,7 @@ public class RiskEventActionAdapter implements ActionAdapter {
         Objects.requireNonNull(request);
         if(!definition().equals(request.adapter()))throw new IllegalArgumentException("CREATE_RISK_EVENT adapter version mismatch");
         try {
-            var policy=json.readValue(request.policySnapshotJson(),ActionPolicy.class);
+            var policy=ActionFrozenPolicy.readFrozen(json,request.policySnapshotJson(),request.inputSnapshotJson());
             var action=policy.actions().stream().filter(value->request.source().actionId().equals(value.actionId())).findFirst().orElseThrow();
             if(action.type()!=definition().type() || action.effectiveAdapterVersion()!=definition().version())
                 throw new IllegalArgumentException("CREATE_RISK_EVENT policy mismatch");

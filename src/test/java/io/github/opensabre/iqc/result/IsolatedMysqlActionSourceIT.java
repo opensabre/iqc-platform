@@ -46,10 +46,14 @@ class IsolatedMysqlActionSourceIT {
     @BeforeEach void fixture() throws Exception { fixture("SAVE_RESULT"); }
     void fixture(String type) throws Exception {fixture(type,null);}
     void fixture(String type,java.time.LocalTime relativeTime) throws Exception {
+        fixture(type,relativeTime,PipelineRelease.SCHEMA);
+    }
+    void fixture(String type,java.time.LocalTime relativeTime,String schema) throws Exception {
         jdbc.update("DELETE FROM iqc_inspection_conversation_result");jdbc.update("DELETE FROM iqc_task_execution");jdbc.update("DELETE FROM iqc_inspection_task");
-        var release=json.readValue("""
+        var release=json.readerFor(PipelineRelease.class)
+                .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).<PipelineRelease>readValue("""
           {"schemaVersion":"iqc-pipeline-release-v1","pipeline":{"schemaVersion":"iqc-pipeline-v1","nodes":[
-          {"nodeId":"llm","type":"LLM","version":"1","enabled":true,"config":{"findingDefinition":
+          {"nodeId":"llm","type":"LLM","version":"1","enabled":true,"timeoutMs":1000,"retries":0,"onError":"FAIL_PIPELINE","config":{"findingDefinition":
           {"schemaVersion":"iqc-finding-definition-v1","name":"Risk","code":"RISK","category":"risk","valueType":"BOOLEAN",
           "defaultSeverity":"HIGH","evidenceRequired":true,"evidenceTypes":["CONVERSATION"]},"ruleSnapshot":{"id":"rule","versionNo":1}}}]},
           "fusion":{"id":"fusion","version":1,"method":"PRIORITY"},"items":[{"itemCode":"risk","findingCode":"RISK","hitMeaning":"VIOLATION"}],
@@ -58,8 +62,11 @@ class IsolatedMysqlActionSourceIT {
           "idempotency":"PRODUCTION_SOURCE_V1","failureHandling":"RECORD_ONLY","configuration":{}}]}}
           """.replace("\"type\":\"SAVE_RESULT\"", "\"type\":\""+type+"\"")
           .replace("\"configuration\":{}", "CREATE_REVIEW".equals(type)?"\"configuration\":{\"reason\":\"automated review\"}":
-                  "ADD_TO_EVALUATION_CANDIDATE".equals(type)?"\"configuration\":{\"sampleType\":\"FALSE_POSITIVE\",\"reviewRevision\":1}":"\"configuration\":{}"),PipelineRelease.class);
-        var input=new ProductionInputSnapshotService.Input("conversation","revision",json.createObjectNode().put("businessType","frozen"),
+                  "ADD_TO_EVALUATION_CANDIDATE".equals(type)?"\"configuration\":{\"sampleType\":\"FALSE_POSITIVE\",\"reviewRevision\":1}":"\"configuration\":{}")
+          .replace(PipelineRelease.SCHEMA,schema));
+        var business=json.createObjectNode().put("businessType","frozen");
+        if(PipelineRelease.EXACT_SCHEMA.equals(schema))business.put("amount",new java.math.BigDecimal("0.900000000000000001"));
+        var input=new ProductionInputSnapshotService.Input("conversation","revision",business,
                 List.of(new ProductionInputSnapshotService.Message("message",1,"agent","frozen text",relativeTime)));
         var body=json.valueToTree(List.of(input));var root=json.createObjectNode();root.putObject("executionStrategy").put("mode","PIPELINE");
         root.putObject("productionInputs").put("schemaVersion",ProductionInputSnapshotService.SCHEMA).put("hashAlgorithm","selector-decimal-sha256-v1")
@@ -73,9 +80,23 @@ class IsolatedMysqlActionSourceIT {
         var inputs=new ProductionInputSnapshotService(null,null,null,json);var prepared=inputs.prepare(task,root);
         var fact=new Finding("fact","RISK","risk",Finding.ValueType.BOOLEAN,json.valueToTree(true),Finding.State.KNOWN,null,Finding.Severity.HIGH,
                 "risk",List.of(new Finding.Evidence("evidence",Finding.EvidenceType.CONVERSATION,"message",null)),new Finding.Source("llm","LLM","1",1,null));
-        var runtime=mock(PipelineRuntime.class);
-        when(runtime.execute(any(),any(),any(),any(),any())).thenReturn(new PipelineRuntime.Run(PipelineRuntime.Status.SUCCESS,List.of(),List.of(fact),Map.of(),false));
-        var evaluation=new PipelineConversationEvaluator(runtime,json,tasks).evaluate(task,release,prepared.messages().get("conversation"),PipelineRuntime.Mode.PRODUCTION,prepared.businessContext("conversation"));
+        PipelineConversationEvaluator.Evaluation evaluation;
+        if(PipelineRelease.EXACT_SCHEMA.equals(schema)) {
+            // Exercise runtime scheduling/trace production as well as SQL source replay; no provider call.
+            EngineAdapter adapter=new EngineAdapter(){
+                public String type(){return "LLM";}
+                public NodeResult execute(NodeContext context){return new NodeResult(NodeResult.Status.SUCCESS,List.of(fact),Map.of(),Map.of(),null);}
+            };
+            try(var runtime=new PipelineRuntime(List.of(adapter),1,4)) {
+                evaluation=new PipelineConversationEvaluator(runtime,json,tasks).evaluate(task,release,prepared.messages().get("conversation"),PipelineRuntime.Mode.PRODUCTION,prepared.businessContext("conversation"));
+                assertEquals(PipelineRuntime.Status.SUCCESS,evaluation.run().status());
+                assertEquals(1,evaluation.run().findings().size());
+            }
+        } else {
+            var runtime=mock(PipelineRuntime.class);
+            when(runtime.execute(any(),any(),any(),any(),any())).thenReturn(new PipelineRuntime.Run(PipelineRuntime.Status.SUCCESS,List.of(),List.of(fact),Map.of(),false));
+            evaluation=new PipelineConversationEvaluator(runtime,json,tasks).evaluate(task,release,prepared.messages().get("conversation"),PipelineRuntime.Mode.PRODUCTION,prepared.businessContext("conversation"));
+        }
         var row=new ConversationInspectionResult();row.setId("result");row.setTaskId("task");row.setExecutionId("execution");row.setConversationId("conversation");
         row.setAggregationMode("PIPELINE");row.setReason("isolated source");row.setExecutionTraceJson(json.writeValueAsString(evaluation));
         row.setScoringResultJson(json.writeValueAsString(evaluation.scoring()));row.setBusinessItemResultsJson(json.writeValueAsString(evaluation.items()));
@@ -85,6 +106,19 @@ class IsolatedMysqlActionSourceIT {
         source=new ActionProductionSourceValidator(tasks,executions,results,assets,inputs,json);
     }
     private ActionProductionSourceValidator.Validated validate() {return tx.execute(status->source.validate(reference));}
+    @Test void exactV2PersistedSourceRetainsBusinessConditionIdentityAndRejectsTampering() throws Exception {
+        fixture("SAVE_RESULT",null,PipelineRelease.EXACT_SCHEMA);
+        var actual=validate();
+        assertEquals(new java.math.BigDecimal("0.900000000000000001"),actual.context().businessContext().path("amount").decimalValue());
+        assertEquals(ActionPolicy.Match.MATCH,ActionPolicy.evaluate(new ActionPolicy.Condition(ActionPolicy.Kind.BUSINESS_EQUALS,
+                "/amount",null,List.of(),"0.900000000000000001"),actual.context()));
+        assertEquals(ActionPolicy.Match.NO_MATCH,ActionPolicy.evaluate(new ActionPolicy.Condition(ActionPolicy.Kind.BUSINESS_EQUALS,
+                "/amount",null,List.of(),"0.900000000000000002"),actual.context()));
+        // Replace raw stored text: JSON_SET itself would coerce the exact numeric literal.
+        jdbc.update("UPDATE iqc_inspection_task SET rule_snapshot_json=REPLACE(rule_snapshot_json,?,?) WHERE id='task'",
+                "0.900000000000000001","0.900000000000000002");
+        assertThrows(RuntimeException.class,this::validate);
+    }
     @Test void actualFrozenInputAndDeterministicProjectionProduceBoundActionSource() throws Exception {
         var actual=validate();assertEquals("user",actual.ownerBound().userId());assertEquals("result",actual.decisionReference());
         assertEquals(SelectorAssetService.hash(actual.inputSnapshotJson()),actual.inputSnapshotHash());

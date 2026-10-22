@@ -37,10 +37,10 @@ public class QualityOperationsController {
         this(service, businessReviews, businessReports, labelReviews, businessSamples, null, null);
     }
 
-    /** Refresh fixed server-selected grants before operations returning sensitive data. */
-    private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access readAccess(String resource) {
+    /** Refresh fixed grants before reading or writing sensitive quality operations. */
+    private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access responseAccess(String resource) {
         if (sensitive == null || resultProjection == null)
-            throw IqcException.invalidState("敏感读取授权组件不可用");
+            throw IqcException.invalidState("质检操作敏感读取授权组件不可用");
         var access = sensitive.current(java.util.Set.of(resource));
         if (org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()
                 instanceof org.springframework.web.context.request.ServletRequestAttributes servlet
@@ -62,7 +62,7 @@ public class QualityOperationsController {
     @ResourcePermission(code="iqc:review:label:create", name="发起标签值复核", type="iqc", description="为冻结标签值发起复核")
     @Audit(operationType=OperationType.CREATE, description="发起 IQC 标签值复核", module="IQC_REVIEW", request=false, response=false, key="#labelResultId")
     public ResultReview requestLabelReview(@PathVariable String labelResultId, @RequestBody LabelReviewRequest request) {
-        var access=readAccess("iqc:review:label:create");
+        var access=responseAccess("iqc:review:label:create");
         if (request == null || request.expectedRevision() == null)
             throw IqcException.invalidArgument("标签复核必须指定预期修订");
         return resultProjection.labelReview(labelReviews.request(labelResultId, request.expectedRevision(), request.requestId(), request.comment()),access,false);
@@ -72,7 +72,7 @@ public class QualityOperationsController {
     @ResourcePermission(code="iqc:review:label:history", name="查看标签值复核", type="iqc", description="查看标签值复核轮次")
     @Audit(operationType=OperationType.QUERY,description="读取标签复核历史",module="IQC_PRIVACY",request=false,response=false,key="#labelResultId")
     public List<ResultReview> labelReviewHistory(@PathVariable String labelResultId) {
-        var access=readAccess("iqc:review:label:history");
+        var access=responseAccess("iqc:review:label:history");
         return labelReviews.history(labelResultId).stream().map(row->resultProjection.labelReview(row,access,true)).toList();
     }
 
@@ -83,7 +83,7 @@ public class QualityOperationsController {
     public io.github.opensabre.iqc.privacy.ResultReadProjection.ReviewQueuePage<io.github.opensabre.iqc.label.model.LabelReviewQueueItem> labelReviewQueue(
             @RequestParam(required=false) String status, @RequestParam(required=false) String taskId,
             @RequestParam(defaultValue="1") int current, @RequestParam(defaultValue="20") int size) {
-        var access=readAccess("iqc:review:label:queue");
+        var access=responseAccess("iqc:review:label:queue");
         return resultProjection.labelReviewQueue(labelReviews.queue(status, taskId, current, size),access);
     }
 
@@ -91,7 +91,7 @@ public class QualityOperationsController {
     @ResourcePermission(code="iqc:review:label:decide", name="处理标签值复核", type="iqc", description="修正或退回标签值复核")
     @Audit(operationType=OperationType.UPDATE, description="处理 IQC 标签值复核", module="IQC_REVIEW", request=false, response=false, key="#reviewId")
     public ResultReview decideLabelReview(@PathVariable String reviewId, @RequestBody LabelReviewDecision request) {
-        var access=readAccess("iqc:review:label:decide");
+        var access=responseAccess("iqc:review:label:decide");
         if (request == null || request.expectedRevision() == null
                 || (!"COMPLETED".equals(request.decision()) && !"REJECTED".equals(request.decision())))
             throw IqcException.invalidArgument("标签复核必须指定修订与完成/退回决定");
@@ -104,14 +104,14 @@ public class QualityOperationsController {
     @Audit(operationType=OperationType.UPDATE, description="标注 IQC 质检结果", module="IQC_RESULT", request=false, response=false, key="#resultId")
     @RateLimit(sceneCode="iqc-result-feedback", maxCount=60, period=60)
     public ResultFeedback feedback(@PathVariable String resultId, @RequestBody FeedbackRequest request) {
-        var access = readAccess("iqc:result:feedback");
+        var access = responseAccess("iqc:result:feedback");
         return resultProjection.feedback(service.feedback(resultId, request.feedbackType(), request.comment(), request.evidenceJson()), access);
     }
     @GetMapping("/feedback")
     @ResourcePermission(code="iqc:result:view", name="查看质检反馈", type="iqc", description="查询误判漏判反馈")
     @Audit(operationType=OperationType.QUERY, description="查询 IQC 质检反馈", module="IQC_RESULT", request=false, response=false)
     public List<ResultFeedback> feedbacks(@RequestParam(required=false) String resultId, @RequestParam(required=false) String type) {
-        var access = readAccess("iqc:result:view");
+        var access = responseAccess("iqc:result:view");
         return service.feedbacks(resultId, type).stream().map(row -> resultProjection.feedback(row, access)).toList();
     }
 
@@ -119,7 +119,7 @@ public class QualityOperationsController {
     @ResourcePermission(code="iqc:review:create", name="发起人工复核", type="iqc", description="为质检结果发起复核")
     @Audit(operationType=OperationType.CREATE, description="发起 IQC 人工复核", module="IQC_REVIEW", request=false, response=false, key="#resultId")
     public ResultReview requestReview(@PathVariable String resultId, @RequestBody(required=false) ReviewRequest request) {
-        var access=readAccess("iqc:review:create");
+        var access=responseAccess("iqc:review:create");
         if (request != null && business(request.targetType())) {
             if (request.expectedRevision() == null) throw IqcException.invalidArgument("业务复核必须指定预期修订");
             if(request.stage()!=null||request.parentReviewId()!=null)return resultProjection.businessReview(businessReviews.request(resultId,request.expectedRevision(),request.requestId(),request.comment(),request.stage(),request.parentReviewId()),access,false);
@@ -138,7 +138,7 @@ public class QualityOperationsController {
                                       @RequestParam(required=false) String taskId,
                                       @RequestParam(defaultValue="1") int current,
                                       @RequestParam(defaultValue="20") int size) {
-        var access=readAccess("iqc:review:view");
+        var access=responseAccess("iqc:review:view");
         if("SCORE_CONTEXT".equals(view)){
             if(!business(targetType)||resultId==null||resultId.isBlank()||status!=null||taskId!=null)
                 throw IqcException.invalidArgument("评分复核上下文必须指定单一业务结果");
@@ -165,7 +165,7 @@ public class QualityOperationsController {
     @ResourcePermission(code="iqc:review:decide", name="处理人工复核", type="iqc", description="通过、修正或退回复核")
     @Audit(operationType=OperationType.UPDATE, description="处理 IQC 人工复核", module="IQC_REVIEW", request=false, response=false, key="#reviewId")
     public ResultReview decide(@PathVariable String reviewId, @RequestBody ReviewDecision request) {
-        var access=readAccess("iqc:review:decide");
+        var access=responseAccess("iqc:review:decide");
         if (business(request.targetType())) {
             if (request.expectedRevision() == null || (!"COMPLETED".equals(request.decision()) && !"REJECTED".equals(request.decision())))
                 throw IqcException.invalidArgument("业务复核必须指定修订与完成/退回决定");
@@ -184,7 +184,7 @@ public class QualityOperationsController {
     @ResourcePermission(code="iqc:sample:manage", name="管理质检样本", type="iqc", description="从质检结果沉淀样本")
     @Audit(operationType=OperationType.CREATE, description="创建 IQC 质检样本", module="IQC_SAMPLE", request=false, response=false, key="#resultId")
     public QualitySample createSample(@PathVariable String resultId, @RequestBody SampleRequest request) {
-        var access = readAccess("iqc:sample:manage");
+        var access = responseAccess("iqc:sample:manage");
         if (request == null) throw IqcException.invalidArgument("样本请求不能为空");
         if (business(request.targetType())) {
             if (request.expectedJson() != null) throw IqcException.invalidArgument("业务候选的期望结果必须来自已完成复核");
@@ -198,7 +198,7 @@ public class QualityOperationsController {
     @ResourcePermission(code="iqc:sample:view", name="查看质检样本", type="iqc", description="查询质检样本库")
     @Audit(operationType=OperationType.QUERY, description="读取 IQC 样本列表", module="IQC_PRIVACY", request=false, response=false)
     public List<QualitySample> samples(@RequestParam(required=false) String type, @RequestParam(required=false) String status) {
-        var access = readAccess("iqc:sample:view");
+        var access = responseAccess("iqc:sample:view");
         return resultProjection.samples(service.samples(type, status), access);
     }
 

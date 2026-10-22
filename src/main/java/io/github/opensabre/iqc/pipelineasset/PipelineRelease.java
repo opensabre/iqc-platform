@@ -22,6 +22,8 @@ public record PipelineRelease(String schemaVersion, PipelineDefinition pipeline,
                               @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
                               ReviewPolicy reviewPolicy) {
     public static final String SCHEMA = "iqc-pipeline-release-v1";
+    /** Explicit lossless numeric protocol; v1 retains its historical JSON/hash semantics. */
+    public static final String EXACT_SCHEMA = "iqc-pipeline-release-v2";
     public PipelineRelease(String schemaVersion,PipelineDefinition pipeline,FusionPolicy fusion,InspectionScoring.Policy scoring,
             List<ItemMapping> items,PublicationGatePolicy publicationGate,io.github.opensabre.iqc.action.ActionPolicy actionPolicy,
             io.github.opensabre.iqc.label.FindingLabelPolicy labelPolicy,RiskPolicy riskPolicy) {
@@ -108,7 +110,7 @@ public record PipelineRelease(String schemaVersion, PipelineDefinition pipeline,
         }
     }
     public PipelineRelease {
-        if (!SCHEMA.equals(schemaVersion)) throw new IllegalArgumentException("unsupported pipeline release schema");
+        if (!SCHEMA.equals(schemaVersion) && !EXACT_SCHEMA.equals(schemaVersion)) throw new IllegalArgumentException("unsupported pipeline release schema");
         Objects.requireNonNull(pipeline); Objects.requireNonNull(fusion); Objects.requireNonNull(scoring);
         if(fusion.method()==FusionPolicy.Method.CUSTOM)io.github.opensabre.iqc.fusion.FusionExtensionRegistry.system().require(fusion.custom());
         if(fusion.method()==FusionPolicy.Method.WEIGHTED&&!fusion.nodeWeights().keySet().equals(

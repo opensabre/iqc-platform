@@ -26,7 +26,7 @@ public final class LabelResultSourceValidator {
                 || row.getValueJson()==null || !Objects.equals(row.getSourceProjectionHash(),SelectorAssetService.hash(row.getValueJson())))
             throw IqcException.invalidState("Finding标签来源或投影摘要无效");
         try {
-            var projection=json.readValue(row.getValueJson(),FindingLabelProjection.Projection.class);
+            var projection=FindingLabelProjection.read(json,row.getValueJson());
             if(projection==null)throw IqcException.invalidState("Finding标签投影不能为空");
             var binding=projection.binding();
             if(!Objects.equals(row.getLabelId(),binding.labelId()) || !Objects.equals(row.getLabelVersionNo(),binding.labelVersion())

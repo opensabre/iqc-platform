@@ -129,6 +129,12 @@ class JointLabelMaterializationTransactionTest {
 
     @BeforeEach
     void createIsolatedResultTables() {
+        // Fresh base grants for the HTTP workflow; no sensitive grants are implied by authoring rights.
+        when(httpOrganization.currentActionAccess(anyString())).thenAnswer(invocation -> {
+            String user=invocation.getArgument(0);
+            return Result.success(new IqcOrganizationClient.SchedulerAccess("iqc-scheduler-access-v1",user,user,true,
+                    List.of("alice","bob").contains(user)?"g1":"g2",java.util.Set.of(),httpWorkflowResources(),java.time.Instant.now()));
+        });
         // Fast H2 fixture for the existing taxonomy; MySQL subclass uses the formal V1.1.24 tables.
         for (String table : List.of("iqc_label_rule_binding", "iqc_label_value_definition", "iqc_label",
                 "iqc_label_group", "iqc_label_category")) jdbc.execute("DROP TABLE IF EXISTS " + table);
@@ -415,7 +421,7 @@ class JointLabelMaterializationTransactionTest {
             String userId = invocation.getArgument(0);
             return Result.success(new IqcOrganizationClient.SchedulerAccess("iqc-scheduler-access-v1",
                     userId, userId, true, "alice".equals(userId) ? "g1" : "g2", java.util.Set.of(),
-                    java.util.Set.of("iqc:result:view"), java.time.Instant.now()));
+                    httpWorkflowResources(), java.time.Instant.now()));
         });
         when(httpRateLimiter.check(any())).thenReturn(new RateLimitDecision(
                 true, 60, 0, 60, null, "isolated-test"));
@@ -440,14 +446,15 @@ class JointLabelMaterializationTransactionTest {
 
         JsonNode created = httpData(http(alice, path, request));
         String taskId = created.path("id").asText();
+        assertThat(created.path("ruleSnapshotJson").isMissingNode() || created.path("ruleSnapshotJson").isNull()).isTrue();
         assertThat(taskId).startsWith("tr-");
         assertThat(created.path("createdBy").asText()).isEqualTo("alice");
         assertThat(created.path("ownerGroupId").asText()).isEqualTo("g1");
-        JsonNode frozen = mapper.readTree(created.path("ruleSnapshotJson").asText());
+        JsonNode frozen = mapper.readTree(taskMapper.selectById(taskId).getRuleSnapshotJson());
         assertThat(frozen.at("/schemeSnapshot/release/definition/schemaVersion").asText()).isEqualTo(SchemeDefinition.JOINT_TASK_SCHEMA);
         assertThat(frozen.at("/schemeSnapshot/contentHash").asText()).isEqualTo(
                 io.github.opensabre.iqc.scheme.InspectionSchemeService.contentHash(frozen.at("/schemeSnapshot/release").toString()));
-        assertThat(mapper.readTree(created.path("labelScopeSnapshotJson").asText()))
+        assertThat(mapper.readTree(taskMapper.selectById(taskId).getLabelScopeSnapshotJson()))
                 .isEqualTo(frozen.at("/schemeSnapshot/release/dependencies/labels"));
         assertThat(frozen.at("/schemeSnapshot/release/dependencies/labels/labels/0/groupName").asText()).isEqualTo("资产");
         assertThat(frozen.at("/schemeSnapshot/release/dependencies/labels/labels/0/categoryName").asText()).isEqualTo("画像");
@@ -504,6 +511,12 @@ class JointLabelMaterializationTransactionTest {
                     new IqcOrganizationClient.OrganizationUser(user, user, user, "g1", "Group 1")));
         when(httpRateLimiter.check(any())).thenReturn(new RateLimitDecision(true, 60, 0, 60, null, "isolated-test"));
         String alice = signedHttpIdentity("alice");
+        when(httpOrganization.currentActionAccess(anyString())).thenAnswer(invocation -> {
+            String user=invocation.getArgument(0);
+            return Result.success(new IqcOrganizationClient.SchedulerAccess("iqc-scheduler-access-v1",user,user,true,
+                    List.of("alice","bob").contains(user)?"g1":"g2",java.util.Set.of(),
+                    httpWorkflowResources(),java.time.Instant.now()));
+        });
         String bob = signedHttpIdentity("bob");
         String trialId = httpData(http(alice, "/api/iqc/schemes/scheme-1/trials",
                 "{\"expectedRevision\":1,\"conversationIds\":[\"conversation-1\"],\"requestId\":\"published_trial_01\"}")).path("id").asText();
@@ -524,8 +537,8 @@ class JointLabelMaterializationTransactionTest {
         String scheduledId = scheduled.path("id").asText();
         assertThat(scheduled.path("taskType").asText()).isEqualTo("SCHEDULED");
         assertThat(scheduled.path("status").asText()).isEqualTo("SCHEDULED");
-        assertThat(scheduled.path("conversationIdsJson").asText()).isEqualTo("[]");
-        JsonNode scheduledSnapshot = mapper.readTree(scheduled.path("ruleSnapshotJson").asText());
+        assertThat(taskMapper.selectById(scheduledId).getConversationIdsJson()).isEqualTo("[]");
+        JsonNode scheduledSnapshot = mapper.readTree(taskMapper.selectById(scheduledId).getRuleSnapshotJson());
         assertThat(scheduledSnapshot.path("schemeSnapshot").path("kind").asText()).isEqualTo("PUBLISHED");
         assertThat(scheduledSnapshot.path("schemeSnapshot").path("versionNo").asInt()).isEqualTo(1);
         assertThat(httpData(http(bob, path, scheduledRequest)).path("id").asText()).isEqualTo(scheduledId);
@@ -593,6 +606,11 @@ class JointLabelMaterializationTransactionTest {
             Thread.sleep(100);
         } while (System.nanoTime() < deadline);
         assertThat(completed.path("status").asText()).as(completed.toString()).isEqualTo("SUCCEEDED");
+    }
+
+    private static java.util.Set<String> httpWorkflowResources() {
+        return java.util.Set.of("iqc:result:view","iqc:result:business:view","iqc:task:view",
+                "iqc:task:execute","iqc:task:create","iqc:scheme:trial:create","iqc:scheme:use");
     }
 
     private String signedHttpIdentity(String username) {
@@ -1187,7 +1205,8 @@ class JointLabelMaterializationTransactionTest {
         assertThat(count("iqc_inspection_task")).isEqualTo(baselineTasks);
         var created = httpData(http(alice, path, request));
         String taskId = created.path("id").asText();
-        var snapshot = mapper.readTree(created.path("ruleSnapshotJson").asText());
+        assertThat(created.path("ruleSnapshotJson").isMissingNode() || created.path("ruleSnapshotJson").isNull()).isTrue();
+        var snapshot = mapper.readTree(taskMapper.selectById(taskId).getRuleSnapshotJson());
         assertThat(snapshot.at("/schemeSnapshot/release/definition/schemaVersion").asText()).isEqualTo(SchemeDefinition.ROUTED_TASK_SCHEMA);
         assertThat(snapshot.at("/schemeSnapshot/release/dependencies/itemExecutionPlan/items/0/route").asText()).isEqualTo("RULE_ONLY");
         assertThat(snapshot.at("/schemeSnapshot/contentHash").asText()).isEqualTo(
@@ -1232,7 +1251,8 @@ class JointLabelMaterializationTransactionTest {
         assertThat(count("iqc_inspection_task")).isEqualTo(baseline);
         var created = httpData(http(token, path, request));
         String taskId = created.path("id").asText();
-        var frozen = mapper.readTree(created.path("ruleSnapshotJson").asText());
+        assertThat(created.path("ruleSnapshotJson").isMissingNode() || created.path("ruleSnapshotJson").isNull()).isTrue();
+        var frozen = mapper.readTree(taskMapper.selectById(taskId).getRuleSnapshotJson());
         assertThat(frozen.at("/schemeSnapshot/selectedVariantCode").asText()).isEqualTo("standard");
         assertThat(frozen.at("/schemeSnapshot/release/selectedVariantCode").asText()).isEqualTo("standard");
         assertThat(frozen.at("/schemeSnapshot/release/definition/executionVariants/variants")).hasSize(2);
@@ -1300,13 +1320,13 @@ class JointLabelMaterializationTransactionTest {
         jdbc.update("UPDATE iqc_inspection_scheme SET draft_revision=2,draft_config_json=? WHERE id='scheme-1'",
                 mapper.writeValueAsString(new SchemeDefinition(SchemeDefinition.SCHEMA, original.items(), original.agent(), original.scoring())));
         assertThat(httpData(http(token, path, request)).path("id").asText()).isEqualTo(taskId);
-        assertThat(taskMapper.selectById(taskId).getRuleSnapshotJson()).isEqualTo(created.path("ruleSnapshotJson").asText());
+        assertThat(taskMapper.selectById(taskId).getRuleSnapshotJson()).isEqualTo(frozen.toString());
         String alternateRequest = request.replace("variant_http_trial_01", "variant_http_trial_02")
                 .replace("}", ",\"variantCode\":\"alternate\"}");
         // Restore the authoring version only to test a different request's explicit approved selection.
         jdbc.update("UPDATE iqc_inspection_scheme SET draft_revision=1,draft_config_json=? WHERE id='scheme-1'", mapper.writeValueAsString(draft));
         var alternate = httpData(http(token, path, alternateRequest));
-        assertThat(mapper.readTree(alternate.path("ruleSnapshotJson").asText()).at("/schemeSnapshot/selectedVariantCode").asText())
+        assertThat(mapper.readTree(taskMapper.selectById(alternate.path("id").asText()).getRuleSnapshotJson()).at("/schemeSnapshot/selectedVariantCode").asText())
                 .isEqualTo("alternate");
         assertThat(count("iqc_inspection_task")).isEqualTo(baseline + 2);
         httpData(http(token, "/api/iqc/tasks/" + taskId + "/run", "{}"));

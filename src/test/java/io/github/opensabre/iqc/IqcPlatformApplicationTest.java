@@ -67,6 +67,8 @@ public class IqcPlatformApplicationTest {
 
     @Test
     void loadsWithOpenSabreGovernanceAndSafeLlmDefault() {
+        assertThat(applicationContext.getBean(io.github.opensabre.governance.config.GovernanceProperties.class)
+                .getRegistration().isWaitForTasksToCompleteOnShutdown()).isFalse();
         assertThat(applicationContext.getBeansOfType(ErrorCatalogProvider.class)).isNotEmpty();
         assertThat(applicationContext.getBeansOfType(DictionaryProvider.class)).isNotEmpty();
         assertThat(applicationContext.getBeansOfType(AuditAspect.class)).hasSize(1);

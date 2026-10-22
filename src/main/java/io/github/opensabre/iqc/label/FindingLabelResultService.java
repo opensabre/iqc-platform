@@ -57,7 +57,7 @@ public class FindingLabelResultService {
             var task=tasks.selectById(source.taskId());
             if(task==null || FindingLabelTaskDirectory.expected(task,json)==null)
                 throw IqcException.invalidState("标签核对缺少冻结目录");
-            var release=json.treeToValue(json.readTree(task.getRuleSnapshotJson()).path("pipelineSnapshot").path("release"),PipelineRelease.class);
+            var release=json.treeToValue(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenTree(json,task.getRuleSnapshotJson()).path("pipelineSnapshot").path("release"),PipelineRelease.class);
             var policy=release.labelPolicy();
             var binding=FindingLabelActionConfiguration.requireBinding(policy,action.configuration());
             var row=find(source.resultId(),binding.labelId(),binding.valueCode());
@@ -103,7 +103,7 @@ public class FindingLabelResultService {
                 throw IqcException.invalidState("标签动作领取或冻结请求已失效");
             var task=tasks.selectById(source.taskId()); // Source validator already holds the Task lock.
             FindingLabelTaskDirectory.expected(task,json);
-            var root=json.readTree(task.getRuleSnapshotJson());
+            var root=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenTree(json,task.getRuleSnapshotJson());
             var release=json.treeToValue(root.path("pipelineSnapshot").path("release"),PipelineRelease.class);
             var policy=release.labelPolicy();
             if(policy==null)throw IqcException.invalidState("标签动作缺少冻结标签政策");

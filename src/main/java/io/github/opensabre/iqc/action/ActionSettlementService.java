@@ -44,7 +44,7 @@ public class ActionSettlementService {
                 || !Objects.equals(row.getPolicySnapshotJson(),request.policySnapshotJson()))
             throw IqcException.invalidState("动作结算与冻结请求不一致");
         try {
-            var policy=json.readValue(row.getPolicySnapshotJson(),ActionPolicy.class);
+            var policy=ActionFrozenPolicy.readFrozen(json,row.getPolicySnapshotJson(),row.getInputSnapshotJson());
             var action=policy.actions().stream().filter(value->row.getActionId().equals(value.actionId())).findFirst().orElse(null);
             if(action==null || !action.type().name().equals(row.getActionType())
                     || action.effectiveAdapterVersion()!=request.adapter().version())

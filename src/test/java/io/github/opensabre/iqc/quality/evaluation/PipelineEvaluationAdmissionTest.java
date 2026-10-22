@@ -52,6 +52,23 @@ class PipelineEvaluationAdmissionTest {
     }
     private PipelineEvaluationService.Prepared prepare() { return service.prepare(task, snapshot, false); }
     @Test
+    void exactFrozenReleaseReadPreservesAdjacentDecimals() {
+        ((ObjectNode)snapshot.at("/pipelineSnapshot/release")).put("schemaVersion","iqc-pipeline-release-v2");
+        ((ObjectNode)snapshot.at("/pipelineSnapshot/release/pipeline/nodes/0/config"))
+                .put("amount",new java.math.BigDecimal("0.900000000000000001"));
+        digest();
+        assertThat(prepare().release().pipeline().nodes().getFirst().config().path("amount").decimalValue())
+                .isEqualByComparingTo("0.900000000000000001");
+        var tasks=mock(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class);
+        var scope=mock(io.github.opensabre.iqc.shared.IqcDataScope.class);
+        task.setId("task"); task.setCreatedBy("owner"); task.setRuleSnapshotJson(snapshot.toString());
+        when(tasks.selectById("task")).thenReturn(task);
+        when(scope.canView("owner",null)).thenReturn(true);
+        var storedService=new PipelineEvaluationService(datasets,null,null,tasks,null,null,null,null,json,scope);
+        assertThat(storedService.context("task").prepared().release().pipeline().nodes().getFirst().config().path("amount").decimalValue())
+                .isEqualByComparingTo("0.900000000000000001");
+    }
+    @Test
     void usesFrozenDatasetAndCanonicalRolesWithoutLoadingLiveConversations() {
         var prepared = prepare();
         assertThat(prepared.datasetHash()).isEqualTo("dataset-hash");

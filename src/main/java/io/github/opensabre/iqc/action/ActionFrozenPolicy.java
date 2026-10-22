@@ -17,6 +17,24 @@ final class ActionFrozenPolicy {
         }
     }
     private ActionFrozenPolicy() { }
+    /** Standalone policy copies inherit numeric decoding from their immutable source task. */
+    static ActionPolicy readFrozen(ObjectMapper json,String policyBody,String inputBody)
+            throws com.fasterxml.jackson.core.JsonProcessingException {
+        var input=json.readTree(inputBody);
+        var reader=json.readerFor(ActionPolicy.class);
+        // Historical callers without an embedded task keep the original v1 interpretation.
+        if(input!=null && input.path("taskSnapshotJson").isTextual()) {
+            var task=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenTree(json,input.path("taskSnapshotJson").asText());
+            String schema=task==null ? io.github.opensabre.iqc.pipelineasset.PipelineRelease.SCHEMA
+                    : task.path("pipelineSnapshot").path("release").path("schemaVersion").asText(io.github.opensabre.iqc.pipelineasset.PipelineRelease.SCHEMA);
+            if(io.github.opensabre.iqc.pipelineasset.PipelineRelease.EXACT_SCHEMA.equals(schema))
+                reader=reader.with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
+            else if(!io.github.opensabre.iqc.pipelineasset.PipelineRelease.SCHEMA.equals(schema))
+                throw new IllegalArgumentException("Unsupported frozen Action source release protocol");
+        }
+        return reader.readValue(policyBody);
+    }
+
     static Prepared validate(ActionExecution row,ActionProductionSourceValidator.Reference reference,
                              ActionProductionSourceValidator.Validated validated,ObjectMapper json)
             throws com.fasterxml.jackson.core.JsonProcessingException {
