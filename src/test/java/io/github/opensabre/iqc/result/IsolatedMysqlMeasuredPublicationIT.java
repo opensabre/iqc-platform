@@ -242,7 +242,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         var rule=new QualityRule();rule.setCode("R_"+key);rule.setName("Controlled rule");rule.setRuleType("LLM");rule.setExpression("Check processed text");rule.setTargetRole("all");rule.setStatus("ACTIVE");rule.setVersionNo(1);
         s.getMapper(QualityRuleMapper.class).insert(rule);
         var rv=new QualityRuleVersion();org.springframework.beans.BeanUtils.copyProperties(rule,rv);rv.setId(null);rv.setRuleId(rule.getId());rv.setStatus("PUBLISHED");s.getMapper(QualityRuleVersionMapper.class).insert(rv);
-        var agent=new QualityAgent();agent.setCode("A_"+key);agent.setName("Controlled agent");agent.setStatus("ACTIVE");agent.setVersionNo(1);agent.setConfigJson("{\"schemaVersion\":\"3.0\",\"systemPrompt\":\"Controlled test\",\"primaryModelProfileId\":\"controlled\"}");s.getMapper(QualityAgentMapper.class).insert(agent);
+        var agent=new QualityAgent();agent.setCode("A_"+key);agent.setName("Controlled agent");agent.setStatus("ACTIVE");agent.setVersionNo(1);agent.setConfigJson("{\"schemaVersion\":\"3.0\",\"systemPrompt\":\"Controlled test\",\"primaryModelProfileId\":\"controlled\",\"assetSnapshots\":{\"primaryModel\":{\"id\":\"controlled\",\"versionNo\":1,\"provider\":\"OPENAI\",\"modelName\":\"controlled\",\"endpoint\":\"https://invalid.example/v1\"},\"mcpServers\":[],\"skills\":[]}}");s.getMapper(QualityAgentMapper.class).insert(agent);
         var av=new QualityAgentVersion();org.springframework.beans.BeanUtils.copyProperties(agent,av);av.setId(null);av.setAgentId(agent.getId());av.setStatus("PUBLISHED");s.getMapper(QualityAgentVersionMapper.class).insert(av);
         var definition=new FindingDefinition(FindingDefinition.SCHEMA,"MODEL_"+key.toUpperCase(),"Controlled boolean","GENERAL",null,Finding.ValueType.BOOLEAN,List.of(),Finding.Severity.LOW,false,List.of());
         var facts=context.getBean(FindingCatalogService.class);var catalog=facts.create(definition);facts.publish(catalog.getId(),1);
@@ -254,7 +254,22 @@ class IsolatedMysqlMeasuredPublicationIT {
         var gold=context.getBean(GoldSampleService.class);gold.annotate(sample.getId(),new GoldSampleService.Annotation(0,List.of(new GoldFinding(definition.code(),Finding.ValueType.BOOLEAN,Finding.State.KNOWN,j.valueToTree(true),List.of())),null,List.of(),GoldConversation.Difficulty.BASIC,null));actor.set("reviewer");gold.review(sample.getId(),1,true,"independent approval");actor.set("annotator");
         var datasets=context.getBean(EvaluationDatasetService.class);var dataset=datasets.create("Controlled model",new DatasetDraft(DatasetDraft.SCHEMA,DatasetDraft.Type.BASIC,null,List.of(new DatasetDraft.Member(sample.getId(),1))));datasets.freeze(dataset.getId(),1);
         var provider=context.getBean(LlmQualityProvider.class);
-        when(provider.evaluateConversation(anyList(),any(),any(),any(),anyString(),any())).thenReturn(new LlmQualityProvider.LlmEvaluation(true,true,"controlled","{\"hit\":true,\"reason\":\"controlled\"}",new SnapshotChatModelRouter.InvocationFingerprint("iqc-llm-invocation-fingerprint-v1","a".repeat(64),"b".repeat(64))));
+        // Exercise production prompt construction, parsing and router fingerprint generation.
+        var model=mock(org.springframework.ai.chat.model.ChatModel.class);
+        when(model.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(new org.springframework.ai.chat.model.ChatResponse(List.of(new org.springframework.ai.chat.model.Generation(new org.springframework.ai.chat.messages.AssistantMessage("{\"hit\":true,\"reason\":\"controlled\"}")))));
+        ObjectProvider<org.springframework.ai.chat.model.ChatModel> defaults=mock(ObjectProvider.class);
+        when(defaults.getIfAvailable()).thenReturn(model);
+        var gateway=mock(io.github.opensabre.iqc.result.llm.gateway.ModelGateway.class);
+        when(gateway.invokeTracked(any(),any(),any(),any(),any(),any())).thenAnswer(call->{
+            var identity=(io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity)call.getArgument(0);
+            var output=((java.util.function.Supplier<org.springframework.ai.chat.model.ChatResponse>)call.getArgument(2)).get();
+            return new io.github.opensabre.iqc.result.llm.gateway.ModelGateway.Invocation<>(output,new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Handle("controlled-call",identity.key()));
+        });
+        var router=spy(new SnapshotChatModelRouter(defaults,j,mock(SecretReferenceResolver.class),gateway));doReturn(model).when(router).create(any());
+        var properties=new LlmQualityProperties();properties.setModel("controlled");properties.setMaxAttempts(1);
+        var delegate=new SpringAiLlmQualityProvider(defaults,router,j,mock(io.github.opensabre.governance.ratelimit.GovernanceRateLimiter.class),mock(io.github.opensabre.governance.usage.UsageCounterRecorder.class),properties,new SnapshotMcpToolProvider(j,reference->""));
+        doAnswer(call->delegate.evaluateConversation(call.getArgument(0),call.getArgument(1),call.getArgument(2),call.getArgument(3),call.getArgument(4),call.getArgument(5)))
+                .when(provider).evaluateConversation(anyList(),any(),any(),any(),anyString(),any());
         var evaluations=context.getBean(PipelineEvaluationService.class);
         var first=run(evaluations.create(dataset.getId(),1,asset.getId(),null,1,"first",1,"first"+key));
         var second=run(evaluations.create(dataset.getId(),1,asset.getId(),null,1,"second",1,"second"+key));
@@ -274,7 +289,7 @@ class IsolatedMysqlMeasuredPublicationIT {
             List<io.github.opensabre.iqc.conversation.model.ConversationMessage> messages=call.getArgument(0);
             if(failedConversation.equals(messages.getFirst().getConversationId())&&!recovered.get())
                 return new LlmQualityProvider.LlmEvaluation(false,false,"controlled temporary failure");
-            return new LlmQualityProvider.LlmEvaluation(true,true,"controlled","{\"hit\":true,\"reason\":\"controlled\"}",new SnapshotChatModelRouter.InvocationFingerprint("iqc-llm-invocation-fingerprint-v1","a".repeat(64),"b".repeat(64)));
+            return delegate.evaluateConversation(messages,call.getArgument(1),call.getArgument(2),call.getArgument(3),call.getArgument(4),call.getArgument(5));
         }).when(provider).evaluateConversation(anyList(),any(),any(),any(),anyString(),any());
         var runner=context.getBean(InspectionExecutionService.class);
         var queued=runner.queue(evaluations.create(retryDataset.getId(),1,asset.getId(),null,1,"partial",1,"partial"+key).getId());
@@ -289,6 +304,8 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals(2,inherited.expectedPairs());assertEquals(0,inherited.comparablePairs());assertNull(inherited.agreementRate());
         assertEquals(Map.of("SAME_ARTIFACT",1,"UNSUCCESSFUL_NODE",1),inherited.excludedReasons());
         verify(provider,times(5)).evaluateConversation(anyList(),any(),any(),any(),anyString(),any());
+        verify(model,times(4)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
+        verify(gateway,times(4)).invokeTracked(any(),any(),any(),any(),any(),any());
     }
     private ScheduledActorAccessService.Resolved authorizedActor() {
         return new ScheduledActorAccessService.Resolved("user-annotator","annotator",false,"group",Set.of(),

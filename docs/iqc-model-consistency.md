@@ -43,3 +43,9 @@ HTTP 合约由 `EvaluationCommandHttpPrivacyTest` 扩展两项：真实 MockMvc 
 真实 SQL 重试继承也已覆盖：扩展上述受控模型场景为两个 Gold 样本，适配器令第二个样本首次失败，原队列/工作器进入 PARTIAL_FAILED；恢复后再次 queue/executePersisted，任务 SUCCEEDED，当前轮结果表恰一行。report 中第一个样本 sourceExecutionId 保留前轮，第二个指向重试轮。比较 retry/prior 得 expected=2、comparable=0、agreement=null、SAME_ARTIFACT=1、UNSUCCESSFUL_NODE=1；provider 全场景调用恰5次（两次独立单样本、首次双样本、重试单样本），未重复调用已成功样本。
 
 原97699 terminal0，`/tmp/iqc-b-consistency-retry-sql.log`，testCompile 与 SQL2/计算5/报告20共27项零失败错误跳过。SQL 继承证据现已具备，模型输出与指纹仍受控，不改变真实供应商/路由指纹生成和浏览器整链尚未验证的边界。
+
+## 生产 Provider/Router 指纹到 SQL（2026-10-22）
+
+上述 SQL 模型夹具进一步替换固定指纹：mock 适配器的正常分支委托真实 `SpringAiLlmQualityProvider.evaluateConversation`，使用真实提示词构造、解析、`SnapshotChatModelRouter` 路由与指纹生成，再经原工作器落库并比较。冻结 Agent 提供模型 profile；仅 router.create 返回的 ChatModel 和 ModelGateway 为 mock，gateway 调用传入 supplier 并返回按实际 ModelIdentity.key 构造的句柄。Agent 资产 validator 仍 mock。未发外部请求、未真实记账结算。
+
+独立 Task/EID 的同输入产物 comparable/agreeing=1；SQL 重试继承及未成功节点排除仍通过。provider 入口5次，实际模型与 gateway.invokeTracked 各4次（首次失败样本在适配器注入点直接失败）。不再用固定64字符常量代替输入指纹。最终原91129 terminal0，`/tmp/iqc-b-consistency-router-sql.log`，testCompile+SQL2/计算5/报告20共27项零失败错误跳过；专用MySQL自动关闭。这补齐生产 Provider/Router 指纹到真实SQL的组合证据，仍不证明真实供应商/网关账本/PDP或浏览器整链。
