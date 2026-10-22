@@ -39,3 +39,7 @@ HTTP 合约由 `EvaluationCommandHttpPrivacyTest` 扩展两项：真实 MockMvc 
 两个独立 Task/EID 实际运行并落库后，读取结果得到 expected/comparable/agreeing=1，agreement=1；同一 Task/EID 比较归 SAME_ARTIFACT，不算独立执行。模型会话入口确切调用两次。该事实为无强制证据的普通低风险布尔项，未放宽高风险证据约束。
 
 最终 `/tmp/iqc-b-consistency-model-sql-final.log`、原2622 terminal0，testCompile/测试共27项通过（真实SQL2、计算5、报告20）。首轮已完整main编译；此前三轮分别暴露夹具必填relative_time缺失、高风险无证据、错误设桩单消息入口，均仅修测试夹具。最终MySQL脚本自动关闭。仍不包含真实模型供应商、SQL重试继承或浏览器整链证明。
+
+真实 SQL 重试继承也已覆盖：扩展上述受控模型场景为两个 Gold 样本，适配器令第二个样本首次失败，原队列/工作器进入 PARTIAL_FAILED；恢复后再次 queue/executePersisted，任务 SUCCEEDED，当前轮结果表恰一行。report 中第一个样本 sourceExecutionId 保留前轮，第二个指向重试轮。比较 retry/prior 得 expected=2、comparable=0、agreement=null、SAME_ARTIFACT=1、UNSUCCESSFUL_NODE=1；provider 全场景调用恰5次（两次独立单样本、首次双样本、重试单样本），未重复调用已成功样本。
+
+原97699 terminal0，`/tmp/iqc-b-consistency-retry-sql.log`，testCompile 与 SQL2/计算5/报告20共27项零失败错误跳过。SQL 继承证据现已具备，模型输出与指纹仍受控，不改变真实供应商/路由指纹生成和浏览器整链尚未验证的边界。

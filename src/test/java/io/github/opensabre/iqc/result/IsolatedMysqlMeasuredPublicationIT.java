@@ -262,6 +262,33 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals(1,compared.expectedPairs());assertEquals(1,compared.comparablePairs());assertEquals(1,compared.agreeingPairs());assertEquals(0,BigDecimal.ONE.compareTo(compared.agreementRate()));
         var duplicate=evaluations.consistency(first.getId(),first.getCurrentExecutionId(),first.getId(),first.getCurrentExecutionId());assertEquals(Map.of("SAME_ARTIFACT",1),duplicate.excludedReasons());
         verify(provider,times(2)).evaluateConversation(anyList(),any(),any(),any(),anyString(),any());
+        // A second sample fails once; the original worker must retry only that sample.
+        String failedConversation="retry"+key,failedMessage="retrymessage"+key;
+        db.update("INSERT INTO iqc_conversation(id,source_file_name,message_count,status,created_by,owner_group_id,source_fingerprint) VALUES (?,'processed retry conversation',1,'READY','annotator','group',?)",failedConversation,"retry"+key);
+        db.update("INSERT INTO iqc_conversation_message(id,conversation_id,sequence_no,speaker_role,content,relative_time,raw_line,line_number) VALUES (?,?,1,'agent','retry text','00:00:00','retry text',1)",failedMessage,failedConversation);
+        var failedSample=new QualitySample();failedSample.setName("Retry gold");failedSample.setSampleType("POSITIVE");failedSample.setConversationId(failedConversation);failedSample.setMessageId(failedMessage);failedSample.setSourceResultId("retrymanual"+key);failedSample.setContentSnapshot("retry text");failedSample.setStatus("CANDIDATE");failedSample.setCreatedBy("annotator");failedSample.setOwnerGroupId("group");s.getMapper(QualitySampleMapper.class).insert(failedSample);
+        gold.annotate(failedSample.getId(),new GoldSampleService.Annotation(0,List.of(new GoldFinding(definition.code(),Finding.ValueType.BOOLEAN,Finding.State.KNOWN,j.valueToTree(true),List.of())),null,List.of(),GoldConversation.Difficulty.BASIC,null));actor.set("reviewer");gold.review(failedSample.getId(),1,true,"independent retry approval");actor.set("annotator");
+        var retryDataset=datasets.create("Retry model",new DatasetDraft(DatasetDraft.SCHEMA,DatasetDraft.Type.BASIC,null,List.of(new DatasetDraft.Member(sample.getId(),1),new DatasetDraft.Member(failedSample.getId(),1))));datasets.freeze(retryDataset.getId(),1);
+        var recovered=new java.util.concurrent.atomic.AtomicBoolean(false);
+        doAnswer(call->{
+            List<io.github.opensabre.iqc.conversation.model.ConversationMessage> messages=call.getArgument(0);
+            if(failedConversation.equals(messages.getFirst().getConversationId())&&!recovered.get())
+                return new LlmQualityProvider.LlmEvaluation(false,false,"controlled temporary failure");
+            return new LlmQualityProvider.LlmEvaluation(true,true,"controlled","{\"hit\":true,\"reason\":\"controlled\"}",new SnapshotChatModelRouter.InvocationFingerprint("iqc-llm-invocation-fingerprint-v1","a".repeat(64),"b".repeat(64)));
+        }).when(provider).evaluateConversation(anyList(),any(),any(),any(),anyString(),any());
+        var runner=context.getBean(InspectionExecutionService.class);
+        var queued=runner.queue(evaluations.create(retryDataset.getId(),1,asset.getId(),null,1,"partial",1,"partial"+key).getId());
+        String priorId=queued.getCurrentExecutionId();runner.executePersisted(queued.getId(),priorId);
+        var partial=s.getMapper(InspectionTaskMapper.class).selectById(queued.getId());assertEquals("PARTIAL_FAILED",partial.getStatus());
+        var prior=evaluations.report(partial.getId(),priorId);assertEquals(1,prior.successfulSamples());
+        recovered.set(true);var retried=run(partial);assertNotEquals(priorId,retried.getCurrentExecutionId());
+        var retryReport=evaluations.report(retried.getId(),retried.getCurrentExecutionId());assertTrue(retryReport.complete());assertEquals(2,retryReport.successfulSamples());
+        assertEquals(priorId,retryReport.sourceExecutionIds().get(sample.getId()));assertEquals(retried.getCurrentExecutionId(),retryReport.sourceExecutionIds().get(failedSample.getId()));
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_evaluation_sample_result WHERE task_id=? AND execution_id=?",Integer.class,retried.getId(),retried.getCurrentExecutionId()));
+        var inherited=evaluations.consistency(retried.getId(),retried.getCurrentExecutionId(),retried.getId(),priorId);
+        assertEquals(2,inherited.expectedPairs());assertEquals(0,inherited.comparablePairs());assertNull(inherited.agreementRate());
+        assertEquals(Map.of("SAME_ARTIFACT",1,"UNSUCCESSFUL_NODE",1),inherited.excludedReasons());
+        verify(provider,times(5)).evaluateConversation(anyList(),any(),any(),any(),anyString(),any());
     }
     private ScheduledActorAccessService.Resolved authorizedActor() {
         return new ScheduledActorAccessService.Resolved("user-annotator","annotator",false,"group",Set.of(),
