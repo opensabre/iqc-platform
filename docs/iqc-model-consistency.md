@@ -66,3 +66,9 @@ HTTP 合约由 `EvaluationCommandHttpPrivacyTest` 扩展两项：真实 MockMvc 
 B快进至固定A59ce621（包含标签SQL提交b5ae66f），扩展原EvaluationCommandHttpPrivacyTest：六种缺失/空白selected EID/reference Task/reference EID均拒绝为IQC-1003、无data、不回退普通报告、不查询领域服务；半缺参数时授权服务故障优先失败且不查询产物。既有普通report分支、完整比较身份、null缺测和no-store/nosniff断言保留。静态控制器仅一个带report:view的GET /report映射，不再独立注册/consistency。
 
 原57126 terminal1仅新测试错误码期望写成IQC-1001，实际既有枚举IQC-1003，纠正断言；原96499 terminal0，`/tmp/iqc-b-report-route-final.log`，fresh XML 20项无失败/错误/跳过。首轮完整main/test编译，末轮testCompile+surerfire，diff检查通过。本轮真实MVC与响应包装，grants/domain mock；不是资源注册服务/PDP或真实socket浏览器证明，不替代统一路由SQL/MVC组合后续复验。
+
+### B 2026-10-23 统一路由 SQL/MVC 组合验证
+
+在4057c3d的既有真实SQL模型重试夹具，比较请求切换为GET /report参考参数，并增加同一路径普通报告：HTTP data与各自领域报告序列化JSON一致，普通报告标签comparableLabels=2、首样本sourceExecutionIds仍prior；缺reference EID返回IQC-1003无data，当前授权故障IQC-1006无data；四次当前report:view校验，读取不新增模型或网关调用（仍各4次）。
+
+原99047 terminal1：新缺参数场景暴露SQL夹具未装标准BaseException处理器；加入生产DefaultWebMvcExceptionHandlerAdvice后原21866 terminal0，`/tmp/iqc-b-shared-report-sql-final.log`。fresh XML SQL2+一致性计算5+领域报告23=30项无失败/错误/跳过，testCompile+surerfire及diff检查通过。脚本自动关闭专用34307。真实SQL/worker/provider-router/报告/MVC组合，scope/current grants/ChatModel/网关账本及Agent validator仍受控；不是实际socket/PDP或浏览器连接此后端。此前旧路由证据不代替本轮结果。

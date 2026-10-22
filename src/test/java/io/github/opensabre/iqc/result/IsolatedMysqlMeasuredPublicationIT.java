@@ -323,8 +323,8 @@ class IsolatedMysqlMeasuredPublicationIT {
         when(grants.current(anySet())).thenReturn(new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("controlled",false,false,false,Instant.now()));
         var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
                 new io.github.opensabre.iqc.rest.PipelineEvaluationController(evaluations,grants,new io.github.opensabre.iqc.privacy.ResultReadProjection(j)))
-                .setControllerAdvice(new io.github.opensabre.webmvc.rest.RestResponseBodyAdvice(),new io.github.opensabre.iqc.governance.IqcExceptionHandlerAdvice()).build();
-        var response=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/iqc/evaluation/tasks/{task}/consistency",retried.getId())
+                .setControllerAdvice(new io.github.opensabre.webmvc.rest.RestResponseBodyAdvice(),new io.github.opensabre.iqc.governance.IqcExceptionHandlerAdvice(),new io.github.opensabre.webmvc.exception.DefaultWebMvcExceptionHandlerAdvice()).build();
+        var response=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/iqc/evaluation/tasks/{task}/report",retried.getId())
                 .param("executionId",retried.getCurrentExecutionId()).param("referenceTaskId",retried.getId()).param("referenceExecutionId",priorId))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cache-Control","private, no-store"))
@@ -333,12 +333,26 @@ class IsolatedMysqlMeasuredPublicationIT {
         var envelope=j.readTree(response);assertEquals("000000",envelope.path("code").asText());
         assertEquals(j.readTree(j.writeValueAsString(inherited)),envelope.path("data"));
         assertFalse(response.contains("processed text"));assertFalse(response.contains("retry text"));assertFalse(response.contains("inputHash"));
+        var ordinary=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/iqc/evaluation/tasks/{task}/report",retried.getId())
+                .param("executionId",retried.getCurrentExecutionId()))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cache-Control","private, no-store"))
+                .andReturn().getResponse().getContentAsString();
+        assertEquals("000000",j.readTree(ordinary).path("code").asText());
+        assertEquals(j.readTree(j.writeValueAsString(retryReport)),j.readTree(ordinary).path("data"));
+        assertEquals(2,j.readTree(ordinary).at("/data/businessMetrics/comparableLabels").asInt());
+        assertEquals(priorId,j.readTree(ordinary).path("data").path("sourceExecutionIds").path(sample.getId()).asText());
+        var incomplete=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/iqc/evaluation/tasks/{task}/report",retried.getId())
+                .param("executionId",retried.getCurrentExecutionId()).param("referenceTaskId",retried.getId()))
+                .andReturn().getResponse().getContentAsString();
+        assertEquals("IQC-1003",j.readTree(incomplete).path("code").asText());
+        assertTrue(j.readTree(incomplete).path("data").isNull()||j.readTree(incomplete).path("data").isMissingNode());
         when(grants.current(anySet())).thenThrow(new IllegalStateException("controlled grant unavailable"));
-        var denied=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/iqc/evaluation/tasks/{task}/consistency",retried.getId())
+        var denied=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/iqc/evaluation/tasks/{task}/report",retried.getId())
                 .param("executionId",retried.getCurrentExecutionId()).param("referenceTaskId",retried.getId()).param("referenceExecutionId",priorId))
                 .andReturn().getResponse().getContentAsString();
         assertEquals("IQC-1006",j.readTree(denied).path("code").asText());assertTrue(j.readTree(denied).path("data").isNull()||j.readTree(denied).path("data").isMissingNode());
-        verify(grants,times(2)).current(Set.of("iqc:evaluation:report:view"));
+        verify(grants,times(4)).current(Set.of("iqc:evaluation:report:view"));
         verify(model,times(4)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
         verify(gateway,times(4)).invokeTracked(any(),any(),any(),any(),any(),any());
     }
