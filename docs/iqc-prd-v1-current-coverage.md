@@ -93,3 +93,7 @@ FrozenDetectorEngine增加过滤前的llmCitationGrounding计数，复用原Lega
 ### 2026-10-23 引用报告聚合与页面
 
 在原评测报告增加可选citationGroundingMetrics，基于已验证产物及重试继承来源，按冻结样本×LLM节点计覆盖、最后轨迹去重，展示部分/缺测/坏容器和已观测引用错误率。旧构造保留、null字段省略；新生成ReportEvidence摘要含新增字段，历史证据不回写。UI复用report:view与原报告加载，不增API/权限/表/模型调用。详见iqc-llm-citation-grounding.md；广义事实幻觉、真实SQL/HTTP/浏览器证据仍待，不以本批视为全PRD完成。
+
+### 2026-10-23 标签SQL增量与单会话费用
+
+固定集成B b5ae66f/85a27dc：真实标签解析/投影和隔离SQL重试来源专项及Gold地址提示；原测试证据属于B原提交的受控边界。原任务模型调用分页/全量费用统计新增可选会话筛选，沿用组织scope、EID归属及当前敏感投影，不新增API/表/计费算法。UI显示生效范围、未知费用与币种，未关联旧调用不可回填。见iqc-model-gateway.md；本批编译/构建，真实SQL/HTTP/browser/供应商新组合仍待。数据层完整率尚无上游应有消息数契约，不使用已保存计数冒充完整率。

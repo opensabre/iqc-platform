@@ -112,12 +112,17 @@ public class GatewayCallService {
     }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public io.github.opensabre.iqc.shared.IqcPage<CallView> taskPage(String taskId,String executionId,String status,long current,long size){
+        return taskPageFiltered(taskId,executionId,status,current,size,null);
+    }
+    private io.github.opensabre.iqc.shared.IqcPage<CallView> taskPageFiltered(String taskId,String executionId,String status,long current,long size,String conversationId){
         taskService.getObject().get(taskId);
+        if(conversationId!=null&&!conversationId.matches("[A-Za-z0-9:_-]{1,64}"))throw IqcException.invalidArgument("会话标识无效");
         if(current<1 || size<1 || size>100 || (status!=null && !Set.of("RESERVED","CONFIRMED","UNKNOWN").contains(status)))
             throw IqcException.invalidArgument("模型调用分页条件无效");
         if(executionId!=null){var run=executionRows.selectById(executionId);
             if(run==null || !Objects.equals(run.getTaskId(),taskId))throw IqcException.notFound("任务执行轮次不存在");}
         var query=Wrappers.<GatewayCall>lambdaQuery().eq(GatewayCall::getTaskId,taskId);
+        if(conversationId!=null)query.eq(GatewayCall::getConversationId,conversationId);
         if(executionId!=null)query.eq(GatewayCall::getExecutionId,executionId);
         if(status!=null)query.eq(GatewayCall::getStatus,status);
         return readPage(query,current,size);
@@ -151,10 +156,19 @@ public class GatewayCallService {
         var page=taskPage(taskId,executionId,status,current,size);
         return withSummary(page,null,taskId,executionId,status);
     }
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public CallPage taskPageWithSummary(String taskId,String executionId,String status,long current,long size,String conversationId){
+        if(conversationId==null)return taskPageWithSummary(taskId,executionId,status,current,size);
+        var page=taskPageFiltered(taskId,executionId,status,current,size,conversationId);
+        return withSummary(page,calls.conversationCostGroups(null,taskId,executionId,status,conversationId));
+    }
     private CallPage withSummary(io.github.opensabre.iqc.shared.IqcPage<CallView> page,String modelKey,String taskId,String executionId,String status){
+        return withSummary(page,calls.costGroups(modelKey,taskId,executionId,status));
+    }
+    private CallPage withSummary(io.github.opensabre.iqc.shared.IqcPage<CallView> page,List<GatewayCallMapper.CostGroup> costGroups){
         java.math.BigInteger count=java.math.BigInteger.ZERO,known=java.math.BigInteger.ZERO;
         var groups=new ArrayList<CurrencyCost>();
-        for(var group:calls.costGroups(modelKey,taskId,executionId,status)){
+        for(var group:costGroups){
             var n=java.math.BigInteger.valueOf(group.getCallCount());
             var k=java.math.BigInteger.valueOf(group.getKnownCount());
             count=count.add(n);known=known.add(k);

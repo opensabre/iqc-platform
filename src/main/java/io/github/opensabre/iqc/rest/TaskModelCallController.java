@@ -35,7 +35,13 @@ public class TaskModelCallController {
     @ResourcePermission(code="iqc:task:model-calls:view",name="查看任务模型调用",type="iqc",description="按任务数据范围查询真实执行轮次的模型调用")
     @io.github.opensabre.governance.audit.annotations.Audit(operationType=io.github.opensabre.governance.audit.annotations.OperationType.QUERY,description="读取任务模型调用账本",module="IQC_PRIVACY",request=false,response=false,key="#id")
     public GatewayCallService.CallPage page(@PathVariable String id,@RequestParam(required=false) String executionId,
-            @RequestParam(required=false) String status,@RequestParam(defaultValue="1") long current,@RequestParam(defaultValue="20") long size){
+            @RequestParam(required=false) String status,@RequestParam(defaultValue="1") long current,@RequestParam(defaultValue="20") long size,
+            @RequestParam(required=false) String conversationId){
+        if(conversationId==null)return page(id,executionId,status,current,size);
+        var access=callAccess();
+        return projection.gatewayCalls(calls.taskPageWithSummary(id,executionId,status,current,size,conversationId),access);
+    }
+    public GatewayCallService.CallPage page(String id,String executionId,String status,long current,long size){
         var access=callAccess();
         return projection.gatewayCalls(calls.taskPageWithSummary(id,executionId,status,current,size),access);
     }
