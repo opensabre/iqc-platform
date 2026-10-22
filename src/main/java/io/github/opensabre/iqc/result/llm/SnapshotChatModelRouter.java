@@ -173,6 +173,9 @@ public class SnapshotChatModelRouter {
     /** Best-effort measurement only: never changes admission, retry, model output or diagnostic retention. */
     private String invocationInputHash(Prompt prompt,JsonNode profile){
         if(profile==null||!profile.isObject())return null;
+        // Text-only evidence cannot establish equality of requests carrying media attachments.
+        if(prompt.getInstructions().stream().anyMatch(message->message instanceof org.springframework.ai.content.MediaContent media
+                &&media.getMedia()!=null&&!media.getMedia().isEmpty()))return null;
         try{
             var input=new java.util.LinkedHashMap<String,Object>();input.put("schemaVersion","iqc-llm-invocation-input-v1");
             input.put("profile",profile);input.put("request",objectMapper.readTree(diagnosticRequest(prompt)));

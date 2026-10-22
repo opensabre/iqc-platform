@@ -151,6 +151,70 @@ class ResultReadProjectionTest {
         assertEquals("{\"value\":\"13812345678\"}", source.valueJson());
     }
 
+    @Test
+    void reviewBodiesRequireBothGrantsAndCommandsNeverEchoBodies() {
+        var source = new io.github.opensabre.iqc.quality.model.ResultReview();
+        source.setId("review-1"); source.setSourceHash("immutable-hash");
+        source.setRequestComment("private request"); source.setReviewComment("private decision");
+        source.setReviewedResultJson("{\"secret\":true}");
+        for (boolean full : List.of(false, true)) for (boolean pii : List.of(false, true)) {
+            for (boolean detail : List.of(false, true)) {
+                for (var returned : List.of(projection.labelReview(source, access(full, pii, true), detail),
+                        projection.messageReview(source, access(full, pii, true), detail))) {
+                    boolean visible = full && pii && detail;
+                    assertEquals(visible ? source.getReviewedResultJson() : null, returned.getReviewedResultJson());
+                    assertEquals(visible ? "private request" : null, returned.getRequestComment());
+                    assertEquals(visible ? "private decision" : null, returned.getReviewComment());
+                    assertEquals(visible, returned.getPrivacy().get("canonicalPayloadVisible"));
+                    assertEquals("review-1", returned.getId()); assertEquals("immutable-hash", returned.getSourceHash());
+                }
+            }
+        }
+        assertEquals("private request", source.getRequestComment());
+        assertEquals("{\"secret\":true}", source.getReviewedResultJson());
+        assertNull(source.getPrivacy());
+    }
+
+    @Test
+    void manualScoreReasonIsWithheldWithoutChangingExactScoreOrStaleState() throws Exception {
+        var json = new ObjectMapper();
+        var adjustment = new io.github.opensabre.iqc.quality.BusinessItemReviewEvaluator.ScoreAdjustment(
+                "r1", "computed-hash", "99.123456789012345678", "private reason");
+        for (String status : List.of("APPLIED", "STALE")) {
+            var manual = new io.github.opensabre.iqc.quality.BusinessItemReviewEvaluator.ManualScoreProjection(
+                    adjustment, status, "computed-hash", new java.math.BigDecimal("80.123456789012345678"));
+            var source = new io.github.opensabre.iqc.quality.BusinessItemReviewService.ScoreContext(
+                    "r1", "source-hash", "computed-hash", "COMPLETE", "80", manual);
+            for (boolean full : List.of(false, true)) for (boolean pii : List.of(false, true)) {
+                var projected = projection.scoreReviewContext(source, access(full, pii, false));
+                var value = json.valueToTree(projected.manualScore());
+                assertEquals(status, value.path("status").asText());
+                assertEquals("99.123456789012345678", value.path("adjustment").path("finalScore").asText());
+                assertEquals(full && pii ? "private reason" : null,
+                        value.path("adjustment").path("reason").isNull() ? null : value.path("adjustment").path("reason").asText());
+                assertEquals("computed-hash", projected.computedScoringHash());
+            }
+            assertEquals("private reason", source.manualScore().adjustment().reason());
+        }
+    }
+
+    @Test
+    void workflowPresentationRejectsMalformedOrNonPriorParentsWhileBodyRemainsHidden() {
+        var source = new io.github.opensabre.iqc.quality.model.ResultReview();
+        source.setReviewRevision(2); source.setStatus("PENDING");
+        source.setReviewedResultJson("{\"schemaVersion\":\"iqc-review-workflow-v1\",\"stage\":\"SECOND_REVIEW\","
+                + "\"parentReviewId\":\"parent\",\"parentRevision\":1,\"parentDecisionHash\":\"" + "a".repeat(64) + "\"}");
+        var safe = projection.businessReview(source, access(false, false, false), true);
+        assertNull(safe.getReviewedResultJson());
+        assertEquals("AVAILABLE", safe.getReviewPresentation().get("state"));
+        assertEquals("SECOND_REVIEW", safe.getReviewPresentation().get("stage"));
+        source.setReviewRevision(1);
+        assertEquals("UNAVAILABLE", projection.businessReview(source, access(true, true, true), true).getReviewPresentation().get("state"));
+        source.setReviewedResultJson("broken");
+        assertEquals("INVALID", projection.businessReview(source, access(false, false, false), true).getReviewPresentation().get("stage"));
+        assertNull(projection.businessReview(source, access(true, true, true), false).getReviewPresentation());
+    }
+
     private SensitiveReadAccessService.Access access(boolean full, boolean pii, boolean prompt) {
         return new SensitiveReadAccessService.Access("test", full, pii, prompt, Instant.now());
     }

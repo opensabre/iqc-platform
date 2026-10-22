@@ -25,3 +25,7 @@ PRD V1.0 §14.3 的置信度校准诊断，复用 FindingEvaluationMetrics 与�
 ## 证据状态
 
 本批只编译/构建，无新增或运行测试。独立验证待：0/1/0.1边界、已知false、数值等值、缺/错类型与无置信度、空分母、精确Brier/ECE、源对象不变、旧Result/ReportEvidence JSON往返以及完整HTTP/页面。
+
+## B 组合验证
+
+A 13891c5 与 B ee4e3dc 组合后完成主/测试编译及8套件52项验证（零失败、错误、跳过），日志 `/tmp/iqc-b-confidence-combined-second.log`。新增 FindingConfidenceDiagnosticsTest 五项覆盖置信度0/1/0.1边界、已知false、缺测与空分母、精确数值和源数据不变，以及旧Result/最小ReportEvidence序列化往返摘要不变；不代表所有历史线上证据已回放。真实SQL发布到回流Gold回归门禁链路再次通过，仍为受控身份/scope。

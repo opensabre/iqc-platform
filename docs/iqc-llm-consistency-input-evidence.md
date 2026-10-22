@@ -26,3 +26,21 @@ SnapshotChatModelRouter 在实际选定主/备用模型、进入原 Gateway 前�
 ## 验证状态
 
 本批仅skipTests test-compile；没有新增或运行测试。B待验证：相同输入跨Task稳定、Prompt/上游/工具定义/实际Fallback变化、工具继续与直接返回、未管理/无网关/未知选项、序列化失败、旧构造JSON、结构指标计数不变及原调用/预算/结算/副作用不变。真实供应商、SQL与浏览器仍待。
+
+## B 组合验证与媒体边界修复
+
+组合固定A3a4cc6d与Babba771。发现文本摘要不覆盖MediaContent附件，修正为带媒体调用不生成指纹，避免同文本不同附件的伪相等；模型请求和返回仍照常，未增加音频转换或原文落盘。未来若需测量媒体输入，应单独定义稳定且覆盖实际内容的协议。
+
+新增InvocationFingerprintTest通过实际router公开调用检查跨Task稳定、系统Prompt/上游文本/冻结profile/工具定义变化、Handle的实际modelKey、无Handle/未知选项/媒体缺测、旧LlmEvaluation JSON兼容；工具定义变更测试验证工具未被执行，来源对象保持原处理。模型与网关为受控mock，不是供应商或真实结算测试。
+
+原13690 terminal0，主/测试编译及首轮12项通过，`/tmp/iqc-b-invocation-fingerprint-first.log`。追加工具/profile后原33875 terminal0，testCompile/surefire，InvocationFingerprintTest7、SnapshotChatModelRouterTest3、SpringAiLlmQualityProviderTest4共14项零失败错误跳过，`/tmp/iqc-b-invocation-fingerprint-tools.log`。计数不跨轮累计。
+
+工具历史继续/returnDirect、完整Fallback及预算结算副作用仍需独立验证。一致性聚合、多独立产物选择、覆盖率/不可比原因及页面仍未实现；本批不以指纹采集代替模型一致性指标。
+
+## B 工具继续、直接返回与实际备用路径
+
+新增三个实际router路径检查（受控模型/网关，实际Spring AI ToolCallingManager）：工具返回进入下一轮时，最终指纹覆盖其历史，改变工具返回会改变最终输入摘要；每次工具执行一次且两轮模型调用。returnDirect只执行工具一次/模型一次，无最终模型指纹，不把工具结果伪装模型输出。主模型异常后原路由实际转备用，返回指纹modelKey等于备用Handle身份。
+
+原71399终态1：17项中16通过，备用夹具重新when设桩触发旧Supplier回调；改用doAnswer，无生产修复。原57001终态0，`/tmp/iqc-b-invocation-tool-cycle-second.log`，testCompile/surefire，新指纹10+Router3+Provider4共17项零失败错误跳过。未证明真实供应商、真实Gateway预算/结算或端到端持久化。
+
+接入核对：FrozenDetectorEngine保留完整llmStructuredOutput节点metrics，故指纹进入原冻结trace；当前StructuredCounter只汇总结构成功率。一致性需要原来源校验后的多个独立Task/EID实际产物，不能只扩充这个单产物计数器或拿Benchmark不同变量结果直接冒充同输入一致性。

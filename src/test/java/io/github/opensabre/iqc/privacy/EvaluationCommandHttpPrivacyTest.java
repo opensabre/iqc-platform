@@ -81,6 +81,34 @@ class EvaluationCommandHttpPrivacyTest {
         assertTrue(response.contains("0.12345678901234567890123456789"));
         verify(grants).current(Set.of("iqc:evaluation:report:view"));verify(service).report("t","e");
     }
+    @Test void consistencyTransportBindsBothExplicitExecutionsAndPreservesUnmeasuredValues() throws Exception {
+        allow(false,false,false);
+        var report=new io.github.opensabre.iqc.quality.evaluation.ModelConsistencyMetrics.Report(
+                "iqc-model-consistency-v1","scope",2,0,0,BigDecimal.ZERO,null,Map.of("SAME_ARTIFACT",1,"MISSING_ARTIFACT",1));
+        when(service.consistency("t","selected","reference-task","reference-execution")).thenReturn(report);
+        mvc().perform(get("/api/iqc/evaluation/tasks/t/report")
+                .param("executionId","selected").param("referenceTaskId","reference-task")
+                .param("referenceExecutionId","reference-execution"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value("000000"))
+                .andExpect(header().string("Cache-Control","private, no-store"))
+                .andExpect(header().string("X-Content-Type-Options","nosniff"))
+                .andExpect(jsonPath("$.data.expectedPairs").value(2))
+                .andExpect(jsonPath("$.data.comparablePairs").value(0))
+                .andExpect(jsonPath("$.data.comparisonCoverage").value(0))
+                .andExpect(jsonPath("$.data.agreementRate").doesNotExist())
+                .andExpect(jsonPath("$.data.excludedReasons.SAME_ARTIFACT").value(1));
+        verify(grants).current(Set.of("iqc:evaluation:report:view"));
+        verify(service).consistency("t","selected","reference-task","reference-execution");
+    }
+    @Test void consistencyAuthorizationFailurePreventsAnyArtifactQuery() throws Exception {
+        when(grants.current(anySet())).thenThrow(new IllegalStateException("unavailable"));
+        mvc().perform(get("/api/iqc/evaluation/tasks/t/report")
+                .param("executionId","selected").param("referenceTaskId","reference-task")
+                .param("referenceExecutionId","reference-execution"))
+                .andExpect(jsonPath("$.code").value("IQC-1006"))
+                .andExpect(jsonPath("$.data").doesNotExist());
+        verify(grants).current(Set.of("iqc:evaluation:report:view"));verifyNoInteractions(service);
+    }
     @Test void deniedCurrentAccessPreventsCreationAndReportQuery() throws Exception {
         when(grants.current(anySet())).thenThrow(new IllegalStateException("unavailable"));var mvc=mvc();
         mvc.perform(post("/api/iqc/evaluation/tasks").contentType("application/json").content("{\"datasetVersion\":1}"))

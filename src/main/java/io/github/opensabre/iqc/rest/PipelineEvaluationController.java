@@ -59,10 +59,23 @@ public class PipelineEvaluationController {
     }
     @GetMapping("/{taskId}/report")
     @ResourcePermission(code="iqc:evaluation:report:view", name="查看固定数据集评测报告", type="iqc", description="以完整金标分母计算并保留失败重试来源")
-    @Audit(operationType=OperationType.QUERY, description="读取冻结数据集评测报告", module="IQC_PRIVACY", request=false, response=false, key="#taskId")
-    public PipelineEvaluationService.Report report(@PathVariable String taskId, @RequestParam(required=false) String executionId) {
+    @Audit(operationType=OperationType.QUERY, description="读取评测及独立重复运行报告", module="IQC_PRIVACY", request=false, response=false, key="#taskId")
+    public Object report(@PathVariable String taskId,@RequestParam(required=false) String executionId,
+            @RequestParam(required=false) String referenceTaskId,@RequestParam(required=false) String referenceExecutionId){
+        if(referenceTaskId==null&&referenceExecutionId==null)return report(taskId,executionId);
+        return consistency(taskId,executionId,referenceTaskId,referenceExecutionId);
+    }
+    /** Preserve the embedded single-execution report contract and immutable publication evidence. */
+    public PipelineEvaluationService.Report report(String taskId,String executionId){
+        access("iqc:evaluation:report:view");return service.report(taskId,executionId);
+    }
+    /** Same registered report resource; explicit reference parameters select the independent comparison. */
+    public io.github.opensabre.iqc.quality.evaluation.ModelConsistencyMetrics.Report consistency(String taskId,String executionId,
+            String referenceTaskId,String referenceExecutionId){
         access("iqc:evaluation:report:view");
-        return service.report(taskId, executionId);
+        if(executionId==null||executionId.isBlank()||referenceTaskId==null||referenceTaskId.isBlank()
+                ||referenceExecutionId==null||referenceExecutionId.isBlank())throw IqcException.invalidArgument("一致性报告必须指定双方Task和执行轮次");
+        return service.consistency(taskId,executionId,referenceTaskId,referenceExecutionId);
     }
     public record Create(String datasetId, Integer datasetVersion, String pipelineId, Integer pipelineVersion,
                          Integer draftRevision, String name, Integer concurrency, String requestId) { }

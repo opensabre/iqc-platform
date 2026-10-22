@@ -29,3 +29,9 @@
 ## 验证状态
 
 本批仅编译/构建，无新增或运行测试。待B独立覆盖：无样本/未完成/未修改/仅原因/状态及证据/数值等值/生效与过期改分/多轮及pending/分类重叠、精确值与源不变、构造和旧JSON兼容、实际SQL组织范围与HTTP/browser。模型一致性所需重复同输入同版本运行仍待，并未用旧方案投票伪造指标。
+
+## B 组合验证
+
+组合A5147226与Bb5044c5后，主/测试编译及BusinessQualityReportServiceTest、FindingConfidenceDiagnosticsTest、ResultReadProjectionTest通过（日志 `/tmp/iqc-b-review-change-combined.log`）。报表测试补未复核/缺失结果分母、空完成分母、旧17参构造与JSON往返；扩展pending保留完成结论、APPLIED/STALE数字修改与分类并集计数。原旧测试mock补上新增比较实际需要的original，不改生产校验。Finding语义边界/实际SQL角色与HTTP/browser仍待，不将单元测试作为完整验收。
+
+B追加Finding语义边界测试，经实际报表入口检查：精确小数差异、严重度、UNKNOWN状态、证据reference变化进入修改计数；数值尾零、证据集合顺序/重复、证据ID与details解释及整体explanation不制造变更，原事实序列化不变。原10457 terminal0，testCompile/surefire，BusinessQualityReportServiceTest十九项全过，日志 `/tmp/iqc-b-finding-modification-boundaries.log`。该检查使用受控mock来源，未替代原服务来源校验/SQL组织角色/browser。

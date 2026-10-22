@@ -2,6 +2,11 @@ package io.github.opensabre.iqc.result;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.opensabre.iqc.action.*;
+import io.github.opensabre.iqc.rule.dao.*;
+import io.github.opensabre.iqc.rule.model.*;
+import io.github.opensabre.iqc.agent.dao.*;
+import io.github.opensabre.iqc.agent.model.*;
+import io.github.opensabre.iqc.result.llm.*;
 import io.github.opensabre.iqc.quality.BusinessItemReviewService;
 import io.github.opensabre.iqc.quality.BusinessItemReviewEvaluator;
 import io.github.opensabre.iqc.quality.BusinessReviewSampleService;
@@ -99,8 +104,21 @@ class IsolatedMysqlMeasuredPublicationIT {
             var report=evaluations.report(executed.getId(),executed.getCurrentExecutionId());
             assertTrue(report.complete());assertEquals(1,report.successfulSamples());
             assertEquals(0,BigDecimal.ONE.compareTo(report.findingMetrics().aggregate().f1()));
+            // Real persisted metric results must never manufacture a model consistency denominator.
+            var repeated=run(evaluations.create(dataset.getId(),1,asset.getId(),null,1,"Independent repeat",1,
+                    "repeat_"+UUID.randomUUID().toString().replace("-","")));
+            assertNotEquals(executed.getId(),repeated.getId());
+            var consistency=evaluations.consistency(executed.getId(),executed.getCurrentExecutionId(),
+                    repeated.getId(),repeated.getCurrentExecutionId());
+            assertEquals(0,consistency.expectedPairs());assertEquals(0,consistency.comparablePairs());
+            assertEquals(0,consistency.agreeingPairs());assertNull(consistency.comparisonCoverage());
+            assertNull(consistency.agreementRate());assertTrue(consistency.excludedReasons().isEmpty());
             evidence.add(new PipelinePublicationGateService.ExecutionEvidence(executed.getId(),executed.getCurrentExecutionId()));
         }
+        var incompatible=assertThrows(RuntimeException.class,()->evaluations.consistency(
+                evidence.get(0).taskId(),evidence.get(0).executionId(),
+                evidence.get(1).taskId(),evidence.get(1).executionId()));
+        assertTrue(incompatible.getMessage().contains("相同冻结数据集"));
         var trial=context.getBean(InspectionTaskService.class).createUsingPipelineSnapshot(pipelines.frozenDraft(asset.getId(),1),
                 "real trial",List.of(conversation),1,"trial_"+suffix);
         trial=run(trial);
@@ -213,6 +231,82 @@ class IsolatedMysqlMeasuredPublicationIT {
         var preserved=sql.getMapper(QualitySampleMapper.class).selectById(captured.getId());
         assertEquals(candidateBody,preserved.getContentSnapshot());assertEquals(candidateLineage,preserved.getExpectedJson());
     }
+    @Test void controlledModelBridgePersistsIndependentComparableArtifacts() throws Exception {
+        actor.set("annotator");
+        io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of("user_name","annotator","user_id","user-annotator"));
+        var j=context.getBean(ObjectMapper.class);var s=context.getBean(SqlSessionTemplate.class);
+        var db=new JdbcTemplate(context.getBean(DataSource.class));String key=UUID.randomUUID().toString().replace("-","");
+        String conversation="model"+key,message="message"+key;
+        db.update("INSERT INTO iqc_conversation(id,source_file_name,message_count,status,created_by,owner_group_id,source_fingerprint) VALUES (?,'processed conversation',1,'READY','annotator','group',?)",conversation,key);
+        db.update("INSERT INTO iqc_conversation_message(id,conversation_id,sequence_no,speaker_role,content,relative_time,raw_line,line_number) VALUES (?,?,1,'agent','processed text','00:00:00','processed text',1)",message,conversation);
+        var rule=new QualityRule();rule.setCode("R_"+key);rule.setName("Controlled rule");rule.setRuleType("LLM");rule.setExpression("Check processed text");rule.setTargetRole("all");rule.setStatus("ACTIVE");rule.setVersionNo(1);
+        s.getMapper(QualityRuleMapper.class).insert(rule);
+        var rv=new QualityRuleVersion();org.springframework.beans.BeanUtils.copyProperties(rule,rv);rv.setId(null);rv.setRuleId(rule.getId());rv.setStatus("PUBLISHED");s.getMapper(QualityRuleVersionMapper.class).insert(rv);
+        var agent=new QualityAgent();agent.setCode("A_"+key);agent.setName("Controlled agent");agent.setStatus("ACTIVE");agent.setVersionNo(1);agent.setConfigJson("{\"schemaVersion\":\"3.0\",\"systemPrompt\":\"Controlled test\",\"primaryModelProfileId\":\"controlled\",\"assetSnapshots\":{\"primaryModel\":{\"id\":\"controlled\",\"versionNo\":1,\"provider\":\"OPENAI\",\"modelName\":\"controlled\",\"endpoint\":\"https://invalid.example/v1\"},\"mcpServers\":[],\"skills\":[]}}");s.getMapper(QualityAgentMapper.class).insert(agent);
+        var av=new QualityAgentVersion();org.springframework.beans.BeanUtils.copyProperties(agent,av);av.setId(null);av.setAgentId(agent.getId());av.setStatus("PUBLISHED");s.getMapper(QualityAgentVersionMapper.class).insert(av);
+        var definition=new FindingDefinition(FindingDefinition.SCHEMA,"MODEL_"+key.toUpperCase(),"Controlled boolean","GENERAL",null,Finding.ValueType.BOOLEAN,List.of(),Finding.Severity.LOW,false,List.of());
+        var facts=context.getBean(FindingCatalogService.class);var catalog=facts.create(definition);facts.publish(catalog.getId(),1);
+        var config=j.createObjectNode();config.putObject("ruleReference").put("id",rule.getId()).put("versionNo",1);config.putObject("findingReference").put("id",catalog.getId()).put("versionNo",1);config.putObject("agentReference").put("id",agent.getId()).put("versionNo",1);
+        var node=new PipelineDefinition.Node("model","LLM","Controlled model","1",List.of(),Map.of(),config,null,3000,0,PipelineDefinition.OnError.FAIL_PIPELINE,null,null,true);
+        var release=new PipelineRelease(PipelineRelease.EXACT_SCHEMA,new PipelineDefinition(PipelineDefinition.SCHEMA,List.of(node)),new FusionPolicy("priority",1,FusionPolicy.Method.PRIORITY,Map.of(),Map.of(),null,Set.of()),new InspectionScoring.Policy(InspectionScoring.POLICY_VERSION,InspectionScoring.Mode.DEDUCTION,100,60,List.of(new InspectionScoring.Item("check",20,false))),List.of(new PipelineRelease.ItemMapping("check",definition.code(),io.github.opensabre.iqc.scheme.SchemeDefinition.HitMeaning.VIOLATION)));
+        var asset=context.getBean(PipelineAssetService.class).create("P_"+key.toUpperCase(),"Controlled model persistence",release);
+        var sample=new QualitySample();sample.setName("Controlled gold");sample.setSampleType("POSITIVE");sample.setConversationId(conversation);sample.setMessageId(message);sample.setSourceResultId("manual"+key);sample.setContentSnapshot("processed text");sample.setStatus("CANDIDATE");sample.setCreatedBy("annotator");sample.setOwnerGroupId("group");s.getMapper(QualitySampleMapper.class).insert(sample);
+        var gold=context.getBean(GoldSampleService.class);gold.annotate(sample.getId(),new GoldSampleService.Annotation(0,List.of(new GoldFinding(definition.code(),Finding.ValueType.BOOLEAN,Finding.State.KNOWN,j.valueToTree(true),List.of())),null,List.of(),GoldConversation.Difficulty.BASIC,null));actor.set("reviewer");gold.review(sample.getId(),1,true,"independent approval");actor.set("annotator");
+        var datasets=context.getBean(EvaluationDatasetService.class);var dataset=datasets.create("Controlled model",new DatasetDraft(DatasetDraft.SCHEMA,DatasetDraft.Type.BASIC,null,List.of(new DatasetDraft.Member(sample.getId(),1))));datasets.freeze(dataset.getId(),1);
+        var provider=context.getBean(LlmQualityProvider.class);
+        // Exercise production prompt construction, parsing and router fingerprint generation.
+        var model=mock(org.springframework.ai.chat.model.ChatModel.class);
+        when(model.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(new org.springframework.ai.chat.model.ChatResponse(List.of(new org.springframework.ai.chat.model.Generation(new org.springframework.ai.chat.messages.AssistantMessage("{\"hit\":true,\"reason\":\"controlled\"}")))));
+        ObjectProvider<org.springframework.ai.chat.model.ChatModel> defaults=mock(ObjectProvider.class);
+        when(defaults.getIfAvailable()).thenReturn(model);
+        var gateway=mock(io.github.opensabre.iqc.result.llm.gateway.ModelGateway.class);
+        when(gateway.invokeTracked(any(),any(),any(),any(),any(),any())).thenAnswer(call->{
+            var identity=(io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity)call.getArgument(0);
+            var output=((java.util.function.Supplier<org.springframework.ai.chat.model.ChatResponse>)call.getArgument(2)).get();
+            return new io.github.opensabre.iqc.result.llm.gateway.ModelGateway.Invocation<>(output,new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Handle("controlled-call",identity.key()));
+        });
+        var router=spy(new SnapshotChatModelRouter(defaults,j,mock(SecretReferenceResolver.class),gateway));doReturn(model).when(router).create(any());
+        var properties=new LlmQualityProperties();properties.setModel("controlled");properties.setMaxAttempts(1);
+        var delegate=new SpringAiLlmQualityProvider(defaults,router,j,mock(io.github.opensabre.governance.ratelimit.GovernanceRateLimiter.class),mock(io.github.opensabre.governance.usage.UsageCounterRecorder.class),properties,new SnapshotMcpToolProvider(j,reference->""));
+        doAnswer(call->delegate.evaluateConversation(call.getArgument(0),call.getArgument(1),call.getArgument(2),call.getArgument(3),call.getArgument(4),call.getArgument(5)))
+                .when(provider).evaluateConversation(anyList(),any(),any(),any(),anyString(),any());
+        var evaluations=context.getBean(PipelineEvaluationService.class);
+        var first=run(evaluations.create(dataset.getId(),1,asset.getId(),null,1,"first",1,"first"+key));
+        var second=run(evaluations.create(dataset.getId(),1,asset.getId(),null,1,"second",1,"second"+key));
+        var compared=evaluations.consistency(first.getId(),first.getCurrentExecutionId(),second.getId(),second.getCurrentExecutionId());
+        assertEquals(1,compared.expectedPairs());assertEquals(1,compared.comparablePairs());assertEquals(1,compared.agreeingPairs());assertEquals(0,BigDecimal.ONE.compareTo(compared.agreementRate()));
+        var duplicate=evaluations.consistency(first.getId(),first.getCurrentExecutionId(),first.getId(),first.getCurrentExecutionId());assertEquals(Map.of("SAME_ARTIFACT",1),duplicate.excludedReasons());
+        verify(provider,times(2)).evaluateConversation(anyList(),any(),any(),any(),anyString(),any());
+        // A second sample fails once; the original worker must retry only that sample.
+        String failedConversation="retry"+key,failedMessage="retrymessage"+key;
+        db.update("INSERT INTO iqc_conversation(id,source_file_name,message_count,status,created_by,owner_group_id,source_fingerprint) VALUES (?,'processed retry conversation',1,'READY','annotator','group',?)",failedConversation,"retry"+key);
+        db.update("INSERT INTO iqc_conversation_message(id,conversation_id,sequence_no,speaker_role,content,relative_time,raw_line,line_number) VALUES (?,?,1,'agent','retry text','00:00:00','retry text',1)",failedMessage,failedConversation);
+        var failedSample=new QualitySample();failedSample.setName("Retry gold");failedSample.setSampleType("POSITIVE");failedSample.setConversationId(failedConversation);failedSample.setMessageId(failedMessage);failedSample.setSourceResultId("retrymanual"+key);failedSample.setContentSnapshot("retry text");failedSample.setStatus("CANDIDATE");failedSample.setCreatedBy("annotator");failedSample.setOwnerGroupId("group");s.getMapper(QualitySampleMapper.class).insert(failedSample);
+        gold.annotate(failedSample.getId(),new GoldSampleService.Annotation(0,List.of(new GoldFinding(definition.code(),Finding.ValueType.BOOLEAN,Finding.State.KNOWN,j.valueToTree(true),List.of())),null,List.of(),GoldConversation.Difficulty.BASIC,null));actor.set("reviewer");gold.review(failedSample.getId(),1,true,"independent retry approval");actor.set("annotator");
+        var retryDataset=datasets.create("Retry model",new DatasetDraft(DatasetDraft.SCHEMA,DatasetDraft.Type.BASIC,null,List.of(new DatasetDraft.Member(sample.getId(),1),new DatasetDraft.Member(failedSample.getId(),1))));datasets.freeze(retryDataset.getId(),1);
+        var recovered=new java.util.concurrent.atomic.AtomicBoolean(false);
+        doAnswer(call->{
+            List<io.github.opensabre.iqc.conversation.model.ConversationMessage> messages=call.getArgument(0);
+            if(failedConversation.equals(messages.getFirst().getConversationId())&&!recovered.get())
+                return new LlmQualityProvider.LlmEvaluation(false,false,"controlled temporary failure");
+            return delegate.evaluateConversation(messages,call.getArgument(1),call.getArgument(2),call.getArgument(3),call.getArgument(4),call.getArgument(5));
+        }).when(provider).evaluateConversation(anyList(),any(),any(),any(),anyString(),any());
+        var runner=context.getBean(InspectionExecutionService.class);
+        var queued=runner.queue(evaluations.create(retryDataset.getId(),1,asset.getId(),null,1,"partial",1,"partial"+key).getId());
+        String priorId=queued.getCurrentExecutionId();runner.executePersisted(queued.getId(),priorId);
+        var partial=s.getMapper(InspectionTaskMapper.class).selectById(queued.getId());assertEquals("PARTIAL_FAILED",partial.getStatus());
+        var prior=evaluations.report(partial.getId(),priorId);assertEquals(1,prior.successfulSamples());
+        recovered.set(true);var retried=run(partial);assertNotEquals(priorId,retried.getCurrentExecutionId());
+        var retryReport=evaluations.report(retried.getId(),retried.getCurrentExecutionId());assertTrue(retryReport.complete());assertEquals(2,retryReport.successfulSamples());
+        assertEquals(priorId,retryReport.sourceExecutionIds().get(sample.getId()));assertEquals(retried.getCurrentExecutionId(),retryReport.sourceExecutionIds().get(failedSample.getId()));
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_evaluation_sample_result WHERE task_id=? AND execution_id=?",Integer.class,retried.getId(),retried.getCurrentExecutionId()));
+        var inherited=evaluations.consistency(retried.getId(),retried.getCurrentExecutionId(),retried.getId(),priorId);
+        assertEquals(2,inherited.expectedPairs());assertEquals(0,inherited.comparablePairs());assertNull(inherited.agreementRate());
+        assertEquals(Map.of("SAME_ARTIFACT",1,"UNSUCCESSFUL_NODE",1),inherited.excludedReasons());
+        verify(provider,times(5)).evaluateConversation(anyList(),any(),any(),any(),anyString(),any());
+        verify(model,times(4)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
+        verify(gateway,times(4)).invokeTracked(any(),any(),any(),any(),any(),any());
+    }
     private ScheduledActorAccessService.Resolved authorizedActor() {
         return new ScheduledActorAccessService.Resolved("user-annotator","annotator",false,"group",Set.of(),
                 Set.of("iqc:pipeline:task:create","iqc:task:execute","iqc:action:enqueue","iqc:review:create"),Instant.now());
@@ -231,7 +325,7 @@ class IsolatedMysqlMeasuredPublicationIT {
             // Reuse the production framework filler; this test owns only the supplied user context.
             com.baomidou.mybatisplus.core.toolkit.GlobalConfigUtils.getGlobalConfig(f.getConfiguration())
                     .setMetaObjectHandler(new io.github.opensabre.persistence.handler.PoMetaObjectHandler());
-            for(var type:List.of(ConversationMapper.class,ConversationMessageMapper.class,FindingCatalogMapper.class,FindingCatalogVersionMapper.class,
+            for(var type:List.of(QualityRuleMapper.class,QualityRuleVersionMapper.class,QualityAgentMapper.class,QualityAgentVersionMapper.class,ConversationMapper.class,ConversationMessageMapper.class,FindingCatalogMapper.class,FindingCatalogVersionMapper.class,
                     PipelineAssetMapper.class,PipelineAssetVersionMapper.class,QualitySampleMapper.class,QualitySampleVersionMapper.class,
                     EvaluationDatasetMapper.class,EvaluationDatasetVersionMapper.class,EvaluationSampleResultMapper.class,
                     ConversationInspectionResultMapper.class,RuleInspectionResultMapper.class,InspectionEvidenceMapper.class,InspectionResultMapper.class,ResultReviewMapper.class,ActionDiscoveryMapper.class))
@@ -251,9 +345,10 @@ class IsolatedMysqlMeasuredPublicationIT {
         @Bean ActionSettlementService settlements(SqlSessionTemplate s,ActionAdapterRegistry adapters,ObjectMapper j){return new ActionSettlementService(s.getMapper(ActionExecutionMapper.class),adapters,j);}
         @Bean ActionExecutionService actionRunner(ActionClaimService claims,ActionSettlementService settlements,ActionAdapterRegistry adapters,SqlSessionTemplate s,IqcDataScope scope,ObjectMapper j){return new ActionExecutionService(claims,settlements,adapters,s.getMapper(ActionExecutionMapper.class),scope,j);}
         @Bean FindingCatalogService findings(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope){return new FindingCatalogService(s.getMapper(FindingCatalogMapper.class),s.getMapper(FindingCatalogVersionMapper.class),j,scope);}
-        @Bean(destroyMethod="close") PipelineRuntime runtime(ObjectMapper j){return new PipelineRuntime(List.of(new TranscriptMetricEngine(j)),1,8);}
+        @Bean LlmQualityProvider model(){return mock(LlmQualityProvider.class);}
+        @Bean(destroyMethod="close") PipelineRuntime runtime(ObjectMapper j,ObjectProvider<InspectionExecutionService> runner){return new PipelineRuntime(List.of(new TranscriptMetricEngine(j),new FrozenDetectorEngine("LLM",j,runner)),1,8);}
         @Bean PipelineAssetService pipelines(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,PipelineRuntime runtime,FindingCatalogService facts,ObjectProvider<PipelinePublicationGateService> gates){
-            return new PipelineAssetService(s.getMapper(PipelineAssetMapper.class),s.getMapper(PipelineAssetVersionMapper.class),null,null,null,null,null,facts,j,scope,runtime,s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationInspectionResultMapper.class),gates);
+            return new PipelineAssetService(s.getMapper(PipelineAssetMapper.class),s.getMapper(PipelineAssetVersionMapper.class),s.getMapper(QualityRuleMapper.class),s.getMapper(QualityRuleVersionMapper.class),s.getMapper(QualityAgentMapper.class),s.getMapper(QualityAgentVersionMapper.class),mock(io.github.opensabre.iqc.agent.AgentAssetReferenceValidator.class),facts,j,scope,runtime,s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationInspectionResultMapper.class),gates);
         }
         @Bean ProductionInputSnapshotService inputs(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope){return new ProductionInputSnapshotService(s.getMapper(ConversationMapper.class),s.getMapper(ConversationMessageMapper.class),scope,j);}
         @Bean @Primary InspectionTaskService tasks(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,ProductionInputSnapshotService inputs,ObjectProvider<PipelineAssetService> pipelines,ObjectProvider<ScheduledActorAccessService> actors){return new InspectionTaskService(s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationMapper.class),null,null,null,j,s.getMapper(TaskExecutionMapper.class),scope,null,null,inputs,pipelines,actors);}
@@ -263,6 +358,6 @@ class IsolatedMysqlMeasuredPublicationIT {
         @Bean PipelineEvaluationService evaluations(EvaluationDatasetService datasets,PipelineAssetService pipelines,InspectionTaskService tasks,SqlSessionTemplate s,PipelineConversationEvaluator evaluator,ObjectMapper j,IqcDataScope scope){return new PipelineEvaluationService(datasets,pipelines,tasks,s.getMapper(InspectionTaskMapper.class),s.getMapper(TaskExecutionMapper.class),s.getMapper(TaskItemMapper.class),s.getMapper(EvaluationSampleResultMapper.class),evaluator,j,scope);}
         @Bean PipelinePublicationGateService gates(PipelineEvaluationService evaluations,ObjectMapper j,SqlSessionTemplate s){return new PipelinePublicationGateService(evaluations,j,s.getMapper(TaskExecutionMapper.class));}
         @Bean HierarchicalResultService hierarchy(SqlSessionTemplate s,ObjectMapper j){return new HierarchicalResultService(s.getMapper(ConversationInspectionResultMapper.class),s.getMapper(RuleInspectionResultMapper.class),s.getMapper(InspectionEvidenceMapper.class),j,null,s.getMapper(InspectionTaskMapper.class),s.getMapper(InspectionResultMapper.class),s.getMapper(TaskItemMapper.class));}
-        @Bean InspectionExecutionService runner(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,HierarchicalResultService hierarchy,PipelineAssetService pipelines,PipelineConversationEvaluator evaluator,PipelineEvaluationService evaluations){return new InspectionExecutionService(s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationMapper.class),s.getMapper(ConversationMessageMapper.class),s.getMapper(InspectionResultMapper.class),j,s.getMapper(TaskExecutionMapper.class),s.getMapper(TaskItemMapper.class),scope,mock(io.github.opensabre.iqc.result.llm.LlmQualityProvider.class),mock(io.github.opensabre.governance.usage.UsageCounterRecorder.class),hierarchy,mock(io.github.opensabre.iqc.label.LabelCandidateService.class),mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class),pipelines,evaluator,evaluations);}
+        @Bean InspectionExecutionService runner(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,HierarchicalResultService hierarchy,PipelineAssetService pipelines,PipelineConversationEvaluator evaluator,PipelineEvaluationService evaluations,LlmQualityProvider model){return new InspectionExecutionService(s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationMapper.class),s.getMapper(ConversationMessageMapper.class),s.getMapper(InspectionResultMapper.class),j,s.getMapper(TaskExecutionMapper.class),s.getMapper(TaskItemMapper.class),scope,model,mock(io.github.opensabre.governance.usage.UsageCounterRecorder.class),hierarchy,mock(io.github.opensabre.iqc.label.LabelCandidateService.class),mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class),pipelines,evaluator,evaluations);}
     }
 }
