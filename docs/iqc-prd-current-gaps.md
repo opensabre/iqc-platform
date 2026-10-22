@@ -39,3 +39,9 @@ PRD14.3要求业务层标签准确率。当前 `PipelineEvaluationService.report
 本轮在既有报告接入冻结标签投影：`LabelEvaluationMetrics`仅对规范绑定地址且KNOWN的合法标签值计数；正确数/可比数计算准确率，零可比保持null。无政策/目录、旧名称键、缺输出及未知状态保留Gold总数。回归样本须所有Gold标签均可比且正确才能通过，评测不调用业务动作。标签类型仍服从现有投影校验（不支持对象标签），没有扩展目录类型或切换默认release版本。
 
 验证：原66104 terminal1（新增夹具误用仅接受整数的DURATION_MONTHS），修为支持小数的PERCENTAGE后原11353 terminal0，`/tmp/iqc-b-label-metrics-final.log`。fresh XML：LabelEvaluationMetricsTest4、PipelineEvaluationReportTest20，共24项无失败/错误/跳过。首轮完成主源码编译；末轮testCompile+surerfire。测试覆盖纯标签计算和既有报告回归，不代表已补齐绑定标签的真实报告/SQL重试组合、真实PDP或浏览器整链。以上组合仍为下一验收项，完整I1–I7继续进行。
+
+### 标签报告组装验证补充（2026-10-23）
+
+在原PipelineEvaluationReportTest加入冻结BOOLEAN标签政策和规范Gold地址，使用实际evaluator/产物校验/报告组装验证：两标签一对一错accuracy=0.5且回归仅一条通过；缺一产物labelGold=2/comparable=1/accuracy=1、回归0.5且报告不完整；重试继承prior产物与当前产物都可比、准确率/回归为1、原sourceExecutionIds保留，读取报告不调用runtime。
+
+原41298 terminal1为新增缺产物场景Mockito嵌套设桩错误；拆开夹具创建后原51399 terminal0，`/tmp/iqc-b-label-report-final.log`，fresh XML纯标签4+报告23=27项无失败/错误/跳过。本轮是实际产物/领域报告组装，数据库读取与冻结输入准入仍隔离，不代表真实SQL标签继承或网络/PDP验证；这些仍待后续补齐。
