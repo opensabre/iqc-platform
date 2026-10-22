@@ -183,6 +183,35 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals(completed.getId(),json.readTree(captured.getExpectedJson()).path("reviewId").asText());
         assertEquals(0,new BigDecimal("100").compareTo(json.readTree(captured.getExpectedJson()).path("expected").path("scoring").path("finalScore").decimalValue()));
         assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_quality_sample WHERE source_result_id=?",Integer.class,result.getId()));
+        // A reviewed candidate becomes an independently approved gold version, without recapturing live input.
+        String candidateBody=captured.getContentSnapshot(),candidateLineage=captured.getExpectedJson();
+        db.update("UPDATE iqc_conversation_message SET content='changed after candidate',start_ms=20000,end_ms=21000 WHERE id=?",second);
+        gold.annotate(captured.getId(),new GoldSampleService.Annotation(0,List.of(new GoldFinding(definition.code(),Finding.ValueType.NUMBER,
+                Finding.State.KNOWN,json.valueToTree(1000),List.of(first,second))),null,List.of("feedback"),GoldConversation.Difficulty.BASIC,
+                new GoldDecision(new BigDecimal("100"),GoldDecision.ScoreStatus.FINAL,Map.of(),GoldDecision.Risk.NONE)));
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->gold.review(captured.getId(),1,true,"Self review rejected"));
+        actor.set("gold-reviewer");var approved=gold.review(captured.getId(),1,true,"Independent feedback gold review");actor.set("annotator");
+        var frozenGold=json.readValue(approved.getSnapshotJson(),GoldConversation.class);
+        assertEquals(GoldConversation.EXACT_SCHEMA,frozenGold.schemaVersion());
+        assertEquals("processed agent text",frozenGold.messages().get(1).content());
+        assertEquals(2000L,frozenGold.messages().get(1).startMs());
+        assertEquals(completed.getId(),frozenGold.businessContext().path("candidateLineage").path("reviewId").asText());
+        var feedbackDataset=datasets.create("Feedback regression",new DatasetDraft(DatasetDraft.SCHEMA,DatasetDraft.Type.REGRESSION,null,
+                List.of(new DatasetDraft.Member(captured.getId(),approved.getVersionNo()))));
+        datasets.freeze(feedbackDataset.getId(),1);
+        var feedbackTask=run(evaluations.create(feedbackDataset.getId(),1,asset.getId(),null,1,"Feedback regression",1,"feedback_"+suffix));
+        var feedbackReport=evaluations.report(feedbackTask.getId(),feedbackTask.getCurrentExecutionId());
+        assertTrue(feedbackReport.complete());assertEquals(1,feedbackReport.successfulSamples());
+        assertEquals(0,BigDecimal.ONE.compareTo(feedbackReport.findingMetrics().aggregate().f1()));
+        assertEquals(0,new BigDecimal("20").compareTo(feedbackReport.businessMetrics().meanAbsoluteScoreError()));
+        assertEquals(0,BigDecimal.ZERO.compareTo(feedbackReport.regressionMetrics().passRate()));
+        var draft=pipelines.frozenDraft(asset.getId(),1);
+        var feedbackGate=context.getBean(PipelinePublicationGateService.class).evaluate(asset.getId(),1,draft.contentHash(),draft.release(),
+                evidence.get(0),new PipelinePublicationGateService.ExecutionEvidence(feedbackTask.getId(),feedbackTask.getCurrentExecutionId()));
+        assertFalse(feedbackGate.passed());
+        assertTrue(feedbackGate.criteria().stream().anyMatch(c->"REGRESSION_PASS".equals(c.code())&&c.status()==PipelinePublicationGateService.Status.FAILED));
+        var preserved=sql.getMapper(QualitySampleMapper.class).selectById(captured.getId());
+        assertEquals(candidateBody,preserved.getContentSnapshot());assertEquals(candidateLineage,preserved.getExpectedJson());
     }
     private ScheduledActorAccessService.Resolved authorizedActor() {
         return new ScheduledActorAccessService.Resolved("user-annotator","annotator",false,"group",Set.of(),

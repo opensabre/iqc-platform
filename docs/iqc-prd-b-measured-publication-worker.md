@@ -55,3 +55,12 @@ mvn -o -q -Dtest=IsolatedMysqlMeasuredPublicationIT,PipelineNodeSchemaRoundTripT
 本机脚本 `/private/tmp/iqc-b-measured-review-actions-validation.sh` 沿用隔离目录/端口guard及正常关闭；75迁移校验通过，schema1.1.74当前，结束后pid/socket不存在。测试触发器是故障注入，不是生产迁移。
 
 身份授权仍是受控seam：IqcDataScope及ScheduledActorAccessService.capture为mock，固定四个资源grant；没有真实PDP/current grant撤权或HTTP授权证据。调用实际内部工作流和runner，不是定时扫描器tick/自动发现验收。复核确认没有外部发送；不证明真实外部模型、渠道、浏览器、容量SLO。真实候选已产生，但该候选后续Gold审核→数据集→再次评测尚未覆盖。全适用I1–I7继续active。
+
+
+## 回流金标与回归门禁扩展
+
+在f7a8e73后复用刚刚由真实复核产生的候选，候选捕获后再次修改测试专属原消息。实际Gold服务仍从候选冻结体标注，拒绝自审，由另一受控审核人批准；所得精确v2金标保持原正文、2000ms坐标和真实reviewId。冻结为REGRESSION数据集，经实际评测创建与worker运行得到完整报告。
+
+金标保留人工重算100分/NONE风险，原政策仍得到80分/HIGH风险。因此实际报告事实F1=1、平均绝对分差20、回归通过率0；实际PipelinePublicationGateService对原质量Task/EID及此回归Task/EID判定passed=false，REGRESSION_PASS明确FAILED。不会把事实提取正确当作业务政策通过；没有修改、放宽或绕过门禁。此处验证实际门禁evaluate，未声称对已发布修订再次publish可改变原幂等发布记录。
+
+原31814终态0，`/tmp/iqc-b-feedback-gold-regression-first.log`，testCompile/surefire，当轮SQL组合场景1项零失败错误跳过。生产源码未修改；75迁移校验成功、1.1.74当前，隔离MySQL正常关闭，pid/socket不存在。候选原正文及lineage两个JSON逐字节保持，未重捕获当前会话。固定受控身份、单场景、无外部供应商/真实PDP/browser/容量SLO的边界不变。
