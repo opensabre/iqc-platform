@@ -55,7 +55,10 @@ public interface LlmQualityProvider {
                 && output.path("reason").isTextual() && !output.path("reason").asText().trim().isEmpty();
     }
 
-    record LlmEvaluation(boolean supported, boolean hit, String reason, String structuredJson) {
+    record LlmEvaluation(boolean supported, boolean hit, String reason, String structuredJson,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            SnapshotChatModelRouter.InvocationFingerprint invocationFingerprint) {
+        public LlmEvaluation(boolean supported,boolean hit,String reason,String structuredJson){this(supported,hit,reason,structuredJson,null);}
         public LlmEvaluation(boolean supported, boolean hit, String reason) {
             this(supported, hit, reason, null);
         }

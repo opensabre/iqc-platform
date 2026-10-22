@@ -1278,12 +1278,17 @@ public class InspectionExecutionService {
                 : results.stream().anyMatch(result -> "NOT_EVALUATED".equals(result.getResultStatus())) ? "NOT_EVALUATED"
                 : results.stream().anyMatch(result -> "HIT".equals(result.getResultStatus())) ? "HIT" : "NOT_HIT";
         var aggregate = itemStageOutcome(status, "逐项检测阶段完成");
-        long calls=0,validOutputs=0;
+        long calls=0,validOutputs=0;var fingerprints=objectMapper.createArrayNode();
         for(var result:results) if(result.getDetectorMetricsJson()!=null) {
             var measured=readSnapshot(result.getDetectorMetricsJson());
             calls+=measured.path("logicalInvocations").asLong(); validOutputs+=measured.path("validOutputs").asLong();
         }
-        if(calls>0) aggregate.setDetectorMetricsJson(structuredOutputMetrics(calls,validOutputs));
+        for(var result:results)if(result.getDetectorMetricsJson()!=null){
+            var measured=readSnapshot(result.getDetectorMetricsJson());
+            if(measured.path("invocationFingerprints").isArray())measured.path("invocationFingerprints").forEach(fingerprints::add);
+        }
+        if(calls>0){var metrics=(ObjectNode)readSnapshot(structuredOutputMetrics(calls,validOutputs));
+            metrics.set("invocationFingerprints",fingerprints);aggregate.setDetectorMetricsJson(metrics.toString());}
         var evidence = objectMapper.createArrayNode();
         results.forEach(result -> {
             var values = readSnapshot(result.getEvidenceJson());
@@ -1436,7 +1441,7 @@ public class InspectionExecutionService {
                     evaluation = priorRuns.get(runIndex);
                 } else evaluation=llmQualityProvider.evaluate(message.getContent(),rule,readSnapshot(task.getAgentSnapshotJson()),
                         preRuleFindings,recordId,callContext);
-                result.setDetectorMetricsJson(structuredOutputMetrics(1,evaluation.validStructuredOutput(objectMapper,conversationFacts)?1:0));
+                result.setDetectorMetricsJson(structuredOutputMetrics(1,evaluation.validStructuredOutput(objectMapper,conversationFacts)?1:0,evaluation.invocationFingerprint()));
                 if (!evaluation.supported()) {
                     result.setResultStatus("ERROR"); result.setScore(0); result.setRiskLevel("HIGH"); result.setDeduction(0);
                     result.setReason(evaluation.reason()); result.setFindingJson("[]"); result.setEvidenceJson("[]"); result.setSuggestionJson("[]");
@@ -1490,6 +1495,11 @@ public class InspectionExecutionService {
             }
             return compiled;
         }
+    }
+    private String structuredOutputMetrics(long calls,long valid,io.github.opensabre.iqc.result.llm.SnapshotChatModelRouter.InvocationFingerprint fingerprint){
+        var metrics=(ObjectNode)readSnapshot(structuredOutputMetrics(calls,valid));
+        var fingerprints=metrics.putArray("invocationFingerprints");if(fingerprint!=null)fingerprints.add(objectMapper.valueToTree(fingerprint));
+        return metrics.toString();
     }
     private String structuredOutputMetrics(long calls,long valid) {
         return objectMapper.createObjectNode().put("schemaVersion","iqc-llm-structured-metrics-v1")
