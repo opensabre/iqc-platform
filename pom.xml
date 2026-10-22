@@ -35,6 +35,11 @@
     </dependencyManagement>
 
     <dependencies>
+        <!-- External event transport; business acceptance still uses the existing trigger ledger. -->
+        <dependency>
+            <groupId>org.springframework.amqp</groupId>
+            <artifactId>spring-rabbit</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.github.opensabre</groupId>
             <artifactId>opensabre-starter-persistence</artifactId>

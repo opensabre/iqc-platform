@@ -1,0 +1,20 @@
+# Optional deployment overlay; not loaded by default. Values come from deployment secrets/organization assets.
+iqc:
+  trigger:
+    enabled: true
+    rabbit:
+      enabled: true
+      uri: ${IQC_TRIGGER_RABBIT_URI}
+      queue: ${IQC_TRIGGER_RABBIT_QUEUE:iqc.trigger.events}
+      source: ${IQC_TRIGGER_RABBIT_SOURCE:business-events}
+      owner-user-id: ${IQC_TRIGGER_RABBIT_OWNER_USER_ID}
+      owner: ${IQC_TRIGGER_RABBIT_OWNER}
+      all: false
+      # group-id: <the bound owner's current organization group; omit for owner-only scope>
+      pipeline-ids:
+        - ${IQC_TRIGGER_RABBIT_PIPELINE_ID}
+      event-types:
+        - ComplaintCreated
+        - OrderCompleted
+        - RiskDetected
+      allow-content: false

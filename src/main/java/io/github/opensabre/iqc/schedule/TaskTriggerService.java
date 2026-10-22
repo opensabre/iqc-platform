@@ -60,11 +60,30 @@ public class TaskTriggerService {
             }
         }
     }
-    private InspectionTask receiveAttempt(String requestJson){
+    public TaskTriggerRequest externalRequest(String requestJson){
         if(requestJson==null || requestJson.getBytes(StandardCharsets.UTF_8).length>16*1024*1024)throw IqcException.invalidArgument("触发请求超过16MiB");
         var request=read(requestJson,TaskTriggerRequest.class);
         if("archive-subscription".equals(request.source()))throw IqcException.invalidArgument("内部订阅来源保留，不能由外部接收使用");
-        return accept(request,actors.capture(),null,null,null,null);
+        return request;
+    }
+    private InspectionTask receiveAttempt(String requestJson){
+        return accept(externalRequest(requestJson),actors.capture(),null,null,null,null);
+    }
+    /** Trusted broker adapter supplies a deployment-bound identity, never one read from the payload. */
+    public InspectionTask receiveFromBroker(TaskTriggerRequest request,ScheduledActorAccessService.CreationBound bound,
+            ScheduledActorAccessService.Resolved actor){
+        if(request==null || bound==null || "archive-subscription".equals(request.source()))
+            throw IqcException.invalidArgument("外部消息触发来源无效");
+        var evidence=new Accepted("iqc-trigger-accepted-v1",request,"",null,null,bound,null,null);
+        var transaction=new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        transaction.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        transaction.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        for(int attempt=0;;attempt++){
+            try{return transaction.execute(status->{validateActor(evidence,actor);return accept(request,bound,null,null,null,null);});}
+            catch(org.springframework.dao.PessimisticLockingFailureException | org.springframework.dao.DuplicateKeyException conflict){
+                if(attempt>=2)throw conflict;
+            }
+        }
     }
     /** Runs inside the subscription row lock and transaction; never captures cached user context in background. */
     @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
