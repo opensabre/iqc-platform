@@ -249,9 +249,19 @@ class IsolatedMysqlMeasuredPublicationIT {
         var config=j.createObjectNode();config.putObject("ruleReference").put("id",rule.getId()).put("versionNo",1);config.putObject("findingReference").put("id",catalog.getId()).put("versionNo",1);config.putObject("agentReference").put("id",agent.getId()).put("versionNo",1);
         var node=new PipelineDefinition.Node("model","LLM","Controlled model","1",List.of(),Map.of(),config,null,3000,0,PipelineDefinition.OnError.FAIL_PIPELINE,null,null,true);
         var release=new PipelineRelease(PipelineRelease.EXACT_SCHEMA,new PipelineDefinition(PipelineDefinition.SCHEMA,List.of(node)),new FusionPolicy("priority",1,FusionPolicy.Method.PRIORITY,Map.of(),Map.of(),null,Set.of()),new InspectionScoring.Policy(InspectionScoring.POLICY_VERSION,InspectionScoring.Mode.DEDUCTION,100,60,List.of(new InspectionScoring.Item("check",20,false))),List.of(new PipelineRelease.ItemMapping("check",definition.code(),io.github.opensabre.iqc.scheme.SchemeDefinition.HitMeaning.VIOLATION)));
+        String labelId="label"+key, labelGroup="labelgroup"+key, labelCategory="category"+key;
+        db.update("INSERT INTO iqc_label_category(id,name,code) VALUES (?,'Controlled category',?)",labelCategory,labelCategory);
+        db.update("INSERT INTO iqc_label_group(id,category_id,name,code) VALUES (?,?,'Controlled group',?)",labelGroup,labelCategory,labelGroup);
+        db.update("INSERT INTO iqc_label(id,group_id,name,code,status,version_no,target_role,created_by,owner_group_id) VALUES (?,?,'Controlled label',?,'PUBLISHED',1,'all','annotator','group')",labelId,labelGroup,labelId);
+        db.update("INSERT INTO iqc_label_value_definition(id,label_id,value_code,value_type) VALUES (?,?,'hit','BOOLEAN')","value"+key,labelId);
+        db.update("INSERT INTO iqc_label_rule_binding(id,label_id,rule_id,rule_version_no) VALUES (?,?,?,1)","binding"+key,labelId,rule.getId());
+        var labelPolicy=new io.github.opensabre.iqc.label.FindingLabelPolicy(io.github.opensabre.iqc.label.FindingLabelPolicy.SCHEMA,
+                List.of(new io.github.opensabre.iqc.label.FindingLabelPolicy.Binding(labelId,1,"hit",definition.code())),null);
+        String labelAddress=io.github.opensabre.iqc.label.FindingLabelPolicy.bindingAddress(labelPolicy.bindings().getFirst());
+        release=new PipelineRelease(release.schemaVersion(),release.pipeline(),release.fusion(),release.scoring(),release.items(),null,null,labelPolicy);
         var asset=context.getBean(PipelineAssetService.class).create("P_"+key.toUpperCase(),"Controlled model persistence",release);
         var sample=new QualitySample();sample.setName("Controlled gold");sample.setSampleType("POSITIVE");sample.setConversationId(conversation);sample.setMessageId(message);sample.setSourceResultId("manual"+key);sample.setContentSnapshot("processed text");sample.setStatus("CANDIDATE");sample.setCreatedBy("annotator");sample.setOwnerGroupId("group");s.getMapper(QualitySampleMapper.class).insert(sample);
-        var gold=context.getBean(GoldSampleService.class);gold.annotate(sample.getId(),new GoldSampleService.Annotation(0,List.of(new GoldFinding(definition.code(),Finding.ValueType.BOOLEAN,Finding.State.KNOWN,j.valueToTree(true),List.of())),null,List.of(),GoldConversation.Difficulty.BASIC,null));actor.set("reviewer");gold.review(sample.getId(),1,true,"independent approval");actor.set("annotator");
+        var gold=context.getBean(GoldSampleService.class);gold.annotate(sample.getId(),new GoldSampleService.Annotation(0,List.of(new GoldFinding(definition.code(),Finding.ValueType.BOOLEAN,Finding.State.KNOWN,j.valueToTree(true),List.of())),null,List.of(),GoldConversation.Difficulty.BASIC,new GoldDecision(null,null,Map.of(labelAddress,j.valueToTree(true)),null)));actor.set("reviewer");gold.review(sample.getId(),1,true,"independent approval");actor.set("annotator");
         var datasets=context.getBean(EvaluationDatasetService.class);var dataset=datasets.create("Controlled model",new DatasetDraft(DatasetDraft.SCHEMA,DatasetDraft.Type.BASIC,null,List.of(new DatasetDraft.Member(sample.getId(),1))));datasets.freeze(dataset.getId(),1);
         var provider=context.getBean(LlmQualityProvider.class);
         // Exercise production prompt construction, parsing and router fingerprint generation.
@@ -282,7 +292,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         db.update("INSERT INTO iqc_conversation(id,source_file_name,message_count,status,created_by,owner_group_id,source_fingerprint) VALUES (?,'processed retry conversation',1,'READY','annotator','group',?)",failedConversation,"retry"+key);
         db.update("INSERT INTO iqc_conversation_message(id,conversation_id,sequence_no,speaker_role,content,relative_time,raw_line,line_number) VALUES (?,?,1,'agent','retry text','00:00:00','retry text',1)",failedMessage,failedConversation);
         var failedSample=new QualitySample();failedSample.setName("Retry gold");failedSample.setSampleType("POSITIVE");failedSample.setConversationId(failedConversation);failedSample.setMessageId(failedMessage);failedSample.setSourceResultId("retrymanual"+key);failedSample.setContentSnapshot("retry text");failedSample.setStatus("CANDIDATE");failedSample.setCreatedBy("annotator");failedSample.setOwnerGroupId("group");s.getMapper(QualitySampleMapper.class).insert(failedSample);
-        gold.annotate(failedSample.getId(),new GoldSampleService.Annotation(0,List.of(new GoldFinding(definition.code(),Finding.ValueType.BOOLEAN,Finding.State.KNOWN,j.valueToTree(true),List.of())),null,List.of(),GoldConversation.Difficulty.BASIC,null));actor.set("reviewer");gold.review(failedSample.getId(),1,true,"independent retry approval");actor.set("annotator");
+        gold.annotate(failedSample.getId(),new GoldSampleService.Annotation(0,List.of(new GoldFinding(definition.code(),Finding.ValueType.BOOLEAN,Finding.State.KNOWN,j.valueToTree(true),List.of())),null,List.of(),GoldConversation.Difficulty.BASIC,new GoldDecision(null,null,Map.of(labelAddress,j.valueToTree(true)),null)));actor.set("reviewer");gold.review(failedSample.getId(),1,true,"independent retry approval");actor.set("annotator");
         var retryDataset=datasets.create("Retry model",new DatasetDraft(DatasetDraft.SCHEMA,DatasetDraft.Type.BASIC,null,List.of(new DatasetDraft.Member(sample.getId(),1),new DatasetDraft.Member(failedSample.getId(),1))));datasets.freeze(retryDataset.getId(),1);
         var recovered=new java.util.concurrent.atomic.AtomicBoolean(false);
         doAnswer(call->{
@@ -296,8 +306,12 @@ class IsolatedMysqlMeasuredPublicationIT {
         String priorId=queued.getCurrentExecutionId();runner.executePersisted(queued.getId(),priorId);
         var partial=s.getMapper(InspectionTaskMapper.class).selectById(queued.getId());assertEquals("PARTIAL_FAILED",partial.getStatus());
         var prior=evaluations.report(partial.getId(),priorId);assertEquals(1,prior.successfulSamples());
+        assertEquals(2,prior.businessMetrics().labelGold());assertEquals(1,prior.businessMetrics().comparableLabels());
+        assertEquals(0,BigDecimal.ONE.compareTo(prior.businessMetrics().labelAccuracy()));
         recovered.set(true);var retried=run(partial);assertNotEquals(priorId,retried.getCurrentExecutionId());
         var retryReport=evaluations.report(retried.getId(),retried.getCurrentExecutionId());assertTrue(retryReport.complete());assertEquals(2,retryReport.successfulSamples());
+        assertEquals(2,retryReport.businessMetrics().labelGold());assertEquals(2,retryReport.businessMetrics().comparableLabels());
+        assertEquals(0,BigDecimal.ONE.compareTo(retryReport.businessMetrics().labelAccuracy()));
         assertEquals(priorId,retryReport.sourceExecutionIds().get(sample.getId()));assertEquals(retried.getCurrentExecutionId(),retryReport.sourceExecutionIds().get(failedSample.getId()));
         assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_evaluation_sample_result WHERE task_id=? AND execution_id=?",Integer.class,retried.getId(),retried.getCurrentExecutionId()));
         var inherited=evaluations.consistency(retried.getId(),retried.getCurrentExecutionId(),retried.getId(),priorId);
@@ -346,7 +360,7 @@ class IsolatedMysqlMeasuredPublicationIT {
             // Reuse the production framework filler; this test owns only the supplied user context.
             com.baomidou.mybatisplus.core.toolkit.GlobalConfigUtils.getGlobalConfig(f.getConfiguration())
                     .setMetaObjectHandler(new io.github.opensabre.persistence.handler.PoMetaObjectHandler());
-            for(var type:List.of(QualityRuleMapper.class,QualityRuleVersionMapper.class,QualityAgentMapper.class,QualityAgentVersionMapper.class,ConversationMapper.class,ConversationMessageMapper.class,FindingCatalogMapper.class,FindingCatalogVersionMapper.class,
+            for(var type:List.of(io.github.opensabre.iqc.label.dao.LabelCategoryMapper.class,io.github.opensabre.iqc.label.dao.LabelGroupMapper.class,io.github.opensabre.iqc.label.dao.InsightLabelMapper.class,io.github.opensabre.iqc.label.dao.LabelRuleBindingMapper.class,io.github.opensabre.iqc.label.dao.LabelValueDefinitionMapper.class,io.github.opensabre.iqc.label.dao.LabelCollectionMapper.class,io.github.opensabre.iqc.label.dao.LabelCollectionMemberMapper.class,QualityRuleMapper.class,QualityRuleVersionMapper.class,QualityAgentMapper.class,QualityAgentVersionMapper.class,ConversationMapper.class,ConversationMessageMapper.class,FindingCatalogMapper.class,FindingCatalogVersionMapper.class,
                     PipelineAssetMapper.class,PipelineAssetVersionMapper.class,QualitySampleMapper.class,QualitySampleVersionMapper.class,
                     EvaluationDatasetMapper.class,EvaluationDatasetVersionMapper.class,EvaluationSampleResultMapper.class,
                     ConversationInspectionResultMapper.class,RuleInspectionResultMapper.class,InspectionEvidenceMapper.class,InspectionResultMapper.class,ResultReviewMapper.class,ActionDiscoveryMapper.class))
@@ -368,10 +382,20 @@ class IsolatedMysqlMeasuredPublicationIT {
         @Bean FindingCatalogService findings(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope){return new FindingCatalogService(s.getMapper(FindingCatalogMapper.class),s.getMapper(FindingCatalogVersionMapper.class),j,scope);}
         @Bean LlmQualityProvider model(){return mock(LlmQualityProvider.class);}
         @Bean(destroyMethod="close") PipelineRuntime runtime(ObjectMapper j,ObjectProvider<InspectionExecutionService> runner){return new PipelineRuntime(List.of(new TranscriptMetricEngine(j),new FrozenDetectorEngine("LLM",j,runner)),1,8);}
-        @Bean PipelineAssetService pipelines(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,PipelineRuntime runtime,FindingCatalogService facts,ObjectProvider<PipelinePublicationGateService> gates){
-            return new PipelineAssetService(s.getMapper(PipelineAssetMapper.class),s.getMapper(PipelineAssetVersionMapper.class),s.getMapper(QualityRuleMapper.class),s.getMapper(QualityRuleVersionMapper.class),s.getMapper(QualityAgentMapper.class),s.getMapper(QualityAgentVersionMapper.class),mock(io.github.opensabre.iqc.agent.AgentAssetReferenceValidator.class),facts,j,scope,runtime,s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationInspectionResultMapper.class),gates);
+        @Bean PipelineAssetService pipelines(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,PipelineRuntime runtime,FindingCatalogService facts,ObjectProvider<PipelinePublicationGateService> gates,ObjectProvider<io.github.opensabre.iqc.label.FindingLabelFreezeService> labels){
+            return new PipelineAssetService(s.getMapper(PipelineAssetMapper.class),s.getMapper(PipelineAssetVersionMapper.class),s.getMapper(QualityRuleMapper.class),s.getMapper(QualityRuleVersionMapper.class),s.getMapper(QualityAgentMapper.class),s.getMapper(QualityAgentVersionMapper.class),mock(io.github.opensabre.iqc.agent.AgentAssetReferenceValidator.class),facts,j,scope,runtime,s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationInspectionResultMapper.class),gates,labels);
         }
         @Bean ProductionInputSnapshotService inputs(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope){return new ProductionInputSnapshotService(s.getMapper(ConversationMapper.class),s.getMapper(ConversationMessageMapper.class),scope,j);}
+        @Bean io.github.opensabre.iqc.label.FindingLabelFreezeService labelFreeze(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope){
+            return new io.github.opensabre.iqc.label.FindingLabelFreezeService(new io.github.opensabre.iqc.label.LabelResolutionService(
+                    s.getMapper(io.github.opensabre.iqc.label.dao.LabelCategoryMapper.class),
+                    s.getMapper(io.github.opensabre.iqc.label.dao.LabelGroupMapper.class),
+                    s.getMapper(io.github.opensabre.iqc.label.dao.InsightLabelMapper.class),
+                    s.getMapper(io.github.opensabre.iqc.label.dao.LabelRuleBindingMapper.class),
+                    s.getMapper(io.github.opensabre.iqc.label.dao.LabelValueDefinitionMapper.class),
+                    s.getMapper(io.github.opensabre.iqc.label.dao.LabelCollectionMapper.class),
+                    s.getMapper(io.github.opensabre.iqc.label.dao.LabelCollectionMemberMapper.class),scope),j);
+        }
         @Bean @Primary InspectionTaskService tasks(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,ProductionInputSnapshotService inputs,ObjectProvider<PipelineAssetService> pipelines,ObjectProvider<ScheduledActorAccessService> actors){return new InspectionTaskService(s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationMapper.class),null,null,null,j,s.getMapper(TaskExecutionMapper.class),scope,null,null,inputs,pipelines,actors);}
         @Bean GoldSampleService gold(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope){return new GoldSampleService(s.getMapper(QualitySampleMapper.class),s.getMapper(QualitySampleVersionMapper.class),s.getMapper(ConversationMapper.class),s.getMapper(ConversationMessageMapper.class),scope,j);}
         @Bean EvaluationDatasetService datasets(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,GoldSampleService gold){return new EvaluationDatasetService(s.getMapper(EvaluationDatasetMapper.class),s.getMapper(EvaluationDatasetVersionMapper.class),gold,scope,j);}

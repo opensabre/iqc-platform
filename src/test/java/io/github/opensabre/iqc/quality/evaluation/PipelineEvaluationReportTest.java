@@ -33,6 +33,7 @@ class PipelineEvaluationReportTest {
     private final PipelineEvaluationService.Prepared prepared = mock(PipelineEvaluationService.Prepared.class);
     private final TaskExecution execution = new TaskExecution();
     private boolean exactProtocol;
+    private io.github.opensabre.iqc.label.FindingLabelPolicy labelPolicy;
 
     @BeforeEach
     void frozenDatasetWithoutArtifacts() {
@@ -131,6 +132,8 @@ class PipelineEvaluationReportTest {
                  "scoring":{"version":"iqc-score-v2","mode":"DEDUCTION","baseScore":100,"passingScore":80,
                   "items":[{"itemCode":"redline","points":20,"veto":false}]}}
                 """.replace("iqc-pipeline-release-v1", exactProtocol ? PipelineRelease.EXACT_SCHEMA : PipelineRelease.SCHEMA), PipelineRelease.class);
+        if (labelPolicy != null) release = new PipelineRelease(release.schemaVersion(), release.pipeline(), release.fusion(),
+                release.scoring(), release.items(), release.publicationGate(), release.actionPolicy(), labelPolicy);
         when(prepared.release()).thenReturn(release);
         var gold = prepared.dataset().members().stream().filter(m -> sampleId.equals(m.sampleId())).findFirst().orElseThrow();
         when(prepared.member(gold.gold().conversationId())).thenReturn(gold);
@@ -224,6 +227,66 @@ class PipelineEvaluationReportTest {
         var report = service.report("task", "execution");
         assertThat(report.sourceExecutionIds()).containsEntry("first", "prior").containsEntry("second", "execution");
         assertThat(report.complete()).isTrue(); assertThat(report.availableSamples()).isEqualTo(2);
+    }
+    private void labelledDataset(boolean secondExpected) throws Exception {
+        labelPolicy = new io.github.opensabre.iqc.label.FindingLabelPolicy(
+                io.github.opensabre.iqc.label.FindingLabelPolicy.SCHEMA,
+                List.of(new io.github.opensabre.iqc.label.FindingLabelPolicy.Binding("redline", 1, "hit", "REDLINE")),
+                json.readTree("""
+                {"schemaVersion":"2.0","labels":[{"id":"redline","versionNo":1,"name":"Redline",
+                "targetRole":"all","values":[{"valueCode":"hit","valueType":"BOOLEAN"}]}]}
+                """));
+        var original = dataset(DatasetDraft.Type.REGRESSION);
+        var members = original.members().stream().map(member -> {
+            var g = member.gold(); var d = g.decision();
+            var decision = new GoldDecision(d.score(), d.scoreStatus(),
+                    Map.of("/redline/hit", json.valueToTree("first".equals(member.sampleId()) || secondExpected)), d.risk());
+            var gold = new GoldConversation(g.schemaVersion(), g.sourceSampleId(), g.conversationId(), g.messages(),
+                    g.businessContext(), g.findings(), g.annotatorId(), g.reviewerId(), g.source(), g.tags(), g.difficulty(), decision);
+            return new DatasetSnapshot.Member(member.sampleId(), member.versionNo(), member.draftRevision(), member.contentHash(), gold);
+        }).toList();
+        when(prepared.dataset()).thenReturn(new DatasetSnapshot(original.schemaVersion(), original.datasetId(), original.name(),
+                original.type(), original.description(), members));
+    }
+    @Test
+    void frozenLabelsParticipateInReportAccuracyAndRegression() throws Exception {
+        labelledDataset(false); artifactSnapshot();
+        var first = artifact("first", "execution", 10); var second = artifact("second", "execution", 20);
+        when(results.selectList(any())).thenReturn(List.of(first, second));
+        var report = service.report("task", "execution");
+        assertThat(report.businessMetrics().labelGold()).isEqualTo(2);
+        assertThat(report.businessMetrics().comparableLabels()).isEqualTo(2);
+        assertThat(report.businessMetrics().labelAccuracy()).isEqualByComparingTo("0.5");
+        assertThat(report.regressionMetrics().passedSamples()).isEqualTo(1);
+        assertThat(report.regressionMetrics().failedSampleIds()).containsExactly("second");
+    }
+    @Test
+    void missingLabelArtifactRetainsGoldDenominator() throws Exception {
+        labelledDataset(true); artifactSnapshot();
+        var first = artifact("first", "execution", 10);
+        when(results.selectList(any())).thenReturn(List.of(first));
+        var report = service.report("task", "execution");
+        assertThat(report.businessMetrics().labelGold()).isEqualTo(2);
+        assertThat(report.businessMetrics().comparableLabels()).isEqualTo(1);
+        assertThat(report.businessMetrics().labelAccuracy()).isEqualByComparingTo("1");
+        assertThat(report.regressionMetrics().passRate()).isEqualByComparingTo("0.5");
+        assertThat(report.complete()).isFalse();
+    }
+    @Test
+    void inheritedLabelArtifactRemainsComparableWithoutReexecution() throws Exception {
+        labelledDataset(true); artifactSnapshot(); execution.setAttemptNo(2);
+        var prior = new TaskExecution(); prior.setId("prior"); prior.setTaskId("task"); prior.setStatus("PARTIAL_FAILED"); prior.setAttemptNo(1);
+        when(executions.selectById("prior")).thenReturn(prior);
+        when(executions.selectList(any())).thenAnswer(call -> new ArrayList<>(List.of(prior)));
+        var first = artifact("first", "prior", 10); var second = artifact("second", "execution", 20);
+        when(results.selectList(any())).thenReturn(List.of(first), List.of(second));
+        clearInvocations(runtime);
+        var report = service.report("task", "execution");
+        assertThat(report.sourceExecutionIds()).containsEntry("first", "prior").containsEntry("second", "execution");
+        assertThat(report.businessMetrics().comparableLabels()).isEqualTo(2);
+        assertThat(report.businessMetrics().labelAccuracy()).isEqualByComparingTo("1");
+        assertThat(report.regressionMetrics().passRate()).isEqualByComparingTo("1");
+        verifyNoInteractions(runtime);
     }
     @Test
     void rejectsChangedArtifactDigestAndForeignFactIdentity() throws Exception {
