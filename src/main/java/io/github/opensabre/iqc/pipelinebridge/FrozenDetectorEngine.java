@@ -73,8 +73,14 @@ public final class FrozenDetectorEngine implements EngineAdapter {
         }
         var outcome=executor.getObject().evaluateFrozenPipelineNode(task,rule,config.get("agentSnapshot"),inputs,upstream,
                 phase,scope,context.node().nodeId(),context.attempt());
-        Map<String,JsonNode> metrics="LLM".equals(type) && outcome.getDetectorMetricsJson()!=null
-                ?Map.of("llmStructuredOutput",json.readTree(outcome.getDetectorMetricsJson())):Map.of();
+        Map<String,JsonNode> metrics=new LinkedHashMap<>();
+        if("LLM".equals(type)){
+            if(outcome.getDetectorMetricsJson()!=null)metrics.put("llmStructuredOutput",json.readTree(outcome.getDetectorMetricsJson()));
+            try{
+                var raw=outcome.getFindingJson()==null?null:json.readTree(outcome.getFindingJson());
+                metrics.put("llmCitationGrounding",json.valueToTree(LlmCitationGrounding.inspect(raw,inputs)));
+            }catch(RuntimeException|java.io.IOException unavailable){ /* Missing measurement must not change the business verdict. */ }
+        }
         if("ERROR".equals(outcome.getResultStatus())) return NodeResult.failure(NodeResult.Status.ERROR,"Detector failed",metrics);
         var citations=json.createArrayNode();
         if(outcome.getEvidenceJson()!=null) {

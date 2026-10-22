@@ -28,7 +28,7 @@ public final class LegacyFindingAdapter {
             String messageId = citation.path("messageId").asText();
             String text = citation.path("text").asText(citation.path("matchedText").asText());
             var message = inputs.stream().filter(input -> Objects.equals(messageId, input.getId())).findFirst().orElse(null);
-            if (message == null || text.isBlank() || message.getContent() == null || !message.getContent().contains(text)) {
+            if (!citationGrounded(citation,message)) {
                 invalidEvidence = true; continue;
             }
             var details = JsonNodeFactory.instance.objectNode().put("text", LlmTextSanitizer.sanitize(text))
@@ -44,6 +44,14 @@ public final class LegacyFindingAdapter {
         return new Finding(id, "LEGACY_RULE:" + ruleId, category,
                 Finding.ValueType.BOOLEAN, state == Finding.State.KNOWN ? BooleanNode.valueOf("HIT".equals(status)) : null,
                 state, null, severity, invalidEvidence ? "INVALID_EVIDENCE" : LlmTextSanitizer.sanitize(reason), evidence, source);
+    }
+
+    /** Shared compatibility quote predicate; callers retain their protocol/role and decision policies. */
+    public static boolean citationGrounded(JsonNode citation,ConversationMessage message){
+        if(citation==null||message==null)return false;
+        String text=citation.path("text").asText(citation.path("matchedText").asText());
+        return Objects.equals(citation.path("messageId").asText(),message.getId())&&!text.isBlank()
+                &&message.getContent()!=null&&message.getContent().contains(text);
     }
 
     private static Finding.Severity severity(String value) {

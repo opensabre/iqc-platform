@@ -84,3 +84,8 @@ BusinessQualityReportService沿原选择/冻结标准/已验证最近完成复�
 ## 2026-10-22 模型一致性输入来源增量
 
 实际Finding.Source.inputHash仅覆盖消息，不覆盖Prompt/上游；新增框架调用fingerprint经LlmEvaluation/原结构指标进入新轨迹，复用真实网关modelKey和精确摘要，不落正文、不改旧sourceHash。详见iqc-llm-consistency-input-evidence.md。当前仅来源采集且编译，独立重复运行比较/覆盖率/不可比原因报告仍待，不能把这一增量称模型一致性已完成。
+
+
+## 2026-10-22 引用真实性来源增量
+
+FrozenDetectorEngine增加过滤前的llmCitationGrounding计数，复用原LegacyFindingAdapter引用判定，失败节点也保留可用诊断。未知协议/丢失响应不填零，不根据过滤后合法引用宣称无幻觉；具体口径与待验见iqc-llm-citation-grounding.md。当前只采集来源，原报告聚合与页面尚待接入，广义事实幻觉仍不可冒称完成。
