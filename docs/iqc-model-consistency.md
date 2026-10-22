@@ -49,3 +49,9 @@ HTTP 合约由 `EvaluationCommandHttpPrivacyTest` 扩展两项：真实 MockMvc 
 上述 SQL 模型夹具进一步替换固定指纹：mock 适配器的正常分支委托真实 `SpringAiLlmQualityProvider.evaluateConversation`，使用真实提示词构造、解析、`SnapshotChatModelRouter` 路由与指纹生成，再经原工作器落库并比较。冻结 Agent 提供模型 profile；仅 router.create 返回的 ChatModel 和 ModelGateway 为 mock，gateway 调用传入 supplier 并返回按实际 ModelIdentity.key 构造的句柄。Agent 资产 validator 仍 mock。未发外部请求、未真实记账结算。
 
 独立 Task/EID 的同输入产物 comparable/agreeing=1；SQL 重试继承及未成功节点排除仍通过。provider 入口5次，实际模型与 gateway.invokeTracked 各4次（首次失败样本在适配器注入点直接失败）。不再用固定64字符常量代替输入指纹。最终原91129 terminal0，`/tmp/iqc-b-consistency-router-sql.log`，testCompile+SQL2/计算5/报告20共27项零失败错误跳过；专用MySQL自动关闭。这补齐生产 Provider/Router 指纹到真实SQL的组合证据，仍不证明真实供应商/网关账本/PDP或浏览器整链。
+
+## SQL 到控制器响应组合验证（2026-10-22）
+
+上述真实工作器/Provider/Router/SQL重试场景继续接真实 `PipelineEvaluationController`、响应包装与异常处理，MockMvc请求显式双方Task/EID。响应data经相同JSON序列化与直接服务报告逐字段相等；private/no-store与nosniff存在，不含会话正文或inputHash。授权服务mock抛错时返回IQC-1006且无data，读取未增加模型或gateway调用（仍各4次）。
+
+原13595 terminal1只因测试JsonNode的0/0.0节点类型比较，改为双方均经JSON序列化解析；原43057最终terminal0，`/tmp/iqc-b-consistency-sql-http-final.log`，testCompile及SQL2/计算5/报告20共27项零失败错误跳过。mock当前授权与范围、模型响应/网关账本/Agent资产validator的边界沿前节。此为SQL与真实MVC控制器组合，不是真实socket HTTP、PDP或浏览器整链；无生产源码改动，隔离MySQL自动关闭。
