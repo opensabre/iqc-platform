@@ -336,6 +336,36 @@ class PipelineEvaluationReportTest {
         assertThat(result.excludedReasons()).containsEntry("MISSING_ARTIFACT",2);
     }
 
+    @Test void consistencyUsesInheritedArtifactIdentityInsteadOfRequestedRetryExecution() throws Exception {
+        artifactSnapshot();execution.setAttemptNo(2);
+        tasks.selectById("task").setRuleSnapshotJson("{\"evaluationSnapshot\":{\"versionNo\":1},\"pipelineSnapshot\":{\"contentHash\":\""+"a".repeat(64)+"\"}}");
+        var prior=new TaskExecution();prior.setId("prior");prior.setTaskId("task");
+        prior.setStatus("PARTIAL_FAILED");prior.setAttemptNo(1);
+        when(executions.selectById("prior")).thenReturn(prior);
+        when(executions.selectList(any())).thenAnswer(call->new ArrayList<>(List.of(prior)))
+                .thenAnswer(call->new ArrayList<TaskExecution>());
+        var inherited=artifact("first","prior",10);
+        when(results.selectList(any())).thenReturn(List.of(inherited),List.of(),List.of(inherited));
+        when(results.selectOne(any())).thenReturn(inherited);
+        var comparison=service.consistency("task","execution","task","prior");
+        assertThat(comparison.expectedPairs()).isEqualTo(2);
+        assertThat(comparison.comparablePairs()).isZero();assertThat(comparison.agreementRate()).isNull();
+        assertThat(comparison.excludedReasons()).containsOnly(
+                org.assertj.core.api.Assertions.entry("SAME_ARTIFACT",1),
+                org.assertj.core.api.Assertions.entry("MISSING_ARTIFACT",1));
+        verify(results,times(2)).selectOne(any());
+    }
+
+    @Test void consistencyRejectsArtifactDisappearingAfterReportValidation() throws Exception {
+        artifactSnapshot();
+        tasks.selectById("task").setRuleSnapshotJson("{\"evaluationSnapshot\":{\"versionNo\":1},\"pipelineSnapshot\":{\"contentHash\":\""+"a".repeat(64)+"\"}}");
+        var row=artifact("first","execution",10);
+        when(results.selectList(any())).thenReturn(List.of(row));
+        when(results.selectOne(any())).thenReturn(null);
+        assertThatThrownBy(()->service.consistency("task","execution","task","execution"))
+                .hasMessageContaining("已校验产物已消失");
+    }
+
     @Test void consistencyRejectsChangedFrozenPipelineBeforeArtifactReads(){
         var selected=tasks.selectById("task");
         selected.setRuleSnapshotJson("{\"pipelineSnapshot\":{\"contentHash\":\""+"a".repeat(64)+"\"}}");

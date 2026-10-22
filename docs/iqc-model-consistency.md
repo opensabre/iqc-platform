@@ -27,3 +27,5 @@ comparisonCoverage=comparablePairs/expectedPairs；agreementRate=agreeingPairs/c
 `IsolatedMysqlMeasuredPublicationIT` 在同一冻结数据集和流水线下，由真实工作器执行两个独立评测任务并读取持久化产物。该流水线仅含处理后会话时间间隔 METRIC 节点，因此一致性 expected/comparable/agreeing 均为 0，coverage/agreement 为 null，排除原因为空；不得报告为 100%。不同冻结数据集（RISK/REGRESSION）的实际执行比较被拒绝。
 
 本轮 main/test 编译及三个测试类共 24 项通过（SQL 1、计算 5、报告 18）；日志 `/tmp/iqc-b-consistency-sql-validation.log`。使用本机专用 34307 数据库，75 项迁移校验通过，脚本结束自动关闭。本证据不包含模型供应商调用、继承产物的 SQL 场景、HTTP 或浏览器联调，不能证明模型一致性达标。
+
+服务层继承边界另由 `PipelineEvaluationReportTest` 覆盖：显式比较 retry/prior 两个 EID，retry 的样本实际继承 prior 产物时，归为 SAME_ARTIFACT，未生成独立比较；缺失样本继续保留 MISSING_ARTIFACT 分母。原 report 校验后 selectOne 已无产物时，拒绝返回比较报告。该层使用真实报告/产物校验逻辑、模拟 mapper，不是 SQL 继承场景证据。最终 `/tmp/iqc-b-consistency-inherited-final.log`，报告 20 +计算 5 共 25 项通过；首轮测试设桩 API 编译错误已修正，无生产代码变化。
