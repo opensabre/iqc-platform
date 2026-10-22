@@ -358,4 +358,50 @@ class BusinessQualityReportServiceTest {
         assertThat(json.writeValueAsString(json.readValue(encoded,BusinessQualityReportService.PolicyGroup.class))).isEqualTo(encoded);
     }
 
+    @Test void findingModificationUsesExactValuesAndSemanticEvidenceInsteadOfIdsOrExplanation() throws Exception {
+        task("a",90,"[\"c\"]");
+        var result=new ConversationInspectionResult();result.setId("r");
+        when(results.selectLatestForTaskConversation(any(),any())).thenReturn(result);
+        var pass=evaluation(InspectionScoring.ItemStatus.PASS);
+        when(reviews.validatedMachineEvaluation(any(),any())).thenReturn(pass);
+        var completed=new io.github.opensabre.iqc.quality.model.ResultReview();completed.setStatus("COMPLETED");
+        when(reviews.latest("r",true)).thenReturn(completed);
+        var json=new ObjectMapper();
+        var e1=new io.github.opensabre.iqc.finding.Finding.Evidence("e1",io.github.opensabre.iqc.finding.Finding.EvidenceType.CONVERSATION,"m1",null);
+        var e2=new io.github.opensabre.iqc.finding.Finding.Evidence("e2",io.github.opensabre.iqc.finding.Finding.EvidenceType.CONVERSATION,"m2",null);
+        var equivalentEvidence=new io.github.opensabre.iqc.finding.Finding.Evidence("human-e1",e1.type(),e1.reference(),json.readTree("{\"explanation\":\"human\"}"));
+        var changedEvidence=new io.github.opensabre.iqc.finding.Finding.Evidence("e3",e1.type(),"m3",null);
+        var original=reviewMetricFact("1.000000000000000001",io.github.opensabre.iqc.finding.Finding.Severity.LOW,
+                io.github.opensabre.iqc.finding.Finding.State.KNOWN,List.of(e1,e2),"machine");
+        var before=json.writeValueAsString(original);
+        var variants=List.of(
+                reviewMetricFact("1.0000000000000000010",original.severity(),original.state(),List.of(e2,equivalentEvidence,equivalentEvidence),"human explanation"),
+                reviewMetricFact("1.000000000000000002",original.severity(),original.state(),original.evidence(),"machine"),
+                reviewMetricFact("1.000000000000000001",io.github.opensabre.iqc.finding.Finding.Severity.HIGH,original.state(),original.evidence(),"machine"),
+                reviewMetricFact(null,original.severity(),io.github.opensabre.iqc.finding.Finding.State.UNKNOWN,original.evidence(),"machine"),
+                reviewMetricFact("1.000000000000000001",original.severity(),original.state(),List.of(e1,changedEvidence),"machine"));
+        for(int i=0;i<variants.size();i++){
+            var findingProjection=new HumanFindingReviewEvaluator.PolicyProjection(
+                    new HumanFindingReviewEvaluator.Projection(List.of(original),List.of(variants.get(i)),List.of()),
+                    List.of(),pass.scoring(),null,"NONE",java.util.Map.of(),null,"PASS");
+            when(reviews.validatedProjection(any(),any(),any())).thenReturn(
+                    new BusinessItemReviewEvaluator.Projection("r",pass,pass,List.of(),findingProjection));
+            var changes=service.report(List.of("a")).groups().getFirst().reviewChanges();
+            assertThat(changes.reviewedResults()).isEqualTo(1);
+            assertThat(changes.findingChangedResults()).as("variant %s",i).isEqualTo(i==0?0:1);
+            assertThat(changes.modifiedResults()).as("variant %s",i).isEqualTo(i==0?0:1);
+            assertThat(changes.itemOrScoreChangedResults()).isZero();
+            assertThat(changes.effectiveNumericScoreChangedResults()).isZero();
+        }
+        assertThat(json.writeValueAsString(original)).isEqualTo(before);
+    }
+
+    private io.github.opensabre.iqc.fusion.FindingFusion.Result reviewMetricFact(String number,
+            io.github.opensabre.iqc.finding.Finding.Severity severity,io.github.opensabre.iqc.finding.Finding.State state,
+            List<io.github.opensabre.iqc.finding.Finding.Evidence> evidence,String explanation){
+        return new io.github.opensabre.iqc.fusion.FindingFusion.Result("METRIC",io.github.opensabre.iqc.finding.Finding.ValueType.NUMBER,state,
+                number==null?null:com.fasterxml.jackson.databind.node.DecimalNode.valueOf(new java.math.BigDecimal(number)),
+                severity,List.of(),List.of(),List.of(),evidence,explanation,"fusion",1);
+    }
+
 }
