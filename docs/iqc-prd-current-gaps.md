@@ -33,3 +33,9 @@ PRD14.3要求业务层标签准确率。当前 `PipelineEvaluationService.report
 - I1/I2/I6及其它既有功能仍须对照正式PRD验收；不能因为本轮优先处理指标而缩小原任务。
 
 以上后三项属于待核实/待验收集合，不据简单源码搜索判断整个能力不存在。新增基础设施或并行实现前，仍必须搜索拥有仓库、starter、共享服务和Wiki；framework/base-gateway修改需用户明确批准。本轮仅文档复核，不更改生产源码或部署状态。
+
+## 标签指标实施进展
+
+本轮在既有报告接入冻结标签投影：`LabelEvaluationMetrics`仅对规范绑定地址且KNOWN的合法标签值计数；正确数/可比数计算准确率，零可比保持null。无政策/目录、旧名称键、缺输出及未知状态保留Gold总数。回归样本须所有Gold标签均可比且正确才能通过，评测不调用业务动作。标签类型仍服从现有投影校验（不支持对象标签），没有扩展目录类型或切换默认release版本。
+
+验证：原66104 terminal1（新增夹具误用仅接受整数的DURATION_MONTHS），修为支持小数的PERCENTAGE后原11353 terminal0，`/tmp/iqc-b-label-metrics-final.log`。fresh XML：LabelEvaluationMetricsTest4、PipelineEvaluationReportTest20，共24项无失败/错误/跳过。首轮完成主源码编译；末轮testCompile+surerfire。测试覆盖纯标签计算和既有报告回归，不代表已补齐绑定标签的真实报告/SQL重试组合、真实PDP或浏览器整链。以上组合仍为下一验收项，完整I1–I7继续进行。

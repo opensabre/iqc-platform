@@ -254,7 +254,7 @@ public class PipelineEvaluationService {
         var sources = new LinkedHashMap<String, String>(); int successful = 0;
         boolean regression = prepared.dataset().type() == DatasetDraft.Type.REGRESSION;
         var regressionFailed = new ArrayList<String>(); int regressionPassed = 0;
-        int scoreGold=0,comparableScores=0,riskGold=0,highRiskGold=0,highRiskDetected=0,labelGold=0;
+        int scoreGold=0,comparableScores=0,riskGold=0,highRiskGold=0,highRiskDetected=0,labelGold=0,comparableLabels=0,correctLabels=0;
         var absoluteScoreError=java.math.BigDecimal.ZERO; var durations=new ArrayList<Long>();
         var structured=new StructuredCounter(prepared.release());
         for (var member : prepared.dataset().members()) {
@@ -273,6 +273,8 @@ public class PipelineEvaluationService {
             }
             var actual = validatedRow(task, prepared, row); sources.put(member.sampleId(), row.getExecutionId());
             structured.add(actual);
+            var labelCounts=LabelEvaluationMetrics.evaluate(expected==null?Map.of():expected.labels(),prepared.release().labelPolicy(),actual.fusion());
+            comparableLabels+=labelCounts.comparable(); correctLabels+=labelCounts.correct();
             if ("SUCCESS".equals(row.getStatus())) successful++;
             durations.add(row.getDurationMs());
             if(expected!=null) {
@@ -286,7 +288,7 @@ public class PipelineEvaluationService {
             metricSamples.add(metricSample);
             if (regression) {
                 boolean matched = "SUCCESS".equals(row.getStatus()) && FindingEvaluationMetrics.matchesGold(metricSample)
-                        && matchesBusiness(expected, actual);
+                        && matchesBusiness(expected, actual, labelCounts);
                 if (matched) regressionPassed++; else regressionFailed.add(member.sampleId());
             }
         }
@@ -294,7 +296,7 @@ public class PipelineEvaluationService {
         durations.sort(Long::compareTo);
         var business=new BusinessMetrics(scoreGold,comparableScores,comparableScores==0?null:absoluteScoreError.divide(
                 java.math.BigDecimal.valueOf(comparableScores),6,java.math.RoundingMode.HALF_UP),ratio(comparableScores,scoreGold),
-                riskGold,highRiskGold,highRiskDetected,ratio(highRiskDetected,highRiskGold),labelGold,0,null);
+                riskGold,highRiskGold,highRiskDetected,ratio(highRiskDetected,highRiskGold),labelGold,comparableLabels,ratio(correctLabels,comparableLabels));
         var latency=new LatencyMetrics("CONVERSATION_EVALUATOR_WALL_EXCLUDING_QUEUE",durations.size(),percentile(durations,0.5),
                 percentile(durations,0.95),percentile(durations,0.99),ratio(sources.size()-successful,sources.size()));
         return new Report("iqc-evaluation-report-v1", taskId, execution.getId(), prepared.datasetHash(), prepared.dataset().members().size(),
@@ -370,9 +372,9 @@ public class PipelineEvaluationService {
                     calls==0 || unmeasured>0?null:java.math.BigDecimal.valueOf(valid).divide(java.math.BigDecimal.valueOf(calls),6,java.math.RoundingMode.HALF_UP));
         }
     }
-    private boolean matchesBusiness(GoldDecision expected, PipelineConversationEvaluator.Evaluation actual) {
+    private boolean matchesBusiness(GoldDecision expected, PipelineConversationEvaluator.Evaluation actual, LabelEvaluationMetrics.Counts labels) {
         if (expected == null) return true;
-        if (!expected.labels().isEmpty()) return false; // No label output exists in this Pipeline contract yet.
+        if (!labels.matchesAll()) return false;
         if (expected.risk() != null && !expected.risk().name().equals(actual.riskLevel())) return false;
         if (expected.scoreStatus() != null && !expected.scoreStatus().name().equals(actual.scoring().scoreStatus().name())) return false;
         return expected.score() == null || actual.scoring().finalScore() != null
