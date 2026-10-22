@@ -304,6 +304,38 @@ public class PipelineEvaluationService {
                         regressionPassed,regression?ratio(regressionPassed,prepared.dataset().members().size()):null,List.copyOf(regressionFailed)),
                 structured.summary());
     }
+    /** Explicit repeated-run comparison reuses the existing ownership, artifact and source-execution checks. */
+    public ModelConsistencyMetrics.Report consistency(String taskId,String executionId,String referenceTaskId,String referenceExecutionId){
+        if(java.util.stream.Stream.of(taskId,executionId,referenceTaskId,referenceExecutionId).anyMatch(v->v==null||v.isBlank()))
+            throw IqcException.invalidArgument("一致性比较必须指定双方Task与执行轮次");
+        var selected=context(taskId);var reference=context(referenceTaskId);
+        if(!selected.prepared().datasetHash().equals(reference.prepared().datasetHash())
+                ||!selected.snapshot().path("pipelineSnapshot").path("contentHash").equals(reference.snapshot().path("pipelineSnapshot").path("contentHash"))
+                ||selected.snapshot().path("pipelineSnapshot").path("contentHash").asText().isBlank())
+            throw IqcException.invalidArgument("一致性比较要求相同冻结数据集与流水线版本");
+        var left=report(taskId,executionId);var right=report(referenceTaskId,referenceExecutionId);
+        var nodes=selected.prepared().release().pipeline().nodes().stream().filter(n->"LLM".equals(n.type())).map(n->n.nodeId()).toList();
+        var pairs=new ArrayList<ModelConsistencyMetrics.Pair>();
+        for(var member:selected.prepared().dataset().members()){
+            var a=consistencyArtifact(selected,left,member.sampleId());var b=consistencyArtifact(reference,right,member.sampleId());
+            for(String node:nodes)pairs.add(new ModelConsistencyMetrics.Pair(consistencyObservation(a,node),consistencyObservation(b,node)));
+        }
+        return ModelConsistencyMetrics.evaluate(pairs,json);
+    }
+    private record ConsistencyArtifact(String identity,Map<String,io.github.opensabre.iqc.pipeline.NodeResult> nodes) { }
+    private ConsistencyArtifact consistencyArtifact(Context context,Report report,String sampleId){
+        String source=report.sourceExecutionIds().get(sampleId);if(source==null)return null;
+        var row=results.selectOne(Wrappers.<EvaluationSampleResult>lambdaQuery().eq(EvaluationSampleResult::getTaskId,context.task().getId())
+                .eq(EvaluationSampleResult::getExecutionId,source).eq(EvaluationSampleResult::getSampleId,sampleId));
+        if(row==null)throw IqcException.invalidState("一致性比较的已校验产物已消失");
+        var actual=validatedRow(context.task(),context.prepared(),row);
+        var nodes=new LinkedHashMap<String,io.github.opensabre.iqc.pipeline.NodeResult>();
+        actual.run().trace().forEach(trace->nodes.put(trace.nodeId(),trace.result()));
+        return new ConsistencyArtifact(context.task().getId()+":"+source+":"+sampleId,Map.copyOf(nodes));
+    }
+    private ModelConsistencyMetrics.Observation consistencyObservation(ConsistencyArtifact artifact,String node){
+        return artifact==null?null:new ModelConsistencyMetrics.Observation(artifact.identity(),artifact.nodes().get(node));
+    }
     private static final class StructuredCounter {
         private final Map<String,String> nodeTypes=new HashMap<>();
         private final int declared;

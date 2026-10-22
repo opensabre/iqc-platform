@@ -64,6 +64,13 @@ public class PipelineEvaluationController {
         access("iqc:evaluation:report:view");
         return service.report(taskId, executionId);
     }
+    @GetMapping("/{taskId}/consistency")
+    @ResourcePermission(code="iqc:evaluation:report:view", name="查看固定数据集评测报告", type="iqc", description="以完整金标分母计算并保留失败重试来源")
+    @Audit(operationType=OperationType.QUERY, description="读取模型重复运行一致性", module="IQC_PRIVACY", request=false, response=false, key="#taskId")
+    public io.github.opensabre.iqc.quality.evaluation.ModelConsistencyMetrics.Report consistency(@PathVariable String taskId,
+            @RequestParam String executionId,@RequestParam String referenceTaskId,@RequestParam String referenceExecutionId){
+        access("iqc:evaluation:report:view");return service.consistency(taskId,executionId,referenceTaskId,referenceExecutionId);
+    }
     public record Create(String datasetId, Integer datasetVersion, String pipelineId, Integer pipelineVersion,
                          Integer draftRevision, String name, Integer concurrency, String requestId) { }
 }

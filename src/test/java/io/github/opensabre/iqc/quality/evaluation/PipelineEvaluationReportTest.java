@@ -314,4 +314,37 @@ class PipelineEvaluationReportTest {
         assertThat(report.regressionMetrics().passRate()).isEqualByComparingTo("0");
     }
 
+    @Test void consistencyRequiresExplicitExecutionIdentitiesBeforeReadingArtifacts(){
+        assertThatThrownBy(()->service.consistency("task",null,"task","execution"))
+                .hasMessageContaining("双方Task与执行轮次");
+        verifyNoInteractions(results);
+    }
+    @Test void consistencyAuthorizesReferenceTaskBeforeReadingEitherReport(){
+        var forbidden=new InspectionTask();forbidden.setId("forbidden");forbidden.setTaskType("PIPELINE_EVALUATION");forbidden.setCreatedBy("outsider");
+        when(tasks.selectById("forbidden")).thenReturn(forbidden);
+        when(scope.canView(eq("outsider"),any())).thenReturn(false);
+        assertThatThrownBy(()->service.consistency("task","execution","forbidden","other"))
+                .hasMessageContaining("无权查看评测任务");
+        verifyNoInteractions(results);
+    }
+    @Test void consistencyRetainsMissingSampleAndNodeDenominator() {
+        var task=tasks.selectById("task");
+        task.setRuleSnapshotJson("{\"pipelineSnapshot\":{\"contentHash\":\""+"a".repeat(64)+"\"}}");
+        var result=service.consistency("task","execution","task","execution");
+        assertThat(result.expectedPairs()).isEqualTo(2);assertThat(result.comparablePairs()).isZero();
+        assertThat(result.agreementRate()).isNull();
+        assertThat(result.excludedReasons()).containsEntry("MISSING_ARTIFACT",2);
+    }
+
+    @Test void consistencyRejectsChangedFrozenPipelineBeforeArtifactReads(){
+        var selected=tasks.selectById("task");
+        selected.setRuleSnapshotJson("{\"pipelineSnapshot\":{\"contentHash\":\""+"a".repeat(64)+"\"}}");
+        var reference=new InspectionTask();reference.setId("reference");reference.setTaskType("PIPELINE_EVALUATION");reference.setCreatedBy("owner");
+        reference.setRuleSnapshotJson("{\"pipelineSnapshot\":{\"contentHash\":\""+"b".repeat(64)+"\"}}");
+        when(tasks.selectById("reference")).thenReturn(reference);doReturn(prepared).when(service).prepare(eq(reference),any(),eq(false));
+        assertThatThrownBy(()->service.consistency("task","execution","reference","other"))
+                .hasMessageContaining("相同冻结数据集与流水线版本");
+        verifyNoInteractions(results);
+    }
+
 }
