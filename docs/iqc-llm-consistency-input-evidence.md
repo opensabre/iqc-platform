@@ -36,3 +36,11 @@ SnapshotChatModelRouter 在实际选定主/备用模型、进入原 Gateway 前�
 原13690 terminal0，主/测试编译及首轮12项通过，`/tmp/iqc-b-invocation-fingerprint-first.log`。追加工具/profile后原33875 terminal0，testCompile/surefire，InvocationFingerprintTest7、SnapshotChatModelRouterTest3、SpringAiLlmQualityProviderTest4共14项零失败错误跳过，`/tmp/iqc-b-invocation-fingerprint-tools.log`。计数不跨轮累计。
 
 工具历史继续/returnDirect、完整Fallback及预算结算副作用仍需独立验证。一致性聚合、多独立产物选择、覆盖率/不可比原因及页面仍未实现；本批不以指纹采集代替模型一致性指标。
+
+## B 工具继续、直接返回与实际备用路径
+
+新增三个实际router路径检查（受控模型/网关，实际Spring AI ToolCallingManager）：工具返回进入下一轮时，最终指纹覆盖其历史，改变工具返回会改变最终输入摘要；每次工具执行一次且两轮模型调用。returnDirect只执行工具一次/模型一次，无最终模型指纹，不把工具结果伪装模型输出。主模型异常后原路由实际转备用，返回指纹modelKey等于备用Handle身份。
+
+原71399终态1：17项中16通过，备用夹具重新when设桩触发旧Supplier回调；改用doAnswer，无生产修复。原57001终态0，`/tmp/iqc-b-invocation-tool-cycle-second.log`，testCompile/surefire，新指纹10+Router3+Provider4共17项零失败错误跳过。未证明真实供应商、真实Gateway预算/结算或端到端持久化。
+
+接入核对：FrozenDetectorEngine保留完整llmStructuredOutput节点metrics，故指纹进入原冻结trace；当前StructuredCounter只汇总结构成功率。一致性需要原来源校验后的多个独立Task/EID实际产物，不能只扩充这个单产物计数器或拿Benchmark不同变量结果直接冒充同输入一致性。
