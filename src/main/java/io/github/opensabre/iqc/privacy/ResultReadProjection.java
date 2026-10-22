@@ -756,6 +756,65 @@ public final class ResultReadProjection {
                 configurationPrivacy("iqc-review-queue-read-v1",access,reveal,List.of("records.requestComment")));
     }
 
+    public record ScoreReviewContextRead(String sourceResultId,String sourceHash,String computedScoringHash,String computedScoreStatus,
+            String computedScore,Object manualScore,Map<String,Object> privacy) { }
+    public ScoreReviewContextRead scoreReviewContext(io.github.opensabre.iqc.quality.BusinessItemReviewService.ScoreContext source,
+            SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(source);Objects.requireNonNull(access);boolean reveal=access.fullConversation()&&access.pii();
+        Object manual=source.manualScore();
+        if(!reveal&&source.manualScore()!=null){
+            var original=source.manualScore();var adjustment=original.adjustment();
+            var safeAdjustment=new LinkedHashMap<String,Object>();
+            safeAdjustment.put("sourceResultId",adjustment.sourceResultId());safeAdjustment.put("expectedScoringHash",adjustment.expectedScoringHash());
+            safeAdjustment.put("finalScore",adjustment.finalScore());safeAdjustment.put("reason",null);
+            var safe=new LinkedHashMap<String,Object>();safe.put("adjustment",safeAdjustment);safe.put("status",original.status());
+            safe.put("computedScoringHash",original.computedScoringHash());safe.put("effectiveScore",original.effectiveScore());manual=safe;
+        }
+        return new ScoreReviewContextRead(source.sourceResultId(),source.sourceHash(),source.computedScoringHash(),source.computedScoreStatus(),
+                source.computedScore(),manual,configurationPrivacy("iqc-score-review-context-read-v1",access,reveal,List.of("manualScore.adjustment.reason")));
+    }
+
+    public io.github.opensabre.iqc.quality.model.ResultReview labelReview(
+            io.github.opensabre.iqc.quality.model.ResultReview source,SensitiveReadAccessService.Access access,boolean detailRead){
+        return reviewRead(source,access,detailRead,"iqc-label-review-read-v1");
+    }
+    public io.github.opensabre.iqc.quality.model.ResultReview messageReview(
+            io.github.opensabre.iqc.quality.model.ResultReview source,SensitiveReadAccessService.Access access,boolean detailRead){
+        return reviewRead(source,access,detailRead,"iqc-message-review-read-v1");
+    }
+    public io.github.opensabre.iqc.quality.model.ResultReview businessReview(
+            io.github.opensabre.iqc.quality.model.ResultReview source,SensitiveReadAccessService.Access access,boolean detailRead){
+        var copy=reviewRead(source,access,detailRead,"iqc-business-review-read-v1");
+        if(!detailRead)return copy;
+        var display=new LinkedHashMap<String,Object>();display.put("policyVersion","iqc-review-workflow-presentation-v1");
+        try{
+            if(source.getReviewRevision()==null||source.getReviewRevision()<1)throw new IllegalArgumentException();
+            var raw=source.getReviewedResultJson();
+            com.fasterxml.jackson.databind.JsonNode workflow=null;
+            if(raw!=null&&!raw.isBlank()){
+                var root=json.readTree(raw);if(root==null||!root.isObject())throw new IllegalArgumentException();
+                workflow="COMPLETED".equals(source.getStatus())?root.get("workflow"):root;
+            }else if("COMPLETED".equals(source.getStatus()))throw new IllegalArgumentException();
+            io.github.opensabre.iqc.quality.BusinessItemReviewEvaluator.ReviewWorkflow checked=null;
+            if(workflow!=null&&!workflow.isNull()){
+                checked=json.treeToValue(workflow,io.github.opensabre.iqc.quality.BusinessItemReviewEvaluator.ReviewWorkflow.class);
+                if(checked.parentRevision()!=null&&checked.parentRevision()>=source.getReviewRevision())throw new IllegalArgumentException();
+            }
+            display.put("state","AVAILABLE");display.put("stage",checked==null?"INITIAL":checked.stage().name());display.put("workflow",checked==null||checked.stage()==io.github.opensabre.iqc.quality.BusinessItemReviewEvaluator.ReviewStage.INITIAL?null:checked);
+        }catch(Exception invalid){display.put("state","UNAVAILABLE");display.put("stage","INVALID");}
+        copy.setReviewPresentation(display);return copy;
+    }
+    private io.github.opensabre.iqc.quality.model.ResultReview reviewRead(
+            io.github.opensabre.iqc.quality.model.ResultReview source,SensitiveReadAccessService.Access access,boolean detailRead,String policy){
+        Objects.requireNonNull(source);Objects.requireNonNull(access);
+        var copy=new io.github.opensabre.iqc.quality.model.ResultReview();BeanUtils.copyProperties(source,copy);copy.setReviewPresentation(null);
+        boolean reveal=detailRead&&access.fullConversation()&&access.pii();
+        copy.setCreatedBy(text(source.getCreatedBy(),access.fullConversation()&&access.pii()));
+        copy.setReviewerId(text(source.getReviewerId(),access.fullConversation()&&access.pii()));
+        if(!reveal){copy.setRequestComment(null);copy.setReviewComment(null);copy.setReviewedResultJson(null);}
+        copy.setPrivacy(configurationPrivacy(policy,access,reveal,List.of("requestComment","reviewComment","reviewedResultJson")));return copy;
+    }
+
     private Map<String,Object> configurationPrivacy(String policyVersion,SensitiveReadAccessService.Access access,boolean canonical,List<String> withheld){
         var metadata=new LinkedHashMap<String,Object>();metadata.put("policyVersion",policyVersion);
         metadata.put("canonicalPayloadVisible",canonical);metadata.put("canReadFull",access.fullConversation());

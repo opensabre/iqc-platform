@@ -69,3 +69,8 @@
 4. 独立B继续任务/worker/并发/数据库/HTTP/browser专项；用统一当前组合验证A–E及重启/容量/真实供应商和角色。
 
 未经上述要求逐项证明，不把任何单批构建、测试数量或源码清单升级为整个PRD已完成。
+
+
+## 2026-10-22 模型层置信度误差诊断增量
+
+FindingEvaluationMetrics沿原金标/结果比较新增带协议的confidenceDiagnostics，经原Report进入评测页：coverage、Brier、ECE及10箱。没有finalConfidence的原结果不补零，空分母null。具体定义、旧Result构造/ReportEvidence摘要兼容风险及证据边界见iqc-confidence-diagnostics.md。当前仅代码/编译构建，数值/HTTP/旧JSON兼容待B验证；一致性、幻觉、真正校准工件真实性及其余层指标仍未因此完成。

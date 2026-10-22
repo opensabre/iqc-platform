@@ -32,8 +32,51 @@ public final class FindingEvaluationMetrics {
                           BigDecimal coverage, BigDecimal valueAccuracy, BigDecimal stateAccuracy,
                           BigDecimal evidenceAccuracy) { }
     public record Result(String schemaVersion, int sampleCount, Summary aggregate,
-                         Map<String, Summary> byCode, long unlabelledOutputs) {
+                         Map<String, Summary> byCode, long unlabelledOutputs,
+                         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                         ConfidenceDiagnostics confidenceDiagnostics) {
+        public Result(String schemaVersion,int sampleCount,Summary aggregate,Map<String,Summary> byCode,long unlabelledOutputs){
+            this(schemaVersion,sampleCount,aggregate,byCode,unlabelledOutputs,null);
+        }
         public Result { byCode = Collections.unmodifiableMap(new LinkedHashMap<>(byCode)); }
+    }
+
+    /** Diagnostic of reported confidence in a complete typed value match, not probability of a positive label. */
+    public record ConfidenceBin(int index,BigDecimal lowerInclusive,BigDecimal upperBound,boolean upperInclusive,
+                                long count,BigDecimal meanConfidence,BigDecimal observedAccuracy) { }
+    public record ConfidenceDiagnostics(String schemaVersion,String scope,long eligibleKnownGold,long scored,long unscored,
+                                        BigDecimal coverage,BigDecimal brierScore,BigDecimal expectedCalibrationError,
+                                        List<ConfidenceBin> bins) {
+        public ConfidenceDiagnostics { bins=List.copyOf(bins); }
+    }
+    private static ConfidenceDiagnostics confidenceDiagnostics(List<Sample> samples){
+        long eligible=0,scored=0;long[] counts=new long[10],correct=new long[10];
+        BigDecimal[] confidenceSums=new BigDecimal[10];java.util.Arrays.fill(confidenceSums,BigDecimal.ZERO);
+        BigDecimal squaredError=BigDecimal.ZERO;
+        for(var sample:samples){
+            var actual=new LinkedHashMap<String,FindingFusion.Result>();sample.actual().forEach(fact->actual.put(fact.code(),fact));
+            for(var gold:sample.gold().findings()){
+                if(gold.state()!=Finding.State.KNOWN)continue;eligible++;
+                var result=actual.get(gold.code());
+                if(result==null||result.state()!=Finding.State.KNOWN||result.valueType()!=gold.valueType()
+                        ||!Finding.validValue(result.valueType(),result.value())||result.finalConfidence()==null)continue;
+                BigDecimal confidence=result.finalConfidence();
+                if(confidence.signum()<0||confidence.compareTo(BigDecimal.ONE)>0)throw new IllegalArgumentException("invalid final confidence");
+                boolean match=equal(gold.value(),result.value());int bin=Math.min(9,confidence.multiply(BigDecimal.TEN).intValue());
+                scored++;counts[bin]++;if(match)correct[bin]++;confidenceSums[bin]=confidenceSums[bin].add(confidence);
+                BigDecimal difference=confidence.subtract(match?BigDecimal.ONE:BigDecimal.ZERO);
+                squaredError=squaredError.add(difference.multiply(difference));
+            }
+        }
+        var bins=new java.util.ArrayList<ConfidenceBin>();BigDecimal calibrationError=BigDecimal.ZERO;
+        for(int i=0;i<10;i++){
+            calibrationError=calibrationError.add(confidenceSums[i].subtract(BigDecimal.valueOf(correct[i])).abs());
+            bins.add(new ConfidenceBin(i,BigDecimal.valueOf(i,1),BigDecimal.valueOf(i+1,1),i==9,counts[i],
+                    counts[i]==0?null:confidenceSums[i].divide(BigDecimal.valueOf(counts[i]),6,RoundingMode.HALF_UP),ratio(correct[i],counts[i])));
+        }
+        return new ConfidenceDiagnostics("iqc-finding-confidence-diagnostics-v1","FINAL_VALUE_CORRECTNESS_ON_KNOWN_GOLD",eligible,scored,eligible-scored,
+                ratio(scored,eligible),scored==0?null:squaredError.divide(BigDecimal.valueOf(scored),6,RoundingMode.HALF_UP),
+                scored==0?null:calibrationError.divide(BigDecimal.valueOf(scored),6,RoundingMode.HALF_UP),bins);
     }
 
     public static Result evaluate(List<Sample> samples) {
@@ -53,7 +96,7 @@ public final class FindingEvaluationMetrics {
             }
         }
         var byCode = new LinkedHashMap<String, Summary>(); counters.forEach((code, value) -> byCode.put(code, value.summary()));
-        return new Result(SCHEMA, samples.size(), overall.summary(), byCode, unlabelled);
+        return new Result(SCHEMA, samples.size(), overall.summary(), byCode, unlabelled, confidenceDiagnostics(samples));
     }
 
     /** Exact match of all labelled states, known values and optional selected evidence. */

@@ -567,3 +567,40 @@ IqcMcpServerController四个现有命令原Audit.request默认true，会复制na
 原IqcPage服务查询不变，当前业务review:view、标签review:label:queue分别在业务前刷新授权/no-store，查询审计不收正文。独立ReviewQueuePage响应保留records/current/size/total并加iqc-review-queue-read-v1隐私元数据。FULL+PII齐备回原requestComment；其它组合扣留评论，对taskName/createdBy及标签labelName/valueDescription沿原PII mask。业务record重建、标签DTO复制，原对象/SQL范围/排序分页/ID/状态/currentResult不改，业务stage直接保留原已校验枚举，不重新解析已清理workflowMetadata为INITIAL。
 
 页面已知受限或未知privacy清除评论并提示未展示；卸载使队列和标签历史代次失效/清行和selected，关闭历史清引用。旧无privacy API兼容保留。ResultReview历史与命令返回的reviewedResultJson/评论、人工改分原因仍待配套安全工作流/UI投影；此批不覆盖那些接口。当前仅编译构建，实际四grant/源不变/组织SQL/分页stage/当前授权和浏览器待验。
+
+
+## 人工改分上下文原因投影（2026-10-22）
+
+SCORE_CONTEXT沿现有reviews固定review:view当前授权/no-store及原service组织/来源/计算hash校验，独立ScoreReviewContextRead只控制前轮manualScore.adjustment.reason：FULL+PII齐备回原原因，否则该字段null，iqc-score-review-context-read-v1声明扣留。computedScore/hash/status、APPLIED/STALE、effectiveScore、原finalScore字符串和source/expectedScoringHash完全保留；没有manualScore仍null，不把旧原因扣留变成未改分或零分。不需要Prompt授权，不修改原ManualScoreProjection/ScoreAdjustment/评估及存储。
+
+ManualScoreReviewEditor原本不以旧原因填表，新一轮原因始终重新必填；现提示前轮原因未展示，仍可用原评分基准编辑。存在但未知/受限privacy剔除旧原因；保留旧无privacy兼容。卸载清评分上下文/输入并失效请求代次。当前仅编译构建，四grant/精确分数及状态/hash不变/源字节不变、实际授权/浏览器仍待独立验收。ResultReview历史与命令正文仍待。
+
+
+## 标签复核历史与回执（2026-10-22）
+
+标签history/create/decide先检查原固定label:history/create/decide当前授权/no-store，历史QUERY审计不收正文。ResultReview响应copy新增非持久null省略privacy，内部存储/旧快照不设字段。专门history仅FULL+PII齐备回原requestComment/reviewComment/reviewedResultJson；其它组合扣留三字段，创建人/复核人沿原mask，ID/轮次/状态/分数/hash等保留。所有标签命令回执无论敏感grant均扣留正文，前端沿原刷新历史取最终详情，不改复核幂等/锁/来源/组织范围。无需Prompt。
+
+LabelValueReviewPanel区分未展示和损坏：存在但未知/受限privacy清正文评论、显式提示、停止用不完整历史裁决；合法完整旧body原验证保留，无privacy旧接口兼容。LabelReviewQueue历史结论显示复核正文未展示而不猜值。组件卸载清历史/消息/命令草稿并失效请求；已发出的写入不取消，迟到响应不触发刷新。实际grant/源字节/旧内部JSON/命令回执/当前授权及组织/browser待独立验收，当前仅编译构建。业务/消息ResultReview历史与命令仍未投影，工作流stage须另行配套。
+
+
+## 消息复核历史与回执（2026-10-22）
+
+复用既有标签review响应copy字段处理为私有reviewRead，消息路径使用iqc-message-review-read-v1，不新增持久模型。消息history FULL+PII才回原评论/JSON，命令receipt始终扣留，原original/final数值、状态、风险、ID/hash保留，创建人/复核人沿原mask。request/decide入口在原业务分支前检查固定review:create/decide当前授权；history已有review:view/no-store/QUERY不收正文。原service范围与裁决不变；业务review JSON/工作流本批未扣留，仍待完整配套。
+
+旧质量运营页按当前tab及其原grant分别查询review/feedback/sample，report只在report:view具备时查询，不再无条件四接口联读。消息评论受限显示未展示，表单不填历史评论；提交固定目标/复制payload，handler检查decide并防重复，提交中禁止关闭/改动，关闭清表单/selected，卸载清列表/输入/代次，迟到响应不回填。字段保护和页面运行未独立验收，当前仅编译构建；原组织/role/PDP/browser与I1–I7保持待验。
+
+
+## B消息HTTP序列化修复集成（2026-10-22）
+
+从B已提交e0ed424精确取FindingReviewContextRead/findingReviewContext响应代码和ReviewContextQueueHttpPrivacyTest。响应messages由Jackson2 JsonNode改普通List<Map>，仅授权时转换；未授权仍空列表，冻结service上下文不变。B默认MVC实测此前节点bean属性而非消息数组，修复后八grant及队列共13项通过；连同其其它套件/签名H2共53项结果归B当时组合分支，见协作台账。Root集成保留最新score/label/message保护，当前仅skipTests test-compile，不重跑或夸大为全部HTTP/组织/浏览器验收。
+
+
+## 业务复核历史与安全工作流展示（2026-10-22）
+
+业务history及request/decide各已有分支统一接入businessReview，复用reviewRead响应copy规则；history FULL+PII才回原评论/reviewedResultJson，命令永扣正文，不需Prompt。新增ResultReview.reviewPresentation非持久null省略字段；历史专门响应仅含iqc-review-workflow-presentation-v1、AVAILABLE/UNAVAILABLE、阶段及原ReviewWorkflow元数据。复用既有ReviewWorkflow构造校验，额外保持parentRevision小于当前轮次，初审无上游workflow；坏JSON/错误协议不自动补INITIAL。只解析显示用元数据，不重写裁决/源JSON/hash，原服务的锁/独立审核人/范围/计算/升级逻辑不改。
+
+BusinessReviewPanel正文受限时不解析为坏投影，显示未展示并禁止基于不完整历史变更；读取已知有效presentation保留二审/仲裁/终局含义，异常presentation禁操作。完整正文原评分/证据验证保留，无privacy历史旧接口兼容。命令后仍原刷新history；卸载清历史/输入/命令并失效代次，迟到命令响应不刷新。实际四grant/初审二审仲裁/坏协议/源字节/旧JSON、当前授权与组织SQL/浏览器仍待独立验收，本批仅编译构建，完整I1–I7未完成。
+
+## B 新字段回归验证
+
+ResultReadProjectionTest 新增三项，合计九项通过，日志 `/tmp/iqc-b-review-projection-additional.log`：标签/消息历史与命令的FULL、PII授权组合；人工改分APPLIED/STALE与精确分数字符串在隐藏原因时保留；二审展示、无效父轮次及坏JSON安全返回。来源对象保持不变。组合验证另有ReviewContextQueueHttpPrivacyTest十三项通过，未将这些投影级检查作为真实PDP/组织角色/浏览器验收。

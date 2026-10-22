@@ -62,15 +62,18 @@ public class QualityOperationsController {
     @ResourcePermission(code="iqc:review:label:create", name="发起标签值复核", type="iqc", description="为冻结标签值发起复核")
     @Audit(operationType=OperationType.CREATE, description="发起 IQC 标签值复核", module="IQC_REVIEW", request=false, response=false, key="#labelResultId")
     public ResultReview requestLabelReview(@PathVariable String labelResultId, @RequestBody LabelReviewRequest request) {
+        var access=responseAccess("iqc:review:label:create");
         if (request == null || request.expectedRevision() == null)
             throw IqcException.invalidArgument("标签复核必须指定预期修订");
-        return labelReviews.request(labelResultId, request.expectedRevision(), request.requestId(), request.comment());
+        return resultProjection.labelReview(labelReviews.request(labelResultId, request.expectedRevision(), request.requestId(), request.comment()),access,false);
     }
 
     @GetMapping("/label-results/{labelResultId}/reviews")
     @ResourcePermission(code="iqc:review:label:history", name="查看标签值复核", type="iqc", description="查看标签值复核轮次")
+    @Audit(operationType=OperationType.QUERY,description="读取标签复核历史",module="IQC_PRIVACY",request=false,response=false,key="#labelResultId")
     public List<ResultReview> labelReviewHistory(@PathVariable String labelResultId) {
-        return labelReviews.history(labelResultId);
+        var access=responseAccess("iqc:review:label:history");
+        return labelReviews.history(labelResultId).stream().map(row->resultProjection.labelReview(row,access,true)).toList();
     }
 
     /** Scoped, paginated label rounds for the quality operator's worklist. */
@@ -88,11 +91,12 @@ public class QualityOperationsController {
     @ResourcePermission(code="iqc:review:label:decide", name="处理标签值复核", type="iqc", description="修正或退回标签值复核")
     @Audit(operationType=OperationType.UPDATE, description="处理 IQC 标签值复核", module="IQC_REVIEW", request=false, response=false, key="#reviewId")
     public ResultReview decideLabelReview(@PathVariable String reviewId, @RequestBody LabelReviewDecision request) {
+        var access=responseAccess("iqc:review:label:decide");
         if (request == null || request.expectedRevision() == null
                 || (!"COMPLETED".equals(request.decision()) && !"REJECTED".equals(request.decision())))
             throw IqcException.invalidArgument("标签复核必须指定修订与完成/退回决定");
-        return labelReviews.decide(reviewId, request.expectedRevision(), "REJECTED".equals(request.decision()),
-                request.labelDecision(), request.comment());
+        return resultProjection.labelReview(labelReviews.decide(reviewId, request.expectedRevision(), "REJECTED".equals(request.decision()),
+                request.labelDecision(), request.comment()),access,false);
     }
 
     @PostMapping("/results/{resultId}/feedback")
@@ -115,13 +119,14 @@ public class QualityOperationsController {
     @ResourcePermission(code="iqc:review:create", name="发起人工复核", type="iqc", description="为质检结果发起复核")
     @Audit(operationType=OperationType.CREATE, description="发起 IQC 人工复核", module="IQC_REVIEW", request=false, response=false, key="#resultId")
     public ResultReview requestReview(@PathVariable String resultId, @RequestBody(required=false) ReviewRequest request) {
+        var access=responseAccess("iqc:review:create");
         if (request != null && business(request.targetType())) {
             if (request.expectedRevision() == null) throw IqcException.invalidArgument("业务复核必须指定预期修订");
-            if(request.stage()!=null||request.parentReviewId()!=null)return businessReviews.request(resultId,request.expectedRevision(),request.requestId(),request.comment(),request.stage(),request.parentReviewId());
-            return businessReviews.request(resultId, request.expectedRevision(), request.requestId(), request.comment());
+            if(request.stage()!=null||request.parentReviewId()!=null)return resultProjection.businessReview(businessReviews.request(resultId,request.expectedRevision(),request.requestId(),request.comment(),request.stage(),request.parentReviewId()),access,false);
+            return resultProjection.businessReview(businessReviews.request(resultId, request.expectedRevision(), request.requestId(), request.comment()),access,false);
         }
         if(request!=null&&(request.stage()!=null||request.parentReviewId()!=null))throw IqcException.invalidArgument("消息复核不接受业务阶段升级");
-        return service.requestReview(resultId, request == null ? null : request.comment());
+        return resultProjection.messageReview(service.requestReview(resultId, request == null ? null : request.comment()),access,false);
     }
     @GetMapping("/reviews")
     @ResourcePermission(code="iqc:review:view", name="查看人工复核", type="iqc", description="查询人工复核工作台")
@@ -137,7 +142,7 @@ public class QualityOperationsController {
         if("SCORE_CONTEXT".equals(view)){
             if(!business(targetType)||resultId==null||resultId.isBlank()||status!=null||taskId!=null)
                 throw IqcException.invalidArgument("评分复核上下文必须指定单一业务结果");
-            return businessReviews.scoreContext(resultId);
+            return resultProjection.scoreReviewContext(businessReviews.scoreContext(resultId),access);
         }
         if("FINDING_CONTEXT".equals(view)){
             if(!business(targetType)||resultId==null||resultId.isBlank()||status!=null||taskId!=null)
@@ -152,26 +157,27 @@ public class QualityOperationsController {
         if (business(targetType)) {
             if (resultId == null || resultId.isBlank()) throw IqcException.invalidArgument("业务复核历史必须指定会话结果");
             if (status != null) throw IqcException.invalidArgument("业务复核历史按完整轮次返回，不支持状态筛选");
-            return businessReviews.history(resultId);
+            return businessReviews.history(resultId).stream().map(row->resultProjection.businessReview(row,access,true)).toList();
         }
-        return service.reviews(status);
+        return service.reviews(status).stream().map(row->resultProjection.messageReview(row,access,true)).toList();
     }
     @PostMapping("/reviews/{reviewId}/decision")
     @ResourcePermission(code="iqc:review:decide", name="处理人工复核", type="iqc", description="通过、修正或退回复核")
     @Audit(operationType=OperationType.UPDATE, description="处理 IQC 人工复核", module="IQC_REVIEW", request=false, response=false, key="#reviewId")
     public ResultReview decide(@PathVariable String reviewId, @RequestBody ReviewDecision request) {
+        var access=responseAccess("iqc:review:decide");
         if (business(request.targetType())) {
             if (request.expectedRevision() == null || (!"COMPLETED".equals(request.decision()) && !"REJECTED".equals(request.decision())))
                 throw IqcException.invalidArgument("业务复核必须指定修订与完成/退回决定");
             if (request.finalScore() != null || request.finalStatus() != null || request.finalRiskLevel() != null)
                 throw IqcException.invalidArgument("业务复核不能手工覆盖总分、整体状态或风险");
-            if(request.scoreAdjustment()!=null)return businessReviews.decide(reviewId,request.expectedRevision(),"REJECTED".equals(request.decision()),
-                    request.items(),request.findingDecisions(),request.scoreAdjustment(),request.comment());
-            return businessReviews.decide(reviewId, request.expectedRevision(), "REJECTED".equals(request.decision()), request.items(),request.findingDecisions(),request.comment());
+            if(request.scoreAdjustment()!=null)return resultProjection.businessReview(businessReviews.decide(reviewId,request.expectedRevision(),"REJECTED".equals(request.decision()),
+                    request.items(),request.findingDecisions(),request.scoreAdjustment(),request.comment()),access,false);
+            return resultProjection.businessReview(businessReviews.decide(reviewId, request.expectedRevision(), "REJECTED".equals(request.decision()), request.items(),request.findingDecisions(),request.comment()),access,false);
         }
         if(request.scoreAdjustment()!=null)throw IqcException.invalidArgument("消息复核不接受业务人工改分命令");
         if(request.findingDecisions()!=null&&!request.findingDecisions().isEmpty())throw IqcException.invalidArgument("消息复核不接受Finding裁决");
-        return service.decideReview(reviewId, request.decision(), request.finalStatus(), request.finalScore(), request.finalRiskLevel(), request.comment());
+        return resultProjection.messageReview(service.decideReview(reviewId, request.decision(), request.finalStatus(), request.finalScore(), request.finalRiskLevel(), request.comment()),access,false);
     }
 
     @PostMapping("/results/{resultId}/samples")
