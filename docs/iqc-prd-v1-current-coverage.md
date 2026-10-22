@@ -89,3 +89,7 @@ BusinessQualityReportService沿原选择/冻结标准/已验证最近完成复�
 ## 2026-10-22 引用真实性来源增量
 
 FrozenDetectorEngine增加过滤前的llmCitationGrounding计数，复用原LegacyFindingAdapter引用判定，失败节点也保留可用诊断。未知协议/丢失响应不填零，不根据过滤后合法引用宣称无幻觉；具体口径与待验见iqc-llm-citation-grounding.md。当前只采集来源，原报告聚合与页面尚待接入，广义事实幻觉仍不可冒称完成。
+
+### 2026-10-23 引用报告聚合与页面
+
+在原评测报告增加可选citationGroundingMetrics，基于已验证产物及重试继承来源，按冻结样本×LLM节点计覆盖、最后轨迹去重，展示部分/缺测/坏容器和已观测引用错误率。旧构造保留、null字段省略；新生成ReportEvidence摘要含新增字段，历史证据不回写。UI复用report:view与原报告加载，不增API/权限/表/模型调用。详见iqc-llm-citation-grounding.md；广义事实幻觉、真实SQL/HTTP/浏览器证据仍待，不以本批视为全PRD完成。

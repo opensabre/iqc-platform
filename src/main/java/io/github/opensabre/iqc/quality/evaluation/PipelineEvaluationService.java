@@ -231,7 +231,18 @@ public class PipelineEvaluationService {
                          int expectedSamples, int availableSamples, int successfulSamples, boolean complete,
                          List<String> missingSampleIds, Map<String, String> sourceExecutionIds, FindingEvaluationMetrics.Result findingMetrics,
                          BusinessMetrics businessMetrics,LatencyMetrics latencyMetrics,RegressionMetrics regressionMetrics,
-                         StructuredMetrics structuredMetrics) { }
+                         StructuredMetrics structuredMetrics,
+                         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                         CitationGroundingMetrics.Summary citationGroundingMetrics) {
+        public Report(String schemaVersion,String taskId,String executionId,String datasetHash,int expectedSamples,
+                      int availableSamples,int successfulSamples,boolean complete,List<String> missingSampleIds,
+                      Map<String,String> sourceExecutionIds,FindingEvaluationMetrics.Result findingMetrics,
+                      BusinessMetrics businessMetrics,LatencyMetrics latencyMetrics,RegressionMetrics regressionMetrics,
+                      StructuredMetrics structuredMetrics){
+            this(schemaVersion,taskId,executionId,datasetHash,expectedSamples,availableSamples,successfulSamples,complete,
+                    missingSampleIds,sourceExecutionIds,findingMetrics,businessMetrics,latencyMetrics,regressionMetrics,structuredMetrics,null);
+        }
+    }
     public record StructuredMetrics(String scope,int declaredLlmNodes,long logicalInvocations,long validOutputs,
                                     long invalidOrFailedOutputs,long unmeasuredAttempts,java.math.BigDecimal successRate) { }
     public record RegressionMetrics(String scope,int expectedSamples,int passedSamples,
@@ -257,6 +268,7 @@ public class PipelineEvaluationService {
         int scoreGold=0,comparableScores=0,riskGold=0,highRiskGold=0,highRiskDetected=0,labelGold=0,comparableLabels=0,correctLabels=0;
         var absoluteScoreError=java.math.BigDecimal.ZERO; var durations=new ArrayList<Long>();
         var structured=new StructuredCounter(prepared.release());
+        var citations=new CitationGroundingMetrics(prepared.release(),prepared.dataset().members().size());
         for (var member : prepared.dataset().members()) {
             var row = bySample.get(member.sampleId());
             var expected=member.gold().decision();
@@ -272,7 +284,7 @@ public class PipelineEvaluationService {
                 continue;
             }
             var actual = validatedRow(task, prepared, row); sources.put(member.sampleId(), row.getExecutionId());
-            structured.add(actual);
+            structured.add(actual); citations.add(actual);
             var labelCounts=LabelEvaluationMetrics.evaluate(expected==null?Map.of():expected.labels(),prepared.release().labelPolicy(),actual.fusion());
             comparableLabels+=labelCounts.comparable(); correctLabels+=labelCounts.correct();
             if ("SUCCESS".equals(row.getStatus())) successful++;
@@ -304,7 +316,7 @@ public class PipelineEvaluationService {
                 FindingEvaluationMetrics.evaluate(metricSamples),business,latency,
                 new RegressionMetrics("EXACT_LABELLED_FINDING_EVIDENCE_SCORE_RISK",regression?prepared.dataset().members().size():0,
                         regressionPassed,regression?ratio(regressionPassed,prepared.dataset().members().size()):null,List.copyOf(regressionFailed)),
-                structured.summary());
+                structured.summary(),citations.summary());
     }
     /** Explicit repeated-run comparison reuses the existing ownership, artifact and source-execution checks. */
     public ModelConsistencyMetrics.Report consistency(String taskId,String executionId,String referenceTaskId,String referenceExecutionId){

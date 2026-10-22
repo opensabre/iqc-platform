@@ -27,3 +27,18 @@
 ## 后续与验证
 
 需接入原评测报告显示可测覆盖率、引用错误率及坏容器/缺测，独立列出语义金标准确率。当前仅采集来源及编译，没有新增/运行测试。B待验证原适配行为不变、合法/未知ID/非原文/空/坏容器/角色会话错误、未知协议、错误节点仍保留指标、源字节不变及真实provider→SQL路径。完整“幻觉”需求与整体I1–I7未因此完成。
+
+## 原评测报告聚合（2026-10-23）
+
+`PipelineEvaluationService.Report.citationGroundingMetrics`复用原GET /report及report:view，schema为`iqc-citation-grounding-report-v1`，scope为`LAST_TRACE_PER_FROZEN_SAMPLE_LLM_NODE`。只读经validatedRow校验的持久化产物，保留原重试来源选择；不调用模型或业务动作。
+
+- expectedNodeSamples = 冻结Gold样本数 × 冻结LLM节点数，包括尚无产物的样本。每样本每LLM节点仅取run.trace最后记录，不把内部重试重复计数。
+- observedNodeSamples：最后记录存在且attempt>0、非SKIPPED的样本节点，包括执行失败。
+- measuredNodeSamples / partialNodeSamples：来源协议分别为MEASURED / PARTIAL且通过协议校验的样本节点。
+- unmeasuredNodeSamples = expected - measured - partial，包含缺失、跳过、旧产物、未知输出及无效诊断。invalidDiagnosticNodeSamples是已存在但协议/整数计数/状态关系不合法的诊断子集。
+- measurementCoverage = measured / expected；无LLM节点或零样本时为null。部分测量不冒充完整覆盖。
+- 输出/引用/坏容器计数只累计合法来源诊断。observedQuoteErrorRate = invalidQuotes / claimedQuotes；零引用为null。该比率允许在部分测量时展示，但名称和UI明确它只覆盖已观测引用，不能外推至未知输出/所有模型请求。
+
+新增字段为可选且null时省略；原15参数Report构造保留，历史JSON缺字段可读。新生成报告与ReportEvidence摘要将包含该诊断，历史存储的ReportEvidence和报告摘要不回写。发布门禁条件未新增或放宽，既有完整性、金标与回归判定不变。
+
+UI原报告页引用卡片展示覆盖、部分/未测量、已观测错误率、坏容器与无效诊断；沿用报告现有加载/清理/授权流程，不增加异步请求或原文。当前证据为编译/构建，尚无本批SQL/HTTP/浏览器运行证明。B后续应验证旧Report构造/JSON、零LLM/零引用、缺产物、SKIPPED、最后重试轨迹、未知/部分/无效协议、继承源、错误节点保留以及新旧门禁报告摘要兼容。
