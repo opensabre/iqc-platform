@@ -99,8 +99,21 @@ class IsolatedMysqlMeasuredPublicationIT {
             var report=evaluations.report(executed.getId(),executed.getCurrentExecutionId());
             assertTrue(report.complete());assertEquals(1,report.successfulSamples());
             assertEquals(0,BigDecimal.ONE.compareTo(report.findingMetrics().aggregate().f1()));
+            // Real persisted metric results must never manufacture a model consistency denominator.
+            var repeated=run(evaluations.create(dataset.getId(),1,asset.getId(),null,1,"Independent repeat",1,
+                    "repeat_"+UUID.randomUUID().toString().replace("-","")));
+            assertNotEquals(executed.getId(),repeated.getId());
+            var consistency=evaluations.consistency(executed.getId(),executed.getCurrentExecutionId(),
+                    repeated.getId(),repeated.getCurrentExecutionId());
+            assertEquals(0,consistency.expectedPairs());assertEquals(0,consistency.comparablePairs());
+            assertEquals(0,consistency.agreeingPairs());assertNull(consistency.comparisonCoverage());
+            assertNull(consistency.agreementRate());assertTrue(consistency.excludedReasons().isEmpty());
             evidence.add(new PipelinePublicationGateService.ExecutionEvidence(executed.getId(),executed.getCurrentExecutionId()));
         }
+        var incompatible=assertThrows(RuntimeException.class,()->evaluations.consistency(
+                evidence.get(0).taskId(),evidence.get(0).executionId(),
+                evidence.get(1).taskId(),evidence.get(1).executionId()));
+        assertTrue(incompatible.getMessage().contains("相同冻结数据集"));
         var trial=context.getBean(InspectionTaskService.class).createUsingPipelineSnapshot(pipelines.frozenDraft(asset.getId(),1),
                 "real trial",List.of(conversation),1,"trial_"+suffix);
         trial=run(trial);
