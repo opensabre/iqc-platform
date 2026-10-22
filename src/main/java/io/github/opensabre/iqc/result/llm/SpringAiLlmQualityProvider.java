@@ -245,7 +245,8 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
                         throw new IllegalArgumentException("会话标签输出格式无效", exception);
                     }
                 }
-                return evaluation;
+                return new LlmEvaluation(evaluation.supported(),evaluation.hit(),evaluation.reason(),evaluation.structuredJson(),
+                        SnapshotChatModelRouter.invocationFingerprint(response));
             } catch (io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException denied) {
                 throw denied;
             } catch (RuntimeException exception) {

@@ -55,9 +55,9 @@ public class SnapshotChatModelRouter {
                     options instanceof OpenAiChatOptions?"OPENAI":defaultModel.getClass().getSimpleName(),endpoint,model);
             if(callbacks.length>0){
                 if(!(defaultModel instanceof OpenAiChatModel))throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_TOOL_RUNTIME_UNSUPPORTED");
-                return invokeToolCycle(defaultModel,executablePrompt,identity,context);
+                return invokeToolCycle(defaultModel,executablePrompt,identity,context,null);
             }
-            return invoke(defaultModel,executablePrompt,identity,context);
+            return invoke(defaultModel,executablePrompt,identity,context,null);
         }
         List<JsonNode> candidates=new ArrayList<>(); candidates.add(config.path("assetSnapshots").path("primaryModel"));
         config.path("assetSnapshots").path("fallbackModels").forEach(candidates::add);
@@ -68,7 +68,7 @@ public class SnapshotChatModelRouter {
             var identity=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity(candidate.path("provider").asText(),
                     candidate.path("endpoint").asText(),candidate.path("modelName").asText(),price(candidate,true),outputConstraint(candidate,true),deployment(candidate));
             int retries=Math.max(0,Math.min(candidate.path("maxRetries").asInt(0),5));
-            for(int attempt=0;attempt<=retries;attempt++)try{return invokeToolCycle(selected,executablePrompt,identity,context);}
+            for(int attempt=0;attempt<=retries;attempt++)try{return invokeToolCycle(selected,executablePrompt,identity,context,candidate);}
             catch(io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException denied){throw denied;}
             catch(RuntimeException exception){last=exception;}
         }
@@ -80,7 +80,7 @@ public class SnapshotChatModelRouter {
         var selected=create(profile);
         var identity=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity(profile.path("provider").asText(),
                 profile.path("endpoint").asText(),profile.path("modelName").asText(),price(profile,true),outputConstraint(profile,true),deployment(profile));
-        return invoke(selected,prompt,identity,context.forToolRound(0));
+        return invoke(selected,prompt,identity,context.forToolRound(0),profile);
     }
     private ToolCallback[] guardTools(ToolCallback[] callbacks,io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context){
         return java.util.Arrays.stream(callbacks).map(delegate->new ToolCallback(){
@@ -91,22 +91,37 @@ public class SnapshotChatModelRouter {
                 if(gateway!=null)gateway.assertToolExecutionAllowed(context);return delegate.call(arguments,toolContext);}
         }).toArray(ToolCallback[]::new);
     }
+    public record InvocationFingerprint(String schemaVersion,String modelKey,String inputHash) {
+        public InvocationFingerprint {
+            if(!"iqc-llm-invocation-fingerprint-v1".equals(schemaVersion)||modelKey==null||!modelKey.matches("[a-f0-9]{64}")
+                    ||inputHash==null||!inputHash.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("Invalid invocation fingerprint");
+        }
+    }
+    public static InvocationFingerprint invocationFingerprint(ChatResponse response){
+        return response instanceof MeteredResponse metered?metered.fingerprint:response instanceof ToolCycleResponse cycle?cycle.fingerprint:null;
+    }
     private static final class MeteredResponse extends ChatResponse {
         private final io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Handle handle;
-        MeteredResponse(ChatResponse response,io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Handle handle){super(response.getResults(),response.getMetadata());this.handle=handle;}
+        private final InvocationFingerprint fingerprint;
+        MeteredResponse(ChatResponse response,io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Handle handle,String inputHash){
+            super(response.getResults(),response.getMetadata());this.handle=handle;
+            fingerprint=inputHash!=null&&handle!=null&&handle.modelKey()!=null&&handle.modelKey().matches("[a-f0-9]{64}")
+                    ?new InvocationFingerprint("iqc-llm-invocation-fingerprint-v1",handle.modelKey(),inputHash):null;
+        }
     }
     /** Marker prevents business-output parsing failures from replaying completed external tools. */
     private static final class ToolCycleResponse extends ChatResponse {
-        ToolCycleResponse(ChatResponse response){super(response.getResults(),response.getMetadata());}
+        private final InvocationFingerprint fingerprint;
+        ToolCycleResponse(ChatResponse response){super(response.getResults(),response.getMetadata());fingerprint=invocationFingerprint(response);}
     }
     public static boolean toolsExecuted(ChatResponse response){return response instanceof ToolCycleResponse;}
     private ChatResponse invokeToolCycle(ChatModel model,Prompt initial,
             io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity identity,
-            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context){
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context,JsonNode profile){
         Prompt next=initial;int executed=0;var toolIds=new java.util.HashSet<String>();
         for(int round=0;;round++){
             ChatResponse response;
-            try{response=invoke(model,next,identity,context.forToolRound(round));}
+            try{response=invoke(model,next,identity,context.forToolRound(round),profile);}
             catch(io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException denied){throw denied;}
             catch(RuntimeException failure){if(round>0)throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_TOOL_CONTINUATION_UNCONFIRMED");throw failure;}
             if(response==null){if(round>0)throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_TOOL_CONTINUATION_EMPTY");return null;}
@@ -145,14 +160,43 @@ public class SnapshotChatModelRouter {
     }
     private ChatResponse invoke(ChatModel model,Prompt prompt,
             io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity identity,
-            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context) {
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context context,JsonNode profile) {
         if(identity.output()!=null && prompt.getOptions()!=null && (prompt.getOptions().getMaxTokens()!=null
                 || (prompt.getOptions() instanceof OpenAiChatOptions openai && openai.getMaxCompletionTokens()!=null)))
             throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("MODEL_OUTPUT_OVERRIDE_NOT_ALLOWED");
         if(gateway==null)return model.call(prompt);
+        String inputHash=invocationInputHash(prompt,profile);
         var result=gateway.invokeTracked(identity,context,()->model.call(prompt),SnapshotChatModelRouter::usage,
                 ()->diagnosticRequest(prompt),this::diagnosticResponse);
-        return result.response()==null?null:new MeteredResponse(result.response(),result.handle());
+        return result.response()==null?null:new MeteredResponse(result.response(),result.handle(),inputHash);
+    }
+    /** Best-effort measurement only: never changes admission, retry, model output or diagnostic retention. */
+    private String invocationInputHash(Prompt prompt,JsonNode profile){
+        if(profile==null||!profile.isObject())return null;
+        // Text-only evidence cannot establish equality of requests carrying media attachments.
+        if(prompt.getInstructions().stream().anyMatch(message->message instanceof org.springframework.ai.content.MediaContent media
+                &&media.getMedia()!=null&&!media.getMedia().isEmpty()))return null;
+        try{
+            var input=new java.util.LinkedHashMap<String,Object>();input.put("schemaVersion","iqc-llm-invocation-input-v1");
+            input.put("profile",profile);input.put("request",objectMapper.readTree(diagnosticRequest(prompt)));
+            var definitions=new java.util.ArrayList<java.util.Map<String,Object>>();
+            if(prompt.getOptions()!=null){
+                // Router-generated options have only standard chat settings and explicit tool callbacks.
+                if(!prompt.getOptions().getClass().getName().equals("org.springframework.ai.model.tool.DefaultToolCallingChatOptions"))return null;
+                var options=(ToolCallingChatOptions)prompt.getOptions();
+                var settings=new java.util.LinkedHashMap<String,Object>();
+                settings.put("model",options.getModel());settings.put("temperature",options.getTemperature());
+                settings.put("maxTokens",options.getMaxTokens());settings.put("topP",options.getTopP());settings.put("topK",options.getTopK());
+                settings.put("presencePenalty",options.getPresencePenalty());settings.put("frequencyPenalty",options.getFrequencyPenalty());
+                settings.put("stopSequences",options.getStopSequences());input.put("promptOptions",settings);
+                if(options.getToolCallbacks()!=null)for(var callback:options.getToolCallbacks()){
+                    var definition=callback.getToolDefinition();var row=new java.util.LinkedHashMap<String,Object>();
+                    row.put("name",definition.name());row.put("description",definition.description());row.put("inputSchema",definition.inputSchema());definitions.add(row);
+                }
+            }
+            input.put("toolDefinitions",definitions);
+            return io.github.opensabre.iqc.selector.SelectorAssetService.hash(objectMapper.valueToTree(input).toString());
+        }catch(RuntimeException|java.io.IOException unavailable){return null;}
     }
     private String diagnosticRequest(Prompt prompt){
         var messages=new java.util.ArrayList<java.util.Map<String,Object>>();

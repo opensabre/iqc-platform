@@ -79,3 +79,8 @@ FindingEvaluationMetrics沿原金标/结果比较新增带协议的confidenceDia
 ## 2026-10-22 业务人工修改率增量
 
 BusinessQualityReportService沿原选择/冻结标准/已验证最近完成复核，新增业务结果修改率和复核覆盖率、三个可重叠变更分类；细则见iqc-business-review-change-metrics.md。没有复核不填成未修改，无修改率分母时null，不混独立标签或旧消息复核，不改机器结果。当前仅编译构建，数值/来源/旧JSON/SQL/browser待独立验证。模型一致性仍缺真正重复同输入同版本Pipeline数据；旧方案投票轨迹不能替代，PRD其余指标及全I1–I7继续。
+
+
+## 2026-10-22 模型一致性输入来源增量
+
+实际Finding.Source.inputHash仅覆盖消息，不覆盖Prompt/上游；新增框架调用fingerprint经LlmEvaluation/原结构指标进入新轨迹，复用真实网关modelKey和精确摘要，不落正文、不改旧sourceHash。详见iqc-llm-consistency-input-evidence.md。当前仅来源采集且编译，独立重复运行比较/覆盖率/不可比原因报告仍待，不能把这一增量称模型一致性已完成。
