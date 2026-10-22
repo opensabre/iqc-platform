@@ -211,7 +211,7 @@ class PipelineEvaluationReportTest {
         assertThat(report.structuredMetrics().logicalInvocations()).isEqualTo(2);
         assertThat(report.structuredMetrics().successRate()).isEqualByComparingTo("1");
         assertThat(report.businessMetrics().labelAccuracy()).isNull();
-        assertThat(report.regressionMetrics().passRate()).isEqualByComparingTo("0"); // Label output is not implemented.
+        assertThat(report.regressionMetrics().passRate()).isEqualByComparingTo("0"); // Legacy name keys have no frozen binding address.
     }
     @Test
     void retryReportRetainsEarlierSampleWithItsOriginalExecutionSource() throws Exception {

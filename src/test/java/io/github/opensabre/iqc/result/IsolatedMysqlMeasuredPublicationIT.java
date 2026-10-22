@@ -43,7 +43,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-/** Real SQL, catalog, independent gold review, datasets, workers and measured publication; no provider calls. */
+/** Real SQL, catalog, independent gold review, datasets, workers and measured publication; controlled model only, no supplier calls. */
 class IsolatedMysqlMeasuredPublicationIT {
     private static AnnotationConfigApplicationContext context;
     private static final AtomicReference<String> actor = new AtomicReference<>("annotator");
@@ -304,6 +304,27 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals(2,inherited.expectedPairs());assertEquals(0,inherited.comparablePairs());assertNull(inherited.agreementRate());
         assertEquals(Map.of("SAME_ARTIFACT",1,"UNSUCCESSFUL_NODE",1),inherited.excludedReasons());
         verify(provider,times(5)).evaluateConversation(anyList(),any(),any(),any(),anyString(),any());
+        // Real MVC transport reads the same SQL artifacts; only current-grant lookup is isolated.
+        var grants=mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
+        when(grants.current(anySet())).thenReturn(new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("controlled",false,false,false,Instant.now()));
+        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
+                new io.github.opensabre.iqc.rest.PipelineEvaluationController(evaluations,grants,new io.github.opensabre.iqc.privacy.ResultReadProjection(j)))
+                .setControllerAdvice(new io.github.opensabre.webmvc.rest.RestResponseBodyAdvice(),new io.github.opensabre.iqc.governance.IqcExceptionHandlerAdvice()).build();
+        var response=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/iqc/evaluation/tasks/{task}/consistency",retried.getId())
+                .param("executionId",retried.getCurrentExecutionId()).param("referenceTaskId",retried.getId()).param("referenceExecutionId",priorId))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cache-Control","private, no-store"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("X-Content-Type-Options","nosniff"))
+                .andReturn().getResponse().getContentAsString();
+        var envelope=j.readTree(response);assertEquals("000000",envelope.path("code").asText());
+        assertEquals(j.readTree(j.writeValueAsString(inherited)),envelope.path("data"));
+        assertFalse(response.contains("processed text"));assertFalse(response.contains("retry text"));assertFalse(response.contains("inputHash"));
+        when(grants.current(anySet())).thenThrow(new IllegalStateException("controlled grant unavailable"));
+        var denied=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/iqc/evaluation/tasks/{task}/consistency",retried.getId())
+                .param("executionId",retried.getCurrentExecutionId()).param("referenceTaskId",retried.getId()).param("referenceExecutionId",priorId))
+                .andReturn().getResponse().getContentAsString();
+        assertEquals("IQC-1006",j.readTree(denied).path("code").asText());assertTrue(j.readTree(denied).path("data").isNull()||j.readTree(denied).path("data").isMissingNode());
+        verify(grants,times(2)).current(Set.of("iqc:evaluation:report:view"));
         verify(model,times(4)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
         verify(gateway,times(4)).invokeTracked(any(),any(),any(),any(),any(),any());
     }
