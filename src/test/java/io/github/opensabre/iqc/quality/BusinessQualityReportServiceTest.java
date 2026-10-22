@@ -113,6 +113,8 @@ class BusinessQualityReportServiceTest {
         when(reviews.latest("r", true)).thenReturn(completed);
         when(reviews.latest("r", false)).thenReturn(pending);
         var projection = mock(BusinessItemReviewEvaluator.Projection.class, RETURNS_DEEP_STUBS);
+        when(projection.original()).thenReturn(evaluation(InspectionScoring.ItemStatus.FAIL));
+        when(projection.findingReview()).thenReturn(null);
         when(projection.reviewed()).thenReturn(evaluation(InspectionScoring.ItemStatus.PASS));
         when(reviews.validatedProjection(completed, result, task)).thenReturn(projection);
         var group = service.report(List.of("a")).groups().getFirst();
@@ -120,6 +122,9 @@ class BusinessQualityReportServiceTest {
         assertThat(group.reviewed().averageScore()).isEqualByComparingTo("100");
         assertThat(group.pendingReviewCount()).isEqualTo(1);
         assertThat(group.missingReviewCount()).isZero();
+        assertThat(group.reviewChanges().reviewedResults()).isEqualTo(1);
+        assertThat(group.reviewChanges().modifiedResults()).isEqualTo(1);
+        assertThat(group.reviewChanges().modificationRate()).isEqualByComparingTo("1");
         assertThat(group.items().getFirst().machine().failureRate()).isEqualByComparingTo("100");
         assertThat(group.items().getFirst().reviewed().failureRate()).isEqualByComparingTo("0");
     }
@@ -280,6 +285,10 @@ class BusinessQualityReportServiceTest {
         assertThat(group.reviewed().averageScore()).isEqualByComparingTo("100");
         assertThat(group.reviewed().pendingCount()).isEqualTo(1);
         var manual=group.reviewed().manualOverrides();
+        assertThat(group.reviewChanges().reviewedResults()).isEqualTo(3);
+        assertThat(group.reviewChanges().modifiedResults()).isEqualTo(2);
+        assertThat(group.reviewChanges().effectiveNumericScoreChangedResults()).isEqualTo(1);
+        assertThat(group.reviewChanges().modificationRate()).isEqualByComparingTo("0.666667");
         assertThat(manual.appliedCount()).isEqualTo(1);assertThat(manual.staleCount()).isEqualTo(1);
         assertThat(manual.averageOverrideScore()).isEqualByComparingTo("90.25");
         assertThat(manual.effectiveNumericCount()).isEqualTo(2);assertThat(manual.averageEffectiveScore()).isEqualByComparingTo("95.13");
@@ -314,6 +323,39 @@ class BusinessQualityReportServiceTest {
         var bad=tasks.selectById("pipe1");var broken=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(bad.getRuleSnapshotJson());
         ((com.fasterxml.jackson.databind.node.ObjectNode)broken.path("pipelineSnapshot")).put("contentHash","wrong");bad.setRuleSnapshotJson(broken.toString());
         assertThatThrownBy(()->service.report(List.of("pipe1"))).hasMessageContaining("快照摘要不一致");
+    }
+
+    @Test void reviewChangeCoverageDoesNotCountUnreviewedResultsAsUnchanged() {
+        task("a",90,"[\"c1\",\"c2\",\"c3\"]");
+        var r1=new ConversationInspectionResult();r1.setId("r1");
+        var r2=new ConversationInspectionResult();r2.setId("r2");
+        when(results.selectLatestForTaskConversation(any(),any())).thenReturn(r1,r2,null);
+        var pass=evaluation(InspectionScoring.ItemStatus.PASS);
+        when(reviews.validatedMachineEvaluation(any(),any())).thenReturn(pass);
+        var complete=new io.github.opensabre.iqc.quality.model.ResultReview();complete.setStatus("COMPLETED");
+        when(reviews.latest("r1",true)).thenReturn(complete);
+        when(reviews.validatedProjection(any(),any(),any())).thenReturn(new BusinessItemReviewEvaluator.Projection("r1",pass,pass,List.of()));
+        var group=service.report(List.of("a")).groups().getFirst();
+        assertThat(group.reviewChanges().reviewedResults()).isEqualTo(1);
+        assertThat(group.reviewChanges().modifiedResults()).isZero();
+        assertThat(group.reviewChanges().modificationRate()).isEqualByComparingTo("0");
+        assertThat(group.reviewChanges().reviewCoverage()).isEqualByComparingTo("0.333333");
+        assertThat(group.missingResultCount()).isEqualTo(1);
+    }
+
+    @Test void noCompletedReviewsHaveNullModificationRateAndLegacyGroupOmitsNewField() throws Exception {
+        task("a",90,"[\"c\"]");
+        var group=service.report(List.of("a")).groups().getFirst();
+        assertThat(group.reviewChanges().reviewedResults()).isZero();
+        assertThat(group.reviewChanges().modificationRate()).isNull();
+        assertThat(group.reviewChanges().reviewCoverage()).isEqualByComparingTo("0");
+        var old=new BusinessQualityReportService.PolicyGroup(group.groupKey(),group.schemeId(),group.versionNo(),
+                group.draftRevision(),group.kind(),group.mode(),group.baseScore(),group.passingScore(),group.taskIds(),
+                group.conversationCount(),group.executionIds(),group.missingResultCount(),group.missingReviewCount(),
+                group.pendingReviewCount(),group.machine(),group.reviewed(),group.items());
+        var json=new ObjectMapper();var encoded=json.writeValueAsString(old);
+        assertThat(json.readTree(encoded).has("reviewChanges")).isFalse();
+        assertThat(json.writeValueAsString(json.readValue(encoded,BusinessQualityReportService.PolicyGroup.class))).isEqualTo(encoded);
     }
 
 }
