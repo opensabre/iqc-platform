@@ -199,3 +199,15 @@ PolicyGroup新增可空rollout，schema为iqc-business-rollout-attribution-v1，
 评分、项目失败率、机器/人工对照、人工修改率与缺结果/复核覆盖复用原计算。页面显示生产灰度观测及冻结来源摘要。分桶以任务为单位，任务包含的会话数可能不同，所选范围也非全部生产流量；候选配置比例不代表实际观测会话比例。跨版本评分标准或语料不一致不能直接解释为因果提升。同Dataset受控配对对照继续使用现有Benchmark，不复制另一套评测。生产费用/时延关联、统计显著性及完整A/B验收继续。
 
 本批仅编译/构建，终态见协作记录；独立验证须覆盖新旧JSON/构造、同修订两侧和不同修订/非灰度拆组、FIRST/LATEST分母、缺失结果与复核覆盖、旧修订回退不改归属、坏证据/撤权/跨组拒绝、SQL/实际worker产物与页面隐私生命周期。
+
+### 事件/订阅/生产归因组合兼容验证（B，2026-10-23）
+
+固定 A 后端1c29c49与B4f9b3c1合并为64f7582，文档追加冲突保留双方；UI固定d73fd41
+与B73e89d7合并为5d6ae7c。后端原41290 offline test-compile+surerfire终态0，日志
+`/tmp/iqc-b-trigger-attribution-integrated.log`，fresh XML报告19/guard8/重放9/周期协议11/
+订阅精确快照1/调度HTTP19/灰度HTTP31共98项，零失败错误跳过。UI原34590 type-check
+终态0，日志 `/tmp/iqc-b-trigger-attribution-ui-typecheck.log`，既有Node/pnpm声明差异仍提示。
+
+这是合并后的既有兼容/受控MVC回归，尚非新增事件/API/MQ灰度接收、归档扫描首次分配、
+生产归因双侧/修订分组和FIRST/LATEST的专项，更不是真实身份或供应商端到端验收。
+此前周期SQL34项仍绑定4f9b3c1，不能自动外推合并后的代码。
