@@ -88,6 +88,12 @@ public class GoldSampleService {
         metadata.put("channel", conversation.getChannel()); metadata.put("businessType", conversation.getBusinessType());
         metadata.put("businessNo", conversation.getBusinessNo()); metadata.put("employeeId", conversation.getEmployeeId());
         metadata.put("customerExternalId", conversation.getCustomerExternalId());
+        if(conversation.getBusinessFieldsJson()!=null){
+            try{
+                var manifest=io.github.opensabre.iqc.conversation.InputCountManifest.frozenFields(json.readTree(conversation.getBusinessFieldsJson()));
+                if(manifest!=null)metadata.putObject("businessContext").set("businessFields",manifest);
+            }catch(com.fasterxml.jackson.core.JsonProcessingException invalid){throw IqcException.invalidState("来源业务元数据JSON无效");}
+        }
         return new Input(frozen.stream().map(message -> {
                 if (message.getSequenceNo() == null) throw new IllegalArgumentException("missing message sequence");
                 return new GoldConversation.Message(message.getId(), message.getSpeakerRole(), message.getContent(),

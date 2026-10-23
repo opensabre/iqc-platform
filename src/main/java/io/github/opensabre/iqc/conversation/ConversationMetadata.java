@@ -100,6 +100,7 @@ public record ConversationMetadata(
                 throw IqcException.invalidArgument("businessFields 数字必须有限");
             fields.put(key, node.deepCopy());
         });
+        InputCountManifest.validate(fields);
         serialize(fields);
         return Collections.unmodifiableMap(fields);
     }

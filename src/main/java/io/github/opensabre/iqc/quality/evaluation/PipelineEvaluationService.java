@@ -233,14 +233,25 @@ public class PipelineEvaluationService {
                          BusinessMetrics businessMetrics,LatencyMetrics latencyMetrics,RegressionMetrics regressionMetrics,
                          StructuredMetrics structuredMetrics,
                          @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-                         CitationGroundingMetrics.Summary citationGroundingMetrics) {
+                         CitationGroundingMetrics.Summary citationGroundingMetrics,
+                         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                         InputCompletenessMetrics.Summary inputCompletenessMetrics) {
         public Report(String schemaVersion,String taskId,String executionId,String datasetHash,int expectedSamples,
                       int availableSamples,int successfulSamples,boolean complete,List<String> missingSampleIds,
                       Map<String,String> sourceExecutionIds,FindingEvaluationMetrics.Result findingMetrics,
                       BusinessMetrics businessMetrics,LatencyMetrics latencyMetrics,RegressionMetrics regressionMetrics,
                       StructuredMetrics structuredMetrics){
             this(schemaVersion,taskId,executionId,datasetHash,expectedSamples,availableSamples,successfulSamples,complete,
-                    missingSampleIds,sourceExecutionIds,findingMetrics,businessMetrics,latencyMetrics,regressionMetrics,structuredMetrics,null);
+                    missingSampleIds,sourceExecutionIds,findingMetrics,businessMetrics,latencyMetrics,regressionMetrics,structuredMetrics,null,null);
+        }
+        public Report(String schemaVersion,String taskId,String executionId,String datasetHash,int expectedSamples,
+                      int availableSamples,int successfulSamples,boolean complete,List<String> missingSampleIds,
+                      Map<String,String> sourceExecutionIds,FindingEvaluationMetrics.Result findingMetrics,
+                      BusinessMetrics businessMetrics,LatencyMetrics latencyMetrics,RegressionMetrics regressionMetrics,
+                      StructuredMetrics structuredMetrics,CitationGroundingMetrics.Summary citationGroundingMetrics){
+            this(schemaVersion,taskId,executionId,datasetHash,expectedSamples,availableSamples,successfulSamples,complete,
+                    missingSampleIds,sourceExecutionIds,findingMetrics,businessMetrics,latencyMetrics,regressionMetrics,
+                    structuredMetrics,citationGroundingMetrics,null);
         }
     }
     public record StructuredMetrics(String scope,int declaredLlmNodes,long logicalInvocations,long validOutputs,
@@ -269,7 +280,9 @@ public class PipelineEvaluationService {
         var absoluteScoreError=java.math.BigDecimal.ZERO; var durations=new ArrayList<Long>();
         var structured=new StructuredCounter(prepared.release());
         var citations=new CitationGroundingMetrics(prepared.release(),prepared.dataset().members().size());
+        var completeness=new InputCompletenessMetrics();
         for (var member : prepared.dataset().members()) {
+            completeness.add(member.gold());
             var row = bySample.get(member.sampleId());
             var expected=member.gold().decision();
             if(expected!=null) {
@@ -316,7 +329,7 @@ public class PipelineEvaluationService {
                 FindingEvaluationMetrics.evaluate(metricSamples),business,latency,
                 new RegressionMetrics("EXACT_LABELLED_FINDING_EVIDENCE_SCORE_RISK",regression?prepared.dataset().members().size():0,
                         regressionPassed,regression?ratio(regressionPassed,prepared.dataset().members().size()):null,List.copyOf(regressionFailed)),
-                structured.summary(),citations.summary());
+                structured.summary(),citations.summary(),completeness.summary());
     }
     /** Explicit repeated-run comparison reuses the existing ownership, artifact and source-execution checks. */
     public ModelConsistencyMetrics.Report consistency(String taskId,String executionId,String referenceTaskId,String referenceExecutionId){
