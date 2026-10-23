@@ -40,3 +40,12 @@ PROMPT Benchmark将来源及正文视为同一变量，原其他不变量继续�
 原14934离线test-compile+surerfire终态0；新增4项及原Agent/Benchmark组合共27项，
 零失败、错误、跳过。日志`/tmp/iqc-b-prompt-version-validation.log`。
 Mapper为受控适配，此证据不替代真实组织权限、SQL发布/工作器及浏览器验收。
+
+### Prompt单变量实验验证（B，2026-10-24）
+
+PromptBenchmarkVariableTest通过内嵌到版本绑定及反向比较，确认仅提示词改变可形成
+PROMPT实验，并且不修改两侧原配置。正文相同仅更换来源不能形成有效实验；
+PROMPT同时改变模型、MODEL夹带Prompt来源变化、正文摘要被篡改均拒绝。
+原77068 compiler:testCompile+surerfire终态0，新增4项与Prompt版本/SkillAPI/
+SmallModel组合共17项零失败、错误、跳过。日志`/tmp/iqc-b-prompt-benchmark-validation.log`。
+此为原比较器的冻结配置验证，不替代同Dataset真实评测任务和供应商调用验收。
