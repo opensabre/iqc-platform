@@ -266,3 +266,15 @@ FIRST/LATEST在两任务同会话同标准中先选最终结果，再仅将对�
 默认报告modelUsage为null且不调用费用/敏感授权服务；显式费用查询撤权在任务/结果读取前
 拒绝。报告服务真实，结果/账本服务/当前敏感授权为受控适配，非PDP或报告SQL端到端。
 前一轮37项SQL独立证明账本精确集合，不将两层证据拼成真实供应商或浏览器整链。
+
+### 归档不可变父来源边界验证（B，2026-10-23）
+
+原20195验证终态0，`/tmp/iqc-b-archive-parent-evidence.log.exit`为0；fresh XML为
+ArchiveReceiptParentEvidenceTest 4项、ExactSubscriptionSnapshotTest 1项、
+PipelineRolloutExecutionGuardTest 8项，共13项零失败、错误和跳过。新增4项直接验证原父关系
+校验：有效历史父来源保持不变，缺失/跨父/坏Hash/版本元数据拒绝，请求身份、配置、目标、
+输入修订与有效区间不一致拒绝，重新计算Hash后变更绑定用户仍拒绝。
+本轮仅证明父关系边界，不替代完整六依赖guard、实际扫描/物化SQL或worker成功链路。
+
+用户确认所有质检输入均为已处理会话；后续实施及验收不包含语音转换、ASR转写或说话人分离，
+继续验证处理后会话接入、触发、质检执行和报告。
