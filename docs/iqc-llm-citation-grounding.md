@@ -26,7 +26,7 @@
 
 ## 后续与验证
 
-需接入原评测报告显示可测覆盖率、引用错误率及坏容器/缺测，独立列出语义金标准确率。当前仅采集来源及编译，没有新增/运行测试。B待验证原适配行为不变、合法/未知ID/非原文/空/坏容器/角色会话错误、未知协议、错误节点仍保留指标、源字节不变及真实provider→SQL路径。完整“幻觉”需求与整体I1–I7未因此完成。
+需接入原评测报告显示可测覆盖率、引用错误率及坏容器/缺测，独立列出语义金标准确率。A初次交付仅采集来源及编译；后续B验证证据见下节。初始待验证原适配行为不变、合法/未知ID/非原文/空/坏容器/角色会话错误、未知协议、错误节点仍保留指标、源字节不变及真实provider→SQL路径。完整“幻觉”需求与整体I1–I7未因此完成。
 
 ## 原评测报告聚合（2026-10-23）
 
@@ -41,4 +41,22 @@
 
 新增字段为可选且null时省略；原15参数Report构造保留，历史JSON缺字段可读。新生成报告与ReportEvidence摘要将包含该诊断，历史存储的ReportEvidence和报告摘要不回写。发布门禁条件未新增或放宽，既有完整性、金标与回归判定不变。
 
-UI原报告页引用卡片展示覆盖、部分/未测量、已观测错误率、坏容器与无效诊断；沿用报告现有加载/清理/授权流程，不增加异步请求或原文。当前证据为编译/构建，尚无本批SQL/HTTP/浏览器运行证明。B后续应验证旧Report构造/JSON、零LLM/零引用、缺产物、SKIPPED、最后重试轨迹、未知/部分/无效协议、继承源、错误节点保留以及新旧门禁报告摘要兼容。
+UI原报告页引用卡片展示覆盖、部分/未测量、已观测错误率、坏容器与无效诊断；沿用报告现有加载/清理/授权流程，不增加异步请求或原文。A初次报告接线证据为编译/构建。初始独立验证清单：旧Report构造/JSON、零LLM/零引用、缺产物、SKIPPED、最后重试轨迹、未知/部分/无效协议、继承源、错误节点保留以及新旧门禁报告摘要兼容。
+
+## B独立验证（2026-10-23）
+
+固定后端fc6e05b，复用原适配器、报告、SQL与worker，不修改生产判定或引用匹配规则。
+
+- LlmCitationGroundingTest 6项：逐条保留合法/未知ID/非原文声明分母，角色及会话身份，标签subjectRole，空数组/坏容器/未知协议与观察信封，matchedText兼容、重复ID取首条、输入JSON与正文不变。
+- CitationGroundingMetricsTest 5项：最后轨迹替代内部重试，ERROR诊断保留，缺样本/attempt0/SKIPPED/非LLM不造测量，部分测量和非法协议/计数/状态不冒充完整覆盖，零引用/零LLM/零样本错误率null。
+- FrozenDetectorCitationMetricsTest 3项：真实FrozenDetectorEngine在ERROR返回前保留原始坏引用计数且不发布Finding，诊断不含引用正文；无法解析原始观察不改变ERROR判定；RULE不生成LLM测量。执行器边界mock，不能外推供应商原始错误响应恢复。
+
+原88984 terminal0（上述前两类+原报告25=36项）；原40707全testCompile后，原31915直接surefire执行三类共14项，terminal0且fresh XML无失败/错误/跳过，日志`/tmp/iqc-b-citation-engine.log`。
+
+原IsolatedMysqlMeasuredPublicationIT扩展实际SpringAiLlmQualityProvider解析、SnapshotChatModelRouter、FrozenDetectorEngine、持久worker/SQL及report读取链：受控ChatModel返回显式空evidence，测量覆盖1但引用条数0、错误率null。两样本首轮一失败，覆盖0.5、未测量1；重试后沿用先前成功样本、覆盖1且零引用率仍null，原sourceExecutionIds/SQL单条新产物/模型调用次数断言保留。真实MVC普通报告与服务对象比对沿原夹具继续覆盖。
+
+原40707 terminal0，`/tmp/iqc-b-citation-sql.log`，fresh XML SQL2+一致性计算5+报告25=32项无失败/错误/跳过。专用MySQL34307自动关闭且socket消失。该SQL轮只证明显式空引用与重试链，非零错误引用由纯工具/ERROR桥接用例验证，尚非真实供应商错误引用到SQL全链；身份/scope/ChatModel及网关部分边界仍受控。
+
+UIabc33d3新增引用面板2项，合原页面权限5项共7项通过；原23888 terminal0，`/tmp/iqc-b-citation-ui.log`。原94676 type-check terminal0，`/tmp/iqc-b-citation-ui-typecheck.log`。实际Vue组件、API/权限桩，生产UI未改，未做本轮浏览器整链。各轮重复用例不累加为独立总数。
+
+完整语义幻觉评测、真实PDP/供应商/浏览器及适用I1–I7仍待验收；不新增发布阈值、不更改默认v1，无共享数据库/push/部署。语音转换按用户要求排除。

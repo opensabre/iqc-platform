@@ -290,7 +290,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         var provider=context.getBean(LlmQualityProvider.class);
         // Exercise production prompt construction, parsing and router fingerprint generation.
         var model=mock(org.springframework.ai.chat.model.ChatModel.class);
-        when(model.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(new org.springframework.ai.chat.model.ChatResponse(List.of(new org.springframework.ai.chat.model.Generation(new org.springframework.ai.chat.messages.AssistantMessage("{\"hit\":true,\"reason\":\"controlled\"}")))));
+        when(model.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(new org.springframework.ai.chat.model.ChatResponse(List.of(new org.springframework.ai.chat.model.Generation(new org.springframework.ai.chat.messages.AssistantMessage("{\"hit\":true,\"reason\":\"controlled\",\"evidence\":[]}")))));
         ObjectProvider<org.springframework.ai.chat.model.ChatModel> defaults=mock(ObjectProvider.class);
         when(defaults.getIfAvailable()).thenReturn(model);
         var gateway=mock(io.github.opensabre.iqc.result.llm.gateway.ModelGateway.class);
@@ -307,6 +307,11 @@ class IsolatedMysqlMeasuredPublicationIT {
         var evaluations=context.getBean(PipelineEvaluationService.class);
         var first=run(evaluations.create(dataset.getId(),1,asset.getId(),null,1,"first",1,"first"+key));
         var second=run(evaluations.create(dataset.getId(),1,asset.getId(),null,1,"second",1,"second"+key));
+        var citationReport=evaluations.report(first.getId(),first.getCurrentExecutionId());
+        assertEquals(1,citationReport.citationGroundingMetrics().measuredNodeSamples());
+        assertEquals(0,citationReport.citationGroundingMetrics().claimedQuotes());
+        assertNull(citationReport.citationGroundingMetrics().observedQuoteErrorRate());
+        assertEquals(0,BigDecimal.ONE.compareTo(citationReport.citationGroundingMetrics().measurementCoverage()));
         var compared=evaluations.consistency(first.getId(),first.getCurrentExecutionId(),second.getId(),second.getCurrentExecutionId());
         assertEquals(1,compared.expectedPairs());assertEquals(1,compared.comparablePairs());assertEquals(1,compared.agreeingPairs());assertEquals(0,BigDecimal.ONE.compareTo(compared.agreementRate()));
         var duplicate=evaluations.consistency(first.getId(),first.getCurrentExecutionId(),first.getId(),first.getCurrentExecutionId());assertEquals(Map.of("SAME_ARTIFACT",1),duplicate.excludedReasons());
@@ -330,10 +335,19 @@ class IsolatedMysqlMeasuredPublicationIT {
         String priorId=queued.getCurrentExecutionId();runner.executePersisted(queued.getId(),priorId);
         var partial=s.getMapper(InspectionTaskMapper.class).selectById(queued.getId());assertEquals("PARTIAL_FAILED",partial.getStatus());
         var prior=evaluations.report(partial.getId(),priorId);assertEquals(1,prior.successfulSamples());
+        assertEquals(2,prior.citationGroundingMetrics().expectedNodeSamples());
+        assertEquals(1,prior.citationGroundingMetrics().measuredNodeSamples());
+        assertEquals(1,prior.citationGroundingMetrics().unmeasuredNodeSamples());
+        assertEquals(0,new BigDecimal("0.5").compareTo(prior.citationGroundingMetrics().measurementCoverage()));
         assertEquals(2,prior.businessMetrics().labelGold());assertEquals(1,prior.businessMetrics().comparableLabels());
         assertEquals(0,BigDecimal.ONE.compareTo(prior.businessMetrics().labelAccuracy()));
         recovered.set(true);var retried=run(partial);assertNotEquals(priorId,retried.getCurrentExecutionId());
         var retryReport=evaluations.report(retried.getId(),retried.getCurrentExecutionId());assertTrue(retryReport.complete());assertEquals(2,retryReport.successfulSamples());
+        assertEquals(2,retryReport.citationGroundingMetrics().expectedNodeSamples());
+        assertEquals(2,retryReport.citationGroundingMetrics().measuredNodeSamples());
+        assertEquals(0,retryReport.citationGroundingMetrics().claimedQuotes());
+        assertNull(retryReport.citationGroundingMetrics().observedQuoteErrorRate());
+        assertEquals(0,BigDecimal.ONE.compareTo(retryReport.citationGroundingMetrics().measurementCoverage()));
         assertEquals(2,retryReport.businessMetrics().labelGold());assertEquals(2,retryReport.businessMetrics().comparableLabels());
         assertEquals(0,BigDecimal.ONE.compareTo(retryReport.businessMetrics().labelAccuracy()));
         assertEquals(priorId,retryReport.sourceExecutionIds().get(sample.getId()));assertEquals(retried.getCurrentExecutionId(),retryReport.sourceExecutionIds().get(failedSample.getId()));

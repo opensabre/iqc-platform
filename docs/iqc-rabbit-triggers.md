@@ -32,7 +32,7 @@ DB已提交但ACK/连接丢失，broker可能再次投递，由原幂等处理�
 
 ## 验证边界
 
-本批只编译，没有新增/运行测试、连接实际broker、迁移SQL或部署。仍需B独立验证：
+A初次交付仅编译。初始独立验证清单（后续B证据见下节）：
 
 1. 关闭时无传输bean/网络连接/健康依赖，开启时配置缺失早拒绝；secret不进入toString/异常。
 2. 真实broker声明/绑定、MANUAL ACK晚于DB提交、提交失败死信、ACK丢失重投及同身份不同body拒绝。
@@ -41,3 +41,29 @@ DB已提交但ACK/连接丢失，broker可能再次投递，由原幂等处理�
 5. 与HTTP接收幂等/历史hash及内部archive-subscription兼容，其他RabbitAdmin存在时声明隔离。
 
 官方传输参考：[Spring AMQP手动确认](https://docs.spring.io/spring-amqp/reference/amqp/receiving-messages/async-returns.html)、[RabbitMQ消息确认](https://www.rabbitmq.com/tutorials/tutorial-two-spring-amqp)。正式验收以本提交实际broker和SQL行为为准，不能由参考文档或编译推断。
+
+## B接收边界与专用broker验证（2026-10-23）
+
+固定后端5f55e11，未修改生产接收器或默认开关。
+
+- RabbitTriggerConsumerTest 8项：使用真实TaskTriggerService.externalRequest严格解析与IqcDataScope收窄，验证acceptance返回后ACK、失败/无持久ID拒绝且不requeue、当前授权失败、未知/重复字段及内部来源、source/pipeline/type部署绑定、非法UTF-8/16MiB、交互身份不能被后台借用、ACK丢失异常不追加reject且scope清理。actors.resolve与持久接收、Channel为mock；这里证明方法返回顺序，不是实际DB提交时刻。
+- RabbitTriggerConfigurationTest 3项：缺开关/false时无传输、消费者或配置bean；错误配置与URI异常不含fixture凭据；六个durable声明与死信参数仅归专用RabbitAdmin。
+- RabbitTriggerBrokerIT 2项：仅在显式IQC_RABBIT_VALIDATION_PORT=35672时运行，使用实际生产连接工厂/拓扑声明、原消费者及真实AMQP Channel。独立随机队列验证publisher confirm、接受ACK后关闭重开无重投、非法UTF-8及acceptance失败进入死信且原body保留、模拟ACK发送丢失后关闭channel可重投同body，redelivered=true，随后ACK清空。通过basicGet交付给原消费者，不宣称已验证Spring监听容器回调配置。
+
+首次17526为新增断言的泛型编译错误；25543的16个非broker用例通过，broker2项因测试URI末尾`/`表示空vhost而未连接成功。改用`/%2f`明确默认`/` vhost后，原35288 terminal0，日志`/tmp/iqc-b-rabbit-broker-final.log`，fresh XML consumer8+configuration3+broker2+原ScheduledActorScope5=18项零失败/错误/跳过。首轮85789因修Mockito测试夹具主动停止130，不作成功证据。
+
+专用节点iqc_b_validation@localhost，配置/数据/日志在`/private/tmp/iqc-b-rabbit.gnovBK`；仅AMQP127.0.0.1:35672，分布式35673及独立EPMD34699，不使用已有broker。原54010节点、9133停止命令均terminal0，专用EPMD停止0，三个端口最终均ECONNREFUSED；随机队列/交换机由夹具清理。未迁移或连接共享SQL。
+
+传输成功仍不等于真实SQL幂等：当前broker测试中acceptance和组织解析为受控边界。同事件同body返回原持久任务、不同body冲突、实际REQUIRES_NEW提交后ACK、SQL竞争、Spring监听容器、内容/retryPolicy权限、WAITING_INPUT到worker产物及真实当前PDP仍须联合验证。不要把两次受控acceptance调用返回同一个fixture ID当作数据库幂等证明。无push/部署，默认enabled=false与v1不变，语音转换排除。
+
+### 独立 SQL 接收事务验证（B，2026-10-23）
+
+`IsolatedMysqlBrokerAcceptanceIT` 复用隔离 MySQL、原 InspectionTaskMapper、
+框架 PoMetaObjectHandler、真实 IqcDataScope 与 TaskTriggerService。三个测试确认：
+外层事务回滚后 REQUIRES_NEW 接收记录仍为 WAITING_INPUT 且负责人正确；同一请求重投
+返回原任务且不重新解析资产；同事件不同载荷不能覆盖原任务；缺当前授权或资产失败不留记录。
+
+原进程 34507 终态 0，日志 `/tmp/iqc-b-broker-acceptance-sql.log`，fresh Surefire XML
+3 项、零失败错误跳过。75 个迁移校验通过，版本 1.1.74；专用 34307 自动关闭、socket 已消失。
+发布资产为受控 fixture，目标会话尚不存在；本轮没有 AMQP Channel、Spring 监听容器、
+实际 PDP、目标物化或 worker。不能将独立 SQL 与前轮 broker 结果合称提交后 ACK 的联合验证。
