@@ -447,6 +447,9 @@ public class PipelineAssetService {
             if("LLM".equals(node.type())) {
                 var agent=agents.selectById(config.path("agentSnapshot").path("id").asText());
                 if(agent==null || "DISABLED".equals(agent.getStatus())) throw IqcException.invalidState("流水线智能体已停用");
+                var body=config.path("agentSnapshot").path("configJson");var frozenAgent=body.isTextual()?parse(body.textValue()):body;
+                if(frozenAgent.hasNonNull("promptAsset"))try{agentAssets.validatePrompt(json.treeToValue(frozenAgent,AgentConfiguration.class));}
+                catch(com.fasterxml.jackson.core.JsonProcessingException invalid){throw IqcException.invalidState("流水线Prompt来源无效");}
             }
         }
     }

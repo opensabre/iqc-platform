@@ -30,7 +30,14 @@ public final class BenchmarkVariableComparator {
         boolean exact=PipelineRelease.EXACT_SCHEMA.equals(baseline.schemaVersion());
         var left = project(baseline, selection, mapper);
         var right = project(candidate, selection, mapper);
-        if (!left.invariant().equals(right.invariant()) || !left.paths().equals(right.paths()))
+        var paths=new java.util.ArrayList<>(left.paths());
+        boolean samePaths=left.paths().equals(right.paths());
+        if(!samePaths&&selection.dimension()==Dimension.PROMPT){
+            samePaths=left.paths().stream().filter(path->!path.endsWith("/promptAsset")).toList()
+                    .equals(right.paths().stream().filter(path->!path.endsWith("/promptAsset")).toList());
+            for(var path:right.paths())if(!paths.contains(path))paths.add(path);
+        }
+        if (!left.invariant().equals(right.invariant()) || !samePaths)
             throw invalid("Benchmark 发现声明变量之外的配置变化");
         String leftVariable = hash(left.variable(), mapper, exact), rightVariable = hash(right.variable(), mapper, exact);
         if (leftVariable.equals(rightVariable)) throw invalid("Benchmark 变量没有实际语义变化");
@@ -38,7 +45,7 @@ public final class BenchmarkVariableComparator {
         String rightPrompt = right.prompt() == null ? null : hash(mapper.getNodeFactory().textNode(right.prompt()), mapper, exact);
         if ((selection.dimension() == Dimension.PROMPT || selection.dimension() == Dimension.SKILL)
                 && leftPrompt!=null && leftPrompt.equals(rightPrompt)) throw invalid("Benchmark 变量未改变实际有效提示");
-        return new Comparison(selection, left.paths(), hash(left.invariant(), mapper, exact), leftVariable, rightVariable,
+        return new Comparison(selection, List.copyOf(paths), hash(left.invariant(), mapper, exact), leftVariable, rightVariable,
                 hash(releaseProjection(baseline,mapper), mapper, exact), hash(releaseProjection(candidate,mapper), mapper, exact), leftPrompt, rightPrompt);
     }
 
@@ -71,6 +78,16 @@ public final class BenchmarkVariableComparator {
         if(!"LLM".equals(nodes.get(index).path("type").asText()))throw invalid("该变量维度不支持此节点类型");
         ObjectNode node = (ObjectNode) nodes.get(index), config = (ObjectNode) node.get("config");
         ObjectNode agent = (ObjectNode) config.get("agentSnapshot"), agentConfig = configuration(node, mapper, exact);
+        if(agentConfig.hasNonNull("promptAsset")){
+            var source=agentConfig.path("promptAsset");
+            if(!source.isObject()||source.size()!=3||!source.path("skillId").isTextual()
+                    ||!source.path("skillId").asText().matches("[A-Za-z0-9:_-]{1,64}")||!source.path("versionNo").isIntegralNumber()
+                    ||!source.path("versionNo").canConvertToInt()||source.path("versionNo").intValue()<1||!source.path("contentHash").isTextual())
+                throw invalid("Prompt版本来源无效");
+            var reference=new io.github.opensabre.iqc.agent.AgentConfiguration.PromptReference(source.path("skillId").asText(),source.path("versionNo").intValue(),source.path("contentHash").asText());
+            if(!reference.contentHash().equals(io.github.opensabre.iqc.agent.AgentConfiguration.promptHash(reference,agentConfig.path("systemPrompt").asText())))
+                throw invalid("Prompt正文与版本摘要不一致");
+        }
         String prompt = effectivePrompt(agentConfig);
         String prefix = "/pipeline/nodes/" + index + "/config/agentSnapshot/configJson";
         List<String> paths = new ArrayList<>();
@@ -79,6 +96,7 @@ public final class BenchmarkVariableComparator {
             case PROMPT -> {
                 if (selection.slot() != null) throw invalid("PROMPT 不接受槽位");
                 variable.set("systemPrompt", agentConfig.get("systemPrompt"));
+                if(agentConfig.has("promptAsset")){variable.set("promptAsset",agentConfig.get("promptAsset"));agentConfig.remove("promptAsset");paths.add(prefix+"/promptAsset");}
                 agentConfig.put("systemPrompt", "__BENCHMARK_VARIABLE__"); paths.add(prefix + "/systemPrompt");
             }
             case MODEL -> {
