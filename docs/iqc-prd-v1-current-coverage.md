@@ -137,3 +137,7 @@ FrozenDetectorEngine增加过滤前的llmCitationGrounding计数，复用原Lega
 ### 2026-10-24 Prompt精确独立来源
 
 复用原Skill指令资产独立版本/启停/回滚，Agent 3.0可选promptAsset明确ID/版本/正文Hash，与实际systemPrompt共同冻结。UI复用原历史端点，PROMPT Benchmark接同一变量与来源校验；原内嵌Prompt/JSON/构造保持。无新表/API/权限/框架，当前实现和编译构建结果见协作记录；真实SQL/角色/发布任务/Benchmark及KnowledgeBase独立映射、校准与其余适用I1–I7继续。
+
+### 2026-10-24 Knowledge语料版本基础（KB1）
+
+已建立独立参考语料协议与知识库草稿/不可变版本领域服务，复用原MySQL/BasePo/Mapper/IqcDataScope/摘要/CAS发布，新增V1.1.75唯一领域持久化模型，见iqc-knowledge-corpus.md及事前复用ADR。当前只有内部服务，未新增未配套授权的HTTP接口；KB2管理/敏感投影/资源注册及精确引用、KB3任务授权正文冻结与有界LLM上下文仍待实施。共享Agent目录只存引用/Hash，不能嵌入私有语料绕过组织范围。根任务/完整适用I1–I7继续，编译不代替真实SQL/权限/worker验收。
