@@ -28,7 +28,13 @@ public class PipelineRolloutTaskController {
             JsonNode concurrency,
             @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class)
             @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class)
-            JsonNode requestKey) { }
+            JsonNode requestKey,
+            @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.ExactValueDeserializer.class)
+            @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class)
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            JsonNode selectorAsset) {
+        public Create(String name,List<String> conversationIds,JsonNode concurrency,JsonNode requestKey){this(name,conversationIds,concurrency,requestKey,null);}
+    }
     @PostMapping
     @ResourcePermission(code="iqc:pipeline:rollout:task:create",name="按灰度策略创建流水线任务",type="iqc",description="新请求按当前策略分配，重放沿用原冻结任务")
     @Audit(operationType=OperationType.CREATE,description="创建灰度流水线任务",module="IQC_ROLLOUT",request=false,response=false,key="#id")
@@ -47,6 +53,14 @@ public class PipelineRolloutTaskController {
             if(!request.concurrency().isIntegralNumber()||!request.concurrency().canConvertToInt())
                 throw IqcException.invalidArgument("并发数须为精确整数");
             concurrency=request.concurrency().intValue();
+        }
+        if(request.selectorAsset()!=null&&!request.selectorAsset().isNull()){
+            var ref=request.selectorAsset();var selectorId=ref.path("selectorId");var version=ref.path("versionNo");
+            if(!ref.isObject()||ref.size()!=2||!selectorId.isTextual()||!selectorId.textValue().matches("[A-Za-z0-9:_-]{1,64}")
+                    ||!version.isIntegralNumber()||!version.canConvertToInt()||version.intValue()<1
+                    ||request.conversationIds()!=null&&!request.conversationIds().isEmpty())throw IqcException.invalidArgument("灰度Selector引用必须精确且不能同时指定会话列表");
+            return projection.taskReceipt(tasks.createWithSelector(id,request.name(),
+                    new io.github.opensabre.iqc.selector.SelectorAssetService.Reference(selectorId.textValue(),version.intValue()),concurrency,request.requestKey().textValue()),access);
         }
         return projection.taskReceipt(tasks.create(id,request.name(),request.conversationIds(),concurrency,request.requestKey().textValue()),access);
     }

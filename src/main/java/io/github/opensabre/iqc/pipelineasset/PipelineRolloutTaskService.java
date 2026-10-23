@@ -7,19 +7,29 @@ import io.github.opensabre.iqc.task.InspectionTaskService;
 import io.github.opensabre.iqc.task.model.InspectionTask;
 import java.util.List;
 import java.util.Objects;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /** One original asset lock serializes policy changes and first request materialization across nodes. */
 @Service
-@RequiredArgsConstructor
 public class PipelineRolloutTaskService {
     private final PipelineAssetService pipelines;
     private final PipelineRolloutService rollouts;
     private final InspectionTaskService tasks;
     private final ObjectMapper json;
     private final IqcDataScope scope;
+    private final io.github.opensabre.iqc.selector.SelectorAssetService selectorAssets;
+    private final io.github.opensabre.iqc.selector.ConversationSelectionService selections;
+    @org.springframework.beans.factory.annotation.Autowired
+    public PipelineRolloutTaskService(PipelineAssetService pipelines,PipelineRolloutService rollouts,InspectionTaskService tasks,
+            ObjectMapper json,IqcDataScope scope,io.github.opensabre.iqc.selector.SelectorAssetService selectorAssets,
+            io.github.opensabre.iqc.selector.ConversationSelectionService selections){
+        this.pipelines=pipelines;this.rollouts=rollouts;this.tasks=tasks;this.json=json;this.scope=scope;
+        this.selectorAssets=selectorAssets;this.selections=selections;
+    }
+    public PipelineRolloutTaskService(PipelineAssetService pipelines,PipelineRolloutService rollouts,InspectionTaskService tasks,ObjectMapper json,IqcDataScope scope){
+        this(pipelines,rollouts,tasks,json,scope,null,null);
+    }
 
     @Transactional(isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public InspectionTask create(String id,String name,List<String> conversationIds,Integer concurrency,String requestKey){
@@ -29,16 +39,33 @@ public class PipelineRolloutTaskService {
         pipelines.lockForRolloutRequest(id);
         var existing=tasks.findRolloutRequest(taskId);
         if(existing!=null)return replay(id,actorId,requestKey,fingerprint,existing);
-        var revision=rollouts.currentForTask(id);
-        var policy=revision.snapshot().policy();
+        var allocation=allocate(id,actorId,requestKey,taskId,fingerprint,PipelineRolloutTaskEvidence.SCHEMA);
+        return tasks.createUsingPipelineRollout(allocation.selected(),name,conversationIds,concurrency,requestKey,allocation.evidence());
+    }
+    @Transactional(isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public InspectionTask createWithSelector(String id,String name,io.github.opensabre.iqc.selector.SelectorAssetService.Reference selector,
+            Integer concurrency,String requestKey){
+        if(selectorAssets==null||selections==null)throw IqcException.invalidState("灰度Selector物化依赖不可用");
+        String actorId=scope.actorUserId();String taskId=PipelineRolloutTaskEvidence.taskId(actorId,id,requestKey,json);
+        String fingerprint=PipelineRolloutTaskEvidence.selectorRequestFingerprint(name,selector,concurrency,json);
+        pipelines.lockForRolloutRequest(id);
+        var existing=tasks.findRolloutRequest(taskId);
+        if(existing!=null)return tasks.requireRolloutSelectorRetry(replay(id,actorId,requestKey,fingerprint,existing),fingerprint,selector);
+        var allocation=allocate(id,actorId,requestKey,taskId,fingerprint,PipelineRolloutTaskEvidence.SELECTOR_SCHEMA);
+        var frozen=selectorAssets.publishedForTask(selector.selectorId(),selector.versionNo());
+        var selection=selections.materialize(frozen.definition());
+        return tasks.createUsingPipelineRolloutSelector(allocation.selected(),name,frozen,selection,concurrency,requestKey,allocation.evidence());
+    }
+    private record Allocation(PipelineAssetService.Prepared selected,PipelineRolloutTaskEvidence evidence) { }
+    private Allocation allocate(String id,String actorId,String requestKey,String taskId,String fingerprint,String schema){
+        var revision=rollouts.currentForTask(id);var policy=revision.snapshot().policy();
         var sources=pipelines.rolloutSourcesForTask(id,policy);
         if(!Objects.equals(revision.snapshot().baselineReleaseHash(),sources.baseline().contentHash())
                 ||!Objects.equals(revision.snapshot().candidateReleaseHash(),sources.candidate().contentHash()))
             throw IqcException.invalidState("灰度策略发布来源摘要已变化");
         var decision=policy.preview(actorId,requestKey,sources.baseline(),sources.candidate(),json);
-        var evidence=new PipelineRolloutTaskEvidence(PipelineRolloutTaskEvidence.SCHEMA,taskId,fingerprint,revision,decision);
-        var selected=decision.side()==PipelineRolloutPolicy.Side.CANDIDATE?sources.candidate():sources.baseline();
-        return tasks.createUsingPipelineRollout(selected,name,conversationIds,concurrency,requestKey,evidence);
+        var evidence=new PipelineRolloutTaskEvidence(schema,taskId,fingerprint,revision,decision);
+        return new Allocation(decision.side()==PipelineRolloutPolicy.Side.CANDIDATE?sources.candidate():sources.baseline(),evidence);
     }
     private InspectionTask replay(String id,String actorId,String requestKey,String fingerprint,InspectionTask task){
         try{

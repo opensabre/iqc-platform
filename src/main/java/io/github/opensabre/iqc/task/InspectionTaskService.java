@@ -467,6 +467,40 @@ public class InspectionTaskService {
         return createUsingPipelineSnapshot(prepared,name,conversationIds,concurrency,null,null,null,null,null,null,null,rollout);
     }
     @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask createUsingPipelineRolloutSelector(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,Integer concurrency,String requestKey,
+            io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence rollout){
+        if(prepared==null||selector==null||selection==null||rollout==null||selectorAssets==null
+                ||!io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.SELECTOR_SCHEMA.equals(rollout.schemaVersion())
+                ||!selector.definition().equals(selection.definition()))throw IqcException.invalidArgument("灰度选数来源缺失或不一致");
+        var locked=selectorAssets.getObject().publishedForTask(selector.selectorId(),selector.versionNo());
+        if(!io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(locked)).equals(
+                io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(selector))))throw IqcException.invalidState("灰度Selector来源已变化");
+        String fingerprint=io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.selectorRequestFingerprint(name,
+                new io.github.opensabre.iqc.selector.SelectorAssetService.Reference(selector.selectorId(),selector.versionNo()),concurrency,objectMapper);
+        var marker=objectMapper.valueToTree(prepared);((com.fasterxml.jackson.databind.node.ObjectNode)marker).put("selectorRequestHash",fingerprint);
+        rollout.verify(dataScope.actorUserId(),prepared.pipelineId(),requestKey,fingerprint,marker,objectMapper);
+        return createUsingPipelineSnapshot(prepared,name,selection.selectedConversationIds(),concurrency,null,selection,fingerprint,locked,null,null,null,rollout);
+    }
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask requireRolloutSelectorRetry(InspectionTask task,String fingerprint,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Reference reference){
+        if(selectorAssets==null||reference==null)throw IqcException.invalidState("灰度Selector历史依赖不可用");
+        try{
+            var exact=objectMapper.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                    .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));
+            var frozen=exact.treeToValue(exact.readTree(task.getSelectionFilterJson()).path("asset"),
+                    io.github.opensabre.iqc.selector.SelectorAssetService.Prepared.class);
+            var original=selectorAssets.getObject().viewVersion(reference.selectorId(),reference.versionNo());
+            if(frozen==null||!reference.selectorId().equals(frozen.selectorId())||reference.versionNo()!=frozen.versionNo()
+                    ||!original.contentHash().equals(frozen.contentHash())||original.sourceDraftRevision()!=frozen.sourceDraftRevision()
+                    ||!original.contentHash().equals(io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(frozen.definition()))))
+                throw IqcException.invalidState("灰度Selector历史来源不一致");
+            return requireSelectorRetry(task,fingerprint,frozen);
+        }catch(com.fasterxml.jackson.core.JsonProcessingException|IllegalArgumentException invalid){throw IqcException.invalidState("灰度Selector历史选数证据无效");}
+    }
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
     public InspectionTask findRolloutRequest(String id){
         var task=taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,id).last("FOR UPDATE"));
         if(task!=null&&!dataScope.canView(task.getCreatedBy(),task.getOwnerGroupId()))throw IqcException.accessDenied("无权读取原灰度任务");

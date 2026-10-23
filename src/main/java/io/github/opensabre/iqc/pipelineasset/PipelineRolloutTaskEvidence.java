@@ -11,6 +11,7 @@ import java.util.Objects;
 public record PipelineRolloutTaskEvidence(String schemaVersion,String taskId,String requestFingerprint,
         PipelineRolloutService.Revision revision,PipelineRolloutPolicy.Decision decision) {
     public static final String SCHEMA="iqc-pipeline-rollout-task-v1";
+    public static final String SELECTOR_SCHEMA="iqc-pipeline-rollout-selector-task-v1";
     public static String taskId(String actorId,String pipelineId,String requestKey,ObjectMapper json){
         if(actorId==null||!actorId.matches("[A-Za-z0-9:_-]{1,64}")||pipelineId==null||pipelineId.isBlank()
                 ||requestKey==null||!requestKey.matches("[A-Za-z0-9:_-]{1,128}"))throw IqcException.invalidArgument("灰度任务身份或请求键无效");
@@ -24,6 +25,15 @@ public record PipelineRolloutTaskEvidence(String schemaVersion,String taskId,Str
         var body=json.createObjectNode().put("schemaVersion",SCHEMA).put("name",name).put("concurrency",parallel);
         body.set("conversationIds",json.valueToTree(ids.stream().distinct().sorted().toList()));
         return PipelineAssetService.hash(body.toString());
+    }
+    public static String selectorRequestFingerprint(String name,io.github.opensabre.iqc.selector.SelectorAssetService.Reference selector,
+            Integer concurrency,ObjectMapper json){
+        int parallel=concurrency==null?1:concurrency;
+        if(name==null||name.isBlank()||name.length()>100||parallel<1||parallel>32||selector==null
+                ||selector.selectorId()==null||!selector.selectorId().matches("[A-Za-z0-9:_-]{1,64}")||selector.versionNo()<1)
+            throw IqcException.invalidArgument("灰度Selector任务需名称、精确发布Selector及1至32并发");
+        var body=json.createObjectNode().put("schemaVersion",SELECTOR_SCHEMA).put("name",name).put("concurrency",parallel);
+        body.set("selectorAsset",json.valueToTree(selector));return PipelineAssetService.hash(body.toString());
     }
     public JsonNode envelope(ObjectMapper json){
         var body=json.valueToTree(this);
@@ -41,9 +51,11 @@ public record PipelineRolloutTaskEvidence(String schemaVersion,String taskId,Str
     /** Checks the recorded choice without needing a raw account ID, request key or a mutable current policy. */
     public void verifyFrozen(String expectedTaskId,JsonNode prepared,ObjectMapper json){
         try{
-            if(!SCHEMA.equals(schemaVersion)||!requiresEvidence(taskId)||!Objects.equals(taskId,expectedTaskId)
+            if((!SCHEMA.equals(schemaVersion)&&!SELECTOR_SCHEMA.equals(schemaVersion))||!requiresEvidence(taskId)||!Objects.equals(taskId,expectedTaskId)
                     ||!validHash(requestFingerprint)||revision==null||revision.snapshot()==null||decision==null
                     ||revision.id()==null||revision.id().isBlank()||revision.revisionNo()<1)throw new IllegalArgumentException();
+            if(SELECTOR_SCHEMA.equals(schemaVersion)?!requestFingerprint.equals(prepared.path("selectorRequestHash").asText())
+                    :prepared.has("selectorRequestHash"))throw new IllegalArgumentException();
             var source=revision.snapshot();var policy=source.policy();String pipelineId=source.pipelineId();
             if(!"iqc-pipeline-rollout-revision-v1".equals(source.schemaVersion())||pipelineId==null
                     ||source.revisionNo()!=revision.revisionNo()||policy==null||!pipelineId.equals(policy.pipelineId())||source.change()==null

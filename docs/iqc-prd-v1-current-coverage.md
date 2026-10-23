@@ -105,3 +105,7 @@ FrozenDetectorEngine增加过滤前的llmCitationGrounding计数，复用原Lega
 ### 2026-10-23 上游声明消息完整率
 
 复用businessFields三个显式标量声明/生产与Gold快照，在原评测报告接有来源分母的数量完整率、测量覆盖、不足/超出/无效/缺测。无声明不根据已保存messageCount伪造完整率；按全部冻结输入统计，不依赖执行产物。MESSAGE清单小扩展沿当前来源，BUSINESS沿不可变输入；不改变无清单旧形状，旧Report15/16构造保留，新摘要包含新指标而历史不回写。UI报告/API接入说明配套，详见iqc-input-completeness.md；当前编译/构建，独立实际SQL/来源/JSON/角色/browser仍待。
+
+### 2026-10-23 已发布Selector灰度入口
+
+原灰度创建接口/任务物化器接可选精确已发布Selector，复用原锁/分配/选数/输入冻结及组织范围。新证据schema绑定selectorRequestHash，原列表v1不重写；原请求重放检查历史Selector与原选数，不跟随当前策略/语料重新分配。页面复用资产库，无新表/API/权限/框架，详见iqc-pipeline-rollout-tasks.md。当前仅编译/构建，真实SQL/worker/权限/browser待B验证；周期/事件灰度及整体I1–I7仍继续。
