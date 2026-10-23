@@ -387,6 +387,55 @@ class IsolatedMysqlRolloutServiceIT {
             assertThatThrownBy(()->validateStoredTask(materialized)).hasMessageContaining("原修订、发布来源或比较证据不一致");
         }
     }
+    private static final java.util.concurrent.atomic.AtomicInteger archiveSecond=new java.util.concurrent.atomic.AtomicInteger();
+    /** Seed only the published parent; discovery, receipt deduplication and transaction writes are real. */
+    private io.github.opensabre.iqc.schedule.EventSubscriptionService.Frame archiveFrame() throws Exception {
+        storePublishedSources();service.append(id,0,policy(0));
+        var scope=context.getBean(IqcDataScope.class);when(scope.owner()).thenReturn("actor-1");when(scope.canViewAll()).thenReturn(false);
+        var start=java.time.Instant.parse("2000-01-01T00:00:00Z").plusSeconds(archiveSecond.incrementAndGet());
+        String fingerprint=PipelineAssetService.hash(context.getBean(ObjectMapper.class).writeValueAsString(conversationId));
+        jdbc.update("UPDATE iqc_conversation SET source_fingerprint=?,created_by='actor-1',created_time=? WHERE id=?",fingerprint,java.sql.Timestamp.from(start),conversationId);
+        var definition=new io.github.opensabre.iqc.schedule.EventSubscriptionDefinition(
+                io.github.opensabre.iqc.schedule.EventSubscriptionDefinition.ROLLOUT_SCHEMA,"ConversationCompleted",start,start.plusSeconds(1),600,1,null,null,null,
+                new io.github.opensabre.iqc.schedule.PeriodicDefinition.RolloutReference(id));
+        var owner=new io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","actor-1","actor-1",false,null);
+        var release=new io.github.opensabre.iqc.schedule.EventSubscriptionService.Published("iqc-event-subscription-rollout-release-v1","Archive scan",definition,null,null,owner);
+        String body=context.getBean(ObjectMapper.class).writeValueAsString(release),hash=io.github.opensabre.iqc.selector.SelectorAssetService.hash(body);
+        String subscription="s"+id,revision="r"+id;
+        jdbc.update("INSERT INTO iqc_event_subscription(id,code,name,draft_config_json,active_revision_id,status,created_by) VALUES(?,?,?,'{}',?,'ACTIVE','actor-1')",subscription,subscription,release.name(),revision);
+        jdbc.update("INSERT INTO iqc_event_subscription_revision(id,subscription_id,version_no,source_draft_revision,snapshot_json,content_hash,created_by) VALUES(?,?,1,1,?,?,'actor-1')",revision,subscription,body,hash);
+        return new io.github.opensabre.iqc.schedule.EventSubscriptionService.Frame(subscription,revision,release,hash);
+    }
+    private int scanWithOwner(io.github.opensabre.iqc.schedule.EventSubscriptionService.Frame frame){
+        var actor=new io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved("actor-1","actor-1",false,null,Set.of(),
+                io.github.opensabre.iqc.schedule.EventSubscriptionService.grants(frame.snapshot().definition()),java.time.Instant.now());
+        var holder=io.github.opensabre.common.core.util.UserContextHolder.getInstance();holder.setContext(Map.of("user_name","actor-1","user_id","actor-1"));
+        try{return context.getBean(io.github.opensabre.iqc.schedule.EventSubscriptionService.class).fire(frame,actor);}finally{holder.clear();}
+    }
+    @Test void archiveScanDeduplicatesDeletedReceiptAndRejectsStaleRevision() throws Exception {
+        var frame=archiveFrame();assertThat(scanWithOwner(frame)).isOne();assertThat(scanWithOwner(frame)).isZero();
+        var row=jdbc.queryForMap("SELECT id,trigger_request_json,status FROM iqc_inspection_task WHERE event_subscription_id=?",frame.subscriptionId());
+        assertThat(row.get("status")).isEqualTo("WAITING_INPUT");
+        var accepted=context.getBean(ObjectMapper.class).readValue((String)row.get("trigger_request_json"),io.github.opensabre.iqc.schedule.TaskTriggerService.Accepted.class);
+        assertThat(accepted.request().target().conversationId()).isEqualTo(conversationId);
+        assertThat(accepted.request().eventId()).isEqualTo(io.github.opensabre.iqc.schedule.EventSubscriptionService.eventId(frame.revisionId(),conversationId,accepted.request().target().inputRevision()));
+        assertThat(accepted.request().requireASR()).isFalse();assertThat(accepted.pipeline().versionNo()).isEqualTo(1);
+        jdbc.update("UPDATE iqc_inspection_task SET status='DELETED' WHERE id=?",row.get("id"));assertThat(scanWithOwner(frame)).isZero();
+        jdbc.update("UPDATE iqc_event_subscription SET active_revision_id='another-revision' WHERE id=?",frame.subscriptionId());
+        assertThat(scanWithOwner(frame)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE event_subscription_id=?",Integer.class,frame.subscriptionId())).isOne();
+        verifyNoInteractions(context.getBean(io.github.opensabre.iqc.result.InspectionExecutionService.class));
+    }
+    @Test void archiveScanUpdateFailureRollsBackReceiptAndAllowsRediscovery() throws Exception {
+        var frame=archiveFrame();
+        jdbc.execute("CREATE TRIGGER reject_archive_scan_update BEFORE UPDATE ON iqc_event_subscription FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='isolated archive scan rejection'");
+        try{assertThatThrownBy(()->scanWithOwner(frame)).hasStackTraceContaining("isolated archive scan rejection");}
+        finally{jdbc.execute("DROP TRIGGER reject_archive_scan_update");}
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE event_subscription_id=?",Integer.class,frame.subscriptionId())).isZero();
+        assertThat(jdbc.queryForObject("SELECT last_scanned_at_utc FROM iqc_event_subscription WHERE id=?",java.time.LocalDateTime.class,frame.subscriptionId())).isNull();
+        assertThat(scanWithOwner(frame)).isOne();assertThat(scanWithOwner(frame)).isZero();
+        verifyNoInteractions(context.getBean(io.github.opensabre.iqc.result.InspectionExecutionService.class));
+    }
     /** Real queue SQL and original periodic guard; non-periodic dependency adapters remain controlled. */
     private io.github.opensabre.iqc.result.InspectionExecutionService realQueue() {
         var session=new SqlSessionTemplate(context.getBean(SqlSessionFactory.class));var assets=mock(PipelineAssetService.class);
@@ -623,6 +672,7 @@ class IsolatedMysqlRolloutServiceIT {
             com.baomidou.mybatisplus.core.toolkit.GlobalConfigUtils.setGlobalConfig(config,global);
             config.addMapper(io.github.opensabre.iqc.selector.dao.SelectorAssetMapper.class);config.addMapper(io.github.opensabre.iqc.selector.dao.SelectorAssetVersionMapper.class);
             config.addMapper(io.github.opensabre.iqc.schedule.dao.PeriodicScheduleMapper.class);config.addMapper(io.github.opensabre.iqc.schedule.dao.PeriodicScheduleRevisionMapper.class);
+            config.addMapper(io.github.opensabre.iqc.schedule.dao.EventSubscriptionMapper.class);
             config.addMapper(io.github.opensabre.iqc.schedule.dao.EventSubscriptionRevisionMapper.class);
             config.addMapper(io.github.opensabre.iqc.result.llm.gateway.GatewayCallMapper.class);
             config.addMapper(PipelineAssetMapper.class);config.addMapper(PipelineAssetVersionMapper.class);config.addMapper(PipelineRolloutRevisionMapper.class);
@@ -688,6 +738,15 @@ class IsolatedMysqlRolloutServiceIT {
             return new io.github.opensabre.iqc.schedule.TaskTriggerService(session.getMapper(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class),
                     session.getMapper(io.github.opensabre.iqc.conversation.dao.ConversationMapper.class),null,pipelines,selectors,selections,null,scope,
                     tasks,executions,json,null,transactionManager,rollouts);
+        }
+        @Bean io.github.opensabre.iqc.schedule.EventSubscriptionService subscriptions(SqlSessionFactory factory,PipelineAssetService pipelines,
+                io.github.opensabre.iqc.selector.SelectorAssetService selectors,io.github.opensabre.iqc.schedule.TaskTriggerService triggers,
+                IqcDataScope scope,ObjectMapper json,PipelineRolloutTaskService rollouts){
+            var session=new SqlSessionTemplate(factory);
+            return new io.github.opensabre.iqc.schedule.EventSubscriptionService(session.getMapper(io.github.opensabre.iqc.schedule.dao.EventSubscriptionMapper.class),
+                    session.getMapper(io.github.opensabre.iqc.schedule.dao.EventSubscriptionRevisionMapper.class),pipelines,selectors,null,
+                    session.getMapper(io.github.opensabre.iqc.conversation.dao.ConversationMapper.class),triggers,
+                    session.getMapper(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class),scope,json,rollouts);
         }
         @Bean io.github.opensabre.iqc.result.InspectionExecutionService scheduledExecutions(){return mock(io.github.opensabre.iqc.result.InspectionExecutionService.class);}
         @Bean io.github.opensabre.iqc.schedule.PeriodicScheduleService scheduledService(SqlSessionFactory factory,PipelineAssetService pipelines,

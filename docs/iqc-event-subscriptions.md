@@ -74,3 +74,15 @@ TaskTriggerService物化与实际queueSystem：首次接收后灰度0→10000且
 
 发布Prepared和组织scope为受控适配，SQL记录由测试初始化；不替代发布UI、真实PDP、
 扫描anti-join、多实例扫描、实际MQ投递或worker成功执行。完整适用I1–I7继续，输入仅处理后会话。
+
+### 归档扫描去重与事务回滚（B，2026-10-24）
+
+原71040 compiler:testCompile+surerfire终态0，`/tmp/iqc-b-archive-scan-sql.log.exit`为0；
+fresh XML SQL30+周期协议11=41项零失败错误跳过，专用34307已关闭且socket消失。
+新增两项使用真实EventSubscriptionService.fire/Spring事务、原会话查询anti-join及
+receiveSubscription：重复扫描和DELETED回执阻止同事件再接收，旧活动修订返回0；
+实际稳定事件ID/目标/原version1/无需ASR得到核对。扫描末尾订阅UPDATE注入SQL失败，
+已写入接收记录和公平扫描时间均回滚，移除故障后重新接收一次且随后去重。
+
+父发布记录由测试初始化，Prepared与当前scope适配受控，每例使用独立历史秒区间和
+独立会话指纹；本轮不证明发布UI、真实组织PDP、多实例或模型worker成功执行。
