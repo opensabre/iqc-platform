@@ -419,6 +419,40 @@ class IsolatedMysqlRolloutServiceIT {
         assertThatThrownBy(()->reports.report(List.of(task.getId()))).hasMessageContaining("原修订、发布来源或比较证据不一致");
         verifyNoInteractions(results);
     }
+    @Test void exactRunUsageExcludesOtherExecutionsAndConversationsAndPreservesUnknownCalls() throws Exception {
+        service.append(id,0,policy(0));var task=createTask("usage-scope");
+        var eid="e"+UUID.randomUUID().toString().replace("-","");
+        jdbc.update("INSERT INTO iqc_task_execution(id,task_id,attempt_no,status) VALUES(?,?,1,'SUCCEEDED')",eid,task.getId());
+        insertUsageCall(task.getId(),eid,conversationId,"CONFIRMED","0.100000000000000001",100);
+        insertUsageCall(task.getId(),eid,conversationId,"CONFIRMED","0.2",300);
+        insertUsageCall(task.getId(),eid,conversationId,"UNCERTAIN",null,null);
+        insertUsageCall(task.getId(),"other-execution",conversationId,"CONFIRMED","99",900);
+        insertUsageCall(task.getId(),eid,"other-conversation","CONFIRMED","99",900);
+        insertUsageCall("other-task",eid,conversationId,"CONFIRMED","99",900);
+        var session=new SqlSessionTemplate(context.getBean(SqlSessionFactory.class));
+        var calls=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService(null,
+                session.getMapper(io.github.opensabre.iqc.result.llm.gateway.GatewayCallMapper.class),
+                session.getMapper(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class),
+                session.getMapper(io.github.opensabre.iqc.task.dao.TaskExecutionMapper.class),context.getBean(IqcDataScope.class),null,
+                context.getBeanProvider(io.github.opensabre.iqc.task.InspectionTaskService.class));
+        var reference=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallMapper.RunReference(task.getId(),eid,conversationId);
+        var usage=new TransactionTemplate(context.getBean(DataSourceTransactionManager.class)).execute(status->calls.taskRunUsage(List.of(reference,reference)));
+        assertThat(usage.costs().callCount()).isEqualTo("3");assertThat(usage.costs().knownCount()).isEqualTo("2");
+        assertThat(usage.costs().unknownCount()).isEqualTo("1");assertThat(usage.costs().currencies()).hasSize(1);
+        assertThat(new java.math.BigDecimal(usage.costs().currencies().getFirst().knownSubtotal())).isEqualByComparingTo("0.300000000000000001");
+        assertThat(usage.latency().callCount()).isEqualTo("3");assertThat(usage.latency().measuredCount()).isEqualTo("2");
+        assertThat(usage.latency().unknownCount()).isEqualTo("1");
+        assertThat(new java.math.BigDecimal(usage.latency().averageMillis())).isEqualByComparingTo("200");
+        var empty=calls.taskRunUsage(List.of());assertThat(empty.costs().callCount()).isEqualTo("0");assertThat(empty.latency().averageMillis()).isNull();
+        var wrong=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallMapper.RunReference(task.getId(),"missing-execution",conversationId);
+        assertThatThrownBy(()->calls.taskRunUsage(List.of(wrong))).hasMessageContaining("执行来源无效");
+    }
+    private void insertUsageCall(String task,String execution,String conversation,String status,String cost,Integer millis){
+        var reserved=java.time.LocalDateTime.parse("2026-10-23T00:00:00");
+        jdbc.update("INSERT INTO iqc_model_gateway_call(call_id,model_key,task_id,execution_id,conversation_id,status,reserved_at_utc,settled_at_utc,cost_status,pricing_currency,calculated_cost) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                "u"+UUID.randomUUID().toString().replace("-",""),"model",task,execution,conversation,status,reserved,
+                millis==null?null:reserved.plusNanos(millis*1000000L),cost==null?"UNKNOWN":"CALCULATED_FROM_DECLARED_PRICE","USD",cost==null?null:new java.math.BigDecimal(cost));
+    }
     private void storePublishedSources() throws Exception {
         var json=context.getBean(ObjectMapper.class);
         for(int version=1;version<=2;version++) {
@@ -528,6 +562,7 @@ class IsolatedMysqlRolloutServiceIT {
             com.baomidou.mybatisplus.core.toolkit.GlobalConfigUtils.setGlobalConfig(config,global);
             config.addMapper(io.github.opensabre.iqc.selector.dao.SelectorAssetMapper.class);config.addMapper(io.github.opensabre.iqc.selector.dao.SelectorAssetVersionMapper.class);
             config.addMapper(io.github.opensabre.iqc.schedule.dao.PeriodicScheduleMapper.class);config.addMapper(io.github.opensabre.iqc.schedule.dao.PeriodicScheduleRevisionMapper.class);
+            config.addMapper(io.github.opensabre.iqc.result.llm.gateway.GatewayCallMapper.class);
             config.addMapper(PipelineAssetMapper.class);config.addMapper(PipelineAssetVersionMapper.class);config.addMapper(PipelineRolloutRevisionMapper.class);
             config.addMapper(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class);
             config.addMapper(io.github.opensabre.iqc.task.dao.TaskExecutionMapper.class);config.addMapper(io.github.opensabre.iqc.task.dao.TaskItemMapper.class);
