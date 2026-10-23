@@ -375,6 +375,50 @@ class IsolatedMysqlRolloutServiceIT {
         assertThat(fireWithOwner(frame,due)).isTrue();
         assertThat(jdbc.queryForObject("SELECT status FROM iqc_inspection_task WHERE periodic_schedule_id=?",String.class,frame.scheduleId())).isEqualTo("QUEUED");
     }
+    /** Real task/revision provenance; result reads are empty controlled adapters, not worker outcomes. */
+    private io.github.opensabre.iqc.quality.BusinessQualityReportService rolloutReport(
+            io.github.opensabre.iqc.result.dao.ConversationInspectionResultMapper results) {
+        var session=new SqlSessionTemplate(context.getBean(SqlSessionFactory.class));var json=context.getBean(ObjectMapper.class);
+        var reviews=new io.github.opensabre.iqc.quality.BusinessItemReviewService(null,null,null,null,null,json);
+        return new io.github.opensabre.iqc.quality.BusinessQualityReportService(
+                session.getMapper(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class),results,reviews,
+                context.getBean(IqcDataScope.class),json,session.getMapper(io.github.opensabre.iqc.task.dao.TaskExecutionMapper.class),
+                context.getBean(PipelineRolloutExecutionGuard.class));
+    }
+    @Test void businessReportKeepsHistoricalRevisionsAndMissingResultDenominatorsAfterRollback() throws Exception {
+        storePublishedSources();service.append(id,0,policy(0));
+        var first=createTask("report-first");var duplicateStandard=createTask("report-second");
+        service.append(id,1,policy(10000));var candidate=createTask("report-candidate");
+        service.append(id,2,policy(0));var rollback=createTask("report-rollback");
+        var results=mock(io.github.opensabre.iqc.result.dao.ConversationInspectionResultMapper.class);
+        var reports=rolloutReport(results);var ids=List.of(first.getId(),duplicateStandard.getId(),candidate.getId(),rollback.getId());
+        for(var runPolicy:io.github.opensabre.iqc.quality.BusinessQualityReportService.RunPolicy.values()){
+            var report=reports.report(ids,null,runPolicy.name());
+            assertThat(report.groups()).hasSize(3);
+            assertThat(report.conversationCount()).isEqualTo(runPolicy==io.github.opensabre.iqc.quality.BusinessQualityReportService.RunPolicy.SELECTED_RUNS?4:3);
+            assertThat(report.groups()).allSatisfy(group->{
+                assertThat(group.missingResultCount()).isEqualTo(group.conversationCount());
+                assertThat(group.machine().resultCount()).isZero();assertThat(group.machine().averageScore()).isNull();
+                assertThat(group.reviewed().resultCount()).isZero();assertThat(group.rollout()).isNotNull();
+                assertThat(group.rollout().selectedVersionNo()).isEqualTo(group.rollout().revisionNo()==2?2:1);
+                assertThat(group.rollout().side()).isEqualTo(group.rollout().revisionNo()==2?"CANDIDATE":"BASELINE");
+            });
+            assertThat(report.groups().stream().map(group->group.rollout().revisionNo()).toList()).containsExactlyInAnyOrder(1,2,3);
+            assertThat(context.getBean(ObjectMapper.class).writeValueAsString(report))
+                    .doesNotContain("salt_0001","cohortHash","requestFingerprint","requestKey","actor-1");
+        }
+    }
+    @Test void businessReportRejectsMissingRolloutOrCorruptOriginalSourceBeforeResultReads() throws Exception {
+        storePublishedSources();service.append(id,0,policy(0));var task=createTask("report-corrupt");
+        var results=mock(io.github.opensabre.iqc.result.dao.ConversationInspectionResultMapper.class);var reports=rolloutReport(results);
+        var json=context.getBean(ObjectMapper.class);var broken=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(task.getRuleSnapshotJson());
+        broken.remove("rolloutSnapshot");jdbc.update("UPDATE iqc_inspection_task SET rule_snapshot_json=? WHERE id=?",broken.toString(),task.getId());
+        assertThatThrownBy(()->reports.report(List.of(task.getId()))).hasMessageContaining("原修订、发布来源或比较证据不一致");
+        jdbc.update("UPDATE iqc_inspection_task SET rule_snapshot_json=? WHERE id=?",task.getRuleSnapshotJson(),task.getId());
+        jdbc.update("UPDATE iqc_pipeline_asset_version SET snapshot_json='{}' WHERE pipeline_id=? AND version_no=2",id);
+        assertThatThrownBy(()->reports.report(List.of(task.getId()))).hasMessageContaining("原修订、发布来源或比较证据不一致");
+        verifyNoInteractions(results);
+    }
     private void storePublishedSources() throws Exception {
         var json=context.getBean(ObjectMapper.class);
         for(int version=1;version<=2;version++) {

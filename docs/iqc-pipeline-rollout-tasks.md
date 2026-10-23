@@ -211,3 +211,18 @@ PolicyGroup新增可空rollout，schema为iqc-business-rollout-attribution-v1，
 这是合并后的既有兼容/受控MVC回归，尚非新增事件/API/MQ灰度接收、归档扫描首次分配、
 生产归因双侧/修订分组和FIRST/LATEST的专项，更不是真实身份或供应商端到端验收。
 此前周期SQL34项仍绑定4f9b3c1，不能自动外推合并后的代码。
+
+### 生产归因真实来源 SQL 专项（B，2026-10-23）
+
+基线2fe3ca8扩原隔离SQL测试两项，真实灰度服务/任务/版本/修订与完整guard/报告实现：
+0→10000→0产生原修订1/2/3，修订1同标准两任务。SELECTED保留4个任务会话，FIRST/LATEST
+在同修订内去重为3个且不跨修订吞掉历史；各组保留原所选版本/侧别。结果Mapper受控为空，
+所有任务会话均记缺结果，机器/人工resultCount=0、均分null；公开报告无salt/cohortHash/
+requestFingerprint/requestKey/actor-1。已知g任务缺灰度标记及未选候选原发布内容损坏，均
+在结果Mapper读取前拒绝报告。
+
+原20406 compiler:testCompile+surerfire终态0，日志 `/tmp/iqc-b-rollout-attribution-sql.log`，
+fresh XML SQL25+周期协议11=36项零失败错误跳过，含合并后周期入队回归。专用34307自动
+关闭且socket消失。没有实际worker结果/复核数据、同修订双侧、普通来源同配置、真实PDP或
+浏览器证明，不将空结果适配称为完整生产A/B验收；费用统计a8073d1和归档父守卫7427f4a
+尚未合入本轮基线。
