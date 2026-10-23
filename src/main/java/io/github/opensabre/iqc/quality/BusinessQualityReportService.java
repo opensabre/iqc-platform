@@ -36,11 +36,19 @@ public class BusinessQualityReportService {
     private final TaskExecutionMapper executions;
 
     private final io.github.opensabre.iqc.pipelineasset.PipelineRolloutExecutionGuard rolloutGuard;
+    private final io.github.opensabre.iqc.result.llm.gateway.GatewayCallService modelCalls;
+    private final io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive;
     @org.springframework.beans.factory.annotation.Autowired
     public BusinessQualityReportService(InspectionTaskMapper tasks,ConversationInspectionResultMapper results,
             BusinessItemReviewService reviews,IqcDataScope scope,ObjectMapper mapper,TaskExecutionMapper executions,
+            io.github.opensabre.iqc.pipelineasset.PipelineRolloutExecutionGuard rolloutGuard,
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService modelCalls,io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive){
+        this.tasks=tasks;this.results=results;this.reviews=reviews;this.scope=scope;this.mapper=mapper;this.executions=executions;this.rolloutGuard=rolloutGuard;this.modelCalls=modelCalls;this.sensitive=sensitive;
+    }
+    public BusinessQualityReportService(InspectionTaskMapper tasks,ConversationInspectionResultMapper results,
+            BusinessItemReviewService reviews,IqcDataScope scope,ObjectMapper mapper,TaskExecutionMapper executions,
             io.github.opensabre.iqc.pipelineasset.PipelineRolloutExecutionGuard rolloutGuard){
-        this.tasks=tasks;this.results=results;this.reviews=reviews;this.scope=scope;this.mapper=mapper;this.executions=executions;this.rolloutGuard=rolloutGuard;
+        this(tasks,results,reviews,scope,mapper,executions,rolloutGuard,null,null);
     }
     public BusinessQualityReportService(InspectionTaskMapper tasks,ConversationInspectionResultMapper results,
             BusinessItemReviewService reviews,IqcDataScope scope,ObjectMapper mapper,TaskExecutionMapper executions){
@@ -50,6 +58,9 @@ public class BusinessQualityReportService {
     public record RolloutAttribution(String schemaVersion,String revisionId,int revisionNo,String revisionHash,String policyHash,
             String side,String state,int candidateBasisPoints,int baselineVersionNo,int candidateVersionNo,
             int selectedVersionNo,String selectedReleaseHash) { }
+    public record ModelUsageSummary(String schemaVersion,int selectedResults,int boundResults,int unboundResults,
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CostSummary costs,
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CallLatencySummary latency) { }
     public record ManualScoreSummary(int appliedCount,int staleCount,BigDecimal averageOverrideScore,
                                      int effectiveNumericCount,BigDecimal averageEffectiveScore) { }
     public record ScoreSummary(int resultCount, int finalCount, int pendingCount, int notApplicableCount,
@@ -76,7 +87,15 @@ public class BusinessQualityReportService {
                               @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
                               ReviewChangeSummary reviewChanges,
                               @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-                              RolloutAttribution rollout) {
+                              RolloutAttribution rollout,
+                              @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                              ModelUsageSummary modelUsage) {
+        public PolicyGroup(String groupKey,String schemeId,String versionNo,String draftRevision,String kind,String mode,int baseScore,int passingScore,
+                List<String> taskIds,int conversationCount,List<String> executionIds,int missingResultCount,int missingReviewCount,int pendingReviewCount,
+                ScoreSummary machine,ScoreSummary reviewed,List<ItemGroup> items,String pipelineId,ReviewChangeSummary reviewChanges,RolloutAttribution rollout){
+            this(groupKey,schemeId,versionNo,draftRevision,kind,mode,baseScore,passingScore,taskIds,conversationCount,executionIds,
+                    missingResultCount,missingReviewCount,pendingReviewCount,machine,reviewed,items,pipelineId,reviewChanges,rollout,null);
+        }
         public PolicyGroup(String groupKey,String schemeId,String versionNo,String draftRevision,String kind,String mode,int baseScore,int passingScore,
                 List<String> taskIds,int conversationCount,List<String> executionIds,int missingResultCount,int missingReviewCount,int pendingReviewCount,
                 ScoreSummary machine,ScoreSummary reviewed,List<ItemGroup> items,String pipelineId,ReviewChangeSummary reviewChanges){
@@ -108,6 +127,14 @@ public class BusinessQualityReportService {
     /** Explicit execution IDs select exact attempts; first/latest policies deduplicate repeated conversations per frozen standard. */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Report report(List<String> taskIds, String executionSelectionJson, String requestedRunPolicy) {
+        return report(taskIds,executionSelectionJson,requestedRunPolicy,false);
+    }
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public Report report(List<String> taskIds,String executionSelectionJson,String requestedRunPolicy,boolean includeModelUsage){
+        if(includeModelUsage){
+            if(sensitive==null||modelCalls==null)throw IqcException.invalidState("调用统计授权/汇总依赖不可用");
+            sensitive.current(java.util.Set.of("iqc:report:view","iqc:task:model-calls:view"));
+        }
         if (taskIds == null || taskIds.isEmpty() || taskIds.size() > 20
                 || taskIds.stream().anyMatch(id -> id == null || id.isBlank() || id.length() > 64))
             throw IqcException.invalidArgument("业务统计必须选择 1–20 个有效任务");
@@ -210,7 +237,23 @@ public class BusinessQualityReportService {
                 group.addItems(reviewed, true);
             }
         }
-        return new Report("SELECTED_TASK_RUNS", runPolicy.name(), selected.size(), candidates.size(), groups.values().stream().map(Group::view).toList());
+        var reportGroups=new ArrayList<PolicyGroup>();
+        for(var group:groups.values()){
+            ModelUsageSummary usage=null;
+            if(includeModelUsage){
+                var references=new ArrayList<io.github.opensabre.iqc.result.llm.gateway.GatewayCallMapper.RunReference>();int expected=0;
+                for(var candidate:candidates)if(candidate.selection().key().equals(group.selection.key())){
+                    expected++;var result=candidate.result();
+                    if(result!=null && result.getExecutionId()!=null && !result.getExecutionId().isBlank())
+                        references.add(new io.github.opensabre.iqc.result.llm.gateway.GatewayCallMapper.RunReference(
+                                candidate.selection().task().getId(),result.getExecutionId(),candidate.conversationId()));
+                }
+                var summary=modelCalls.taskRunUsage(references);int bound=(int)references.stream().distinct().count();
+                usage=new ModelUsageSummary("iqc-business-model-usage-v1",expected,bound,expected-bound,summary.costs(),summary.latency());
+            }
+            reportGroups.add(group.view(usage));
+        }
+        return new Report("SELECTED_TASK_RUNS", runPolicy.name(), selected.size(), candidates.size(),List.copyOf(reportGroups));
     }
 
     private Map<String, String> readExecutionSelections(String json, List<String> taskIds) {
@@ -335,7 +378,7 @@ public class BusinessQualityReportService {
             var counts = human ? reviewedItems : machineItems;
             evaluation.items().forEach(item -> counts.get(item.itemCode()).add(item.status()));
         }
-        PolicyGroup view() {
+        PolicyGroup view(ModelUsageSummary usage) {
             var marker = selection.marker(); var policy = selection.scoring();
             return new PolicyGroup(selection.key(), marker.path("schemeId").asText(""), marker.path("versionNo").asText(""),
                     marker.path("draftRevision").asText(""),marker.has("pipelineId")?(marker.path("trial").asBoolean()?"DRAFT_TRIAL":"PUBLISHED"):marker.path("kind").asText(""),policy.mode().name(),
@@ -347,7 +390,7 @@ public class BusinessQualityReportService {
                         return new ItemGroup(item.itemCode(), item.name(), scoring != null,
                                 scoring == null ? null : scoring.points(), scoring != null && scoring.veto(),
                                 machineItems.get(item.itemCode()).view(), reviewedItems.get(item.itemCode()).view());
-                    }).toList(),marker.has("pipelineId")?marker.path("pipelineId").asText():null,reviewChanges(),selection.rollout());
+                    }).toList(),marker.has("pipelineId")?marker.path("pipelineId").asText():null,reviewChanges(),selection.rollout(),usage);
         }
     }
     private static final class ItemCounts {

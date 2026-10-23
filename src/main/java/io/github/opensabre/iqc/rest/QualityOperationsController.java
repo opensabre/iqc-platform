@@ -208,13 +208,23 @@ public class QualityOperationsController {
     public Object report(@RequestParam(defaultValue="MESSAGE") String view,
                          @RequestParam(required=false) List<String> taskIds,
                          @RequestParam(required=false) String executionSelections,
-                         @RequestParam(defaultValue="SELECTED_RUNS") String runPolicy) {
-        if ("BUSINESS".equals(view)) return businessReports.report(taskIds, executionSelections, runPolicy);
-        if (!"MESSAGE".equals(view) || taskIds != null || executionSelections != null
+                         @RequestParam(defaultValue="SELECTED_RUNS") String runPolicy,
+                         @RequestParam(defaultValue="false") boolean includeModelUsage) {
+        if ("BUSINESS".equals(view)) {
+            if(!includeModelUsage)return businessReports.report(taskIds,executionSelections,runPolicy);
+            if(org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()
+                    instanceof org.springframework.web.context.request.ServletRequestAttributes servlet && servlet.getResponse()!=null)
+                servlet.getResponse().setHeader("Cache-Control","private, no-store");
+            return businessReports.report(taskIds,executionSelections,runPolicy,true);
+        }
+        if (!"MESSAGE".equals(view) || includeModelUsage || taskIds != null || executionSelections != null
                 || !"SELECTED_RUNS".equals(runPolicy)) throw IqcException.invalidArgument("不支持的统计视图或筛选");
         return service.report();
     }
 
+    public Object report(String view,List<String> taskIds,String executionSelections,String runPolicy){
+        return report(view,taskIds,executionSelections,runPolicy,false);
+    }
     /** Retains the direct-call signature used by existing controller callers and tests. */
     public Object report(String view, List<String> taskIds) {
         return report(view, taskIds, null, "SELECTED_RUNS");

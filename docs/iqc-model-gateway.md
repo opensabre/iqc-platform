@@ -204,3 +204,7 @@ UI原任务模型调用组件提供会话ID筛选，显示实际生效会话/执
 扩展原ModelCallReadHttpPrivacyTest：conversationId精确绑定六参数service，在最小敏感授权/全部敏感授权下HTTP data与原ResultReadProjection结果一致，费用长小数字符串与账本总数保留、预算证据按权限隐藏，源对象不变；未传EID保持null（全部重试范围），空汇总callCount为字符串0；撤销当前model-calls:view拒绝且不查询账本。修正原审计测试反射目标到实际HTTP六参数方法（原五参数Java兼容入口已不承载映射），继续断言审计不记录正文。
 
 原42445 terminal0，`/tmp/iqc-b-conversation-cost-http.log`，fresh XML17项无失败/错误/跳过；testCompile+surerfire与diff检查通过。真实MVC/响应包装/敏感投影，grant和领域服务mock；单会话真实SQL隔离证据沿上一条，不叠加宣称实际PDP/浏览器/供应商费用整链通过。
+
+## 业务报告精确执行集合汇总（2026-10-23）
+
+原GatewayCallMapper/Service增加内部taskRunUsage精确任务/EID/会话集合，调用方为原业务统计显式includeModelUsage选项。costGroups原SQL与费用汇总器共用；新集合参数不能成为全表查询，空集合返回无记录汇总。追加同集合CONFIRMED合法接收/结算平均耗时及未测量计数，字符串保留数值精度，任务与执行来源复用原get/mapper核对。HTTP当前report:view+task:model-calls:view检查及默认不查询原则、指标边界见iqc-pipeline-rollout-tasks.md。无新增持久化/API/权限；本批编译构建，实际SQL与授权专项待独立验证。

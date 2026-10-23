@@ -168,3 +168,13 @@ PolicyGroup新增可空rollout，schema为iqc-business-rollout-attribution-v1，
 评分、项目失败率、机器/人工对照、人工修改率与缺结果/复核覆盖复用原计算。页面显示生产灰度观测及冻结来源摘要。分桶以任务为单位，任务包含的会话数可能不同，所选范围也非全部生产流量；候选配置比例不代表实际观测会话比例。跨版本评分标准或语料不一致不能直接解释为因果提升。同Dataset受控配对对照继续使用现有Benchmark，不复制另一套评测。生产费用/时延关联、统计显著性及完整A/B验收继续。
 
 本批仅编译/构建，终态见协作记录；独立验证须覆盖新旧JSON/构造、同修订两侧和不同修订/非灰度拆组、FIRST/LATEST分母、缺失结果与复核覆盖、旧修订回退不改归属、坏证据/撤权/跨组拒绝、SQL/实际worker产物与页面隐私生命周期。
+
+### 生产观测的模型调用费用与耗时（2026-10-23）
+
+同一业务报告可显式请求includeModelUsage=true（默认false；MESSAGE视图拒绝该选项）。沿SensitiveReadAccessService核对当前iqc:report:view与既有iqc:task:model-calls:view及组织范围；默认报告不查调用账本。PolicyGroup可空modelUsage使用iqc-business-model-usage-v1，旧DTO与控制器/服务调用构造继续兼容。
+
+在原FIRST/LATEST等运行口径最终选出结果后，以(taskId,结果executionId,conversationId)精确集合查原iqc_model_gateway_call；重新核对任务可见与执行归属，最多500个精确引用。缺结果/执行ID进入unboundResults，不省略EID从而扩大为所有重试；同一集合引用去重。未参与最终统计的其它会话/轮次不会进入账本汇总。继承产物不把历史调用复制到新EID，零匹配记录表示没有本范围调用事实，并非零成本保证。
+
+费用沿原CostSummary与共用SQL判断CONFIRMED/CALCULATED_FROM_DECLARED_PRICE，金额/计数字符串精确传输，币种各自累计、未知不填零。所有匹配调用（包括重试及工具轮次）保留；不冒称供应商实际账单或完整重建继承结果的历史总成本。耗时由同范围CONFIRMED且reserved/settled合法的行计算接收至结算平均毫秒，并列已测量/未测量调用计数；没有时长分母返回null。这不是任务队列延迟、端到端时延或P95。费用与耗时两次聚合位于同一只读REPEATABLE_READ事务并核对调用总数，无新表/端点/权限。
+
+页面显式勾选该项；撤销或重新授予调用权限均清报告与请求代次，查询完成后按实时权限展示，防止旧响应恢复费用。真实SQL集合筛选/空记录/未知币种/小数、运行口径去重、继承轮次、HTTP当前授权与页面撤权专项待B独立验证；完整A/B统计与I7继续。
