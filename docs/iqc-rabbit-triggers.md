@@ -71,3 +71,33 @@ A初次交付仅编译。初始独立验证清单（后续B证据见下节）：
 ## 2026-10-23 灰度目标扩展
 
 同一consumer支持显式iqc-task-rollout-trigger-v1/rollout.pipelineId，原允许pipelineIds集合匹配统一目标ID，不从可空固定pipeline读取。当前组织授权额外要求既有rollout:task:create，其他发布协议/大小/原始字节/ACK与死信规则不变。分配在原接收事务冻结，重投/等待不跟随新策略，详见iqc-pipeline-rollout-tasks.md。原B broker/SQL证据属于旧固定目标原基线，不能外推新灰度路径已验证。
+### 消费者、真实 broker 与 SQL 联合验证（B，2026-10-23）
+
+`IsolatedMysqlBrokerAcceptanceIT.realBrokerLostAckRedeliversCommittedTaskAndConflictsGoToDeadLetter`
+使用原 Rabbit 连接工厂/持久拓扑、真实 Channel、原消费者及 TaskTriggerService/事务/Mapper。
+ACK 调用前通过无 Spring 事务的独立 JDBC 连接读取 WAITING_INPUT，随后模拟 ACK 发送失败。
+物理关闭通道后，真实 broker 重投同 body 且 redelivered=true；原接收路径返回唯一已存任务，
+不再解析发布资产。再次 ACK/物理重开后队列为空。同事件变更载荷进入原死信队列，原名称和任务保持。
+
+原 67110 testCompile+surerfire 终态 0，日志 `/tmp/iqc-b-broker-sql-joint.log`，fresh XML
+共 4 项、零失败错误跳过（包含前三项 SQL 回归）。随机队列/交换机清理完成；专用 MySQL 自动关闭，
+Rabbit 原 88884/stop 98255 均终态 0、独立 epmd 关闭，34307/35672/35673/34699 均 ECONNREFUSED。
+本轮 basicGet 交付原消费者，非 Spring 注解监听容器。当前授权/发布资产仍受控，目标尚不存在，
+不能外推实际 PDP、选数物化或 worker 全链，也不包含生产 broker 或语音转换。
+
+### Spring 注解监听容器与 SQL 联合验证（B，2026-10-23）
+
+新增 `annotationListenerAutomaticallyAcceptsDuplicatesAndDeadLettersConflicts`：加载原生产
+RabbitTriggerConfiguration/配置绑定/EnableRabbit 与 RabbitTriggerConsumer，而非手工交付或
+重新实现监听器。唯一运行中的容器经原持久拓扑自动接收；首次消息独立入库，同 body 再投
+不重查资产、不新增任务；冲突载荷被拒绝并进入死信，原任务名称保持。以消费者原 accepted/
+rejected 指标等待处理结束，停止容器后确认主队列为空，随机拓扑和上下文清理。
+
+原 52237 因测试方法引用误用 listener 包接口编译失败；改用 core.MessageListenerContainer
+后，原 80072 compiler:testCompile+surerfire 终态 0，日志
+`/tmp/iqc-b-rabbit-container-sql-final.log`，fresh XML 5 项零失败错误跳过，包含前轮 SQL/broker
+回归。专用 MySQL 自动关闭；Rabbit 原 46305/stop 18415 均终态 0、epmd 关闭，四个专用端口
+34307/35672/35673/34699 均 ECONNREFUSED。无生产修改。
+
+当前组织授权与发布资产仍为受控夹具，目标输入尚不存在。本轮证明注解发现、配置绑定、
+原消息转换/人工 ACK 与数据库接收能联合工作，不证明实际 PDP、目标物化/worker 或供应商链路。

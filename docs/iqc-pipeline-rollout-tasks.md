@@ -100,3 +100,61 @@ API新模式用当前负责人投影检查原触发/创建/执行及现有rollou
 ## 归档订阅接入（2026-10-23后续增量）
 
 归档订阅新增显式灰度定义与发布协议，复用上节事件接收分配：订阅发布冻结路由意图，每条新归档事件首次持久接受时冻结当前策略。原固定协议与已有任务保持原含义，详见 [归档订阅](iqc-event-subscriptions.md)。此前章节的“归档订阅待接入”是历史阶段记录；本增量代码不替代真实运行验证或A/B效果归因验收。
+### Selector / 周期灰度组合兼容验证（B，2026-10-23）
+
+固定 A 后端 b2765c4 无冲突并入 B a7bc903，UI 99b467f 并入 73e89d7。
+原 96504 offline test-compile+surerfire 终态 0，日志
+`/tmp/iqc-b-periodic-rollout-integrated-tests.log`：PeriodicDefinitionTest 8、
+PipelineRolloutTaskReplayTest 9、PipelineRolloutExecutionGuardTest 8、
+ScheduleConfigurationHttpPrivacyTest 19、PipelineRolloutHttpPrivacyTest 31，
+fresh XML 共 75 项零失败错误跳过。UI 原 44202 type-check 终态 0，日志
+`/tmp/iqc-b-periodic-rollout-ui-typecheck.log`，仍有既有 Node/pnpm 声明差异。
+
+本轮复用既有兼容/重放/guard/受控 MVC 测试，不能替代新周期灰度真实 tick、计划时刻、
+扩量回退/同实例重放、事务回滚/并发游标、组织授权及 worker 来源冻结专项，也不是 UI
+浏览器交互或实际 PDP 验证。Rabbit 注解容器 5 项独立结果绑定此前 d7cddb9，不外推本组合。
+
+### 周期 Selector 灰度持久化专项（B，2026-10-23）
+
+在既有 IsolatedMysqlRolloutServiceIT 中接入原 SelectorAssetService/版本 Mapper 与真实
+ConversationSelectionService/Conversation Mapper，复用原灰度修订服务、事务与任务物化器。
+新增三个 SQL 用例验证：
+
+- 首实例基线版本 1/修订 1；扩量后新实例候选版本 2/修订 2；回退后新实例基线版本 1/修订 3。
+  选数锚点与任务计划时刻一致。Selector 停用和会话正文变化后，旧实例重放保留原任务、
+  ruleSnapshot/selectionFilter 与原会话正文；新实例拒绝已停用 Selector。
+- 真实 UPDATE trigger 注入写入失败，外层事务回滚后不留实例；解除 trigger 后同实例成功，
+  再次调用仍为原任务。
+- 空选数持久化 NO_DATA/零消息；策略扩量后原空实例仍沿用原冻结快照。
+
+PeriodicDefinitionTest 增加 3 项：新灰度协议往返、计划算法一致及额外既有 grant；旧 10/11
+参数构造 JSON 一致且不新增 rollout；新旧目标/协议混用及坏 ID 拒绝。
+
+原 91050 首轮 24 项 23 过、1 项测试时间数值节点类型比较失败；改为反序列化 Instant 的
+语义比较，并补回退/协议断言。原 16457 compiler:testCompile+surerfire 终态 0，日志
+`/tmp/iqc-b-periodic-rollout-sql-final.log`，fresh XML SQL16+协议11=27 零失败错误跳过。
+随机 schema 完整迁移/75 校验/二次 migrate 无变化后测试并删除，专用 34307 自动关闭，socket 消失。
+
+本轮实例身份直接进入原 createPeriodicWithSelector，尚未经过 PeriodicScheduleService.fire
+的 tick/游标/入队，也未验证新周期 worker 来源 guard。scope 与 pipeline 发布比较源仍受控；
+Selector 发布版本、选数、输入、任务与灰度修订为真实 SQL，不外推实际 PDP 或供应商链路。
+
+### 周期 fire / 游标事务专项（B，2026-10-23）
+
+在同一隔离 SQL 夹具注册原 PeriodicScheduleService 及周期/修订 Mapper，加入五项测试。
+周期修订快照由夹具 SQL 写入，fire、选数、分配、任务写入和游标更新走生产代码与真实事务：
+
+- FIRE_LATEST 迟到 615 秒时冻结原计划 +600 秒，选数锚点一致，游标到 +660 秒；
+  实际物化采用本轮扩量后的候选。旧 Frame 再调用返回 false，不再调用入队。
+- 末端入队边界抛错，实例插入和游标一同回滚；同 Frame 可重新成功。
+- SKIP 保存 SKIPPED_MISFIRE、空选数保存 NO_DATA，均前移游标且不调用入队。
+- 两个真实事务竞争同游标，仅一次返回 true、一次物化及一次入队调用，游标仅前移一格。
+- 缺少原 rollout:task:create 或授权 checkedAt 过期，均不留实例、不前移游标、不调用入队。
+
+原 53757 首轮 30 项 29 过，1 项测试将 JDBC LocalDateTime 与 Timestamp 比较失败。
+修正类型断言并补并发/授权用例后，原 54008 compiler:testCompile+surerfire 终态 0，日志
+`/tmp/iqc-b-periodic-fire-sql-final.log`，fresh XML SQL21+协议11=32 零失败错误跳过。
+随机 schema 完整迁移、75 校验及二次 migrate 无变化后测试并删除；34307 自动关闭，socket 消失。
+
+InspectionExecutionService 为受控入队边界，成功调用没有真正建立执行轮次，不能将其称为
+QUEUED/worker 成功。本轮不覆盖周期 create/publish、真实 PDP 或新周期 worker 来源 guard。
