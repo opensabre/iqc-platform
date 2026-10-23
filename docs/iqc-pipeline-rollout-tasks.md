@@ -96,3 +96,28 @@ fresh XML 共 75 项零失败错误跳过。UI 原 44202 type-check 终态 0，�
 本轮复用既有兼容/重放/guard/受控 MVC 测试，不能替代新周期灰度真实 tick、计划时刻、
 扩量回退/同实例重放、事务回滚/并发游标、组织授权及 worker 来源冻结专项，也不是 UI
 浏览器交互或实际 PDP 验证。Rabbit 注解容器 5 项独立结果绑定此前 d7cddb9，不外推本组合。
+
+### 周期 Selector 灰度持久化专项（B，2026-10-23）
+
+在既有 IsolatedMysqlRolloutServiceIT 中接入原 SelectorAssetService/版本 Mapper 与真实
+ConversationSelectionService/Conversation Mapper，复用原灰度修订服务、事务与任务物化器。
+新增三个 SQL 用例验证：
+
+- 首实例基线版本 1/修订 1；扩量后新实例候选版本 2/修订 2；回退后新实例基线版本 1/修订 3。
+  选数锚点与任务计划时刻一致。Selector 停用和会话正文变化后，旧实例重放保留原任务、
+  ruleSnapshot/selectionFilter 与原会话正文；新实例拒绝已停用 Selector。
+- 真实 UPDATE trigger 注入写入失败，外层事务回滚后不留实例；解除 trigger 后同实例成功，
+  再次调用仍为原任务。
+- 空选数持久化 NO_DATA/零消息；策略扩量后原空实例仍沿用原冻结快照。
+
+PeriodicDefinitionTest 增加 3 项：新灰度协议往返、计划算法一致及额外既有 grant；旧 10/11
+参数构造 JSON 一致且不新增 rollout；新旧目标/协议混用及坏 ID 拒绝。
+
+原 91050 首轮 24 项 23 过、1 项测试时间数值节点类型比较失败；改为反序列化 Instant 的
+语义比较，并补回退/协议断言。原 16457 compiler:testCompile+surerfire 终态 0，日志
+`/tmp/iqc-b-periodic-rollout-sql-final.log`，fresh XML SQL16+协议11=27 零失败错误跳过。
+随机 schema 完整迁移/75 校验/二次 migrate 无变化后测试并删除，专用 34307 自动关闭，socket 消失。
+
+本轮实例身份直接进入原 createPeriodicWithSelector，尚未经过 PeriodicScheduleService.fire
+的 tick/游标/入队，也未验证新周期 worker 来源 guard。scope 与 pipeline 发布比较源仍受控；
+Selector 发布版本、选数、输入、任务与灰度修订为真实 SQL，不外推实际 PDP 或供应商链路。

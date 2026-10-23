@@ -72,4 +72,33 @@ class PeriodicDefinitionTest {
         assertThatThrownBy(() -> definition("0 * * * * *", "invalid", "2026-10-06T00:00:00Z", null, PeriodicDefinition.MisfirePolicy.SKIP)).isInstanceOf(java.time.DateTimeException.class);
         assertThatThrownBy(() -> definition("0 * * * * *", "UTC", "2026-10-06T00:00:00Z", "2026-10-06T00:00:00Z", PeriodicDefinition.MisfirePolicy.SKIP)).isInstanceOf(IllegalArgumentException.class);
     }
+    @Test void rolloutProtocolIsExplicitAndRequiresTheExistingRolloutGrant() throws Exception {
+        var fixed=minute(PeriodicDefinition.MisfirePolicy.FIRE_LATEST);
+        var gray=new PeriodicDefinition(PeriodicDefinition.ROLLOUT_SCHEMA,fixed.cron(),fixed.zoneId(),fixed.effectiveFrom(),null,fixed.misfirePolicy(),10,2,null,fixed.selector(),null,new PeriodicDefinition.RolloutReference("pipeline"));
+        assertThat(gray.usesRollout()).isTrue();assertThat(gray.targetPipelineId()).isEqualTo("pipeline");
+        assertThat(gray.tick(gray.first(),gray.first().plusSeconds(615))).isEqualTo(fixed.tick(fixed.first(),fixed.first().plusSeconds(615)));
+        assertThat(PeriodicScheduleService.grants(gray)).containsExactlyInAnyOrder("iqc:pipeline:task:create","iqc:task:execute","iqc:schedule:publish","iqc:pipeline:rollout:task:create");
+        assertThat(PeriodicScheduleService.grants(fixed)).doesNotContain("iqc:pipeline:rollout:task:create");
+        var json=new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
+        assertThat(json.readTree(json.writeValueAsString(gray)).has("pipeline")).isFalse();
+        assertThat(json.readValue(json.writeValueAsString(gray),PeriodicDefinition.class)).isEqualTo(gray);
+    }
+    @Test void fixedHistoricalConstructorsRetainJsonAndDoNotActivateRollout() throws Exception {
+        var fixed=minute(PeriodicDefinition.MisfirePolicy.SKIP);
+        var compatible=new PeriodicDefinition(fixed.schemaVersion(),fixed.cron(),fixed.zoneId(),fixed.effectiveFrom(),null,fixed.misfirePolicy(),10,2,fixed.pipeline(),fixed.selector(),null);
+        var json=new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
+        String original=json.writeValueAsString(fixed);assertThat(json.writeValueAsString(compatible)).isEqualTo(original);
+        assertThat(json.readTree(original).has("rollout")).isFalse();
+        assertThat(json.readValue(original,PeriodicDefinition.class)).isEqualTo(fixed);
+        assertThat(fixed.usesRollout()).isFalse();assertThat(fixed.targetPipelineId()).isEqualTo("pipeline");
+    }
+    @Test void schemaAndTargetCannotBeMixedOrSilentlyConverted() {
+        var fixed=minute(PeriodicDefinition.MisfirePolicy.SKIP);
+        for(String schema:new String[]{PeriodicDefinition.SCHEMA,PeriodicDefinition.ROLLOUT_SCHEMA}) {
+            assertThatThrownBy(()->new PeriodicDefinition(schema,fixed.cron(),fixed.zoneId(),fixed.effectiveFrom(),null,fixed.misfirePolicy(),10,2,fixed.pipeline(),fixed.selector(),null,new PeriodicDefinition.RolloutReference("pipeline"))).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(()->new PeriodicDefinition(schema,fixed.cron(),fixed.zoneId(),fixed.effectiveFrom(),null,fixed.misfirePolicy(),10,2,null,fixed.selector(),null,null)).isInstanceOf(IllegalArgumentException.class);
+        }
+        assertThatThrownBy(()->new PeriodicDefinition(PeriodicDefinition.ROLLOUT_SCHEMA,fixed.cron(),fixed.zoneId(),fixed.effectiveFrom(),null,fixed.misfirePolicy(),10,2,null,fixed.selector(),null,new PeriodicDefinition.RolloutReference("bad/id"))).isInstanceOf(IllegalArgumentException.class);
+    }
+
 }

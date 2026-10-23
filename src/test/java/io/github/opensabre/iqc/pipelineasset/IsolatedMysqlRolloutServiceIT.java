@@ -193,6 +193,60 @@ class IsolatedMysqlRolloutServiceIT {
         assertThat(root.at("/rolloutSnapshot/evidence/revision/snapshot/policy/candidateBasisPoints").asInt()).isEqualTo(9000);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE conversation_id=?",Integer.class,conversationId)).isEqualTo(1);
     }
+    private io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector(String selectedId) throws Exception {
+        when(context.getBean(IqcDataScope.class).canViewAll()).thenReturn(true);
+        var json=context.getBean(ObjectMapper.class);
+        var definition=new io.github.opensabre.iqc.selector.SelectorDefinition("iqc-selector-v1",null,null,List.of(selectedId),List.of(),null,null,10);
+        String selectorId="s"+id,body=json.writeValueAsString(definition);
+        jdbc.update("INSERT INTO iqc_selector_asset(id,code,name,draft_config_json,status) VALUES(?,?,?,?,'ACTIVE')",selectorId,selectorId,selectorId,body);
+        jdbc.update("INSERT INTO iqc_selector_asset_version(id,selector_id,version_no,source_draft_revision,snapshot_json,content_hash) VALUES(?,?,1,1,?,?)","v"+selectorId,selectorId,body,io.github.opensabre.iqc.selector.SelectorAssetService.hash(body));
+        return context.getBean(io.github.opensabre.iqc.selector.SelectorAssetService.class).publishedForTask(selectorId,1);
+    }
+    private io.github.opensabre.iqc.task.InspectionTaskService.PeriodicIdentity instance(java.time.Instant planned) {
+        return new io.github.opensabre.iqc.task.InspectionTaskService.PeriodicIdentity("schedule"+id,"revision"+id,planned,context.getBean(ObjectMapper.class).createObjectNode().put("fixture","periodic materialization"));
+    }
+    private io.github.opensabre.iqc.task.model.InspectionTask periodic(io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,java.time.Instant planned){
+        return new TransactionTemplate(context.getBean(DataSourceTransactionManager.class)).execute(status->
+                context.getBean(PipelineRolloutTaskService.class).createPeriodicWithSelector(id,"periodic rollout",selector,instance(planned),1));
+    }
+    @Test void realSelectorPeriodicReplayKeepsFrozenInputWhileNewInstanceUsesExpandedRevision() throws Exception {
+        var selector=selector(conversationId);var planned=java.time.Instant.parse("2026-10-23T01:00:00Z");
+        service.append(id,0,policy(0));var first=periodic(selector,planned);
+        var json=context.getBean(ObjectMapper.class);var root=json.readTree(first.getRuleSnapshotJson());
+        assertThat(root.at("/pipelineSnapshot/versionNo").asInt()).isEqualTo(1);
+        assertThat(json.treeToValue(json.readTree(first.getSelectionFilterJson()).at("/selection/anchor"),java.time.Instant.class)).isEqualTo(planned);
+        assertThat(first.getPlannedAtUtc()).isEqualTo(java.time.LocalDateTime.ofInstant(planned,java.time.ZoneOffset.UTC));
+        assertThat(first.getPeriodicScheduleId()).isEqualTo(instance(planned).scheduleId());
+        service.append(id,1,policy(10000));var second=periodic(selector,planned.plusSeconds(60));
+        assertThat(second.getId()).isNotEqualTo(first.getId());
+        assertThat(json.readTree(second.getRuleSnapshotJson()).at("/pipelineSnapshot/versionNo").asInt()).isEqualTo(2);
+        assertThat(json.readTree(second.getRuleSnapshotJson()).at("/rolloutSnapshot/evidence/revision/revisionNo").asInt()).isEqualTo(2);
+        service.append(id,2,policy(0));var reverted=periodic(selector,planned.plusSeconds(120));
+        assertThat(json.readTree(reverted.getRuleSnapshotJson()).at("/pipelineSnapshot/versionNo").asInt()).isEqualTo(1);
+        assertThat(json.readTree(reverted.getRuleSnapshotJson()).at("/rolloutSnapshot/evidence/revision/revisionNo").asInt()).isEqualTo(3);
+        jdbc.update("UPDATE iqc_selector_asset SET status='DISABLED' WHERE id=?",selector.selectorId());
+        jdbc.update("UPDATE iqc_conversation_message SET content='changed after instance' WHERE conversation_id=?",conversationId);
+        var replay=periodic(selector,planned);
+        assertThat(replay.getId()).isEqualTo(first.getId());assertThat(replay.getRuleSnapshotJson()).isEqualTo(first.getRuleSnapshotJson());
+        assertThat(replay.getSelectionFilterJson()).isEqualTo(first.getSelectionFilterJson());
+        assertThat(json.readTree(replay.getRuleSnapshotJson()).at("/productionInputs/conversations/0/messages/0/content").asText()).isEqualTo("original processed conversation");
+        assertThatThrownBy(()->periodic(selector,planned.plusSeconds(180))).hasMessageContaining("停用");
+    }
+    @Test void periodicInsertFailureRollsBackAndSameInstanceCanRetry() throws Exception {
+        var selector=selector(conversationId);var planned=java.time.Instant.parse("2026-10-23T02:00:00Z");service.append(id,0,policy(5000));
+        jdbc.execute("CREATE TRIGGER reject_periodic_rollout_update BEFORE UPDATE ON iqc_inspection_task FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='isolated periodic rejection'");
+        try {assertThatThrownBy(()->periodic(selector,planned)).hasStackTraceContaining("isolated periodic rejection");
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE periodic_schedule_id=?",Integer.class,instance(planned).scheduleId())).isZero();
+        } finally {jdbc.execute("DROP TRIGGER reject_periodic_rollout_update");}
+        var task=periodic(selector,planned);assertThat(task.getStatus()).isEqualTo("CREATED");
+        assertThat(periodic(selector,planned).getId()).isEqualTo(task.getId());
+    }
+    @Test void emptyPeriodicSelectorPersistsNoDataWithFrozenRevisionAndAnchor() throws Exception {
+        var selector=selector("absent"+id);var planned=java.time.Instant.parse("2026-10-23T03:00:00Z");service.append(id,0,policy(0));
+        var task=periodic(selector,planned);assertThat(task.getStatus()).isEqualTo("NO_DATA");assertThat(task.getTotalMessages()).isZero();
+        assertThat(context.getBean(ObjectMapper.class).readTree(task.getSelectionFilterJson()).at("/selection/selectedConversationIds")).isEmpty();
+        service.append(id,1,policy(10000));assertThat(periodic(selector,planned).getRuleSnapshotJson()).isEqualTo(task.getRuleSnapshotJson());
+    }
     private void storePublishedSources() throws Exception {
         var json=context.getBean(ObjectMapper.class);
         for(int version=1;version<=2;version++) {
@@ -295,6 +349,7 @@ class IsolatedMysqlRolloutServiceIT {
         @Bean IqcDataScope scope(){var scope=mock(IqcDataScope.class);when(scope.actorUserId()).thenReturn("actor-1");when(scope.canView(any(),any())).thenReturn(true);return scope;}
         @Bean SqlSessionFactory sessions(DataSource ds) throws Exception {
             var config=new MybatisConfiguration();config.setMapUnderscoreToCamelCase(true);
+            config.addMapper(io.github.opensabre.iqc.selector.dao.SelectorAssetMapper.class);config.addMapper(io.github.opensabre.iqc.selector.dao.SelectorAssetVersionMapper.class);
             config.addMapper(PipelineAssetMapper.class);config.addMapper(PipelineAssetVersionMapper.class);config.addMapper(PipelineRolloutRevisionMapper.class);
             config.addMapper(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class);
             config.addMapper(io.github.opensabre.iqc.task.dao.TaskExecutionMapper.class);
@@ -338,9 +393,16 @@ class IsolatedMysqlRolloutServiceIT {
                 session.getMapper(io.github.opensabre.iqc.conversation.dao.ConversationMapper.class),null,null,null,json,
                 session.getMapper(io.github.opensabre.iqc.task.dao.TaskExecutionMapper.class),scope,null,null,inputs,pipelines);
         }
+        @Bean io.github.opensabre.iqc.selector.ConversationSelectionService selections(SqlSessionFactory factory,IqcDataScope scope,ObjectMapper json){
+            return new io.github.opensabre.iqc.selector.ConversationSelectionService(new SqlSessionTemplate(factory).getMapper(io.github.opensabre.iqc.conversation.dao.ConversationMapper.class),null,null,scope,json);
+        }
+        @Bean io.github.opensabre.iqc.selector.SelectorAssetService selectors(SqlSessionFactory factory,io.github.opensabre.iqc.selector.ConversationSelectionService selections,IqcDataScope scope,ObjectMapper json){
+            var session=new SqlSessionTemplate(factory);
+            return new io.github.opensabre.iqc.selector.SelectorAssetService(session.getMapper(io.github.opensabre.iqc.selector.dao.SelectorAssetMapper.class),session.getMapper(io.github.opensabre.iqc.selector.dao.SelectorAssetVersionMapper.class),selections,json,scope);
+        }
         @Bean PipelineRolloutTaskService rolloutTasks(PipelineAssetService pipelines,PipelineRolloutService rollouts,
-                io.github.opensabre.iqc.task.InspectionTaskService tasks,ObjectMapper json,IqcDataScope scope) {
-            return new PipelineRolloutTaskService(pipelines,rollouts,tasks,json,scope);
+                io.github.opensabre.iqc.task.InspectionTaskService tasks,ObjectMapper json,IqcDataScope scope,io.github.opensabre.iqc.selector.SelectorAssetService selectors,io.github.opensabre.iqc.selector.ConversationSelectionService selections) {
+            return new PipelineRolloutTaskService(pipelines,rollouts,tasks,json,scope,selectors,selections);
         }
         private static PipelineRelease release(ObjectMapper json,int retries) {
             var node=new io.github.opensabre.iqc.pipeline.PipelineDefinition.Node("rule","RULE","Rule","rule-v1",List.of(),Map.of(),json.createObjectNode(),null,3000,retries,
