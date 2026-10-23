@@ -133,3 +133,7 @@ FrozenDetectorEngine增加过滤前的llmCitationGrounding计数，复用原Lega
 ### 2026-10-23 归档灰度父修订来源收口
 
 原灰度guard复用订阅发布纯读取器，核对Accepted对应不可变父版本、原负责人/目标/Selector及配置、事件派生ID/输入/原有效区间与实际任务名称/并发；不读取当前订阅替代历史。生产DI增加既有订阅版本Mapper，无表/API/UI/权限/框架变化。当前仅后端编译，真实worker/SQL/来源篡改与独立组织授权验收继续，未据此宣布I7或全PRD完成。
+
+### 2026-10-24 Prompt精确独立来源
+
+复用原Skill指令资产独立版本/启停/回滚，Agent 3.0可选promptAsset明确ID/版本/正文Hash，与实际systemPrompt共同冻结。UI复用原历史端点，PROMPT Benchmark接同一变量与来源校验；原内嵌Prompt/JSON/构造保持。无新表/API/权限/框架，当前实现和编译构建结果见协作记录；真实SQL/角色/发布任务/Benchmark及KnowledgeBase独立映射、校准与其余适用I1–I7继续。

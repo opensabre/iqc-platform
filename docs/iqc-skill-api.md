@@ -19,3 +19,13 @@ MCP 回执必须 isError=false 并携带对象 structuredContent。该对象同�
 集成后确认原复核ItemContract仅接受METRIC/LLM的真实非规则节点绑定，Skill/API原ruleId为空/version=0会被误拒，阻断评测/复核/导出。沿原节点/引擎版本及Finding来源核对增加SKILL_API，不制造规则ID/版本，原Scheme/RULE约束保留。前端Trace同样接受受支持的SKILL_API非规则来源。与Review V2字段、精确采样身份及A/B Editor区域一同合并，真实发布/任务/队列/SQL/API/浏览器仍待。
 
 本次27161 backend离线skipTests test-compile已terminal exit0，81530最终UI构建仍在运行。另只读核对BenchmarkVariableComparator：PROMPT/MODEL/SKILL路径目前只识别LLM/agentSnapshot，独立SKILL_API不能被现有单变量报告证明，须后续在原比较器扩展并保留除声明变量外全部冻结配置，不能以PIPELINE复合差异冒充Skill单变量。未新增运行测试/SQL/部署，真实发布/Task/评测/复核/CSV/角色/浏览器继续。
+
+## 2026-10-24 指令版本作为系统Prompt来源
+
+Agent 3.0可使用promptAsset={skillId,versionNo,contentHash?}选择原Skill指令资产的精确历史版本。该引用只取instructions作为systemPrompt，不把Skill的工具路由、输入/输出Schema或名称自动作为LLM能力启用。已有Skill版本更新、启停、回滚和敏感投影继续承担管理；不增加平行Prompt表或版本接口。取舍见ADR 20261024-prompt-instruction-version-reuse。
+
+版本号须为正整数JSON数字，字符串、小数及超出int范围的值拒绝。新草稿保存时从明确Skill版本解析正文，要求当前资产与所选历史版本启用、正文1–8000字；有调用方正文或摘要时必须与来源一致。服务端生成固定域/skillId/versionNo/正文的JSON数组摘要，冻结到promptAsset.contentHash。旧内嵌Prompt无新字段；旧构造保留。提交审批再次核对来源，不跟随Skill当前版本换文字。已冻结Agent/Pipeline包含实际正文及来源ID/版本/Hash，来源变动或停用不能静默替换历史正文。PipelineAssetService仅在需要当前执行可用性时对新绑定调用同一validatePrompt，Skill停用/原版本正文变动拒绝新建或执行，不在历史解释中读取可变指令代替冻结正文。
+
+PROMPT Benchmark将来源及正文视为同一变量，原其他不变量继续核对；旧无引用实验的比较协议/paths保留。只换来源但有效Prompt不变会被原语义差异门禁拒绝，MODEL/SKILL等维度不能顺带改Prompt来源。
+
+页面复用原Skill目录及/skills/{id}/versions，明确选择精确版本、绑定后正文只读，切回内嵌保留原文字并移除来源。权限不足、受限正文、旧响应及关闭后不会安装来源版本。编译/构建及独立验证终态以协作记录为准；数据库/角色/真实发布和任务/Benchmark、权限生命周期仍需专项。KnowledgeBase语料独立版本仍另行实施，本批不将指令资产当知识库。

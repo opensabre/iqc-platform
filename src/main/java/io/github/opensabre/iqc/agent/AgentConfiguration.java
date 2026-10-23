@@ -12,7 +12,9 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
                                  List<Model> models, List<McpServer> mcpServers, List<Skill> skills,
                                  String primaryModelProfileId, List<String> fallbackModelProfileIds,
                                  List<String> mcpServerIds, List<String> skillIds, AssetSnapshots assetSnapshots,
-                                 String ruleSetId) {
+                                 String ruleSetId,
+                                 @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                                 PromptReference promptAsset) {
     public static final String CURRENT_SCHEMA = "3.0";
     public static final String CAPABILITY_SCHEMA = CURRENT_SCHEMA;
 
@@ -21,6 +23,28 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
         return "2.0".equals(schema) || CAPABILITY_SCHEMA.equals(schema);
     }
 
+    public record PromptReference(String skillId,
+            @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=PromptVersionCodec.class) int versionNo,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String contentHash) { }
+    public static final class PromptVersionCodec extends com.fasterxml.jackson.databind.JsonDeserializer<Integer>{
+        @Override public Integer deserialize(com.fasterxml.jackson.core.JsonParser parser,com.fasterxml.jackson.databind.DeserializationContext context) throws java.io.IOException{
+            if(parser.currentToken()!=com.fasterxml.jackson.core.JsonToken.VALUE_NUMBER_INT)
+                return context.reportInputMismatch(Integer.class,"Prompt版本号须为正整数JSON数字");
+            var value=parser.getBigIntegerValue();
+            if(value.signum()<=0||value.bitLength()>31)return context.reportInputMismatch(Integer.class,"Prompt版本号超出正整数范围");
+            return value.intValueExact();
+        }
+    }
+    public static String promptHash(PromptReference reference,String text){
+        return io.github.opensabre.iqc.selector.SelectorAssetService.hash(com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode()
+                .add("iqc-agent-prompt-v1").add(reference.skillId()).add(reference.versionNo()).add(text).toString());
+    }
+    public AgentConfiguration(String schemaVersion,String mode,String systemPrompt,String primaryModel,
+            List<Model> models,List<McpServer> mcpServers,List<Skill> skills,String primaryModelProfileId,List<String> fallbackModelProfileIds,
+            List<String> mcpServerIds,List<String> skillIds,AssetSnapshots assetSnapshots,String ruleSetId){
+        this(schemaVersion,mode,systemPrompt,primaryModel,models,mcpServers,skills,primaryModelProfileId,fallbackModelProfileIds,
+                mcpServerIds,skillIds,assetSnapshots,ruleSetId,null);
+    }
     /** Backward-compatible constructor for legacy callers that predate explicit execution modes. */
     public AgentConfiguration(String schemaVersion, String systemPrompt, String primaryModel,
                               List<Model> models, List<McpServer> mcpServers, List<Skill> skills,
@@ -45,6 +69,11 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
             throw IqcException.invalidArgument("新版 Agent 只配置 LLM 能力，质检模式和规则集应配置在任务或业务方案中");
         if (mode != null && !Set.of("RULE_ONLY", "RULE_THEN_LLM", "LLM_THEN_RULE", "AGENT_LLM").contains(mode.trim().toUpperCase()))
             throw IqcException.invalidArgument("不支持的质检模式: " + mode);
+        if(promptAsset!=null && (!CAPABILITY_SCHEMA.equals(schemaVersion)||promptAsset.skillId()==null
+                ||!promptAsset.skillId().matches("[A-Za-z0-9:_-]{1,64}")||promptAsset.versionNo()<1
+                ||(promptAsset.contentHash()!=null&&(!promptAsset.contentHash().matches("[a-f0-9]{64}")
+                ||!promptAsset.contentHash().equals(promptHash(promptAsset,systemPrompt))))))
+            throw IqcException.invalidArgument("Prompt精确版本来源或正文摘要无效");
         boolean ruleOnly = "RULE_ONLY".equalsIgnoreCase(mode);
         if (!ruleOnly && (systemPrompt == null || systemPrompt.isBlank())) throw IqcException.invalidArgument("默认提示词不能为空");
         if (systemPrompt != null && systemPrompt.length() > 8000) throw IqcException.invalidArgument("默认提示词不能超过 8000 字符");
@@ -133,6 +162,11 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
     /** Returns a copy with immutable asset details captured for approval and execution. */
     public AgentConfiguration withSnapshots(AssetSnapshots snapshots) {
         return new AgentConfiguration(schemaVersion, mode, systemPrompt, primaryModel, models, mcpServers, skills,
-                primaryModelProfileId, fallbackModelProfileIds, mcpServerIds, skillIds, snapshots, ruleSetId);
+                primaryModelProfileId, fallbackModelProfileIds, mcpServerIds, skillIds, snapshots, ruleSetId,promptAsset);
     }
+    public AgentConfiguration withPrompt(String text,PromptReference reference){
+        return new AgentConfiguration(schemaVersion,mode,text,primaryModel,models,mcpServers,skills,primaryModelProfileId,
+                fallbackModelProfileIds,mcpServerIds,skillIds,assetSnapshots,ruleSetId,reference);
+    }
+
 }

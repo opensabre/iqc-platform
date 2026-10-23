@@ -13,8 +13,37 @@ import static io.github.opensabre.iqc.agent.AgentConfiguration.*;
 @Component
 public class AgentAssetReferenceValidator {
     private final IqcModelProfileMapper models; private final IqcMcpServerMapper mcps; private final IqcSkillMapper skills;
-    public AgentAssetReferenceValidator(IqcModelProfileMapper models, IqcMcpServerMapper mcps, IqcSkillMapper skills) { this.models=models; this.mcps=mcps; this.skills=skills; }
+    private final io.github.opensabre.iqc.skill.dao.IqcSkillVersionMapper skillVersions;
+    @org.springframework.beans.factory.annotation.Autowired
+    public AgentAssetReferenceValidator(IqcModelProfileMapper models,IqcMcpServerMapper mcps,IqcSkillMapper skills,
+            io.github.opensabre.iqc.skill.dao.IqcSkillVersionMapper skillVersions){
+        this.models=models;this.mcps=mcps;this.skills=skills;this.skillVersions=skillVersions;
+    }
+    public AgentAssetReferenceValidator(IqcModelProfileMapper models,IqcMcpServerMapper mcps,IqcSkillMapper skills){this(models,mcps,skills,null);}
+    /** Resolve an exact independent instruction version, never the mutable current instructions. */
+    public AgentConfiguration resolvePrompt(AgentConfiguration config){
+        var reference=config.promptAsset();if(reference==null)return config;
+        if(!CAPABILITY_SCHEMA.equals(config.schemaVersion())||reference.skillId()==null||!reference.skillId().matches("[A-Za-z0-9:_-]{1,64}")||reference.versionNo()<1)
+            throw IqcException.invalidArgument("Prompt来源须为精确指令资产版本");
+        if(skillVersions==null)throw IqcException.invalidState("Prompt版本解析依赖不可用");
+        requireEnabledSkill(reference.skillId());
+        var version=skillVersions.selectOne(com.baomidou.mybatisplus.core.toolkit.Wrappers.<io.github.opensabre.iqc.skill.model.IqcSkillVersion>lambdaQuery()
+                .eq(io.github.opensabre.iqc.skill.model.IqcSkillVersion::getSkillId,reference.skillId())
+                .eq(io.github.opensabre.iqc.skill.model.IqcSkillVersion::getVersionNo,reference.versionNo()));
+        if(version==null||!reference.skillId().equals(version.getSkillId())||!java.util.Objects.equals(reference.versionNo(),version.getVersionNo())
+                ||!"ENABLED".equals(version.getStatus())||version.getInstructions()==null||version.getInstructions().isBlank()||version.getInstructions().length()>8000)
+            throw IqcException.invalidState("Prompt指令版本不存在、已停用或正文超限");
+        var text=version.getInstructions();var hash=promptHash(reference,text);
+        if((config.systemPrompt()!=null&&!config.systemPrompt().isBlank()&&!text.equals(config.systemPrompt()))
+                ||(reference.contentHash()!=null&&!hash.equals(reference.contentHash())))throw IqcException.invalidArgument("Prompt正文或摘要与精确版本不一致");
+        return config.withPrompt(text,new PromptReference(reference.skillId(),reference.versionNo(),hash));
+    }
+    public void validatePrompt(AgentConfiguration config){
+        if(config.promptAsset()!=null && (config.promptAsset().contentHash()==null||!resolvePrompt(config).equals(config)))
+            throw IqcException.invalidState("Prompt版本尚未解析冻结");
+    }
     public void validate(AgentConfiguration config) {
+        validatePrompt(config);
         if (!AgentConfiguration.usesManagedAssets(config.schemaVersion())) return;
         if ("RULE_ONLY".equals(config.mode())) return;
         requireEnabledModel(config.primaryModelProfileId());
