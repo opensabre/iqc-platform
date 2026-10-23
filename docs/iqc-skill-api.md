@@ -29,3 +29,14 @@ Agent 3.0可使用promptAsset={skillId,versionNo,contentHash?}选择原Skill指�
 PROMPT Benchmark将来源及正文视为同一变量，原其他不变量继续核对；旧无引用实验的比较协议/paths保留。只换来源但有效Prompt不变会被原语义差异门禁拒绝，MODEL/SKILL等维度不能顺带改Prompt来源。
 
 页面复用原Skill目录及/skills/{id}/versions，明确选择精确版本、绑定后正文只读，切回内嵌保留原文字并移除来源。权限不足、受限正文、旧响应及关闭后不会安装来源版本。编译/构建及独立验证终态以协作记录为准；数据库/角色/真实发布和任务/Benchmark、权限生命周期仍需专项。KnowledgeBase语料独立版本仍另行实施，本批不将指令资产当知识库。
+
+### Prompt精确版本专项验证（B，2026-10-24）
+
+固定同步d2fe179后，PromptAssetVersionTest验证历史版本正文冻结、不修改调用方或
+来源对象、冻结配置JSON往返、历史正文篡改拒绝，以及停用/缺失/错ID/错版本/
+超长正文/坏Hash拒绝。JSON字符串、小数、非正数、越界数与布尔版本均拒绝；
+旧构造序列化省略promptAsset，内嵌配置不访问版本解析依赖。
+
+原14934离线test-compile+surerfire终态0；新增4项及原Agent/Benchmark组合共27项，
+零失败、错误、跳过。日志`/tmp/iqc-b-prompt-version-validation.log`。
+Mapper为受控适配，此证据不替代真实组织权限、SQL发布/工作器及浏览器验收。
