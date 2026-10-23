@@ -140,6 +140,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals(PipelineAssetService.hash(published.getPublicationDecisionJson()),published.getPublicationDecisionHash());
         var prepared=pipelines.publishedReleaseForTask(asset.getId(),1);
         assertEquals("0.900000000000000001",prepared.release().items().getFirst().numericPredicate().threshold());
+        assertArchiveReceiptExecutesPublishedPipeline(prepared,conversation,suffix);
         var production=context.getBean(InspectionTaskService.class).createUsingPipelineSnapshot(prepared,"production",List.of(conversation),1,"production_"+suffix);
         // Mutate live data only after the owning materializer has frozen the complete processed conversation.
         db.update("UPDATE iqc_conversation_message SET content='later text',start_ms=10000,end_ms=11000 WHERE id=?",second);
@@ -443,6 +444,44 @@ class IsolatedMysqlMeasuredPublicationIT {
         db.update("INSERT INTO iqc_model_gateway_call(call_id,model_key,task_id,execution_id,conversation_id,status,reserved_at_utc,pricing_currency,calculated_cost,cost_status) VALUES (?,?,?,?,?,?,UTC_TIMESTAMP(3),?,?,?)",
                 id,"a".repeat(64),task,run,conversation,status,currency,amount==null?null:new BigDecimal(amount),amount==null?"UNKNOWN":"CALCULATED_FROM_DECLARED_PRICE");
     }
+    /** Uses the actual measured publication, receipt transaction, worker, metric engine and result SQL. */
+    private void assertArchiveReceiptExecutesPublishedPipeline(PipelineAssetService.Prepared prepared,String conversation,String suffix) throws Exception {
+        var json=context.getBean(ObjectMapper.class);var db=new JdbcTemplate(context.getBean(DataSource.class));
+        String fingerprint=PipelineAssetService.hash(json.writeValueAsString(conversation));
+        db.update("UPDATE iqc_conversation SET status='IMPORTED',source_fingerprint=? WHERE id=?",fingerprint,conversation);
+        String subscription="sub"+suffix,revision="rev"+suffix;var now=Instant.now();
+        var request=new io.github.opensabre.iqc.schedule.TaskTriggerRequest("iqc-task-trigger-v1","archive-subscription",
+                io.github.opensabre.iqc.schedule.EventSubscriptionService.eventId(revision,conversation,fingerprint),"ConversationCompleted",
+                now.minusSeconds(1),now.plusSeconds(600),"Archive worker execution",
+                new io.github.opensabre.iqc.schedule.PeriodicDefinition.PipelineReference(prepared.pipelineId(),prepared.versionNo()),null,
+                new io.github.opensabre.iqc.schedule.TaskTriggerRequest.Target(conversation,null,null,fingerprint),null,1,false);
+        var bound=new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","user-annotator","annotator",false,"group");
+        var actor=new ScheduledActorAccessService.Resolved("user-annotator","annotator",false,"group",Set.of(),
+                io.github.opensabre.iqc.schedule.TaskTriggerService.grants(request),Instant.now());
+        var definition=new io.github.opensabre.iqc.schedule.EventSubscriptionDefinition(
+                io.github.opensabre.iqc.schedule.EventSubscriptionDefinition.SCHEMA,"ConversationCompleted",now.minusSeconds(60),now.plusSeconds(3600),600,1,request.pipeline(),null);
+        var parent=new io.github.opensabre.iqc.schedule.EventSubscriptionService.Published("iqc-event-subscription-release-v1",request.name(),definition,prepared,null,bound);
+        String parentBody=json.writeValueAsString(parent);
+        db.update("INSERT INTO iqc_event_subscription(id,code,name,draft_config_json,active_revision_id,status,created_by) VALUES(?,?,?,'{}',?,'ACTIVE','annotator')",subscription,subscription,request.name(),revision);
+        db.update("INSERT INTO iqc_event_subscription_revision(id,subscription_id,version_no,source_draft_revision,snapshot_json,content_hash,created_by) VALUES(?,?,1,1,?,?,'annotator')",revision,subscription,parentBody,io.github.opensabre.iqc.selector.SelectorAssetService.hash(parentBody));
+        var triggers=context.getBean(io.github.opensabre.iqc.schedule.TaskTriggerService.class);
+        var tx=new org.springframework.transaction.support.TransactionTemplate(context.getBean(org.springframework.transaction.PlatformTransactionManager.class));
+        var receipt=tx.execute(status->triggers.receiveSubscription(request,bound,actor,prepared,null,subscription,revision));
+        assertEquals("WAITING_INPUT",receipt.getStatus());
+        var accepted=io.github.opensabre.iqc.schedule.TaskTriggerService.readAcceptedEvidence(receipt,json);
+        var frame=new io.github.opensabre.iqc.schedule.TaskTriggerService.Frame(receipt.getId(),accepted,receipt.getTriggerRequestHash());
+        assertTrue(triggers.materialize(frame,actor));assertFalse(triggers.materialize(frame,actor));
+        var sql=context.getBean(SqlSessionTemplate.class);var tasks=sql.getMapper(InspectionTaskMapper.class);
+        var queued=tasks.selectById(receipt.getId());assertEquals("QUEUED",queued.getStatus());
+        context.getBean(InspectionExecutionService.class).executePersisted(queued.getId(),queued.getCurrentExecutionId());
+        var finished=tasks.selectById(queued.getId());assertEquals("SUCCEEDED",finished.getStatus());
+        var result=sql.getMapper(ConversationInspectionResultMapper.class).selectLatestForTaskConversation(finished.getId(),conversation);
+        assertNotNull(result);assertEquals(0,new BigDecimal("80").compareTo(result.getFinalScore()));
+        assertEquals("HIGH",result.getRiskLevel());assertTrue(result.getExecutionTraceJson().contains("1000"));
+        assertEquals(2,db.queryForObject("SELECT COUNT(*) FROM iqc_task_item WHERE execution_id=? AND status='SUCCEEDED'",Integer.class,queued.getCurrentExecutionId()));
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_task_execution WHERE task_id=?",Integer.class,finished.getId()));
+        assertEquals(receipt.getId(),tx.execute(status->triggers.receiveSubscription(request,bound,actor,prepared,null,subscription,revision)).getId());
+    }
     private ScheduledActorAccessService.Resolved authorizedActor() {
         return new ScheduledActorAccessService.Resolved("user-annotator","annotator",false,"group",Set.of(),
                 Set.of("iqc:pipeline:task:create","iqc:task:execute","iqc:action:enqueue","iqc:review:create"),Instant.now());
@@ -507,6 +546,12 @@ class IsolatedMysqlMeasuredPublicationIT {
         @Bean PipelineEvaluationService evaluations(EvaluationDatasetService datasets,PipelineAssetService pipelines,InspectionTaskService tasks,SqlSessionTemplate s,PipelineConversationEvaluator evaluator,ObjectMapper j,IqcDataScope scope){return new PipelineEvaluationService(datasets,pipelines,tasks,s.getMapper(InspectionTaskMapper.class),s.getMapper(TaskExecutionMapper.class),s.getMapper(TaskItemMapper.class),s.getMapper(EvaluationSampleResultMapper.class),evaluator,j,scope);}
         @Bean PipelinePublicationGateService gates(PipelineEvaluationService evaluations,ObjectMapper j,SqlSessionTemplate s){return new PipelinePublicationGateService(evaluations,j,s.getMapper(TaskExecutionMapper.class));}
         @Bean HierarchicalResultService hierarchy(SqlSessionTemplate s,ObjectMapper j){return new HierarchicalResultService(s.getMapper(ConversationInspectionResultMapper.class),s.getMapper(RuleInspectionResultMapper.class),s.getMapper(InspectionEvidenceMapper.class),j,null,s.getMapper(InspectionTaskMapper.class),s.getMapper(InspectionResultMapper.class),s.getMapper(TaskItemMapper.class));}
+        @Bean io.github.opensabre.iqc.schedule.TaskTriggerService triggers(SqlSessionTemplate s,PipelineAssetService pipelines,
+                IqcDataScope scope,InspectionTaskService tasks,InspectionExecutionService runner,ObjectMapper j,
+                org.springframework.transaction.PlatformTransactionManager transactionManager){
+            return new io.github.opensabre.iqc.schedule.TaskTriggerService(s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationMapper.class),
+                    null,pipelines,null,null,null,scope,tasks,runner,j,null,transactionManager);
+        }
         @Bean InspectionExecutionService runner(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,HierarchicalResultService hierarchy,PipelineAssetService pipelines,PipelineConversationEvaluator evaluator,PipelineEvaluationService evaluations,LlmQualityProvider model){return new InspectionExecutionService(s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationMapper.class),s.getMapper(ConversationMessageMapper.class),s.getMapper(InspectionResultMapper.class),j,s.getMapper(TaskExecutionMapper.class),s.getMapper(TaskItemMapper.class),scope,model,mock(io.github.opensabre.governance.usage.UsageCounterRecorder.class),hierarchy,mock(io.github.opensabre.iqc.label.LabelCandidateService.class),mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class),pipelines,evaluator,evaluations);}
     }
 }

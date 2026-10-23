@@ -97,3 +97,21 @@ fresh XML SQL30+周期11=41项零失败错误跳过，专用34307已关闭且soc
 
 本轮增加原用例的连续链路断言，未新增测试数量；Prepared依赖及组织scope仍受控，
 不将到QUEUED的证据称为模型worker成功执行、真实PDP或跨实例验收。
+
+### 固定版本归档接收到真实工作器成功（B，2026-10-24）
+
+复用IsolatedMysqlMeasuredPublicationIT完整目录、Gold独立审核、冻结数据集、真实试跑及
+发布门禁产生的已发布METRIC流水线，在原集成场景加入内部receiveSubscription事务→
+materialize/queue→executePersisted。PipelineAssetService/Runtime/Evaluator/HierarchicalResultService
+及任务/检查点/结果SQL均为原真实实现，父订阅与原发布引用由测试初始化。处理后会话
+无需ASR，最终SUCCEEDED，两消息检查点成功，结果80分/HIGH、原1000ms轨迹，单执行，
+同事件重放返回原ID。
+
+原30131 compiler:testCompile+surerfire终态0，`/tmp/iqc-b-archive-measured-worker.log.exit`为0；
+fresh IsolatedMysqlMeasuredPublicationIT两项零失败错误跳过，93.869秒，专用34307关闭且
+socket消失。新增断言扩原第一项，不新增测试数量；原第二项评测部分失败后重试继承与
+一致性/标签组合随本轮通过，不当作归档任务自身重试证据。
+
+本轮为固定版本归档内部接收到实际工作器成功；不冒称灰度worker或扫描到worker整链。
+组织scope、Agent资产校验及另一模型场景供应商适配仍沿原受控夹具；真实PDP/发布UI、
+跨实例重启恢复、实际供应商和其它适用I1–I7继续。
