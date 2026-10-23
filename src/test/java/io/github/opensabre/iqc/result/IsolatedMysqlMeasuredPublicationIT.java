@@ -445,10 +445,48 @@ class IsolatedMysqlMeasuredPublicationIT {
                 id,"a".repeat(64),task,run,conversation,status,currency,amount==null?null:new BigDecimal(amount),amount==null?"UNKNOWN":"CALCULATED_FROM_DECLARED_PRICE");
     }
     /** Uses the actual measured publication, receipt transaction, worker, metric engine and result SQL. */
+    @Test void exactPromptSurvivesHeadChangesAndDisabledSourceBlocksApproval() throws Exception {
+        var sql=context.getBean(SqlSessionTemplate.class);var json=context.getBean(ObjectMapper.class);
+        var db=new JdbcTemplate(context.getBean(DataSource.class));String key=UUID.randomUUID().toString().replace("-", "");
+        String skill="prompt"+key,model="model"+key;
+        db.update("INSERT INTO iqc_skill(id,name,code,instructions,status,version_no) VALUES(?,?,?,'current head','ENABLED',9)",skill,skill,skill);
+        db.update("INSERT INTO iqc_skill_version(id,skill_id,version_no,name,code,instructions,status) VALUES(?,?,2,?,?,'historical exact body','ENABLED')","pv"+key,skill,skill,skill);
+        db.update("INSERT INTO iqc_model_profile(id,name,code,provider,model_name,status,version_no) VALUES(?,?,?,'OPENAI','controlled','ENABLED',1)",model,model,model);
+        var validator=new io.github.opensabre.iqc.agent.AgentAssetReferenceValidator(
+                sql.getMapper(io.github.opensabre.iqc.modelprofile.dao.IqcModelProfileMapper.class),
+                sql.getMapper(io.github.opensabre.iqc.mcp.dao.IqcMcpServerMapper.class),
+                sql.getMapper(io.github.opensabre.iqc.skill.dao.IqcSkillMapper.class),
+                sql.getMapper(io.github.opensabre.iqc.skill.dao.IqcSkillVersionMapper.class));
+        var agents=new io.github.opensabre.iqc.agent.QualityAgentService(sql.getMapper(QualityAgentMapper.class),sql.getMapper(QualityAgentVersionMapper.class),json,validator);
+        var tx=new org.springframework.transaction.support.TransactionTemplate(context.getBean(org.springframework.transaction.PlatformTransactionManager.class));
+        var config=new io.github.opensabre.iqc.agent.AgentConfiguration("3.0",null,"",null,null,null,null,model,List.of(),List.of(),List.of(),null,null)
+                .withPrompt("",new io.github.opensabre.iqc.agent.AgentConfiguration.PromptReference(skill,2,null));
+        var created=tx.execute(status->agents.create("Prompt SQL", "P_"+key,null,write(json,config)));
+        var frozen=json.readValue(created.getConfigJson(),io.github.opensabre.iqc.agent.AgentConfiguration.class);
+        assertEquals("historical exact body",frozen.systemPrompt());assertNotNull(frozen.promptAsset().contentHash());
+        db.update("UPDATE iqc_skill SET instructions='new current head',version_no=10 WHERE id=?",skill);
+        tx.execute(status->agents.submit(created.getId()));tx.execute(status->agents.publish(created.getId()));
+        String published=agents.versions(created.getId()).getFirst().getConfigJson();
+        assertEquals("historical exact body",json.readTree(published).path("systemPrompt").asText());
+        assertEquals(2,json.readTree(published).path("promptAsset").path("versionNo").asInt());
+        tx.execute(status->agents.createVersion(created.getId(),null,null,null,published));
+        db.update("UPDATE iqc_skill SET status='DISABLED' WHERE id=?",skill);
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->tx.execute(status->agents.submit(created.getId())));
+        assertEquals("DRAFT",agents.versions(created.getId()).getFirst().getStatus());
+        assertEquals(published,agents.versions(created.getId()).get(1).getConfigJson());
+        assertEquals("PUBLISHED",agents.versions(created.getId()).get(1).getStatus());
+    }
+    private static String write(ObjectMapper json,Object value){
+        try{return json.writeValueAsString(value);}catch(Exception error){throw new IllegalStateException(error);}
+    }
+
     private void assertArchiveReceiptExecutesPublishedPipeline(PipelineAssetService.Prepared prepared,String conversation,String suffix) throws Exception {
         var json=context.getBean(ObjectMapper.class);var db=new JdbcTemplate(context.getBean(DataSource.class));
         String fingerprint=PipelineAssetService.hash(json.writeValueAsString(conversation));
         var archiveTime=Instant.parse("2001-01-01T00:00:00Z");
+        // The isolated database retains prior runs; reserve an unused historical second.
+        while(db.queryForObject("SELECT COUNT(*) FROM iqc_conversation WHERE created_time>=? AND created_time<?",Integer.class,
+                java.sql.Timestamp.from(archiveTime),java.sql.Timestamp.from(archiveTime.plusSeconds(1)))>0)archiveTime=archiveTime.plusSeconds(1);
         db.update("UPDATE iqc_conversation SET status='IMPORTED',source_fingerprint=?,created_time=? WHERE id=?",fingerprint,java.sql.Timestamp.from(archiveTime),conversation);
         String subscription="sub"+suffix,revision="rev"+suffix;var now=Instant.now();
         var request=new io.github.opensabre.iqc.schedule.TaskTriggerRequest("iqc-task-trigger-v1","archive-subscription",
@@ -512,7 +550,7 @@ class IsolatedMysqlMeasuredPublicationIT {
             // Reuse the production framework filler; this test owns only the supplied user context.
             com.baomidou.mybatisplus.core.toolkit.GlobalConfigUtils.getGlobalConfig(f.getConfiguration())
                     .setMetaObjectHandler(new io.github.opensabre.persistence.handler.PoMetaObjectHandler());
-            for(var type:List.of(io.github.opensabre.iqc.label.dao.LabelCategoryMapper.class,io.github.opensabre.iqc.label.dao.LabelGroupMapper.class,io.github.opensabre.iqc.label.dao.InsightLabelMapper.class,io.github.opensabre.iqc.label.dao.LabelRuleBindingMapper.class,io.github.opensabre.iqc.label.dao.LabelValueDefinitionMapper.class,io.github.opensabre.iqc.label.dao.LabelCollectionMapper.class,io.github.opensabre.iqc.label.dao.LabelCollectionMemberMapper.class,QualityRuleMapper.class,QualityRuleVersionMapper.class,QualityAgentMapper.class,QualityAgentVersionMapper.class,ConversationMapper.class,ConversationMessageMapper.class,FindingCatalogMapper.class,FindingCatalogVersionMapper.class,
+            for(var type:List.of(io.github.opensabre.iqc.skill.dao.IqcSkillMapper.class,io.github.opensabre.iqc.skill.dao.IqcSkillVersionMapper.class,io.github.opensabre.iqc.modelprofile.dao.IqcModelProfileMapper.class,io.github.opensabre.iqc.mcp.dao.IqcMcpServerMapper.class,io.github.opensabre.iqc.label.dao.LabelCategoryMapper.class,io.github.opensabre.iqc.label.dao.LabelGroupMapper.class,io.github.opensabre.iqc.label.dao.InsightLabelMapper.class,io.github.opensabre.iqc.label.dao.LabelRuleBindingMapper.class,io.github.opensabre.iqc.label.dao.LabelValueDefinitionMapper.class,io.github.opensabre.iqc.label.dao.LabelCollectionMapper.class,io.github.opensabre.iqc.label.dao.LabelCollectionMemberMapper.class,QualityRuleMapper.class,QualityRuleVersionMapper.class,QualityAgentMapper.class,QualityAgentVersionMapper.class,ConversationMapper.class,ConversationMessageMapper.class,FindingCatalogMapper.class,FindingCatalogVersionMapper.class,
                     io.github.opensabre.iqc.schedule.dao.EventSubscriptionMapper.class,io.github.opensabre.iqc.schedule.dao.EventSubscriptionRevisionMapper.class,
                     PipelineAssetMapper.class,PipelineAssetVersionMapper.class,QualitySampleMapper.class,QualitySampleVersionMapper.class,
                     EvaluationDatasetMapper.class,EvaluationDatasetVersionMapper.class,EvaluationSampleResultMapper.class,

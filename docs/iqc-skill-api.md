@@ -49,3 +49,16 @@ PROMPT同时改变模型、MODEL夹带Prompt来源变化、正文摘要被篡改
 原77068 compiler:testCompile+surerfire终态0，新增4项与Prompt版本/SkillAPI/
 SmallModel组合共17项零失败、错误、跳过。日志`/tmp/iqc-b-prompt-benchmark-validation.log`。
 此为原比较器的冻结配置验证，不替代同Dataset真实评测任务和供应商调用验收。
+
+### Prompt真实SQL保存审批验证（B，2026-10-24）
+
+复用IsolatedMysqlMeasuredPublicationIT，实际Skill/SkillVersion/Model/Agent Mapper、
+QualityAgentService与AgentAssetReferenceValidator验证精确历史正文保存及摘要生成，
+当前指令head更新后审批发布仍保留旧正文和版本；再建草稿后停用来源，提交审批拒绝
+且事务回滚保留DRAFT，原PUBLISHED版本正文不变。事务由原平台事务管理器执行，
+未使用真实PDP、HTTP或供应商。
+
+原62568 compiler:testCompile+surerfire终态0，集成3项零失败、错误、跳过，
+28.627秒；专用34307关闭且socket消失。日志`/tmp/iqc-b-prompt-sql-repeatable.log`。
+原归档扫描夹具改为选择未使用的历史秒区间，避免隔离数据库留存旧数据影响数量断言。
+首次编译失败与后续固定区间冲突均已纠正，最终通过范围包括原两项完整集成场景。
