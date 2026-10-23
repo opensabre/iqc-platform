@@ -82,3 +82,17 @@ PeriodicScheduleService保留原事务/行锁、失火、自然实例键、游�
 周期页面显式选择“每实例使用当前灰度策略”，此模式只选流水线与固定Selector，切回固定模式需重新选发布版本；模板、历史、实例与原敏感读取生命周期复用。
 
 当前仅编译/构建，无Root新增或运行测试/SQL/browser/部署。B待验证新旧定义JSON/hash与构造、发布时间/当前资源授权、实际Cron失火/空数据/游标和重试、同实例不重分配/新实例响应回退、计划锚点/组范围、并发锁序和事务回滚、worker/历史对坏周期版本/计划时间/负责人/Selector证据的拒绝及真实页面权限。事件/API/MQ灰度和A/B归因仍待下一层接入，I7/全部PRD不标完成。
+
+### Selector / 周期灰度组合兼容验证（B，2026-10-23）
+
+固定 A 后端 b2765c4 无冲突并入 B a7bc903，UI 99b467f 并入 73e89d7。
+原 96504 offline test-compile+surerfire 终态 0，日志
+`/tmp/iqc-b-periodic-rollout-integrated-tests.log`：PeriodicDefinitionTest 8、
+PipelineRolloutTaskReplayTest 9、PipelineRolloutExecutionGuardTest 8、
+ScheduleConfigurationHttpPrivacyTest 19、PipelineRolloutHttpPrivacyTest 31，
+fresh XML 共 75 项零失败错误跳过。UI 原 44202 type-check 终态 0，日志
+`/tmp/iqc-b-periodic-rollout-ui-typecheck.log`，仍有既有 Node/pnpm 声明差异。
+
+本轮复用既有兼容/重放/guard/受控 MVC 测试，不能替代新周期灰度真实 tick、计划时刻、
+扩量回退/同实例重放、事务回滚/并发游标、组织授权及 worker 来源冻结专项，也不是 UI
+浏览器交互或实际 PDP 验证。Rabbit 注解容器 5 项独立结果绑定此前 d7cddb9，不外推本组合。
