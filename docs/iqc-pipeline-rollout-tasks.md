@@ -2,7 +2,7 @@
 
 ## 适用边界
 
-新增 POST /api/iqc/pipelines/{id}/rollout/tasks，首次请求读取当前保存的策略，实际选择基线或候选精确发布版本，并通过原 InspectionTaskService 物化生产任务。旧的固定版本、草稿试跑、Selector、周期/事件创建入口保持各自原协议；本批灰度入口支持显式会话IDs，尚未扩展为Selector/周期/事件自动灰度。
+新增 POST /api/iqc/pipelines/{id}/rollout/tasks，首次请求读取当前保存的策略，实际选择基线或候选精确发布版本，并通过原 InspectionTaskService 物化生产任务。旧的固定版本、草稿试跑、Selector、周期/事件创建入口保持各自原协议；首批灰度入口支持显式会话IDs；2026-10-23增量支持已发布Selector，见后文，周期/事件自动灰度仍待集成。
 
 新入口只创建任务，执行仍通过原任务执行授权、队列、worker和状态机。保存扩量、替换或ROLLED_BACK修订将影响后续灰度新请求；已有任务的分配、冻结输入、状态和版本不被重写。不默认迁移所有旧调用方到新入口。
 
@@ -52,3 +52,33 @@ PipelineAssetService的读取验证按当前执行/历史读取分别处理：�
 灰度worker和动作来源快照使用局部精确小数解析；不修改全局mapper。公开任务展示复用同一纯冻结校验，只提取版本/侧别等元数据，不进行数据库来源查询或返回原文。守卫不缓存来源，也没有新增状态表；重复校验的数据库与比较开销尚未做容量实测。
 
 本批只编译，未执行Root测试或数据库/供应商/真实角色/browser验证；具体终态和B后续专项以协作记录为准。
+
+## 已发布Selector灰度任务（2026-10-23）
+
+复用同一POST /pipelines/{id}/rollout/tasks，新增可选selectorAsset={selectorId,versionNo}。与非空conversationIds互斥；只接精确已发布Selector，不接内联定义、客户端Prepared或选数结果。引用对象只允许上述两项，versionNo须精确正整数，拒绝小数/字符串/越界；原Create四参数Java构造保留，新字段null省略。权限仍为原rollout:task:create + pipeline:task:create，Selector和Task沿既有组织范围，不新增资源码。
+
+新路径在原流水线锁下先计算同一稳定actor/pipeline/requestKey任务身份并读取既有任务。首次才分配当前策略、锁定已发布Selector版本，调用原ConversationSelectionService.materialize，再经原任务物化器冻结selectionFilterJson与productionInputs。共享原选数定义/时间锚点/分布/IDs/精确hash协议及来源组交集，未复制抽样算法。选集为空/超出批次上限沿原人工Selector创建约束拒绝，不伪造已完成任务。
+
+Selector请求指纹使用明确iqc-pipeline-rollout-selector-task-v1协议，绑定名称、默认并发及Selector ID/版本，独立于当前策略比例和动态选数结果。任务ID命名空间仍与显式列表共用，因此同请求键从列表换到Selector或更改引用/名称/并发会因不同请求指纹拒绝，不能得到第二任务。
+
+新Selector灰度证据schemaVersion同为iqc-pipeline-rollout-selector-task-v1，保留原Evidence五字段。verifyFrozen要求该协议绑定实际pipelineSnapshot.selectorRequestHash，原列表v1不得携带Selector marker；worker/历史来源guard继续通过同一verifyFrozen验证新旧协议。显式列表请求指纹/任务ID和原v1证据不重写，也不切换默认PipelineRelease版本。
+
+重放先核对原灰度修订/请求/实际发布来源，再校验原selectionFilterJson信封、精确定义/hash、selected IDs与任务IDs一致，并通过原Selector.viewVersion核对不可变历史版本的contentHash/草稿修订。允许当前Selector停用，但仍要求当前有权读取该资产，保留原冻结ownerGroupId，不用当前分组或可用性展示字段替换旧证据。不读取当前灰度策略、不重新调用materialize，不从实时归档重新冻结输入；原任务执行仍遵守当前原有执行可用性检查。
+
+页面复用原SelectorAssetLibrary：灰度模式可选手动会话或已发布选择器，内联Selector仍只属固定版本任务。原command冻结选择引用/名称/并发/requestKey，失败后原请求重试；任务回执沿原敏感投影与灰度展示。
+
+当前仅编译/构建，无新增或执行Root测试、SQL、浏览器或部署。B待验证：原列表v1/旧构造兼容；首次Selector→实际持久化/生产输入→worker；原请求在扩量/回退、Selector停用及语料变更后不重分配/不重选；跨模式/更换引用拒绝；当前组织范围、组收窄、精确版本HTTP拒绝和回执隐私；坏选数/历史丢失/并发/事务回滚及新schema worker来源校验。周期/事件灰度和A/B效果归因仍待后续，完整I7不标完成。
+
+## 周期实例灰度（2026-10-23）
+
+原周期定义新增显式schema iqc-periodic-rollout-definition-v1，rollout={pipelineId}指定策略所属流水线；pipeline必须缺省/null，仍固定selector精确发布版本。旧iqc-periodic-definition-v1继续要求固定pipeline版本且不接受rollout，不给旧定义改含义。原PeriodicDefinition十/十一参数构造保留，新增rollout为空时省略。周期发布快照对应iqc-periodic-rollout-release-v1，仅冻结路由意图/Selector/负责人；每个计划实例首次物化时才读取当前灰度策略。
+
+新模式保存/发布验证当前灰度资产与两侧发布来源；发布及每次后台执行的原负责人授权额外要求现有iqc:pipeline:rollout:task:create。继续交集原owner/group/all，发布时不扩大父周期来源组。所有周期API/权限路径不变，无新增表、执行器或公共抽象。
+
+PeriodicScheduleService保留原事务/行锁、失火、自然实例键、游标、自动重试和空数据路径。新实例在同事务内进入原RolloutTaskService：按稳定负责人/流水线/周期ID/修订ID/计划时刻派生g任务键，在原灰度锁内确定当前侧，Selector.materializeAt固定计划时刻，原物化器冻结productionInputs/selectionFilterJson/periodicSnapshot/rolloutSnapshot。先锁流水线再锁Selector，复用统一分配/来源校验，避免另一套分桶或选数算法。已存在实例不再次分配或重选；下一新计划实例受当前扩量/回退影响。失火跳过不伪造灰度检测，空选集保留NO_DATA。
+
+新周期灰度证据iqc-pipeline-rollout-periodic-selector-task-v1，绑定实例请求摘要与selectorRequestHash；摘要不含每次变化的授权checkedAt，不会因重新取得当前授权而变成另一请求。工作器与历史来源guard通过实际Task周期列、原不可变周期版本/hash、计划时刻、父定义的灰度目标/固定Selector、原负责人稳定ID及原请求键重新核对分桶和选数证据。原Selector重放校验提取为同一纯函数，两处复用，不复制持久化模型。新Guard/周期服务保留旧构造用于旧路径，生产DI使用完整依赖；旧列表/Selector/固定周期schema不迁移。
+
+周期页面显式选择“每实例使用当前灰度策略”，此模式只选流水线与固定Selector，切回固定模式需重新选发布版本；模板、历史、实例与原敏感读取生命周期复用。
+
+当前仅编译/构建，无Root新增或运行测试/SQL/browser/部署。B待验证新旧定义JSON/hash与构造、发布时间/当前资源授权、实际Cron失火/空数据/游标和重试、同实例不重分配/新实例响应回退、计划锚点/组范围、并发锁序和事务回滚、worker/历史对坏周期版本/计划时间/负责人/Selector证据的拒绝及真实页面权限。事件/API/MQ灰度和A/B归因仍待下一层接入，I7/全部PRD不标完成。

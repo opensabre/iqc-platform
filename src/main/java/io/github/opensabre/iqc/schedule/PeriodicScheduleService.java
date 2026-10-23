@@ -14,16 +14,16 @@ import io.github.opensabre.iqc.task.dao.InspectionTaskMapper;
 import io.github.opensabre.iqc.task.model.InspectionTask;
 import io.github.opensabre.iqc.task.InspectionTaskService;
 import io.github.opensabre.iqc.result.InspectionExecutionService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Isolation;
 import java.time.*;
 import java.util.*;
 
-@Service @RequiredArgsConstructor
+@Service
 public class PeriodicScheduleService {
-    public record Published(String schemaVersion,PeriodicDefinition definition,PipelineAssetService.Prepared pipeline,
+    public record Published(String schemaVersion,PeriodicDefinition definition,
+                            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) PipelineAssetService.Prepared pipeline,
                             SelectorAssetService.Prepared selector,ScheduledActorAccessService.CreationBound ownerBound) { }
     public record Frame(String scheduleId,String revisionId,Instant dueAt,Published snapshot,String revisionHash) { }
     private final PeriodicScheduleMapper schedules;
@@ -38,6 +38,25 @@ public class PeriodicScheduleService {
     private final IqcDataScope scope;
     private final ObjectMapper json;
     private final io.github.opensabre.iqc.task.retry.AutomaticRetryService automaticRetries;
+    private final io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskService rollouts;
+    @org.springframework.beans.factory.annotation.Autowired
+    public PeriodicScheduleService(PeriodicScheduleMapper schedules,PeriodicScheduleRevisionMapper revisions,PipelineAssetService pipelines,
+            SelectorAssetService selectors,ScheduledActorAccessService actors,ConversationSelectionService selections,InspectionTaskService tasks,
+            InspectionTaskMapper taskRows,InspectionExecutionService executions,IqcDataScope scope,ObjectMapper json,
+            io.github.opensabre.iqc.task.retry.AutomaticRetryService automaticRetries,io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskService rollouts){
+        this.schedules=schedules;this.revisions=revisions;this.pipelines=pipelines;this.selectors=selectors;this.actors=actors;
+        this.selections=selections;this.tasks=tasks;this.taskRows=taskRows;this.executions=executions;this.scope=scope;this.json=json;
+        this.automaticRetries=automaticRetries;this.rollouts=rollouts;
+    }
+    public PeriodicScheduleService(PeriodicScheduleMapper schedules,PeriodicScheduleRevisionMapper revisions,PipelineAssetService pipelines,
+            SelectorAssetService selectors,ScheduledActorAccessService actors,ConversationSelectionService selections,InspectionTaskService tasks,
+            InspectionTaskMapper taskRows,InspectionExecutionService executions,IqcDataScope scope,ObjectMapper json,
+            io.github.opensabre.iqc.task.retry.AutomaticRetryService automaticRetries){
+        this(schedules,revisions,pipelines,selectors,actors,selections,tasks,taskRows,executions,scope,json,automaticRetries,null);
+    }
+    private io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskService requireRollouts(){
+        if(rollouts==null)throw IqcException.invalidState("周期灰度物化依赖不可用");return rollouts;
+    }
 
     private ObjectMapper exact(){return json.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
             .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));}
@@ -53,9 +72,10 @@ public class PeriodicScheduleService {
     private void owner(PeriodicSchedule row){if(!scope.owner().equals(row.getCreatedBy()))throw IqcException.accessDenied("周期修订须由原负责人完成");}
     private void update(PeriodicSchedule row){if(schedules.updateById(row)!=1)throw IqcException.invalidState("周期定义更新失败");}
     private String referenceGroup(PeriodicDefinition definition){
-        pipelines.publishedRelease(definition.pipeline().pipelineId(),definition.pipeline().versionNo());
+        if(definition.usesRollout())requireRollouts().validateCurrentTarget(definition.targetPipelineId());
+        else pipelines.publishedRelease(definition.pipeline().pipelineId(),definition.pipeline().versionNo());
         var selector=selectors.published(definition.selector().selectorId(),definition.selector().versionNo());
-        String group=scope.groupId(),pipelineGroup=pipelines.get(definition.pipeline().pipelineId()).getOwnerGroupId();
+        String group=scope.groupId(),pipelineGroup=pipelines.get(definition.targetPipelineId()).getOwnerGroupId();
         return group!=null && group.equals(pipelineGroup) && group.equals(selector.ownerGroupId())?group:null;
     }
     public IqcPage<PeriodicSchedule> page(long current,long size){
@@ -87,9 +107,12 @@ public class PeriodicScheduleService {
         if(version==null || version.getSnapshotJson()==null || version.getSnapshotJson().length()>16*1024*1024
                 || !SelectorAssetService.hash(version.getSnapshotJson()).equals(version.getContentHash()))throw IqcException.invalidState("周期修订摘要无效");
         var value=read(version.getSnapshotJson(),Published.class);
-        if(!"iqc-periodic-release-v1".equals(value.schemaVersion()) || value.definition()==null || value.ownerBound()==null || value.pipeline()==null || value.selector()==null
-                || !value.definition().pipeline().pipelineId().equals(value.pipeline().pipelineId())
-                || !Objects.equals(value.definition().pipeline().versionNo(),value.pipeline().versionNo())
+        if(value==null||value.definition()==null||value.ownerBound()==null||value.selector()==null)throw IqcException.invalidState("周期发布来源缺失");
+        boolean gray=value.definition().usesRollout();
+        if(!(gray?"iqc-periodic-rollout-release-v1":"iqc-periodic-release-v1").equals(value.schemaVersion())
+                ||(gray?value.pipeline()!=null:value.pipeline()==null
+                    ||!value.definition().pipeline().pipelineId().equals(value.pipeline().pipelineId())
+                    ||!Objects.equals(value.definition().pipeline().versionNo(),value.pipeline().versionNo()))
                 || !value.definition().selector().selectorId().equals(value.selector().selectorId())
                 || value.definition().selector().versionNo()!=value.selector().versionNo())throw IqcException.invalidState("周期发布来源无效");
         return value;
@@ -100,14 +123,18 @@ public class PeriodicScheduleService {
                 .eq(PeriodicScheduleRevision::getSourceDraftRevision,expected));if(previous!=null){snapshot(previous);return previous;}
         var definition=read(row.getDraftConfigJson(),PeriodicDefinition.class);var bound=actors.capture();
         if(!Objects.equals(bound.groupId(),row.getOwnerGroupId()))row.setOwnerGroupId(null);
-        var pipeline=pipelines.publishedReleaseForTask(definition.pipeline().pipelineId(),definition.pipeline().versionNo());
+        PipelineAssetService.Prepared pipeline=null;
+        if(definition.usesRollout()){
+            actors.resolveCurrent(bound,grants(definition));
+            String group=referenceGroup(definition);if(!Objects.equals(group,row.getOwnerGroupId()))row.setOwnerGroupId(null);
+        }else pipeline=pipelines.publishedReleaseForTask(definition.pipeline().pipelineId(),definition.pipeline().versionNo());
         var selector=selectors.publishedForTask(definition.selector().selectorId(),definition.selector().versionNo());
         Instant first=definition.first();if(first==null)throw IqcException.invalidArgument("周期生效范围内没有计划时刻");
         var last=revisions.selectOne(Wrappers.<PeriodicScheduleRevision>lambdaQuery().eq(PeriodicScheduleRevision::getScheduleId,id)
                 .orderByDesc(PeriodicScheduleRevision::getVersionNo).last("LIMIT 1"));
         if(last!=null && last.getVersionNo()==Integer.MAX_VALUE)throw IqcException.invalidState("周期版本已达上限");
         var version=new PeriodicScheduleRevision();version.setScheduleId(id);version.setSourceDraftRevision(expected);
-        version.setVersionNo(last==null?1:last.getVersionNo()+1);version.setSnapshotJson(write(new Published("iqc-periodic-release-v1",definition,pipeline,selector,bound)));
+        version.setVersionNo(last==null?1:last.getVersionNo()+1);version.setSnapshotJson(write(new Published(definition.usesRollout()?"iqc-periodic-rollout-release-v1":"iqc-periodic-release-v1",definition,pipeline,selector,bound)));
         if(version.getSnapshotJson().getBytes(java.nio.charset.StandardCharsets.UTF_8).length>16*1024*1024)throw IqcException.invalidArgument("周期发布快照超过16MiB");
         version.setContentHash(SelectorAssetService.hash(version.getSnapshotJson()));if(revisions.insert(version)!=1)throw IqcException.invalidState("周期修订保存失败");
         row.setActiveRevisionId(version.getId());row.setStatus("DISABLED");row.setNextPlannedAtUtc(utc(first));row.setRetryNotBeforeUtc(null);row.setLastError(null);update(row);return version;
@@ -159,12 +186,17 @@ public class PeriodicScheduleService {
                 task.setRuleSnapshotJson(write(Map.of("periodicSnapshot",identity)));task.setOwnerGroupId(Objects.equals(scope.groupId(),row.getOwnerGroupId())?row.getOwnerGroupId():null);
                 if(taskRows.insert(task)!=1)throw IqcException.invalidState("周期跳过证据保存失败");
             } else {
-                var definition=release.definition();var pipeline=pipelines.publishedReleaseForTask(definition.pipeline().pipelineId(),definition.pipeline().versionNo());
-                var selector=selectors.publishedForTask(definition.selector().selectorId(),definition.selector().versionNo());
-                if(!SelectorAssetService.hash(write(pipeline)).equals(SelectorAssetService.hash(write(release.pipeline())))
-                        || !SelectorAssetService.hash(write(selector)).equals(SelectorAssetService.hash(write(release.selector()))))throw IqcException.invalidState("周期资产冻结来源不一致");
-                var selection=selections.materializeAt(selector.definition(),tick.plannedAt());
-                existing=tasks.createPeriodicPipelineTask(pipeline,row.getName(),selector,selection,identity,definition.concurrency());
+                var definition=release.definition();
+                if(definition.usesRollout()){
+                    existing=requireRollouts().createPeriodicWithSelector(definition.targetPipelineId(),row.getName(),release.selector(),identity,definition.concurrency());
+                }else{
+                    var pipeline=pipelines.publishedReleaseForTask(definition.pipeline().pipelineId(),definition.pipeline().versionNo());
+                    var selector=selectors.publishedForTask(definition.selector().selectorId(),definition.selector().versionNo());
+                    if(!SelectorAssetService.hash(write(pipeline)).equals(SelectorAssetService.hash(write(release.pipeline())))
+                            || !SelectorAssetService.hash(write(selector)).equals(SelectorAssetService.hash(write(release.selector()))))throw IqcException.invalidState("周期资产冻结来源不一致");
+                    var selection=selections.materializeAt(selector.definition(),tick.plannedAt());
+                    existing=tasks.createPeriodicPipelineTask(pipeline,row.getName(),selector,selection,identity,definition.concurrency());
+                }
                 // The immutable schedule includes both asset sources and the original actor bound.
                 // Sharing an instance cannot exceed sharing of its parent release.
                 if(existing.getOwnerGroupId()!=null && !existing.getOwnerGroupId().equals(row.getOwnerGroupId())) {
@@ -184,7 +216,8 @@ public class PeriodicScheduleService {
     }
     public static Set<String> grants(PeriodicDefinition definition){
         var required=new HashSet<>(Set.of("iqc:pipeline:task:create","iqc:task:execute","iqc:schedule:publish"));
-        if(definition.retryPolicy()!=null)required.add("iqc:task:retry-policy:configure");return Set.copyOf(required);
+        if(definition.retryPolicy()!=null)required.add("iqc:task:retry-policy:configure");
+        if(definition.usesRollout())required.add("iqc:pipeline:rollout:task:create");return Set.copyOf(required);
     }
     private void validateActor(Published release,ScheduledActorAccessService.Resolved actor) {
         var bound=release.ownerBound();Instant now=Instant.now();

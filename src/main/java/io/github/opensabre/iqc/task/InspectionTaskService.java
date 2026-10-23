@@ -25,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.ArrayList;
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -467,6 +468,59 @@ public class InspectionTaskService {
         return createUsingPipelineSnapshot(prepared,name,conversationIds,concurrency,null,null,null,null,null,null,null,rollout);
     }
     @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask createUsingPipelineRolloutSelector(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,Integer concurrency,String requestKey,
+            io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence rollout){
+        return materializeRolloutSelection(prepared,name,selector,selection,null,concurrency,requestKey,rollout);
+    }
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask createPeriodicPipelineRollout(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,PeriodicIdentity identity,Integer concurrency,String requestKey,
+            io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence rollout){
+        if(identity==null||selection==null||!Objects.equals(identity.plannedAt(),selection.anchor())
+                ||!requestKey.equals(io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.periodicRequestKey(identity,objectMapper)))
+            throw IqcException.invalidArgument("周期灰度选数锚点或请求键无效");
+        return materializeRolloutSelection(prepared,name,selector,selection,identity,concurrency,requestKey,rollout);
+    }
+    private InspectionTask materializeRolloutSelection(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,PeriodicIdentity periodic,Integer concurrency,String requestKey,
+            io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence rollout){
+        String expectedSchema=periodic==null?io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.SELECTOR_SCHEMA:
+                io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.PERIODIC_SCHEMA;
+        if(prepared==null||selector==null||selection==null||rollout==null||selectorAssets==null
+                ||!expectedSchema.equals(rollout.schemaVersion())
+                ||!selector.definition().equals(selection.definition()))throw IqcException.invalidArgument("灰度选数来源缺失或不一致");
+        var locked=selectorAssets.getObject().publishedForTask(selector.selectorId(),selector.versionNo());
+        if(!io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(locked)).equals(
+                io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(selector))))throw IqcException.invalidState("灰度Selector来源已变化");
+        var reference=new io.github.opensabre.iqc.selector.SelectorAssetService.Reference(selector.selectorId(),selector.versionNo());
+        String fingerprint=periodic==null?io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.selectorRequestFingerprint(name,reference,concurrency,objectMapper)
+                :io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.periodicRequestFingerprint(name,reference,concurrency,periodic,objectMapper);
+        var marker=objectMapper.valueToTree(prepared);((com.fasterxml.jackson.databind.node.ObjectNode)marker).put("selectorRequestHash",fingerprint);
+        rollout.verify(dataScope.actorUserId(),prepared.pipelineId(),requestKey,fingerprint,marker,objectMapper);
+        return createUsingPipelineSnapshot(prepared,name,selection.selectedConversationIds(),concurrency,null,selection,fingerprint,locked,periodic,null,null,rollout);
+    }
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask requireRolloutSelectorRetry(InspectionTask task,String fingerprint,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Reference reference){
+        if(selectorAssets==null||reference==null)throw IqcException.invalidState("灰度Selector历史依赖不可用");
+        try{
+            var exact=objectMapper.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                    .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));
+            var frozen=exact.treeToValue(exact.readTree(task.getSelectionFilterJson()).path("asset"),
+                    io.github.opensabre.iqc.selector.SelectorAssetService.Prepared.class);
+            var original=selectorAssets.getObject().viewVersion(reference.selectorId(),reference.versionNo());
+            if(frozen==null||!reference.selectorId().equals(frozen.selectorId())||reference.versionNo()!=frozen.versionNo()
+                    ||!original.contentHash().equals(frozen.contentHash())||original.sourceDraftRevision()!=frozen.sourceDraftRevision()
+                    ||!original.contentHash().equals(io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(frozen.definition()))))
+                throw IqcException.invalidState("灰度Selector历史来源不一致");
+            return requireSelectorRetry(task,fingerprint,frozen);
+        }catch(com.fasterxml.jackson.core.JsonProcessingException|IllegalArgumentException invalid){throw IqcException.invalidState("灰度Selector历史选数证据无效");}
+    }
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
     public InspectionTask findRolloutRequest(String id){
         var task=taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,id).last("FOR UPDATE"));
         if(task!=null&&!dataScope.canView(task.getCreatedBy(),task.getOwnerGroupId()))throw IqcException.accessDenied("无权读取原灰度任务");
@@ -636,7 +690,13 @@ public class InspectionTaskService {
     }
     private InspectionTask requireSelectorRetry(InspectionTask task,String requestHash,
             io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset) {
-        if(!dataScope.canView(task.getCreatedBy(),task.getOwnerGroupId())) throw IqcException.accessDenied("无权查看既有选数任务");
+        if(!dataScope.canView(task.getCreatedBy(),task.getOwnerGroupId()))throw IqcException.accessDenied("无权查看既有选数任务");
+        validateSelectorEvidence(task,requestHash,selectorAsset,objectMapper);return task;
+    }
+    /** Pure immutable-source check shared by request replay and background rollout validation. */
+    public static void validateSelectorEvidence(InspectionTask task,String requestHash,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset,ObjectMapper objectMapper){
+        if(task==null||task.getSelectionFilterJson()==null)throw IqcException.invalidState("Selector选数证据缺失");
         try {
             var exactJson=objectMapper.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
                     .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));
@@ -644,7 +704,7 @@ public class InspectionTaskService {
             var pipeline=exactJson.readTree(task.getRuleSnapshotJson()).path("pipelineSnapshot");
             var source=envelope.get("asset");
             if(selectorAsset==null ? source!=null : source==null || !io.github.opensabre.iqc.selector.SelectorAssetService.hash(source.toString()).equals(
-                    io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(selectorAsset))))
+                    io.github.opensabre.iqc.selector.SelectorAssetService.hash(objectMapper.writeValueAsString(selectorAsset))))
                 throw IqcException.invalidState("幂等请求Selector资产来源不同或缺失");
             if(selectorAsset!=null && (!"selector-decimal-sha256-v1".equals(envelope.path("hashAlgorithm").asText())
                     || !selectorAsset.contentHash().equals(selection.path("definitionHash").asText())
@@ -660,7 +720,7 @@ public class InspectionTaskService {
                     || !selectionHash.equals(envelope.path("selectionHash").asText())
                     || !selection.path("selectedConversationIds").equals(objectMapper.readTree(task.getConversationIdsJson())))
                 throw IqcException.invalidState("幂等请求不同或冻结选数证据无效");
-            return task;
+            return;
         } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException invalid) {
             throw IqcException.invalidState("既有Selector任务快照无效");
         }
