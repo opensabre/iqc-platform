@@ -214,6 +214,53 @@ class GoldSampleReviewTest {
     }
 
 
+    @Test void businessManifestComesFromFrozenInputAndIgnoresAnnotationForgery() throws Exception {
+        var forged=json.createObjectNode();
+        forged.putObject("conversation").putObject("businessContext").putObject("businessFields")
+                .put("iqcInputManifestVersion","iqc-input-count-manifest-v1")
+                .put("iqcExpectedMessageCount",1).put("iqcInputManifestRef","forged");
+        var request=annotation(forged);
+        var input=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(sample.getContentSnapshot());
+        input.putObject("businessContext").putObject("businessFields")
+                .put("iqcInputManifestVersion","iqc-input-count-manifest-v1")
+                .put("iqcExpectedMessageCount",3).put("iqcInputManifestRef","original-export");
+        String original=input.toString();
+        sample.setContentSnapshot(original);
+        var lineage=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(sample.getExpectedJson());
+        lineage.put("inputHash",io.github.opensabre.iqc.quality.BusinessReviewSampleService.candidateInputHash(input));
+        sample.setExpectedJson(lineage.toString());
+        when(scope.owner()).thenReturn("annotator");
+        service.annotate("sample",request);
+        when(scope.owner()).thenReturn("reviewer");
+        var approved=service.review("sample",2,true,"verified source manifest");
+        var gold=service.read(approved.getSnapshotJson(),GoldConversation.class);
+        var metrics=new InputCompletenessMetrics();metrics.add(gold);
+        assertThat(metrics.summary().expectedMessages()).isEqualTo(3);
+        assertThat(metrics.summary().missingMessages()).isEqualTo(2);
+        assertThat(gold.businessContext().at("/conversation/businessContext/businessFields/iqcInputManifestRef").asText())
+                .isEqualTo("original-export");
+        assertThat(sample.getContentSnapshot()).isEqualTo(original);
+        input.withObject("/businessContext/businessFields").put("iqcExpectedMessageCount",99);
+        assertThat(service.read(approved.getSnapshotJson(),GoldConversation.class)).isEqualTo(gold);
+        assertThat(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(approved.getSnapshotJson()))
+                .isEqualTo(approved.getContentHash());
+    }
+
+    @Test void annotationAloneCannotSupplyMissingUpstreamManifest() throws Exception {
+        var forged=json.createObjectNode();
+        forged.putObject("conversation").putObject("businessContext").putObject("businessFields")
+                .put("iqcInputManifestVersion","iqc-input-count-manifest-v1")
+                .put("iqcExpectedMessageCount",1).put("iqcInputManifestRef","forged");
+        var request=annotation(forged);
+        when(scope.owner()).thenReturn("annotator");service.annotate("sample",request);
+        when(scope.owner()).thenReturn("reviewer");
+        var gold=service.read(service.review("sample",2,true,"source has no manifest").getSnapshotJson(),GoldConversation.class);
+        var metrics=new InputCompletenessMetrics();metrics.add(gold);
+        assertThat(metrics.summary().measuredSamples()).isZero();
+        assertThat(metrics.summary().unmeasuredSamples()).isEqualTo(1);
+        assertThat(metrics.summary().declaredMessageCoverage()).isNull();
+    }
+
     @Test void unknownCandidateProtocolCannotSelectALegacyHashFallback() throws Exception {
         var request=annotation(json.nullNode());
         sample.setContentSnapshot(sample.getContentSnapshot().replace("iqc-conversation-candidate-input-v1","iqc-conversation-candidate-input-v99"));

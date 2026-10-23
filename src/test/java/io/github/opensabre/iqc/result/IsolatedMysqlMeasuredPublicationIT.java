@@ -61,6 +61,9 @@ class IsolatedMysqlMeasuredPublicationIT {
         var sql=context.getBean(SqlSessionTemplate.class);String suffix=UUID.randomUUID().toString().replace("-","");
         String conversation="c"+suffix,first="m1"+suffix,second="m2"+suffix;
         db.update("INSERT INTO iqc_conversation(id,source_file_name,message_count,status,created_by,owner_group_id,source_fingerprint) VALUES (?,'processed conversation',2,'READY','annotator','group',?)",conversation,suffix);
+        String manifest=json.createObjectNode().put("iqcInputManifestVersion","iqc-input-count-manifest-v1")
+                .put("iqcExpectedMessageCount",3).put("iqcInputManifestRef","export-"+suffix).put("privateField","not in message Gold").toString();
+        db.update("UPDATE iqc_conversation SET business_fields_json=? WHERE id=?",manifest,conversation);
         db.update("INSERT INTO iqc_conversation_message(id,conversation_id,sequence_no,speaker_role,content,start_ms,end_ms,relative_time,raw_line,line_number) VALUES (?,?,1,'customer','processed customer text',0,1000,'00:00:00','processed customer text',1),(?,?,2,'agent','processed agent text',2000,3000,'00:00:02','processed agent text',2)",first,conversation,second,conversation);
         var findingService=context.getBean(FindingCatalogService.class);
         var definition=new FindingDefinition(FindingDefinition.SCHEMA,"GAP_"+suffix.toUpperCase(),"Transcript interval gap","TIMING",null,
@@ -103,6 +106,14 @@ class IsolatedMysqlMeasuredPublicationIT {
             var executed=run(task);
             var report=evaluations.report(executed.getId(),executed.getCurrentExecutionId());
             assertTrue(report.complete());assertEquals(1,report.successfulSamples());
+            var completeness=report.inputCompletenessMetrics();
+            assertEquals(1,completeness.measuredSamples());assertEquals(1,completeness.deficientSamples());
+            assertEquals(3,completeness.expectedMessages());assertEquals(2,completeness.observedMessages());
+            assertEquals(1,completeness.missingMessages());
+            assertEquals(0,new BigDecimal("0.666667").compareTo(completeness.declaredMessageCoverage()));
+            var messageGold=gold.read(gold.approvedVersion(sample.getId(),1).getSnapshotJson(),GoldConversation.class);
+            assertEquals(3,messageGold.businessContext().at("/conversation/businessContext/businessFields").size());
+            assertTrue(messageGold.businessContext().at("/conversation/businessContext/businessFields/privateField").isMissingNode());
             assertEquals(0,BigDecimal.ONE.compareTo(report.findingMetrics().aggregate().f1()));
             // Real persisted metric results must never manufacture a model consistency denominator.
             var repeated=run(evaluations.create(dataset.getId(),1,asset.getId(),null,1,"Independent repeat",1,
@@ -204,6 +215,9 @@ class IsolatedMysqlMeasuredPublicationIT {
         // A reviewed candidate becomes an independently approved gold version, without recapturing live input.
         String candidateBody=captured.getContentSnapshot(),candidateLineage=captured.getExpectedJson();
         db.update("UPDATE iqc_conversation_message SET content='changed after candidate',start_ms=20000,end_ms=21000 WHERE id=?",second);
+        db.update("UPDATE iqc_conversation SET business_fields_json=? WHERE id=?",
+                json.createObjectNode().put("iqcInputManifestVersion","iqc-input-count-manifest-v1")
+                        .put("iqcExpectedMessageCount",99).put("iqcInputManifestRef","changed-after-candidate").toString(),conversation);
         gold.annotate(captured.getId(),new GoldSampleService.Annotation(0,List.of(new GoldFinding(definition.code(),Finding.ValueType.NUMBER,
                 Finding.State.KNOWN,json.valueToTree(1000),List.of(first,second))),null,List.of("feedback"),GoldConversation.Difficulty.BASIC,
                 new GoldDecision(new BigDecimal("100"),GoldDecision.ScoreStatus.FINAL,Map.of(),GoldDecision.Risk.NONE)));
@@ -214,12 +228,22 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals("processed agent text",frozenGold.messages().get(1).content());
         assertEquals(2000L,frozenGold.messages().get(1).startMs());
         assertEquals(completed.getId(),frozenGold.businessContext().path("candidateLineage").path("reviewId").asText());
+        assertEquals(3,frozenGold.businessContext().at("/conversation/businessContext/businessFields/iqcExpectedMessageCount").intValue());
+        assertEquals("export-"+suffix,frozenGold.businessContext().at("/conversation/businessContext/businessFields/iqcInputManifestRef").asText());
         var feedbackDataset=datasets.create("Feedback regression",new DatasetDraft(DatasetDraft.SCHEMA,DatasetDraft.Type.REGRESSION,null,
                 List.of(new DatasetDraft.Member(captured.getId(),approved.getVersionNo()))));
         datasets.freeze(feedbackDataset.getId(),1);
         var feedbackTask=run(evaluations.create(feedbackDataset.getId(),1,asset.getId(),null,1,"Feedback regression",1,"feedback_"+suffix));
         var feedbackReport=evaluations.report(feedbackTask.getId(),feedbackTask.getCurrentExecutionId());
         assertTrue(feedbackReport.complete());assertEquals(1,feedbackReport.successfulSamples());
+        assertEquals(3,feedbackReport.inputCompletenessMetrics().expectedMessages());
+        assertEquals(2,feedbackReport.inputCompletenessMetrics().observedMessages());
+        assertEquals(1,feedbackReport.inputCompletenessMetrics().missingMessages());
+        // Both approved source paths retain their own manifest after live archive metadata has changed.
+        var originalReport=evaluations.report(evidence.getFirst().taskId(),evidence.getFirst().executionId());
+        assertEquals(3,originalReport.inputCompletenessMetrics().expectedMessages());
+        assertEquals(99,json.readTree(db.queryForObject("SELECT business_fields_json FROM iqc_conversation WHERE id=?",String.class,conversation))
+                .path("iqcExpectedMessageCount").intValue());
         assertEquals(0,BigDecimal.ONE.compareTo(feedbackReport.findingMetrics().aggregate().f1()));
         assertEquals(0,new BigDecimal("20").compareTo(feedbackReport.businessMetrics().meanAbsoluteScoreError()));
         assertEquals(0,BigDecimal.ZERO.compareTo(feedbackReport.regressionMetrics().passRate()));

@@ -91,6 +91,26 @@ class PipelineEvaluationReportTest {
         assertThat(report.businessMetrics().labelAccuracy()).isNull();
     }
     @Test
+    void frozenInputCompletenessDoesNotDependOnMissingExecutionArtifacts() {
+        var original=dataset(DatasetDraft.Type.BASIC);
+        var members=original.members().stream().map(member->{
+            var g=member.gold();var context=json.createObjectNode();
+            context.putObject("conversation").putObject("businessContext").putObject("businessFields")
+                    .put("iqcInputManifestVersion","iqc-input-count-manifest-v1")
+                    .put("iqcExpectedMessageCount","first".equals(member.sampleId())?2:1).put("iqcInputManifestRef","batch");
+            var gold=new GoldConversation(g.schemaVersion(),g.sourceSampleId(),g.conversationId(),g.messages(),context,g.findings(),
+                    g.annotatorId(),g.reviewerId(),g.source(),g.tags(),g.difficulty(),g.decision());
+            return new DatasetSnapshot.Member(member.sampleId(),member.versionNo(),member.draftRevision(),member.contentHash(),gold);
+        }).toList();
+        when(prepared.dataset()).thenReturn(new DatasetSnapshot(original.schemaVersion(),original.datasetId(),original.name(),original.type(),original.description(),members));
+        var report=service.report("task","execution");
+        assertThat(report.availableSamples()).isZero();assertThat(report.complete()).isFalse();
+        assertThat(report.inputCompletenessMetrics().measuredSamples()).isEqualTo(2);
+        assertThat(report.inputCompletenessMetrics().expectedMessages()).isEqualTo(3);
+        assertThat(report.inputCompletenessMetrics().observedMessages()).isEqualTo(2);
+        assertThat(report.inputCompletenessMetrics().declaredMessageCoverage()).isEqualByComparingTo("0.666667");
+    }
+    @Test
     void noMeasuredCallsOrDurationsCannotProducePerfectSuccessOrZeroLatency() {
         var report = service.report("task", null);
         assertThat(report.executionId()).isEqualTo("execution");
