@@ -69,6 +69,32 @@ class PipelineEvaluationReportTest {
         return new DatasetSnapshot.Member(id, 1, 1, "a".repeat(64), gold);
     }
     @Test
+    void historicalReportConstructorsOmitNewFieldsAndPreserveEvidenceHash() throws Exception {
+        var current=service.report("task","execution");
+        var legacy=new PipelineEvaluationService.Report(current.schemaVersion(),current.taskId(),current.executionId(),
+                current.datasetHash(),current.expectedSamples(),current.availableSamples(),current.successfulSamples(),
+                current.complete(),current.missingSampleIds(),current.sourceExecutionIds(),current.findingMetrics(),
+                current.businessMetrics(),current.latencyMetrics(),current.regressionMetrics(),current.structuredMetrics());
+        // Preserve serialized decimal scales; valueToTree normalizes trailing zeros in this mapper.
+        String currentJson=json.writeValueAsString(current);
+        String historicalJson=currentJson.substring(0,currentJson.indexOf(",\"citationGroundingMetrics\":"))+"}";
+        assertThat(json.writeValueAsString(legacy)).isEqualTo(historicalJson);
+        var restored=json.readValue(historicalJson,PipelineEvaluationService.Report.class);
+        assertThat(restored.inputCompletenessMetrics()).isNull();
+        assertThat(restored.citationGroundingMetrics()).isNull();
+        assertThat(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(json.writeValueAsString(restored)))
+                .isEqualTo(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(historicalJson));
+        var withCitation=new PipelineEvaluationService.Report(current.schemaVersion(),current.taskId(),current.executionId(),
+                current.datasetHash(),current.expectedSamples(),current.availableSamples(),current.successfulSamples(),
+                current.complete(),current.missingSampleIds(),current.sourceExecutionIds(),current.findingMetrics(),
+                current.businessMetrics(),current.latencyMetrics(),current.regressionMetrics(),current.structuredMetrics(),current.citationGroundingMetrics());
+        var citationTree=(com.fasterxml.jackson.databind.node.ObjectNode)json.valueToTree(current);
+        citationTree.remove("inputCompletenessMetrics");
+        assertThat(json.<com.fasterxml.jackson.databind.JsonNode>valueToTree(withCitation)).isEqualTo(citationTree);
+        assertThat(json.readValue(json.writeValueAsString(withCitation),PipelineEvaluationService.Report.class)).isEqualTo(withCitation);
+    }
+
+    @Test
     void missingArtifactsRetainEveryGoldDenominatorAndNeverPassRegression() {
         var report = service.report("task", "execution");
         assertThat(report.expectedSamples()).isEqualTo(2);
