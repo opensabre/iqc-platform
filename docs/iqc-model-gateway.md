@@ -190,3 +190,11 @@ UI原任务模型调用组件提供会话ID筛选，显示实际生效会话/执
 已知费用小计只包含CONFIRMED且CALCULATED_FROM_DECLARED_PRICE并有金额/币种的账本调用；其它为未知。按币种分组，不能加不同币种。单会话已记录费用只覆盖明确关联该任务/会话的账本，不推测旧未关联记录；无记录不意味着零成本，存在未知费用时不能当完整成本。这是冻结声明价计算，不是供应商结算账单。原成本摘要计数/金额继续字符串精确传输。
 
 当前本批仅编译/构建，无新增或运行测试。B待验证实际MyBatis旧四参数缺conversationId绑定/新五参数SQL与共享ResultMap、跨任务同会话ID隔离、EID归属、不同币种/未知价格、分页全量汇总、零记录、输入拒绝、当前授权/撤权、UI筛选变更及迟到响应，真实供应商账单仍独立。整体系统层成本/吞吐/GPU及I1–I7未因此全部完成。
+
+### B 2026-10-23 单会话费用实际 SQL 行为
+
+在原IsolatedMysqlMeasuredPublicationIT模型场景结束追加8条合成费用账本，复用原GatewayCallService/任务读取与真实Mapper；补配置数据库分页插件，账本读取走原事务代理。筛选task+EID+conversation的4条调用拆两页，记录不重不漏且两页共享全量4条汇总；USD已知小计2、EUR2.5，UNKNOWN计数1且单独过滤时knownSubtotal=null。无EID包含prior共5条，同会话其它task与其它会话/旧null关联不会混入；空结果无币种，旧四参数costGroups缺conversationId键仍正常，新五参数与原ResultMap覆盖一致。跨任务EID、无效会话ID及scope撤权拒绝。
+
+原37831 terminal1新增Bean与导入原GatewayCallService重复，删除新增Bean复用原服务；原46397 terminal1遭本机时钟回拨约1秒，ID生成器在费用断言前拒绝，未改生产ID或校验规则。用已编译产物重跑原6505 terminal0，`/tmp/iqc-b-conversation-cost-sql-retry.log`，fresh XML SQL2+一致性计算5+报告23=30项无失败/错误/跳过；前轮testCompile完成，末轮surefire:test、git diff --check通过。专用34307脚本自动关闭。
+
+费用为隔离SQL合成账本而非供应商计费，数据范围服务/组织权限lookup仍受控；本轮没有验证新会话参数HTTP投影、实际PDP或浏览器费用筛选。既有模型/报告链断言保留，不将30项数量扩称全量PRD验收。

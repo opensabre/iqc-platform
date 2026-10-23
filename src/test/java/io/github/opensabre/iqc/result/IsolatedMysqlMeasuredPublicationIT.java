@@ -353,8 +353,57 @@ class IsolatedMysqlMeasuredPublicationIT {
                 .andReturn().getResponse().getContentAsString();
         assertEquals("IQC-1006",j.readTree(denied).path("code").asText());assertTrue(j.readTree(denied).path("data").isNull()||j.readTree(denied).path("data").isMissingNode());
         verify(grants,times(4)).current(Set.of("iqc:evaluation:report:view"));
+        verifyConversationCosts(db,s,retried,first,conversation,failedConversation,priorId);
         verify(model,times(4)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
         verify(gateway,times(4)).invokeTracked(any(),any(),any(),any(),any(),any());
+    }
+    /** Synthetic accounting rows exercise actual MySQL filtering and the shared currency result map. */
+    private void verifyConversationCosts(JdbcTemplate db,SqlSessionTemplate sql,InspectionTask task,InspectionTask other,
+            String conversation,String otherConversation,String priorId) {
+        String run=task.getCurrentExecutionId(), prefix="cost"+UUID.randomUUID().toString().replace("-","");
+        insertCost(db,prefix+"1",task.getId(),run,conversation,"USD","CONFIRMED","1.25");
+        insertCost(db,prefix+"2",task.getId(),run,conversation,"USD","UNKNOWN",null);
+        insertCost(db,prefix+"3",task.getId(),run,conversation,"USD","CONFIRMED","0.75");
+        insertCost(db,prefix+"4",task.getId(),run,conversation,"EUR","CONFIRMED","2.50");
+        insertCost(db,prefix+"5",task.getId(),run,otherConversation,"USD","CONFIRMED","50");
+        insertCost(db,prefix+"6",task.getId(),priorId,conversation,"USD","CONFIRMED","3");
+        insertCost(db,prefix+"7",other.getId(),other.getCurrentExecutionId(),conversation,"USD","CONFIRMED","99");
+        insertCost(db,prefix+"8",task.getId(),run,null,"USD","CONFIRMED","4");
+        var ledger=context.getBean(io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.class);
+        var first=ledger.taskPageWithSummary(task.getId(),run,null,1,2,conversation);
+        var second=ledger.taskPageWithSummary(task.getId(),run,null,2,2,conversation);
+        assertEquals(4,first.total());assertEquals(2,first.records().size());assertEquals(2,second.records().size());
+        assertEquals(first.costSummary(),second.costSummary());assertEquals("4",first.costSummary().callCount());
+        assertEquals("3",first.costSummary().knownCount());assertEquals("1",first.costSummary().unknownCount());
+        var ids=new java.util.HashSet<String>();
+        java.util.stream.Stream.concat(first.records().stream(),second.records().stream()).forEach(row->{
+            assertEquals(task.getId(),row.taskId());assertEquals(run,row.executionId());assertEquals(conversation,row.conversationId());
+            assertTrue(ids.add(row.callId()));
+        });
+        assertEquals(2,first.costSummary().currencies().size());
+        for(var group:first.costSummary().currencies()) {
+            assertEquals(0,new BigDecimal("USD".equals(group.currency())?"2":"2.5").compareTo(new BigDecimal(group.knownSubtotal())));
+        }
+        var unknown=ledger.taskPageWithSummary(task.getId(),run,"UNKNOWN",1,2,conversation);
+        assertEquals(1,unknown.total());assertEquals("0",unknown.costSummary().knownCount());
+        assertNull(unknown.costSummary().currencies().getFirst().knownSubtotal());
+        var historical=ledger.taskPageWithSummary(task.getId(),null,null,1,10,conversation);
+        assertEquals(5,historical.total());assertEquals("5",historical.costSummary().callCount());
+        var empty=ledger.taskPageWithSummary(task.getId(),run,null,1,2,"no-matching-conversation");
+        assertEquals(0,empty.total());assertEquals("0",empty.costSummary().callCount());assertTrue(empty.costSummary().currencies().isEmpty());
+        // Old four-parameter mapper must tolerate the missing conversationId key and share the result map.
+        var mapper=sql.getMapper(io.github.opensabre.iqc.result.llm.gateway.GatewayCallMapper.class);
+        assertEquals(6,mapper.costGroups(null,task.getId(),run,null).stream().mapToLong(g->g.getCallCount()).sum());
+        assertEquals(4,mapper.conversationCostGroups(null,task.getId(),run,null,conversation).stream().mapToLong(g->g.getCallCount()).sum());
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->ledger.taskPageWithSummary(task.getId(),other.getCurrentExecutionId(),null,1,2,conversation));
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->ledger.taskPageWithSummary(task.getId(),run,null,1,2,"bad/id"));
+        var scope=context.getBean(IqcDataScope.class);when(scope.canView(any(),any())).thenReturn(false);
+        try { assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->ledger.taskPageWithSummary(task.getId(),run,null,1,2,conversation)); }
+        finally { when(scope.canView(any(),any())).thenReturn(true); }
+    }
+    private void insertCost(JdbcTemplate db,String id,String task,String run,String conversation,String currency,String status,String amount) {
+        db.update("INSERT INTO iqc_model_gateway_call(call_id,model_key,task_id,execution_id,conversation_id,status,reserved_at_utc,pricing_currency,calculated_cost,cost_status) VALUES (?,?,?,?,?,?,UTC_TIMESTAMP(3),?,?,?)",
+                id,"a".repeat(64),task,run,conversation,status,currency,amount==null?null:new BigDecimal(amount),amount==null?"UNKNOWN":"CALCULATED_FROM_DECLARED_PRICE");
     }
     private ScheduledActorAccessService.Resolved authorizedActor() {
         return new ScheduledActorAccessService.Resolved("user-annotator","annotator",false,"group",Set.of(),
@@ -379,6 +428,9 @@ class IsolatedMysqlMeasuredPublicationIT {
                     EvaluationDatasetMapper.class,EvaluationDatasetVersionMapper.class,EvaluationSampleResultMapper.class,
                     ConversationInspectionResultMapper.class,RuleInspectionResultMapper.class,InspectionEvidenceMapper.class,InspectionResultMapper.class,ResultReviewMapper.class,ActionDiscoveryMapper.class))
                 if(!f.getConfiguration().hasMapper(type))f.getConfiguration().addMapper(type);
+            var pagination=new com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor();
+            pagination.addInnerInterceptor(new com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor(com.baomidou.mybatisplus.annotation.DbType.MYSQL));
+            f.getConfiguration().addInterceptor(pagination);
             return new SqlSessionTemplate(f);
         }
         @Bean ScheduledActorAccessService actionActors(){var service=mock(ScheduledActorAccessService.class);when(service.capture()).thenReturn(new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","user-annotator","annotator",false,"group"));return service;}
