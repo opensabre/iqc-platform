@@ -445,6 +445,37 @@ class IsolatedMysqlMeasuredPublicationIT {
                 id,"a".repeat(64),task,run,conversation,status,currency,amount==null?null:new BigDecimal(amount),amount==null?"UNKNOWN":"CALCULATED_FROM_DECLARED_PRICE");
     }
     /** Uses the actual measured publication, receipt transaction, worker, metric engine and result SQL. */
+    @Test void knowledgeLifecyclePersistsImmutableVersionsAndRequiresTaskTransaction() {
+        actor.set("annotator");
+        io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of("user_name","annotator","user_id","user-annotator"));
+        var knowledge=context.getBean(io.github.opensabre.iqc.knowledge.KnowledgeBaseService.class);
+        var tx=new org.springframework.transaction.support.TransactionTemplate(context.getBean(org.springframework.transaction.PlatformTransactionManager.class));
+        var corpus=new io.github.opensabre.iqc.knowledge.KnowledgeCorpus(io.github.opensabre.iqc.knowledge.KnowledgeCorpus.SCHEMA,
+                List.of(new io.github.opensabre.iqc.knowledge.KnowledgeCorpus.Document("reference","Reference","frozen reference text","source:manual")));
+        var created=knowledge.create("K_"+UUID.randomUUID().toString().replace("-", "").toUpperCase(Locale.ROOT),"Reference corpus",corpus);
+        assertEquals("DISABLED",created.getStatus());assertEquals("annotator",created.getCreatedBy());
+        var first=knowledge.publish(created.getId(),1);assertEquals(first.getId(),knowledge.publish(created.getId(),1).getId());
+        assertEquals(1,knowledge.history(created.getId()).size());
+        assertThrows(org.springframework.transaction.IllegalTransactionStateException.class,()->knowledge.publishedForTask(created.getId(),1));
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->tx.execute(status->knowledge.publishedForTask(created.getId(),1)));
+        knowledge.availability(created.getId(),true);
+        var prepared=tx.execute(status->knowledge.publishedForTask(created.getId(),1));
+        assertEquals("frozen reference text",prepared.snapshot().corpus().documents().getFirst().text());
+        assertEquals("annotator",prepared.snapshot().owner());assertEquals("annotator",prepared.snapshot().publishedBy());
+        var changed=new io.github.opensabre.iqc.knowledge.KnowledgeCorpus(io.github.opensabre.iqc.knowledge.KnowledgeCorpus.SCHEMA,
+                List.of(new io.github.opensabre.iqc.knowledge.KnowledgeCorpus.Document("reference","Reference","revised reference text","source:manual")));
+        knowledge.update(created.getId(),1,"Revised corpus",changed);
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->knowledge.update(created.getId(),1,"stale",corpus));
+        var second=knowledge.publish(created.getId(),2);assertEquals(2,second.getVersionNo());
+        assertEquals("ACTIVE",knowledge.get(created.getId()).getStatus());
+        assertEquals(first.getSnapshotJson(),knowledge.history(created.getId()).get(1).getSnapshotJson());
+        var restored=knowledge.restore(created.getId(),2,1);assertEquals(3,restored.getDraftRevision());
+        assertEquals(2,restored.getActivePublishedVersion());assertEquals(corpus,knowledge.requestCorpus(restored.getDraftConfigJson()));
+        knowledge.availability(created.getId(),false);
+        assertEquals(first.getContentHash(),knowledge.viewVersion(created.getId(),1).contentHash());
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->tx.execute(status->knowledge.publishedForTask(created.getId(),1)));
+    }
+
     @Test void exactPromptSurvivesHeadChangesAndDisabledSourceBlocksApproval() throws Exception {
         var sql=context.getBean(SqlSessionTemplate.class);var json=context.getBean(ObjectMapper.class);
         var db=new JdbcTemplate(context.getBean(DataSource.class));String key=UUID.randomUUID().toString().replace("-", "");
@@ -550,7 +581,7 @@ class IsolatedMysqlMeasuredPublicationIT {
             // Reuse the production framework filler; this test owns only the supplied user context.
             com.baomidou.mybatisplus.core.toolkit.GlobalConfigUtils.getGlobalConfig(f.getConfiguration())
                     .setMetaObjectHandler(new io.github.opensabre.persistence.handler.PoMetaObjectHandler());
-            for(var type:List.of(io.github.opensabre.iqc.skill.dao.IqcSkillMapper.class,io.github.opensabre.iqc.skill.dao.IqcSkillVersionMapper.class,io.github.opensabre.iqc.modelprofile.dao.IqcModelProfileMapper.class,io.github.opensabre.iqc.mcp.dao.IqcMcpServerMapper.class,io.github.opensabre.iqc.label.dao.LabelCategoryMapper.class,io.github.opensabre.iqc.label.dao.LabelGroupMapper.class,io.github.opensabre.iqc.label.dao.InsightLabelMapper.class,io.github.opensabre.iqc.label.dao.LabelRuleBindingMapper.class,io.github.opensabre.iqc.label.dao.LabelValueDefinitionMapper.class,io.github.opensabre.iqc.label.dao.LabelCollectionMapper.class,io.github.opensabre.iqc.label.dao.LabelCollectionMemberMapper.class,QualityRuleMapper.class,QualityRuleVersionMapper.class,QualityAgentMapper.class,QualityAgentVersionMapper.class,ConversationMapper.class,ConversationMessageMapper.class,FindingCatalogMapper.class,FindingCatalogVersionMapper.class,
+            for(var type:List.of(io.github.opensabre.iqc.knowledge.dao.KnowledgeBaseMapper.class,io.github.opensabre.iqc.knowledge.dao.KnowledgeBaseVersionMapper.class,io.github.opensabre.iqc.skill.dao.IqcSkillMapper.class,io.github.opensabre.iqc.skill.dao.IqcSkillVersionMapper.class,io.github.opensabre.iqc.modelprofile.dao.IqcModelProfileMapper.class,io.github.opensabre.iqc.mcp.dao.IqcMcpServerMapper.class,io.github.opensabre.iqc.label.dao.LabelCategoryMapper.class,io.github.opensabre.iqc.label.dao.LabelGroupMapper.class,io.github.opensabre.iqc.label.dao.InsightLabelMapper.class,io.github.opensabre.iqc.label.dao.LabelRuleBindingMapper.class,io.github.opensabre.iqc.label.dao.LabelValueDefinitionMapper.class,io.github.opensabre.iqc.label.dao.LabelCollectionMapper.class,io.github.opensabre.iqc.label.dao.LabelCollectionMemberMapper.class,QualityRuleMapper.class,QualityRuleVersionMapper.class,QualityAgentMapper.class,QualityAgentVersionMapper.class,ConversationMapper.class,ConversationMessageMapper.class,FindingCatalogMapper.class,FindingCatalogVersionMapper.class,
                     io.github.opensabre.iqc.schedule.dao.EventSubscriptionMapper.class,io.github.opensabre.iqc.schedule.dao.EventSubscriptionRevisionMapper.class,
                     PipelineAssetMapper.class,PipelineAssetVersionMapper.class,QualitySampleMapper.class,QualitySampleVersionMapper.class,
                     EvaluationDatasetMapper.class,EvaluationDatasetVersionMapper.class,EvaluationSampleResultMapper.class,
@@ -567,6 +598,10 @@ class IsolatedMysqlMeasuredPublicationIT {
         @Bean ActionProductionSourceValidator sources(SqlSessionTemplate s,PipelineAssetService assets,ProductionInputSnapshotService inputs,ObjectMapper j){return new ActionProductionSourceValidator(s.getMapper(InspectionTaskMapper.class),s.getMapper(TaskExecutionMapper.class),s.getMapper(ConversationInspectionResultMapper.class),assets,inputs,j);}
         @Bean BusinessReviewActionService reviewActions(ActionProductionSourceValidator sources,BusinessItemReviewService reviews,IqcDataScope scope,ObjectMapper j){return new BusinessReviewActionService(sources,reviews,scope,j);}
         @Bean ActionAdapterRegistry adapters(SqlSessionTemplate s,ObjectMapper j,BusinessReviewActionService reviews){return new ActionAdapterRegistry(List.of(new SavedResultActionAdapter(s.getMapper(ConversationInspectionResultMapper.class),j),new BusinessReviewActionAdapter(reviews,j)));}
+        @Bean io.github.opensabre.iqc.knowledge.KnowledgeBaseService knowledge(SqlSessionTemplate s,IqcDataScope scope,ObjectMapper j){
+            return new io.github.opensabre.iqc.knowledge.KnowledgeBaseService(s.getMapper(io.github.opensabre.iqc.knowledge.dao.KnowledgeBaseMapper.class),
+                    s.getMapper(io.github.opensabre.iqc.knowledge.dao.KnowledgeBaseVersionMapper.class),scope,j);
+        }
         @Bean ActionEnqueueService enqueue(ActionProductionSourceValidator sources,SqlSessionTemplate s,ActionAdapterRegistry adapters,IqcDataScope scope,ObjectMapper j){return new ActionEnqueueService(sources,s.getMapper(ActionExecutionMapper.class),s.getMapper(ActionDiscoveryMapper.class),adapters,scope,j);}
         @Bean ActionDispatchStateService dispatchStates(SqlSessionTemplate s){return new ActionDispatchStateService(s.getMapper(ActionExecutionMapper.class));}
         @Bean ActionReconciliationService reconcile(SqlSessionTemplate s,ActionAdapterRegistry adapters,ScheduledActorAccessService actors,IqcDataScope scope,ObjectMapper j,ActionReconciliationStateService state,ActionReconciliationAttemptService attempts){return new ActionReconciliationService(s.getMapper(ActionExecutionMapper.class),adapters,s.getMapper(ConversationInspectionResultMapper.class),s.getMapper(InspectionTaskMapper.class),actors,scope,j,state,attempts);}

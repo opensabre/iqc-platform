@@ -34,3 +34,15 @@ Agent共享目录只携带精确知识库引用/Hash；私有正文应在有当�
 共12项零失败、错误、跳过；日志`/tmp/iqc-b-knowledge-protocol-final.log`。
 摘要复用原JSON规范化协议，格式空白不属于正文篡改；实际正文变化拒绝。
 本批未执行DDL/SQL，不替代组织权限、CAS并发、事务锁、管理界面和任务正文冻结验收。
+
+## B 真实SQL生命周期验证（2026-10-24）
+
+原实测发布夹具注册实际Knowledge Mapper及Spring事务代理Service，在专用34307
+应用V1.1.75后验证：默认停用、同修订重复发布同ID、无事务的任务引用拒绝、
+停用任务引用拒绝、启用后精确历史读取、原审计owner/publishedBy、旧修订CAS拒绝、
+后续发布保持ACTIVE、原历史正文不变、恢复只生成新草稿且保留发布指针、停用历史可读。
+
+原10993终态0，IsolatedMysqlMeasuredPublicationIT四项零失败、错误、跳过，
+27.455秒，专用MySQL关闭且socket消失；日志`/tmp/iqc-b-knowledge-lifecycle-sql-final.log`。
+首次测试编码含小写被正确拒绝，修正为大写后组合通过。组织scope沿原夹具受控，
+不外推真实PDP、跨组/并发竞态、任务正文冻结或全新数据库完整迁移验收。
