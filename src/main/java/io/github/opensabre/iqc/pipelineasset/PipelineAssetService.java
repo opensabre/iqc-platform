@@ -231,7 +231,8 @@ public class PipelineAssetService {
         validateFrozen(convert(releaseNode),requireExecutionAvailability);
     }
     private void validateRolloutEvidence(JsonNode snapshot,String expectedTaskId){
-        if(!PipelineRolloutTaskEvidence.requiresEvidence(expectedTaskId)&&(snapshot==null||!snapshot.has("rolloutSnapshot")))return;
+        boolean trigger=expectedTaskId!=null&&expectedTaskId.matches("t[a-f0-9]{63}");
+        if(!trigger&&!PipelineRolloutTaskEvidence.requiresEvidence(expectedTaskId)&&(snapshot==null||!snapshot.has("rolloutSnapshot")))return;
         var guard=rolloutGuards==null?null:rolloutGuards.getIfAvailable();
         if(guard==null)throw IqcException.invalidState("灰度任务原始证据校验组件不可用");
         guard.validate(snapshot,expectedTaskId);

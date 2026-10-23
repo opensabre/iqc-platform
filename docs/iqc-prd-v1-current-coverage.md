@@ -113,3 +113,7 @@ FrozenDetectorEngine增加过滤前的llmCitationGrounding计数，复用原Lega
 ### 2026-10-23 周期实例灰度
 
 显式周期灰度定义/发布协议接原调度与Rollout物化链路，保留固定版本v1含义、计划锚点/失火/空数据/游标/重试与当前组织授权。每实例首次冻结当前策略，原实例不重分配；worker来源guard核对原周期修订、实际实例列、负责人、Selector与原分桶。页面增加目标模式，无新表/API/权限/框架。详见iqc-pipeline-rollout-tasks.md；本批编译/构建，真实SQL/角色/并发/worker/browser待B验证，事件灰度及整体I1–I7仍继续。
+
+### 2026-10-23 业务事件API/MQ灰度
+
+显式触发灰度请求复用原t身份/接收事务/冲突与工作器，首次接收冻结分配，等待和重投保持原策略；MQ允许集读取统一目标ID，当前授权加原rollout:task:create。新事件来源guard绑定原接收/时刻/选择/输入，并检查已知t任务缺失灰度标记，旧固定协议保留，无新表/API/权限/框架。仅编译/构建，真实API/队列/SQL/worker/角色联合待B验证；归档订阅灰度及其它I1–I7继续。

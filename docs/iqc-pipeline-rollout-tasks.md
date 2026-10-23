@@ -82,3 +82,17 @@ PeriodicScheduleService保留原事务/行锁、失火、自然实例键、游�
 周期页面显式选择“每实例使用当前灰度策略”，此模式只选流水线与固定Selector，切回固定模式需重新选发布版本；模板、历史、实例与原敏感读取生命周期复用。
 
 当前仅编译/构建，无Root新增或运行测试/SQL/browser/部署。B待验证新旧定义JSON/hash与构造、发布时间/当前资源授权、实际Cron失火/空数据/游标和重试、同实例不重分配/新实例响应回退、计划锚点/组范围、并发锁序和事务回滚、worker/历史对坏周期版本/计划时间/负责人/Selector证据的拒绝及真实页面权限。事件/API/MQ灰度和A/B归因仍待下一层接入，I7/全部PRD不标完成。
+
+## 业务事件API/MQ灰度接收（2026-10-23）
+
+原POST /api/iqc/triggers及可选Rabbit接收器新增显式iqc-task-rollout-trigger-v1请求。新增字段片段为`rollout:{pipelineId}`，pipeline须缺省/null；source/eventId/eventType/occurredAt/expiresAt/name/目标或处理后正文、Selector、并发、重试政策等继续沿原TaskTriggerRequest协议。旧iqc-task-trigger-v1固定发布版本含义不变，不接受非空rollout目标。旧13/14参数请求构造、Accepted八参数和TaskTriggerService旧构造保留，新增空字段省略。
+
+灰度分配时点为原REQUIRES_NEW持久接收事务：先按原稳定负责人/source/eventId查询旧记录，同载荷返回旧任务，不同载荷拒绝；仅首次读取当前策略/两侧发布来源并冻结所选Prepared及灰度证据到原Accepted。原t任务ID命名空间和旧payload/request hash算法不改，同事件切换固定/灰度目标属于载荷变更，不能创建第二任务。等待输入、重复API/MQ投递均不再读当前策略；后续新事件才受扩量/回退影响。
+
+API新模式用当前负责人投影检查原触发/创建/执行及现有rollout:task:create授权；MQ仍由部署固定身份先resolve当前组织授权，再在收窄scope内接收。Rabbit允许pipelineIds集合通过统一targetPipelineId读取固定/灰度目标，事件类型/source/content限制与默认关闭不变。没有新增资源、接收表、执行器或传输确认算法。
+
+物化继续检查当前组织授权、已冻结的所选精确发布版本/Selector可用性、目标输入修订和原发生时刻选数，继而原工作器排队。新Rollout证据iqc-pipeline-rollout-trigger-task-v1绑定原t身份、payloadHash、事件稳定请求键和原cohort/修订；原triggerSnapshot与productionInputs同时保存，检测时不重新分配。
+
+工作器/历史来源guard读取原持久接收记录并共享readAcceptedEvidence纯校验，核对请求/载荷/负责人/原分配、triggerSnapshot时刻/类型/输入修订/过滤结果及冻结输入，Selector存在时复用原选数证据校验。已知t任务在无rolloutSnapshot时也读取原接收类型：固定请求正常继续，灰度请求缺标记拒绝，不能降级成固定任务。此事件来源校验需完整Guard依赖；旧简化构造仍供非事件旧路径。原三参数TriggerIdentity与旧触发物化调用保留，服务端不能丢失已接收的灰度证据。
+
+接收回执仍为原标量Receipt；等待输入时不构造假的执行快照/分配展示，实际物化后的任务继续原安全灰度展示。当前Root仅编译/构建，不新增或运行测试、SQL/broker/browser或部署。B待验证旧JSON/hash/ID及构造、固定/灰度互斥、API/MQ当前授权、首次冻结/等待期间扩量回退/同事件重投不读新策略、载荷冲突/过期/失败回滚/ACK联合、实际物化worker/Selector/NO_DATA/组范围、丢失标记和坏接收/时刻/输入证据拒绝。归档订阅定义仍固定版本，下一层接入同一能力；I7和全PRD不标完成。

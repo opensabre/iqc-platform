@@ -13,7 +13,6 @@ import io.github.opensabre.iqc.task.InspectionTaskService;
 import io.github.opensabre.iqc.task.dao.InspectionTaskMapper;
 import io.github.opensabre.iqc.task.model.InspectionTask;
 import io.github.opensabre.iqc.result.InspectionExecutionService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Isolation;
@@ -21,10 +20,17 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
 
-@Service @RequiredArgsConstructor
+@Service
 public class TaskTriggerService {
     public record Accepted(String schemaVersion,TaskTriggerRequest request,String payloadHash,PipelineAssetService.Prepared pipeline,
-            SelectorAssetService.Prepared selector,ScheduledActorAccessService.CreationBound ownerBound,String subscriptionId,String subscriptionRevisionId) { }
+            SelectorAssetService.Prepared selector,ScheduledActorAccessService.CreationBound ownerBound,String subscriptionId,String subscriptionRevisionId,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence rollout) {
+        public Accepted(String schemaVersion,TaskTriggerRequest request,String payloadHash,PipelineAssetService.Prepared pipeline,
+                SelectorAssetService.Prepared selector,ScheduledActorAccessService.CreationBound ownerBound,String subscriptionId,String subscriptionRevisionId){
+            this(schemaVersion,request,payloadHash,pipeline,selector,ownerBound,subscriptionId,subscriptionRevisionId,null);
+        }
+    }
     public record Frame(String taskId,Accepted accepted,String requestHash) { }
     private final InspectionTaskMapper rows;
     private final ConversationMapper conversations;
@@ -39,16 +45,37 @@ public class TaskTriggerService {
     private final ObjectMapper json;
     private final io.github.opensabre.iqc.task.retry.AutomaticRetryService automaticRetries;
     private final org.springframework.transaction.PlatformTransactionManager transactionManager;
-    private ObjectMapper exact(){return json.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+    private final io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskService rollouts;
+    @org.springframework.beans.factory.annotation.Autowired
+    public TaskTriggerService(InspectionTaskMapper rows,ConversationMapper conversations,ConversationApiIngestService ingest,PipelineAssetService pipelines,
+            SelectorAssetService selectors,ConversationSelectionService selections,ScheduledActorAccessService actors,IqcDataScope scope,
+            InspectionTaskService tasks,InspectionExecutionService executions,ObjectMapper json,
+            io.github.opensabre.iqc.task.retry.AutomaticRetryService automaticRetries,org.springframework.transaction.PlatformTransactionManager transactionManager,
+            io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskService rollouts){
+        this.rows=rows;this.conversations=conversations;this.ingest=ingest;this.pipelines=pipelines;this.selectors=selectors;this.selections=selections;
+        this.actors=actors;this.scope=scope;this.tasks=tasks;this.executions=executions;this.json=json;this.automaticRetries=automaticRetries;
+        this.transactionManager=transactionManager;this.rollouts=rollouts;
+    }
+    public TaskTriggerService(InspectionTaskMapper rows,ConversationMapper conversations,ConversationApiIngestService ingest,PipelineAssetService pipelines,
+            SelectorAssetService selectors,ConversationSelectionService selections,ScheduledActorAccessService actors,IqcDataScope scope,
+            InspectionTaskService tasks,InspectionExecutionService executions,ObjectMapper json,
+            io.github.opensabre.iqc.task.retry.AutomaticRetryService automaticRetries,org.springframework.transaction.PlatformTransactionManager transactionManager){
+        this(rows,conversations,ingest,pipelines,selectors,selections,actors,scope,tasks,executions,json,automaticRetries,transactionManager,null);
+    }
+    private ObjectMapper exact(){return exact(json);}
+    private static ObjectMapper exact(ObjectMapper json){return json.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
             .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
             .enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
             .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));}
-    private String write(Object value){try{return json.writeValueAsString(value);}catch(Exception failure){throw IqcException.invalidState("触发配置序列化失败");}}
-    private <T>T read(String text,Class<T> type){try{return exact().readValue(text,type);}catch(Exception failure){throw IqcException.invalidArgument("触发协议或冻结配置无效");}}
+    private String write(Object value){return write(json,value);}
+    private static String write(ObjectMapper json,Object value){try{return json.writeValueAsString(value);}catch(Exception failure){throw IqcException.invalidState("触发配置序列化失败");}}
+    private <T>T read(String text,Class<T> type){return read(json,text,type);}
+    private static <T>T read(ObjectMapper json,String text,Class<T> type){try{return exact(json).readValue(text,type);}catch(Exception failure){throw IqcException.invalidArgument("触发协议或冻结配置无效");}}
     public static Set<String> grants(TaskTriggerRequest request){var grants=new HashSet<>(Set.of("iqc:pipeline:task:create","iqc:task:execute","iqc:trigger:receive"));
         if(request.content()!=null)grants.add("iqc:conversation:upload");
         if("archive-subscription".equals(request.source()))grants.add("iqc:subscription:publish");
-        if(request.retryPolicy()!=null)grants.add("iqc:task:retry-policy:configure");return Set.copyOf(grants);}
+        if(request.retryPolicy()!=null)grants.add("iqc:task:retry-policy:configure");
+        if(request.usesRollout())grants.add("iqc:pipeline:rollout:task:create");return Set.copyOf(grants);}
     public InspectionTask receive(String requestJson){
         var transaction=new org.springframework.transaction.support.TransactionTemplate(transactionManager);
         transaction.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
@@ -63,11 +90,14 @@ public class TaskTriggerService {
     public TaskTriggerRequest externalRequest(String requestJson){
         if(requestJson==null || requestJson.getBytes(StandardCharsets.UTF_8).length>16*1024*1024)throw IqcException.invalidArgument("触发请求超过16MiB");
         var request=read(requestJson,TaskTriggerRequest.class);
+        if(request==null)throw IqcException.invalidArgument("缺少触发请求");
         if("archive-subscription".equals(request.source()))throw IqcException.invalidArgument("内部订阅来源保留，不能由外部接收使用");
         return request;
     }
     private InspectionTask receiveAttempt(String requestJson){
-        return accept(externalRequest(requestJson),actors.capture(),null,null,null,null);
+        var request=externalRequest(requestJson);var bound=actors.capture();
+        if(request.usesRollout())actors.resolveCurrent(bound,grants(request));
+        return accept(request,bound,null,null,null,null);
     }
     /** Trusted broker adapter supplies a deployment-bound identity, never one read from the payload. */
     public InspectionTask receiveFromBroker(TaskTriggerRequest request,ScheduledActorAccessService.CreationBound bound,
@@ -90,7 +120,7 @@ public class TaskTriggerService {
     public InspectionTask receiveSubscription(TaskTriggerRequest request,ScheduledActorAccessService.CreationBound bound,
             ScheduledActorAccessService.Resolved actor,PipelineAssetService.Prepared expectedPipeline,SelectorAssetService.Prepared expectedSelector,
             String subscriptionId,String revisionId){
-        if(request==null || request.content()!=null || !"archive-subscription".equals(request.source())
+        if(request==null || request.usesRollout() || request.content()!=null || !"archive-subscription".equals(request.source())
                 || subscriptionId==null || revisionId==null || expectedPipeline==null || bound==null)
             throw IqcException.invalidState("内部订阅接收来源无效");
         var evidence=new Accepted("iqc-trigger-accepted-v1",request,"",expectedPipeline,expectedSelector,bound,subscriptionId,revisionId);
@@ -100,7 +130,7 @@ public class TaskTriggerService {
     }
     private InspectionTask accept(TaskTriggerRequest request,ScheduledActorAccessService.CreationBound bound,
             PipelineAssetService.Prepared expectedPipeline,SelectorAssetService.Prepared expectedSelector,String subscriptionId,String revisionId){
-        String payloadHash=SelectorAssetService.hash(write(request));String id="t"+SelectorAssetService.hash(write(List.of(bound.userId(),request.source(),request.eventId()))).substring(0,63);
+        String payloadHash=SelectorAssetService.hash(write(request));String id=io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.triggerTaskId(bound.userId(),request,json);
         var existing=rows.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getCreatedBy,bound.owner())
                 .eq(InspectionTask::getTriggerSource,request.source()).eq(InspectionTask::getTriggerEventId,request.eventId()).last("FOR UPDATE"));
         if(existing!=null){
@@ -112,19 +142,24 @@ public class TaskTriggerService {
         if(request.content()!=null)ingest.validate(request.content());
         if(request.occurredAt().isAfter(Instant.now().plusSeconds(5)) || !request.expiresAt().isAfter(Instant.now()))
             throw IqcException.invalidArgument("新触发事件时刻在未来或已过期");
-        var pipeline=pipelines.publishedReleaseForTask(request.pipeline().pipelineId(),request.pipeline().versionNo());
+        io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence rollout=null;
+        PipelineAssetService.Prepared pipeline;
+        if(request.usesRollout()){
+            if(rollouts==null)throw IqcException.invalidState("事件灰度接收依赖不可用");
+            var allocation=rollouts.prepareTrigger(request,payloadHash,bound);pipeline=allocation.selected();rollout=allocation.evidence();
+        }else pipeline=pipelines.publishedReleaseForTask(request.pipeline().pipelineId(),request.pipeline().versionNo());
         var selector=request.selector()==null?null:selectors.publishedForTask(request.selector().selectorId(),request.selector().versionNo());
         if(subscriptionId!=null && (!SelectorAssetService.hash(write(pipeline)).equals(SelectorAssetService.hash(write(expectedPipeline)))
                 || !Objects.equals(selector==null?null:SelectorAssetService.hash(write(selector)),expectedSelector==null?null:SelectorAssetService.hash(write(expectedSelector)))))
             throw IqcException.invalidState("事件订阅冻结资产发生变化");
-        var accepted=new Accepted("iqc-trigger-accepted-v1",request,payloadHash,pipeline,selector,bound,subscriptionId,revisionId);
+        var accepted=new Accepted("iqc-trigger-accepted-v1",request,payloadHash,pipeline,selector,bound,subscriptionId,revisionId,rollout);
         var row=new InspectionTask();row.setId(id);row.setName(request.name().trim());row.setTaskType("PIPELINE");row.setStatus("WAITING_INPUT");
         row.setEventSubscriptionId(subscriptionId);row.setEventSubscriptionRevisionId(revisionId);row.setTriggerSource(request.source());row.setTriggerEventId(request.eventId());row.setTriggerPayloadHash(payloadHash);row.setTriggerRequestJson(write(accepted));row.setTriggerRequestHash(SelectorAssetService.hash(row.getTriggerRequestJson()));
         if(row.getTriggerRequestJson().getBytes(StandardCharsets.UTF_8).length>32*1024*1024)throw IqcException.invalidArgument("触发冻结配置超过32MiB");
         row.setConversationIdsJson("[]");row.setConcurrencyLimit(request.concurrency());row.setTotalMessages(0);row.setProcessedMessages(0);row.setFailedMessages(0);row.setAttemptCount(0);
         row.setRuleSnapshotJson(write(Map.of("triggerAccepted",Map.of("payloadHash",payloadHash,"eventType",request.eventType(),"occurredAt",request.occurredAt()))));
         // Unknown future input must stay private; known sources may share only their existing intersection.
-        String group=scope.groupId(),pipelineGroup=pipelines.get(request.pipeline().pipelineId()).getOwnerGroupId();
+        String group=scope.groupId(),pipelineGroup=pipelines.get(request.targetPipelineId()).getOwnerGroupId();
         Conversation target=request.target()==null?null:target(request.target(),false);
         if(target!=null && !scope.canView(target.getCreatedBy(),target.getOwnerGroupId()))throw IqcException.accessDenied("无权使用事件目标会话");
         boolean sourceGroup=target!=null && Objects.equals(group,target.getOwnerGroupId());
@@ -132,21 +167,28 @@ public class TaskTriggerService {
         if(rows.insert(row)!=1)throw IqcException.invalidState("触发接收记录保存失败");
         if(request.retryPolicy()!=null){automaticRetries.freeze(row.getId(),request.retryPolicy(),bound,grants(request));return rows.selectById(row.getId());}return row;
     }
-    private Accepted accepted(InspectionTask row){
+    private Accepted accepted(InspectionTask row){return readAcceptedEvidence(row,json);}
+    /** Scope-free immutable receipt verification, shared with workers and materializers. */
+    public static Accepted readAcceptedEvidence(InspectionTask row,ObjectMapper json){
         if(row.getTriggerRequestJson()==null || row.getTriggerRequestJson().length()>32*1024*1024
                 || !SelectorAssetService.hash(row.getTriggerRequestJson()).equals(row.getTriggerRequestHash()))throw IqcException.invalidState("触发接收证据缺失");
-        var accepted=read(row.getTriggerRequestJson(),Accepted.class);var request=accepted.request();
+        var accepted=read(json,row.getTriggerRequestJson(),Accepted.class);
+        if(accepted==null)throw IqcException.invalidState("触发接收内容缺失");var request=accepted.request();
         if(!"iqc-trigger-accepted-v1".equals(accepted.schemaVersion()) || request==null || accepted.ownerBound()==null || accepted.pipeline()==null
                 || !Objects.equals(row.getTriggerSource(),request.source()) || !Objects.equals(row.getTriggerEventId(),request.eventId())
-                || !Objects.equals(row.getTriggerPayloadHash(),accepted.payloadHash()) || !SelectorAssetService.hash(write(request)).equals(accepted.payloadHash())
+                || !Objects.equals(row.getTriggerPayloadHash(),accepted.payloadHash()) || !SelectorAssetService.hash(write(json,request)).equals(accepted.payloadHash())
                 || !Objects.equals(row.getCreatedBy(),accepted.ownerBound().owner())
                 || !Objects.equals(row.getEventSubscriptionId(),accepted.subscriptionId())
                 || !Objects.equals(row.getEventSubscriptionRevisionId(),accepted.subscriptionRevisionId())
                 || ("archive-subscription".equals(request.source())!=(accepted.subscriptionId()!=null && accepted.subscriptionRevisionId()!=null))
-                || !Objects.equals(request.pipeline().pipelineId(),accepted.pipeline().pipelineId()) || !Objects.equals(request.pipeline().versionNo(),accepted.pipeline().versionNo())
+                || !Objects.equals(request.targetPipelineId(),accepted.pipeline().pipelineId())
+                || (!request.usesRollout()&&!Objects.equals(request.pipeline().versionNo(),accepted.pipeline().versionNo()))
+                || (request.usesRollout()!=(accepted.rollout()!=null))
                 || (request.selector()==null)!=(accepted.selector()==null)
                 || (request.selector()!=null && (!request.selector().selectorId().equals(accepted.selector().selectorId()) || request.selector().versionNo()!=accepted.selector().versionNo())))
-            throw IqcException.invalidState("触发接收来源或摘要无效");return accepted;
+            throw IqcException.invalidState("触发接收来源或摘要无效");
+        if(accepted.rollout()!=null)accepted.rollout().verifyTriggered(accepted.ownerBound().userId(),request,accepted.payloadHash(),json.valueToTree(accepted.pipeline()),json);
+        return accepted;
     }
     private Conversation target(TaskTriggerRequest.Target target,boolean lock){
         var query=Wrappers.<Conversation>lambdaQuery();if(target.conversationId()!=null)query.eq(Conversation::getId,target.conversationId());
@@ -175,7 +217,7 @@ public class TaskTriggerService {
                 || !Objects.equals(row.getTriggerRequestHash(),frame.requestHash()))return false;
         var accepted=accepted(row);var request=accepted.request();validateActor(accepted,actor);
         if(!request.expiresAt().isAfter(Instant.now())){terminal(row,"TRIGGER_EXPIRED","输入等待已过期");return true;}
-        var pipeline=pipelines.publishedReleaseForTask(request.pipeline().pipelineId(),request.pipeline().versionNo());
+        var pipeline=pipelines.publishedReleaseForTask(accepted.pipeline().pipelineId(),accepted.pipeline().versionNo());
         var selector=request.selector()==null?null:selectors.publishedForTask(request.selector().selectorId(),request.selector().versionNo());
         if(!SelectorAssetService.hash(write(pipeline)).equals(SelectorAssetService.hash(write(accepted.pipeline())))
                 || (selector!=null && !SelectorAssetService.hash(write(selector)).equals(SelectorAssetService.hash(write(accepted.selector())))))
@@ -196,7 +238,7 @@ public class TaskTriggerService {
         var evidence=json.createObjectNode().put("schemaVersion","iqc-trigger-materialization-v1").put("eventType",request.eventType())
                 .put("conversationId",conversation.getId()).put("inputRevision",conversation.getSourceFingerprint()).put("filteredOut",ids.isEmpty());
         evidence.set("authorization",json.valueToTree(actor));var identity=new InspectionTaskService.TriggerIdentity(accepted.payloadHash(),request.occurredAt(),evidence);
-        var materialized=tasks.materializeTriggeredPipelineTask(pipeline,row,ids,request.concurrency(),selector,selection,identity);
+        var materialized=tasks.materializeTriggeredPipelineTask(pipeline,row,ids,request.concurrency(),selector,selection,identity,accepted.rollout());
         validateActor(accepted,actor);if("CREATED".equals(materialized.getStatus()))executions.queueSystem(materialized.getId());return true;
     }
     private void validateActor(Accepted accepted,ScheduledActorAccessService.Resolved actor){Instant now=Instant.now();var bound=accepted.ownerBound();

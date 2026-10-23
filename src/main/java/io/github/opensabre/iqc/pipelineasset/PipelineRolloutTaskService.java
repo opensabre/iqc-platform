@@ -91,6 +91,17 @@ public class PipelineRolloutTaskService {
             throw IqcException.invalidState("灰度策略发布来源摘要已变化");
         return new Sources(revision,sources);
     }
+    public record TriggerAllocation(PipelineAssetService.Prepared selected,PipelineRolloutTaskEvidence evidence) { }
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public TriggerAllocation prepareTrigger(io.github.opensabre.iqc.schedule.TaskTriggerRequest request,String payloadHash,
+            io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound bound){
+        if(request==null||!request.usesRollout()||bound==null||!Objects.equals(scope.actorUserId(),bound.userId())||!Objects.equals(scope.owner(),bound.owner()))
+            throw IqcException.accessDenied("事件灰度负责人上下文不一致");
+        String id=request.targetPipelineId();pipelines.lockForRolloutRequest(id);
+        var allocation=allocate(id,bound.userId(),PipelineRolloutTaskEvidence.triggerRequestKey(request,json),
+                PipelineRolloutTaskEvidence.triggerTaskId(bound.userId(),request,json),payloadHash,PipelineRolloutTaskEvidence.TRIGGER_SCHEMA);
+        return new TriggerAllocation(allocation.selected(),allocation.evidence());
+    }
     private record Allocation(PipelineAssetService.Prepared selected,PipelineRolloutTaskEvidence evidence) { }
     private Allocation allocate(String id,String actorId,String requestKey,String taskId,String fingerprint,String schema){
         var current=currentSources(id);var revision=current.revision();var sources=current.sources();var policy=revision.snapshot().policy();
