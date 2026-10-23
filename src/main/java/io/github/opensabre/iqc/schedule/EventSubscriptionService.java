@@ -11,16 +11,16 @@ import io.github.opensabre.iqc.schedule.model.*;
 import io.github.opensabre.iqc.shared.*;
 import io.github.opensabre.iqc.task.dao.InspectionTaskMapper;
 import io.github.opensabre.iqc.task.model.InspectionTask;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Isolation;
 import java.time.*;
 import java.util.*;
 
-@Service @RequiredArgsConstructor @lombok.extern.slf4j.Slf4j
+@Service @lombok.extern.slf4j.Slf4j
 public class EventSubscriptionService {
-    public record Published(String schemaVersion,String name,EventSubscriptionDefinition definition,PipelineAssetService.Prepared pipeline,
+    public record Published(String schemaVersion,String name,EventSubscriptionDefinition definition,
+                            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) PipelineAssetService.Prepared pipeline,
                             SelectorAssetService.Prepared selector,ScheduledActorAccessService.CreationBound ownerBound) { }
     public record Frame(String subscriptionId,String revisionId,Published snapshot,String revisionHash) { }
     private final EventSubscriptionMapper schedules;
@@ -34,6 +34,22 @@ public class EventSubscriptionService {
     private final IqcDataScope scope;
     private final ObjectMapper json;
 
+    private final io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskService rollouts;
+    @org.springframework.beans.factory.annotation.Autowired
+    public EventSubscriptionService(EventSubscriptionMapper schedules,EventSubscriptionRevisionMapper revisions,
+            PipelineAssetService pipelines,SelectorAssetService selectors,ScheduledActorAccessService actors,
+            io.github.opensabre.iqc.conversation.dao.ConversationMapper conversations,TaskTriggerService triggers,
+            InspectionTaskMapper taskRows,IqcDataScope scope,ObjectMapper json,
+            io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskService rollouts){
+        this.schedules=schedules;this.revisions=revisions;this.pipelines=pipelines;this.selectors=selectors;this.actors=actors;
+        this.conversations=conversations;this.triggers=triggers;this.taskRows=taskRows;this.scope=scope;this.json=json;this.rollouts=rollouts;
+    }
+    public EventSubscriptionService(EventSubscriptionMapper schedules,EventSubscriptionRevisionMapper revisions,
+            PipelineAssetService pipelines,SelectorAssetService selectors,ScheduledActorAccessService actors,
+            io.github.opensabre.iqc.conversation.dao.ConversationMapper conversations,TaskTriggerService triggers,
+            InspectionTaskMapper taskRows,IqcDataScope scope,ObjectMapper json){
+        this(schedules,revisions,pipelines,selectors,actors,conversations,triggers,taskRows,scope,json,null);
+    }
     private ObjectMapper exact(){return json.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
             .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
             .enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
@@ -55,9 +71,12 @@ public class EventSubscriptionService {
     }
     private void update(EventSubscription row){if(schedules.updateById(row)!=1)throw IqcException.invalidState("事件订阅定义更新失败");}
     private String referenceGroup(EventSubscriptionDefinition definition){
-        pipelines.publishedRelease(definition.pipeline().pipelineId(),definition.pipeline().versionNo());
+        if(definition.usesRollout()){
+            if(rollouts==null)throw IqcException.invalidState("订阅灰度依赖不可用");
+            rollouts.validateCurrentTarget(definition.targetPipelineId());
+        }else pipelines.publishedRelease(definition.pipeline().pipelineId(),definition.pipeline().versionNo());
         var selector=definition.selector()==null?null:selectors.published(definition.selector().selectorId(),definition.selector().versionNo());
-        String group=scope.groupId(),pipelineGroup=pipelines.get(definition.pipeline().pipelineId()).getOwnerGroupId();
+        String group=scope.groupId(),pipelineGroup=pipelines.get(definition.targetPipelineId()).getOwnerGroupId();
         return group!=null && group.equals(pipelineGroup) && (selector==null || group.equals(selector.ownerGroupId()))?group:null;
     }
     public IqcPage<EventSubscription> page(long current,long size){
@@ -89,10 +108,13 @@ public class EventSubscriptionService {
         if(version==null || version.getSnapshotJson()==null || version.getSnapshotJson().length()>16*1024*1024
                 || !SelectorAssetService.hash(version.getSnapshotJson()).equals(version.getContentHash()))throw IqcException.invalidState("事件订阅修订摘要无效");
         var value=read(version.getSnapshotJson(),Published.class);
-        if(!"iqc-event-subscription-release-v1".equals(value.schemaVersion()) || value.name()==null || value.name().isBlank() || value.name().length()>100 || value.definition()==null || value.ownerBound()==null || value.pipeline()==null
+        boolean gray=value.definition()!=null && value.definition().usesRollout();
+        if(!(gray?"iqc-event-subscription-rollout-release-v1":"iqc-event-subscription-release-v1").equals(value.schemaVersion())
+                || value.name()==null || value.name().isBlank() || value.name().length()>100 || value.definition()==null || value.ownerBound()==null
                 || !Objects.equals(version.getCreatedBy(),value.ownerBound().owner())
+                || (gray?value.pipeline()!=null:(value.pipeline()==null
                 || !value.definition().pipeline().pipelineId().equals(value.pipeline().pipelineId())
-                || !Objects.equals(value.definition().pipeline().versionNo(),value.pipeline().versionNo())
+                || !Objects.equals(value.definition().pipeline().versionNo(),value.pipeline().versionNo())))
                 || (value.definition().selector()==null)!=(value.selector()==null)
                 || (value.selector()!=null && (!value.definition().selector().selectorId().equals(value.selector().selectorId())
                 || value.definition().selector().versionNo()!=value.selector().versionNo())))throw IqcException.invalidState("事件订阅发布来源无效");
@@ -104,13 +126,17 @@ public class EventSubscriptionService {
                 .eq(EventSubscriptionRevision::getSourceDraftRevision,expected));if(previous!=null){snapshot(previous);return previous;}
         var definition=read(row.getDraftConfigJson(),EventSubscriptionDefinition.class);var bound=actors.capture();
         if(!Objects.equals(bound.groupId(),row.getOwnerGroupId()))row.setOwnerGroupId(null);
-        var pipeline=pipelines.publishedReleaseForTask(definition.pipeline().pipelineId(),definition.pipeline().versionNo());
+        PipelineAssetService.Prepared pipeline=null;
+        if(definition.usesRollout()){
+            actors.resolveCurrent(bound,grants(definition));
+            String group=referenceGroup(definition);if(!Objects.equals(group,row.getOwnerGroupId()))row.setOwnerGroupId(null);
+        }else pipeline=pipelines.publishedReleaseForTask(definition.pipeline().pipelineId(),definition.pipeline().versionNo());
         var selector=definition.selector()==null?null:selectors.publishedForTask(definition.selector().selectorId(),definition.selector().versionNo());
         var last=revisions.selectOne(Wrappers.<EventSubscriptionRevision>lambdaQuery().eq(EventSubscriptionRevision::getSubscriptionId,id)
                 .orderByDesc(EventSubscriptionRevision::getVersionNo).last("LIMIT 1"));
         if(last!=null && last.getVersionNo()==Integer.MAX_VALUE)throw IqcException.invalidState("事件订阅版本已达上限");
         var version=new EventSubscriptionRevision();version.setSubscriptionId(id);version.setSourceDraftRevision(expected);
-        version.setVersionNo(last==null?1:last.getVersionNo()+1);version.setSnapshotJson(write(new Published("iqc-event-subscription-release-v1",row.getName(),definition,pipeline,selector,bound)));
+        version.setVersionNo(last==null?1:last.getVersionNo()+1);version.setSnapshotJson(write(new Published(definition.usesRollout()?"iqc-event-subscription-rollout-release-v1":"iqc-event-subscription-release-v1",row.getName(),definition,pipeline,selector,bound)));
         if(version.getSnapshotJson().getBytes(java.nio.charset.StandardCharsets.UTF_8).length>16*1024*1024)throw IqcException.invalidArgument("事件订阅发布快照超过16MiB");
         version.setContentHash(SelectorAssetService.hash(version.getSnapshotJson()));if(revisions.insert(version)!=1)throw IqcException.invalidState("事件订阅修订保存失败");
         row.setActiveRevisionId(version.getId());row.setStatus("DISABLED");row.setLastScannedAtUtc(null);row.setRetryNotBeforeUtc(null);row.setLastError(null);update(row);return version;
@@ -128,7 +154,7 @@ public class EventSubscriptionService {
     }
     public static Set<String> grants(){return Set.of("iqc:pipeline:task:create","iqc:task:execute","iqc:trigger:receive","iqc:subscription:publish");}
     public static Set<String> grants(EventSubscriptionDefinition definition){
-        var required=new HashSet<>(grants());if(definition.retryPolicy()!=null)required.add("iqc:task:retry-policy:configure");return Set.copyOf(required);
+        var required=new HashSet<>(grants());if(definition.usesRollout())required.add("iqc:pipeline:rollout:task:create");if(definition.retryPolicy()!=null)required.add("iqc:task:retry-policy:configure");return Set.copyOf(required);
     }
     public List<String> due(Instant now){
         ScheduledActorAccessService.requireBackground();
@@ -199,10 +225,10 @@ public class EventSubscriptionService {
             validateActor(release,actor);
             if(conversation.getCreatedTime()==null || conversation.getSourceFingerprint()==null || !conversation.getSourceFingerprint().matches("[a-f0-9]{64}"))
                 throw IqcException.invalidState("归档事件时间或输入修订无效");
-            var request=new TaskTriggerRequest("iqc-task-trigger-v1","archive-subscription",eventId(version.getId(),conversation.getId(),conversation.getSourceFingerprint()),
+            var request=new TaskTriggerRequest(definition.usesRollout()?TaskTriggerRequest.ROLLOUT_SCHEMA:"iqc-task-trigger-v1","archive-subscription",eventId(version.getId(),conversation.getId(),conversation.getSourceFingerprint()),
                     definition.eventType(),conversation.getCreatedTime().toInstant(),Instant.now().plusSeconds(definition.waitSeconds()),release.name(),
                     definition.pipeline(),definition.selector(),new TaskTriggerRequest.Target(conversation.getId(),null,null,conversation.getSourceFingerprint()),
-                    null,definition.concurrency(),"ASRCompleted".equals(definition.eventType()),definition.retryPolicy());
+                    null,definition.concurrency(),"ASRCompleted".equals(definition.eventType()),definition.retryPolicy(),definition.rollout());
             var receipt=triggers.receiveSubscription(request,release.ownerBound(),actor,release.pipeline(),release.selector(),row.getId(),version.getId());
             if(receipt.getOwnerGroupId()!=null && !Objects.equals(receipt.getOwnerGroupId(),row.getOwnerGroupId())){
                 if(taskRows.update(null,Wrappers.<InspectionTask>lambdaUpdate().eq(InspectionTask::getId,receipt.getId()).set(InspectionTask::getOwnerGroupId,null))!=1)

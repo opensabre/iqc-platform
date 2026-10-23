@@ -120,8 +120,8 @@ public class TaskTriggerService {
     public InspectionTask receiveSubscription(TaskTriggerRequest request,ScheduledActorAccessService.CreationBound bound,
             ScheduledActorAccessService.Resolved actor,PipelineAssetService.Prepared expectedPipeline,SelectorAssetService.Prepared expectedSelector,
             String subscriptionId,String revisionId){
-        if(request==null || request.usesRollout() || request.content()!=null || !"archive-subscription".equals(request.source())
-                || subscriptionId==null || revisionId==null || expectedPipeline==null || bound==null)
+        if(request==null || request.content()!=null || !"archive-subscription".equals(request.source())
+                || subscriptionId==null || revisionId==null || (request.usesRollout()?expectedPipeline!=null:expectedPipeline==null) || bound==null)
             throw IqcException.invalidState("内部订阅接收来源无效");
         var evidence=new Accepted("iqc-trigger-accepted-v1",request,"",expectedPipeline,expectedSelector,bound,subscriptionId,revisionId);
         validateActor(evidence,actor);
@@ -149,7 +149,7 @@ public class TaskTriggerService {
             var allocation=rollouts.prepareTrigger(request,payloadHash,bound);pipeline=allocation.selected();rollout=allocation.evidence();
         }else pipeline=pipelines.publishedReleaseForTask(request.pipeline().pipelineId(),request.pipeline().versionNo());
         var selector=request.selector()==null?null:selectors.publishedForTask(request.selector().selectorId(),request.selector().versionNo());
-        if(subscriptionId!=null && (!SelectorAssetService.hash(write(pipeline)).equals(SelectorAssetService.hash(write(expectedPipeline)))
+        if(subscriptionId!=null && ((!request.usesRollout() && !SelectorAssetService.hash(write(pipeline)).equals(SelectorAssetService.hash(write(expectedPipeline))))
                 || !Objects.equals(selector==null?null:SelectorAssetService.hash(write(selector)),expectedSelector==null?null:SelectorAssetService.hash(write(expectedSelector)))))
             throw IqcException.invalidState("事件订阅冻结资产发生变化");
         var accepted=new Accepted("iqc-trigger-accepted-v1",request,payloadHash,pipeline,selector,bound,subscriptionId,revisionId,rollout);
