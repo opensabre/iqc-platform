@@ -58,3 +58,19 @@ EventSubscriptionService将原发布快照读取/Hash/schema/目标/Selector核�
 归档灰度任务除原Accepted及分配证据外，读取其eventSubscriptionRevisionId指向的原不可变版本，核对版本ID/父订阅ID/版本与源草稿修订、原负责人完整CreationBound、目标模式/流水线、名称/并发/重试配置、精确Selector及冻结来源。事件必须为原内部archive-subscription、显式conversation/inputRevision目标、无正文，eventId按原revision/conversation/fingerprint算法重算；事件类型及requireASR必须与订阅一致，occurredAt落入原有效区间。既有ASRCompleted只是已处理输入状态，不产生转写。原接收与实际任务名称/并发也要一致。
 
 生产完整guard构造增加原EventSubscriptionRevisionMapper；旧三/五参数构造继续支持其原非归档路径，归档灰度缺父Mapper时拒绝。运行/历史/生产统计均通过原guard获同一来源保护；父修订被删除或篡改时不降级成普通事件任务。当前订阅停用或改版不改写旧版本，校验不读取当前组织权限或当前比例；当前主体/worker授权仍由原外层工作流独立负责。本批后端编译终态见协作记录，无前端协议/表/端点/权限/框架变化，实际SQL/worker与坏父版本专项待独立验证。
+
+### 原父来源实际SQL及物化入队验证（B，2026-10-23）
+
+在原IsolatedMysqlRolloutServiceIT连接EventSubscriptionRevisionMapper和完整六依赖guard。
+新增归档模式通过真实订阅/不可变父修订SQL、receiveSubscription MANDATORY事务、原
+TaskTriggerService物化与实际queueSystem：首次接收后灰度0→10000且当前订阅停用、活动
+指针改变，仍保持原版本1和原父来源；重复物化返回false、接收重放同ID，只有一个执行及
+原消息检查点。随后篡改原父content_hash，完整guard拒绝。
+
+原68610 compiler:testCompile+surerfire终态0，`/tmp/iqc-b-archive-trigger-json-fingerprint.log.exit`
+为0；fresh XML SQL28+周期协议11=39项零失败错误跳过，专用34307自动关闭且socket消失。
+原44622因两会话同指纹唯一索引冲突失败，原4259因夹具摘要传入非JSON失败；修正为独立
+会话ID经原JSON序列化和摘要生成指纹，未改生产代码或唯一约束。
+
+发布Prepared和组织scope为受控适配，SQL记录由测试初始化；不替代发布UI、真实PDP、
+扫描anti-join、多实例扫描、实际MQ投递或worker成功执行。完整适用I1–I7继续，输入仅处理后会话。
