@@ -592,7 +592,9 @@ public class InspectionTaskService {
         ((com.fasterxml.jackson.databind.node.ObjectNode) marker).put("requestFingerprint", requestFingerprint);
         String taskId = rollout!=null?rollout.taskId():requestId == null ? null : "p" + io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(
                 objectMapper.createArrayNode().add(dataScope.owner()).add(prepared.pipelineId()).add(requestId).toString()).substring(0, 63);
-        if (taskId != null) {
+        // A validated WAITING_INPUT receipt intentionally owns this ID before its first materialization.
+        // Only new-task creation can reuse an already frozen pipeline fingerprint here.
+        if (taskId != null && receipt == null) {
             var existing = taskMapper.selectById(taskId);
             if (existing != null) {
                 if (!dataScope.canView(existing.getCreatedBy(), existing.getOwnerGroupId()) || !requestFingerprint.equals(

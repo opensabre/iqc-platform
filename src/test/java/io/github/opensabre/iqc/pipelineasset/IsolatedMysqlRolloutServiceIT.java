@@ -326,6 +326,42 @@ class IsolatedMysqlRolloutServiceIT {
         assertThat(jdbc.queryForObject("SELECT next_planned_at_utc FROM iqc_periodic_schedule WHERE id=?",java.time.LocalDateTime.class,frame.scheduleId())).isEqualTo(io.github.opensabre.iqc.schedule.PeriodicScheduleService.utc(due));
         verifyNoInteractions(context.getBean(io.github.opensabre.iqc.result.InspectionExecutionService.class));
     }
+    /** Processed conversation input reaches the original receipt/materializer/queue SQL path. */
+    @Test void processedConversationTriggerQueuesExactlyOnceAndKeepsAcceptedRollout() throws Exception {
+        storePublishedSources();service.append(id,0,policy(0));
+        var scope=context.getBean(IqcDataScope.class);when(scope.owner()).thenReturn("actor-1");when(scope.canViewAll()).thenReturn(true);
+        jdbc.update("UPDATE iqc_conversation SET source_fingerprint=? WHERE id=?","a".repeat(64),conversationId);
+        var now=java.time.Instant.now();
+        var request=new io.github.opensabre.iqc.schedule.TaskTriggerRequest(
+                io.github.opensabre.iqc.schedule.TaskTriggerRequest.ROLLOUT_SCHEMA,"processed-api","event-"+id,"ConversationCompleted",
+                now.minusSeconds(1),now.plusSeconds(600),"Processed conversation",null,null,
+                new io.github.opensabre.iqc.schedule.TaskTriggerRequest.Target(conversationId,null,null,"a".repeat(64)),null,1,false,null,
+                new io.github.opensabre.iqc.schedule.PeriodicDefinition.RolloutReference(id));
+        var bound=new io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","actor-1","actor-1",true,null);
+        var actor=new io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved("actor-1","actor-1",true,null,Set.of(),
+                io.github.opensabre.iqc.schedule.TaskTriggerService.grants(request),java.time.Instant.now());
+        var triggers=context.getBean(io.github.opensabre.iqc.schedule.TaskTriggerService.class);
+        var holder=io.github.opensabre.common.core.util.UserContextHolder.getInstance();holder.setContext(Map.of("user_name","actor-1","user_id","actor-1"));
+        io.github.opensabre.iqc.task.model.InspectionTask receipt;
+        try{receipt=triggers.receiveFromBroker(request,bound,actor);}finally{holder.clear();}
+        assertThat(receipt.getStatus()).isEqualTo("WAITING_INPUT");
+        var accepted=io.github.opensabre.iqc.schedule.TaskTriggerService.readAcceptedEvidence(receipt,context.getBean(ObjectMapper.class));
+        assertThat(accepted.pipeline().versionNo()).isEqualTo(1);
+        // Publication dependency resolution is controlled, as in rolloutSourcesForTask; SQL guard verifies original versions.
+        doReturn(accepted.pipeline()).when(context.getBean(PipelineAssetService.class)).publishedReleaseForTask(id,1);
+        service.append(id,1,policy(10000));
+        var frame=new io.github.opensabre.iqc.schedule.TaskTriggerService.Frame(receipt.getId(),accepted,receipt.getTriggerRequestHash());
+        var runner=realQueue();doAnswer(call->runner.queueSystem(call.getArgument(0))).when(context.getBean(io.github.opensabre.iqc.result.InspectionExecutionService.class)).queueSystem(anyString());
+        assertThat(triggers.materialize(frame,actor)).isTrue();assertThat(triggers.materialize(frame,actor)).isFalse();
+        var mapper=new SqlSessionTemplate(context.getBean(SqlSessionFactory.class)).getMapper(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class);
+        var materialized=mapper.selectById(receipt.getId());assertThat(materialized.getStatus()).isEqualTo("QUEUED");
+        assertThat(materialized.getAttemptCount()).isOne();validateStoredTask(materialized);
+        assertThat(io.github.opensabre.iqc.schedule.TaskTriggerService.readAcceptedEvidence(materialized,context.getBean(ObjectMapper.class)).pipeline().versionNo()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_task_execution WHERE task_id=?",Integer.class,receipt.getId())).isOne();
+        assertThat(jdbc.queryForObject("SELECT message_id FROM iqc_task_item WHERE execution_id=?",String.class,materialized.getCurrentExecutionId())).isEqualTo("m"+conversationId);
+        holder.setContext(Map.of("user_name","actor-1","user_id","actor-1"));
+        try{assertThat(triggers.receiveFromBroker(request,bound,actor).getId()).isEqualTo(receipt.getId());}finally{holder.clear();}
+    }
     /** Real queue SQL and original periodic guard; non-periodic dependency adapters remain controlled. */
     private io.github.opensabre.iqc.result.InspectionExecutionService realQueue() {
         var session=new SqlSessionTemplate(context.getBean(SqlSessionFactory.class));var assets=mock(PipelineAssetService.class);
@@ -616,6 +652,16 @@ class IsolatedMysqlRolloutServiceIT {
         @Bean PipelineRolloutTaskService rolloutTasks(PipelineAssetService pipelines,PipelineRolloutService rollouts,
                 io.github.opensabre.iqc.task.InspectionTaskService tasks,ObjectMapper json,IqcDataScope scope,io.github.opensabre.iqc.selector.SelectorAssetService selectors,io.github.opensabre.iqc.selector.ConversationSelectionService selections) {
             return new PipelineRolloutTaskService(pipelines,rollouts,tasks,json,scope,selectors,selections);
+        }
+        @Bean io.github.opensabre.iqc.schedule.TaskTriggerService triggers(SqlSessionFactory factory,PipelineAssetService pipelines,
+                io.github.opensabre.iqc.selector.SelectorAssetService selectors,io.github.opensabre.iqc.selector.ConversationSelectionService selections,
+                IqcDataScope scope,io.github.opensabre.iqc.task.InspectionTaskService tasks,
+                io.github.opensabre.iqc.result.InspectionExecutionService executions,ObjectMapper json,
+                DataSourceTransactionManager transactionManager,PipelineRolloutTaskService rollouts){
+            var session=new SqlSessionTemplate(factory);
+            return new io.github.opensabre.iqc.schedule.TaskTriggerService(session.getMapper(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class),
+                    session.getMapper(io.github.opensabre.iqc.conversation.dao.ConversationMapper.class),null,pipelines,selectors,selections,null,scope,
+                    tasks,executions,json,null,transactionManager,rollouts);
         }
         @Bean io.github.opensabre.iqc.result.InspectionExecutionService scheduledExecutions(){return mock(io.github.opensabre.iqc.result.InspectionExecutionService.class);}
         @Bean io.github.opensabre.iqc.schedule.PeriodicScheduleService scheduledService(SqlSessionFactory factory,PipelineAssetService pipelines,

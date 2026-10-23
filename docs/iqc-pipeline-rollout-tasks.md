@@ -278,3 +278,19 @@ PipelineRolloutExecutionGuardTest 8项，共13项零失败、错误和跳过。�
 
 用户确认所有质检输入均为已处理会话；后续实施及验收不包含语音转换、ASR转写或说话人分离，
 继续验证处理后会话接入、触发、质检执行和报告。
+
+### 处理后会话灰度触发首次物化修复（B，2026-10-23）
+
+实际SQL用例复现首次物化缺陷：原WAITING_INPUT接收记录已经使用rollout.taskId，通用创建
+幂等分支误把尚无pipeline fingerprint的接收凭据视为已物化任务并拒绝。现仅对无receipt
+的新任务执行原fingerprint重用判断；原materializeTriggeredPipelineTask的身份/Accepted/分配
+校验及外层任务行锁、WAITING_INPUT条件更新仍保留。
+
+原18351 test-compile+surerfire终态0，`/tmp/iqc-b-processed-trigger-production.log.exit`为0；
+fresh XML为IsolatedMysqlRolloutServiceIT27、PeriodicDefinitionTest11，共38项零失败错误跳过，
+专用34307自动关闭、socket消失。新增用例验证实际接收事务、0→10000比例改变后保持原发布
+版本1、实际物化/入队、唯一执行与原消息检查点、重复物化及接收重放。
+
+原98019终态1为夹具缺发布读取依赖，原57072终态1为本生产缺陷；没有将失败计为通过。
+发布Prepared依赖/组织scope受控，原执行guard查询真实原发布版本；此处不证明实际MQ投递、
+真实PDP、完整资产依赖、worker成功执行或归档扫描。语音转换与音频处理排除。
