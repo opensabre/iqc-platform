@@ -109,3 +109,7 @@ FrozenDetectorEngine增加过滤前的llmCitationGrounding计数，复用原Lega
 ### 2026-10-23 已发布Selector灰度入口
 
 原灰度创建接口/任务物化器接可选精确已发布Selector，复用原锁/分配/选数/输入冻结及组织范围。新证据schema绑定selectorRequestHash，原列表v1不重写；原请求重放检查历史Selector与原选数，不跟随当前策略/语料重新分配。页面复用资产库，无新表/API/权限/框架，详见iqc-pipeline-rollout-tasks.md。当前仅编译/构建，真实SQL/worker/权限/browser待B验证；周期/事件灰度及整体I1–I7仍继续。
+
+### 2026-10-23 周期实例灰度
+
+显式周期灰度定义/发布协议接原调度与Rollout物化链路，保留固定版本v1含义、计划锚点/失火/空数据/游标/重试与当前组织授权。每实例首次冻结当前策略，原实例不重分配；worker来源guard核对原周期修订、实际实例列、负责人、Selector与原分桶。页面增加目标模式，无新表/API/权限/框架。详见iqc-pipeline-rollout-tasks.md；本批编译/构建，真实SQL/角色/并发/worker/browser待B验证，事件灰度及整体I1–I7仍继续。

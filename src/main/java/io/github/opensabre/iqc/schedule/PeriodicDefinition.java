@@ -6,10 +6,16 @@ import java.time.*;
 import java.util.*;
 
 public record PeriodicDefinition(String schemaVersion,String cron,String zoneId,Instant effectiveFrom,Instant effectiveUntil,
-        MisfirePolicy misfirePolicy,int maximumCatchUp,int concurrency,PipelineReference pipeline,SelectorAssetService.Reference selector,
+        MisfirePolicy misfirePolicy,int maximumCatchUp,int concurrency,
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) PipelineReference pipeline,SelectorAssetService.Reference selector,
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-        io.github.opensabre.iqc.task.retry.AutomaticRetryPolicy retryPolicy) {
+        io.github.opensabre.iqc.task.retry.AutomaticRetryPolicy retryPolicy,
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) RolloutReference rollout) {
     public static final String SCHEMA="iqc-periodic-definition-v1";
+    public static final String ROLLOUT_SCHEMA="iqc-periodic-rollout-definition-v1";
+    public record RolloutReference(String pipelineId) { }
+    public boolean usesRollout(){return ROLLOUT_SCHEMA.equals(schemaVersion);}
+    public String targetPipelineId(){return usesRollout()?rollout.pipelineId():pipeline.pipelineId();}
     public enum MisfirePolicy { SKIP,FIRE_LATEST,CATCH_UP }
     public record PipelineReference(String pipelineId,int versionNo) { }
     public record Tick(Instant plannedAt,Instant nextAt,boolean skip,Instant missedFrom,Instant missedUntil) { }
@@ -17,11 +23,18 @@ public record PeriodicDefinition(String schemaVersion,String cron,String zoneId,
             MisfirePolicy misfirePolicy,int maximumCatchUp,int concurrency,PipelineReference pipeline,SelectorAssetService.Reference selector){
         this(schemaVersion,cron,zoneId,effectiveFrom,effectiveUntil,misfirePolicy,maximumCatchUp,concurrency,pipeline,selector,null);
     }
+    public PeriodicDefinition(String schemaVersion,String cron,String zoneId,Instant effectiveFrom,Instant effectiveUntil,
+            MisfirePolicy misfirePolicy,int maximumCatchUp,int concurrency,PipelineReference pipeline,SelectorAssetService.Reference selector,
+            io.github.opensabre.iqc.task.retry.AutomaticRetryPolicy retryPolicy){
+        this(schemaVersion,cron,zoneId,effectiveFrom,effectiveUntil,misfirePolicy,maximumCatchUp,concurrency,pipeline,selector,retryPolicy,null);
+    }
     public PeriodicDefinition {
-        if(!SCHEMA.equals(schemaVersion) || cron==null || cron.length()>256 || zoneId==null || effectiveFrom==null
+        boolean gray=ROLLOUT_SCHEMA.equals(schemaVersion);
+        if((!SCHEMA.equals(schemaVersion)&&!gray) || cron==null || cron.length()>256 || zoneId==null || effectiveFrom==null
                 || (effectiveUntil!=null && !effectiveUntil.isAfter(effectiveFrom)) || misfirePolicy==null
                 || maximumCatchUp<1 || maximumCatchUp>100 || concurrency<1 || concurrency>32
-                || pipeline==null || pipeline.pipelineId()==null || pipeline.versionNo()<1
+                || (gray?(pipeline!=null||rollout==null||rollout.pipelineId()==null)
+                         :(pipeline==null||pipeline.pipelineId()==null||pipeline.versionNo()<1||rollout!=null))
                 || selector==null || selector.selectorId()==null || selector.versionNo()<1)
             throw new IllegalArgumentException("invalid periodic definition");
         Instant minimum=Instant.parse("1000-01-01T00:00:00Z"),maximum=Instant.parse("9999-12-31T23:59:59Z");
@@ -29,7 +42,8 @@ public record PeriodicDefinition(String schemaVersion,String cron,String zoneId,
                 || (effectiveUntil!=null && (effectiveUntil.isBefore(minimum) || effectiveUntil.isAfter(maximum))))
             throw new IllegalArgumentException("periodic dates must fit MySQL datetime");
         ZoneId.of(zoneId);cron=CronExpression.parse(cron).toString();
-        if(!pipeline.pipelineId().matches("[A-Za-z0-9:_-]{1,64}") || !selector.selectorId().matches("[A-Za-z0-9:_-]{1,64}"))
+        String target=gray?rollout.pipelineId():pipeline.pipelineId();
+        if(!target.matches("[A-Za-z0-9:_-]{1,64}") || !selector.selectorId().matches("[A-Za-z0-9:_-]{1,64}"))
             throw new IllegalArgumentException("invalid periodic asset identity");
     }
     public Instant next(Instant after) {

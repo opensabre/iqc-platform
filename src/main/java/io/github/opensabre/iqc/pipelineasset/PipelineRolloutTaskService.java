@@ -56,13 +56,44 @@ public class PipelineRolloutTaskService {
         var selection=selections.materialize(frozen.definition());
         return tasks.createUsingPipelineRolloutSelector(allocation.selected(),name,frozen,selection,concurrency,requestKey,allocation.evidence());
     }
-    private record Allocation(PipelineAssetService.Prepared selected,PipelineRolloutTaskEvidence evidence) { }
-    private Allocation allocate(String id,String actorId,String requestKey,String taskId,String fingerprint,String schema){
-        var revision=rollouts.currentForTask(id);var policy=revision.snapshot().policy();
-        var sources=pipelines.rolloutSourcesForTask(id,policy);
+    /** Only schedule code may supply this identity; the surrounding schedule transaction owns the cursor. */
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask createPeriodicWithSelector(String id,String name,io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,
+            InspectionTaskService.PeriodicIdentity identity,int concurrency){
+        if(selectorAssets==null||selections==null||selector==null)throw IqcException.invalidState("周期灰度依赖不可用");
+        String actorId=scope.actorUserId();String requestKey=PipelineRolloutTaskEvidence.periodicRequestKey(identity,json);
+        String taskId=PipelineRolloutTaskEvidence.taskId(actorId,id,requestKey,json);
+        var reference=new io.github.opensabre.iqc.selector.SelectorAssetService.Reference(selector.selectorId(),selector.versionNo());
+        String fingerprint=PipelineRolloutTaskEvidence.periodicRequestFingerprint(name,reference,concurrency,identity,json);
+        pipelines.lockForRolloutRequest(id);var existing=tasks.findRolloutRequest(taskId);
+        if(existing!=null){
+            replay(id,actorId,requestKey,fingerprint,existing);
+            if(!Objects.equals(existing.getPeriodicScheduleId(),identity.scheduleId())||!Objects.equals(existing.getPeriodicRevisionId(),identity.revisionId())
+                    ||!Objects.equals(existing.getPlannedAtUtc(),java.time.LocalDateTime.ofInstant(identity.plannedAt(),java.time.ZoneOffset.UTC)))
+                throw IqcException.invalidState("周期灰度实例来源不一致");
+            return tasks.requireRolloutSelectorRetry(existing,fingerprint,reference);
+        }
+        var allocation=allocate(id,actorId,requestKey,taskId,fingerprint,PipelineRolloutTaskEvidence.PERIODIC_SCHEMA);
+        var locked=selectorAssets.publishedForTask(selector.selectorId(),selector.versionNo());
+        if(!io.github.opensabre.iqc.selector.SelectorAssetService.hash(json.valueToTree(locked).toString()).equals(
+                io.github.opensabre.iqc.selector.SelectorAssetService.hash(json.valueToTree(selector).toString())))
+            throw IqcException.invalidState("周期Selector冻结来源已变化");
+        var selection=selections.materializeAt(locked.definition(),identity.plannedAt());
+        return tasks.createPeriodicPipelineRollout(allocation.selected(),name,locked,selection,identity,concurrency,requestKey,allocation.evidence());
+    }
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void validateCurrentTarget(String id){currentSources(id);}
+    private record Sources(PipelineRolloutService.Revision revision,PipelineAssetService.RolloutSources sources) { }
+    private Sources currentSources(String id){
+        var revision=rollouts.currentForTask(id);var sources=pipelines.rolloutSourcesForTask(id,revision.snapshot().policy());
         if(!Objects.equals(revision.snapshot().baselineReleaseHash(),sources.baseline().contentHash())
                 ||!Objects.equals(revision.snapshot().candidateReleaseHash(),sources.candidate().contentHash()))
             throw IqcException.invalidState("灰度策略发布来源摘要已变化");
+        return new Sources(revision,sources);
+    }
+    private record Allocation(PipelineAssetService.Prepared selected,PipelineRolloutTaskEvidence evidence) { }
+    private Allocation allocate(String id,String actorId,String requestKey,String taskId,String fingerprint,String schema){
+        var current=currentSources(id);var revision=current.revision();var sources=current.sources();var policy=revision.snapshot().policy();
         var decision=policy.preview(actorId,requestKey,sources.baseline(),sources.candidate(),json);
         var evidence=new PipelineRolloutTaskEvidence(schema,taskId,fingerprint,revision,decision);
         return new Allocation(decision.side()==PipelineRolloutPolicy.Side.CANDIDATE?sources.candidate():sources.baseline(),evidence);

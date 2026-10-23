@@ -12,6 +12,7 @@ public record PipelineRolloutTaskEvidence(String schemaVersion,String taskId,Str
         PipelineRolloutService.Revision revision,PipelineRolloutPolicy.Decision decision) {
     public static final String SCHEMA="iqc-pipeline-rollout-task-v1";
     public static final String SELECTOR_SCHEMA="iqc-pipeline-rollout-selector-task-v1";
+    public static final String PERIODIC_SCHEMA="iqc-pipeline-rollout-periodic-selector-task-v1";
     public static String taskId(String actorId,String pipelineId,String requestKey,ObjectMapper json){
         if(actorId==null||!actorId.matches("[A-Za-z0-9:_-]{1,64}")||pipelineId==null||pipelineId.isBlank()
                 ||requestKey==null||!requestKey.matches("[A-Za-z0-9:_-]{1,128}"))throw IqcException.invalidArgument("灰度任务身份或请求键无效");
@@ -35,6 +36,19 @@ public record PipelineRolloutTaskEvidence(String schemaVersion,String taskId,Str
         var body=json.createObjectNode().put("schemaVersion",SELECTOR_SCHEMA).put("name",name).put("concurrency",parallel);
         body.set("selectorAsset",json.valueToTree(selector));return PipelineAssetService.hash(body.toString());
     }
+    public static String periodicRequestKey(io.github.opensabre.iqc.task.InspectionTaskService.PeriodicIdentity identity,ObjectMapper json){
+        if(identity==null||identity.scheduleId()==null||!identity.scheduleId().matches("[A-Za-z0-9:_-]{1,64}")
+                ||identity.revisionId()==null||!identity.revisionId().matches("[A-Za-z0-9:_-]{1,64}")||identity.plannedAt()==null)
+            throw IqcException.invalidArgument("周期灰度实例身份无效");
+        return "cron:"+io.github.opensabre.iqc.selector.SelectorAssetService.hash(json.createArrayNode()
+                .add(identity.scheduleId()).add(identity.revisionId()).add(identity.plannedAt().toString()).toString());
+    }
+    public static String periodicRequestFingerprint(String name,io.github.opensabre.iqc.selector.SelectorAssetService.Reference selector,
+            Integer concurrency,io.github.opensabre.iqc.task.InspectionTaskService.PeriodicIdentity identity,ObjectMapper json){
+        String selection=selectorRequestFingerprint(name,selector,concurrency,json);
+        return PipelineAssetService.hash(json.createObjectNode().put("schemaVersion",PERIODIC_SCHEMA)
+                .put("selectionRequest",selection).put("instanceKey",periodicRequestKey(identity,json)).toString());
+    }
     public JsonNode envelope(ObjectMapper json){
         var body=json.valueToTree(this);
         var envelope=json.createObjectNode();envelope.set("evidence",body);
@@ -51,10 +65,10 @@ public record PipelineRolloutTaskEvidence(String schemaVersion,String taskId,Str
     /** Checks the recorded choice without needing a raw account ID, request key or a mutable current policy. */
     public void verifyFrozen(String expectedTaskId,JsonNode prepared,ObjectMapper json){
         try{
-            if((!SCHEMA.equals(schemaVersion)&&!SELECTOR_SCHEMA.equals(schemaVersion))||!requiresEvidence(taskId)||!Objects.equals(taskId,expectedTaskId)
+            if((!SCHEMA.equals(schemaVersion)&&!SELECTOR_SCHEMA.equals(schemaVersion)&&!PERIODIC_SCHEMA.equals(schemaVersion))||!requiresEvidence(taskId)||!Objects.equals(taskId,expectedTaskId)
                     ||!validHash(requestFingerprint)||revision==null||revision.snapshot()==null||decision==null
                     ||revision.id()==null||revision.id().isBlank()||revision.revisionNo()<1)throw new IllegalArgumentException();
-            if(SELECTOR_SCHEMA.equals(schemaVersion)?!requestFingerprint.equals(prepared.path("selectorRequestHash").asText())
+            if((SELECTOR_SCHEMA.equals(schemaVersion)||PERIODIC_SCHEMA.equals(schemaVersion))?!requestFingerprint.equals(prepared.path("selectorRequestHash").asText())
                     :prepared.has("selectorRequestHash"))throw new IllegalArgumentException();
             var source=revision.snapshot();var policy=source.policy();String pipelineId=source.pipelineId();
             if(!"iqc-pipeline-rollout-revision-v1".equals(source.schemaVersion())||pipelineId==null
