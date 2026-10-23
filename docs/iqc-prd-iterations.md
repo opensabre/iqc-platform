@@ -434,3 +434,7 @@ CREATE_RISK_EVENT v1引用原冻结生产结果/动作账本，稳定幂等事�
 复用既有规则业务授权及当前敏感授权，RuleSet list/history仅FULL+PII齐备返回原description；所有命令回执扣留description。响应副本使用iqc-rule-set-read-v1，非持久privacy为null时省略；ruleIdsJson原顺序、aggregationMode、ID/code/version/status保留，不改变检测或内部快照。页面仅保存成员选择所需元数据，关闭清理新建表单，刷新代次/卸载阻断迟到响应，创建提交复制输入，禁止提交期间关闭。页面本来没有历史编辑入口，未添加空描述覆盖路径。
 
 当前批次仅编译/前端构建；实际grant组合、源对象不变、内部JSON兼容、网关逐URL注册及浏览器生命周期仍待独立验证。单租户组织范围不变，完整I1–I7未完成。
+
+## 2026-10-24 Knowledge Base独立语料版本分步
+
+KB1：独立有界参考文档集合、知识库草稿/不可变版本、原组织owner/group/all及现有资产维护授权/CAS、启停/精确来源/向前恢复及V1.1.75领域DDL已编码；正式协议iqc-knowledge-corpus.md，当前只内部服务。KB2继续管理端点/敏感投影/资源注册与Agent/Pipeline精确引用，KB3继续原任务授权正文冻结/来源组交集/有界LLM上下文与实际运行验收；共享Agent目录不存私有语料正文。新模型复用检索与取舍事前记录ADR 20261024-knowledge-corpus-versions，未改框架/新增基础设施。没有据此完成Knowledge整链或缩减原PRD I1–I7，处理后会话及单租户组织权限边界保持。
