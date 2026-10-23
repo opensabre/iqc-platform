@@ -178,3 +178,7 @@ PolicyGroup新增可空rollout，schema为iqc-business-rollout-attribution-v1，
 费用沿原CostSummary与共用SQL判断CONFIRMED/CALCULATED_FROM_DECLARED_PRICE，金额/计数字符串精确传输，币种各自累计、未知不填零。所有匹配调用（包括重试及工具轮次）保留；不冒称供应商实际账单或完整重建继承结果的历史总成本。耗时由同范围CONFIRMED且reserved/settled合法的行计算接收至结算平均毫秒，并列已测量/未测量调用计数；没有时长分母返回null。这不是任务队列延迟、端到端时延或P95。费用与耗时两次聚合位于同一只读REPEATABLE_READ事务并核对调用总数，无新表/端点/权限。
 
 页面显式勾选该项；撤销或重新授予调用权限均清报告与请求代次，查询完成后按实时权限展示，防止旧响应恢复费用。真实SQL集合筛选/空记录/未知币种/小数、运行口径去重、继承轮次、HTTP当前授权与页面撤权专项待B独立验证；完整A/B统计与I7继续。
+
+### 归档事件原父修订守卫（2026-10-23）
+
+TRIGGER灰度来源guard对archive-subscription额外读取原不可变订阅版本，复用EventSubscriptionService同一发布证据纯读取及父来源校验，绑定原父/版本/负责人/目标/精确Selector、请求配置和稳定事件ID/输入/有效区间；实际任务名称/并发绑定原接收。父来源缺失/坏Hash/不一致拒绝，不能只凭自洽Accepted通过。完整生产DI增加原订阅版本Mapper，旧简化构造在归档路径缺依赖时拒绝。详情见iqc-event-subscriptions.md；旧历史不跟随当前订阅/比例，也不替代原当前组织授权。仅后端编译，真实SQL/worker及坏父来源拒绝专项待B。

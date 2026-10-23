@@ -21,10 +21,16 @@ public class PipelineRolloutExecutionGuard {
     private final ObjectMapper json;
     private final io.github.opensabre.iqc.task.dao.InspectionTaskMapper tasks;
     private final io.github.opensabre.iqc.schedule.dao.PeriodicScheduleRevisionMapper periodicVersions;
+    private final io.github.opensabre.iqc.schedule.dao.EventSubscriptionRevisionMapper subscriptionVersions;
     @org.springframework.beans.factory.annotation.Autowired
     public PipelineRolloutExecutionGuard(PipelineRolloutRevisionMapper revisions,PipelineAssetVersionMapper versions,ObjectMapper json,
+            io.github.opensabre.iqc.task.dao.InspectionTaskMapper tasks,io.github.opensabre.iqc.schedule.dao.PeriodicScheduleRevisionMapper periodicVersions,
+            io.github.opensabre.iqc.schedule.dao.EventSubscriptionRevisionMapper subscriptionVersions){
+        this.revisions=revisions;this.versions=versions;this.json=json;this.tasks=tasks;this.periodicVersions=periodicVersions;this.subscriptionVersions=subscriptionVersions;
+    }
+    public PipelineRolloutExecutionGuard(PipelineRolloutRevisionMapper revisions,PipelineAssetVersionMapper versions,ObjectMapper json,
             io.github.opensabre.iqc.task.dao.InspectionTaskMapper tasks,io.github.opensabre.iqc.schedule.dao.PeriodicScheduleRevisionMapper periodicVersions){
-        this.revisions=revisions;this.versions=versions;this.json=json;this.tasks=tasks;this.periodicVersions=periodicVersions;
+        this(revisions,versions,json,tasks,periodicVersions,null);
     }
     public PipelineRolloutExecutionGuard(PipelineRolloutRevisionMapper revisions,PipelineAssetVersionMapper versions,ObjectMapper json){
         this(revisions,versions,json,null,null);
@@ -66,6 +72,13 @@ public class PipelineRolloutExecutionGuard {
         var exact=json.copy().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
                 .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));
         var accepted=io.github.opensabre.iqc.schedule.TaskTriggerService.readAcceptedEvidence(task,exact);
+        if(!Objects.equals(task.getName(),accepted.request().name().trim())
+                ||!Objects.equals(task.getConcurrencyLimit(),accepted.request().concurrency()))throw new IllegalArgumentException();
+        if(accepted.subscriptionId()!=null){
+            if(subscriptionVersions==null)throw new IllegalArgumentException();
+            var parent=subscriptionVersions.selectById(accepted.subscriptionRevisionId());
+            io.github.opensabre.iqc.schedule.EventSubscriptionService.validateReceiptParent(accepted,parent,exact);
+        }
         var trigger=exact.treeToValue(snapshot.path("triggerSnapshot"),io.github.opensabre.iqc.task.InspectionTaskService.TriggerIdentity.class);
         if(accepted.rollout()==null||trigger==null||trigger.evidence()==null
                 ||!accepted.payloadHash().equals(trigger.payloadHash())||!accepted.request().occurredAt().equals(trigger.occurredAt())
