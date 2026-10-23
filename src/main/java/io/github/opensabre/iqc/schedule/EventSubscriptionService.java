@@ -50,12 +50,14 @@ public class EventSubscriptionService {
             InspectionTaskMapper taskRows,IqcDataScope scope,ObjectMapper json){
         this(schedules,revisions,pipelines,selectors,actors,conversations,triggers,taskRows,scope,json,null);
     }
-    private ObjectMapper exact(){return json.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+    private ObjectMapper exact(){return exact(json);}
+    private static ObjectMapper exact(ObjectMapper json){return json.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
             .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
             .enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
             .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));}
     private String write(Object value){try{return json.writeValueAsString(value);}catch(Exception e){throw IqcException.invalidArgument("事件订阅配置无法序列化");}}
-    private <T> T read(String value,Class<T> type){try{return exact().readValue(value,type);}catch(Exception e){throw IqcException.invalidState("事件订阅快照无效");}}
+    private <T> T read(String value,Class<T> type){return read(json,value,type);}
+    private static <T> T read(ObjectMapper json,String value,Class<T> type){try{return exact(json).readValue(value,type);}catch(Exception e){throw IqcException.invalidState("事件订阅快照无效");}}
     private void name(String value){if(value==null || value.isBlank() || value.length()>100)throw IqcException.invalidArgument("事件订阅名称必须为1–100字");}
     private void revision(EventSubscription row,int expected){if(row.getDraftRevision()==null || row.getDraftRevision()!=expected)throw IqcException.invalidState("事件订阅草稿已变化，请重新加载");}
     private EventSubscription require(String id,boolean lock){
@@ -104,10 +106,13 @@ public class EventSubscriptionService {
     }
     public List<EventSubscriptionRevision> history(String id){require(id,false);var rows=revisions.selectList(Wrappers.<EventSubscriptionRevision>lambdaQuery()
             .eq(EventSubscriptionRevision::getSubscriptionId,id).orderByDesc(EventSubscriptionRevision::getVersionNo).last("LIMIT 100"));rows.forEach(this::snapshot);return rows;}
-    private Published snapshot(EventSubscriptionRevision version){
-        if(version==null || version.getSnapshotJson()==null || version.getSnapshotJson().length()>16*1024*1024
+    private Published snapshot(EventSubscriptionRevision version){return readPublishedEvidence(version,json);}
+    /** Scope-free immutable release decoding, shared by the owning workflow and historical source guard. */
+    public static Published readPublishedEvidence(EventSubscriptionRevision version,ObjectMapper json){
+        if(version==null || version.getSnapshotJson()==null || version.getSnapshotJson().getBytes(java.nio.charset.StandardCharsets.UTF_8).length>16*1024*1024
                 || !SelectorAssetService.hash(version.getSnapshotJson()).equals(version.getContentHash()))throw IqcException.invalidState("事件订阅修订摘要无效");
-        var value=read(version.getSnapshotJson(),Published.class);
+        var value=read(json,version.getSnapshotJson(),Published.class);
+        if(value==null)throw IqcException.invalidState("事件订阅发布内容缺失");
         boolean gray=value.definition()!=null && value.definition().usesRollout();
         if(!(gray?"iqc-event-subscription-rollout-release-v1":"iqc-event-subscription-release-v1").equals(value.schemaVersion())
                 || value.name()==null || value.name().isBlank() || value.name().length()>100 || value.definition()==null || value.ownerBound()==null
@@ -119,6 +124,33 @@ public class EventSubscriptionService {
                 || (value.selector()!=null && (!value.definition().selector().selectorId().equals(value.selector().selectorId())
                 || value.definition().selector().versionNo()!=value.selector().versionNo())))throw IqcException.invalidState("事件订阅发布来源无效");
         return value;
+    }
+    /** No current policy or caller scope: prove a durable receipt came from this exact immutable parent. */
+    public static void validateReceiptParent(TaskTriggerService.Accepted accepted,EventSubscriptionRevision version,ObjectMapper json){
+        try{
+            var published=readPublishedEvidence(version,json);var definition=published.definition();var request=accepted.request();
+            if(accepted.subscriptionId()==null||accepted.subscriptionRevisionId()==null
+                    ||!Objects.equals(version.getId(),accepted.subscriptionRevisionId())
+                    ||!Objects.equals(version.getSubscriptionId(),accepted.subscriptionId())
+                    ||version.getVersionNo()==null||version.getVersionNo()<1||version.getSourceDraftRevision()==null||version.getSourceDraftRevision()<1
+                    ||!Objects.equals(published.ownerBound(),accepted.ownerBound())
+                    ||!"iqc-schedule-owner-scope-v1".equals(published.ownerBound().schemaVersion())
+                    ||published.ownerBound().userId()==null||!published.ownerBound().userId().matches("[A-Za-z0-9:_-]{1,64}")
+                    ||published.ownerBound().owner()==null||published.ownerBound().owner().isBlank()
+                    ||!"archive-subscription".equals(request.source())||request.content()!=null||request.target()==null
+                    ||request.target().conversationId()==null||request.target().sourceType()!=null||request.target().externalId()!=null
+                    ||definition.usesRollout()!=request.usesRollout()||!definition.targetPipelineId().equals(request.targetPipelineId())
+                    ||!published.name().equals(request.name())||definition.concurrency()!=request.concurrency()
+                    ||!definition.eventType().equals(request.eventType())||request.requireASR()!= "ASRCompleted".equals(definition.eventType())
+                    ||request.occurredAt().isBefore(definition.effectiveFrom())
+                    ||(definition.effectiveUntil()!=null&&!request.occurredAt().isBefore(definition.effectiveUntil()))
+                    ||!eventId(version.getId(),request.target().conversationId(),request.target().inputRevision()).equals(request.eventId())
+                    ||!Objects.equals(definition.selector(),request.selector())||!Objects.equals(definition.retryPolicy(),request.retryPolicy())
+                    ||!Objects.equals(published.selector()==null?null:SelectorAssetService.hash(json.writeValueAsString(published.selector())),
+                            accepted.selector()==null?null:SelectorAssetService.hash(json.writeValueAsString(accepted.selector())))
+                    ||(!definition.usesRollout()&&!Objects.equals(SelectorAssetService.hash(json.writeValueAsString(published.pipeline())),
+                            SelectorAssetService.hash(json.writeValueAsString(accepted.pipeline())))))throw new IllegalArgumentException();
+        }catch(Exception invalid){throw IqcException.invalidState("归档事件接收与原订阅发布来源不一致");}
     }
     @Transactional public EventSubscriptionRevision publish(String id,int expected){
         var row=require(id,true);owner(row);revision(row,expected);

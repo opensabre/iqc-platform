@@ -50,3 +50,11 @@ V1.1.46 新增两张配置表及 Task 实例引用/归档发现索引；没有�
 原订阅行锁及事务内，每个归档事件经原 `receiveSubscription` 和业务事件灰度接收器，第一次接受才读取当前策略并冻结选中Prepared和分配证据；重放先查原回执，不重新分桶。Selector仍与发布时的精确快照比较，停用或变化不能悄悄更换来源。原来源保留为内部 `archive-subscription`，外部API/MQ仍不能使用；revision/conversation/fingerprint派生事件ID、扫描反连接、输入修订、等待及自动重试不变。组范围继续取负责人、流水线、Selector及会话原范围交集。
 
 本批实现与编译结果见协作记录。真实订阅发现/事务回滚/并发、发布后扩量回退及已接收任务不重选、当前组织撤权、物化工作器和页面权限须独立验证；不据此宣布I7或全PRD完成。
+
+### 灰度归档任务的不可变父来源校验（2026-10-23）
+
+EventSubscriptionService将原发布快照读取/Hash/schema/目标/Selector核对提取为同一纯readPublishedEvidence，原订阅工作流继续调用；发布正文按UTF-8字节检查既有16MiB上限，JSON null明确拒绝。新增validateReceiptParent供原灰度执行guard复用，不建立第二份订阅快照或查询当前订阅定义。
+
+归档灰度任务除原Accepted及分配证据外，读取其eventSubscriptionRevisionId指向的原不可变版本，核对版本ID/父订阅ID/版本与源草稿修订、原负责人完整CreationBound、目标模式/流水线、名称/并发/重试配置、精确Selector及冻结来源。事件必须为原内部archive-subscription、显式conversation/inputRevision目标、无正文，eventId按原revision/conversation/fingerprint算法重算；事件类型及requireASR必须与订阅一致，occurredAt落入原有效区间。既有ASRCompleted只是已处理输入状态，不产生转写。原接收与实际任务名称/并发也要一致。
+
+生产完整guard构造增加原EventSubscriptionRevisionMapper；旧三/五参数构造继续支持其原非归档路径，归档灰度缺父Mapper时拒绝。运行/历史/生产统计均通过原guard获同一来源保护；父修订被删除或篡改时不降级成普通事件任务。当前订阅停用或改版不改写旧版本，校验不读取当前组织权限或当前比例；当前主体/worker授权仍由原外层工作流独立负责。本批后端编译终态见协作记录，无前端协议/表/端点/权限/框架变化，实际SQL/worker与坏父版本专项待独立验证。

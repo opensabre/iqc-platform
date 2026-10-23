@@ -166,6 +166,9 @@ public class GatewayCallService {
         return withSummary(page,calls.costGroups(modelKey,taskId,executionId,status));
     }
     private CallPage withSummary(io.github.opensabre.iqc.shared.IqcPage<CallView> page,List<GatewayCallMapper.CostGroup> costGroups){
+        return new CallPage(page.records(),page.current(),page.size(),page.total(),summarizeCosts(costGroups));
+    }
+    private static CostSummary summarizeCosts(List<GatewayCallMapper.CostGroup> costGroups){
         java.math.BigInteger count=java.math.BigInteger.ZERO,known=java.math.BigInteger.ZERO;
         var groups=new ArrayList<CurrencyCost>();
         for(var group:costGroups){
@@ -175,8 +178,30 @@ public class GatewayCallService {
             groups.add(new CurrencyCost(group.getCurrency(),n.toString(),k.toString(),n.subtract(k).toString(),
                     group.getKnownSubtotal()==null?null:group.getKnownSubtotal().toPlainString()));
         }
-        return new CallPage(page.records(),page.current(),page.size(),page.total(),
-                new CostSummary(count.toString(),known.toString(),count.subtract(known).toString(),List.copyOf(groups)));
+        return new CostSummary(count.toString(),known.toString(),count.subtract(known).toString(),List.copyOf(groups));
+    }
+    public record CallLatencySummary(String callCount,String measuredCount,String unknownCount,String averageMillis) { }
+    public record RunUsage(CostSummary costs,CallLatencySummary latency) { }
+    /** Exact result-run scope, including every recorded retry/tool call; never widen an absent execution ID. */
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public RunUsage taskRunUsage(List<GatewayCallMapper.RunReference> references){
+        if(references==null || references.size()>500)throw IqcException.invalidArgument("调用统计范围超限");
+        var runs=references.stream().distinct().toList();var taskIds=new HashSet<String>();var executionIds=new HashSet<String>();
+        for(var run:runs){
+            if(run==null || java.util.stream.Stream.of(run.taskId(),run.executionId(),run.conversationId())
+                    .anyMatch(value->value==null||!value.matches("[A-Za-z0-9:_-]{1,64}")))throw IqcException.invalidArgument("调用统计需要精确任务/执行/会话范围");
+            if(taskIds.add(run.taskId()))taskService.getObject().get(run.taskId());
+            String key=run.taskId()+"/"+run.executionId();
+            if(executionIds.add(key)){var execution=executionRows.selectById(run.executionId());
+                if(execution==null||!run.taskId().equals(execution.getTaskId()))throw IqcException.invalidState("调用统计执行来源无效");}
+        }
+        if(runs.isEmpty())return new RunUsage(new CostSummary("0","0","0",List.of()),new CallLatencySummary("0","0","0",null));
+        var costs=summarizeCosts(calls.runCostGroups(runs));var latency=calls.runLatency(runs);
+        if(latency==null||latency.getCallCount()==null||latency.getMeasuredCount()==null)throw IqcException.invalidState("调用耗时汇总无效");
+        long count=latency.getCallCount(),measured=latency.getMeasuredCount();
+        if(count<0||measured<0||measured>count||!Long.toString(count).equals(costs.callCount())
+                ||(measured==0)!=(latency.getAverageMillis()==null))throw IqcException.invalidState("调用汇总范围不一致");
+        return new RunUsage(costs,new CallLatencySummary(Long.toString(count),Long.toString(measured),Long.toString(count-measured),decimal(latency.getAverageMillis())));
     }
     public record CapacityView(String modelKey,
             @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long occupied,
