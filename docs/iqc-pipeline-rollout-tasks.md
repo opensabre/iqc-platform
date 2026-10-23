@@ -182,3 +182,34 @@ PolicyGroup新增可空rollout，schema为iqc-business-rollout-attribution-v1，
 ### 归档事件原父修订守卫（2026-10-23）
 
 TRIGGER灰度来源guard对archive-subscription额外读取原不可变订阅版本，复用EventSubscriptionService同一发布证据纯读取及父来源校验，绑定原父/版本/负责人/目标/精确Selector、请求配置和稳定事件ID/输入/有效区间；实际任务名称/并发绑定原接收。父来源缺失/坏Hash/不一致拒绝，不能只凭自洽Accepted通过。完整生产DI增加原订阅版本Mapper，旧简化构造在归档路径缺依赖时拒绝。详情见iqc-event-subscriptions.md；旧历史不跟随当前订阅/比例，也不替代原当前组织授权。仅后端编译，真实SQL/worker及坏父来源拒绝专项待B。
+### 周期实际入队验证准备与审计字段诊断（B，2026-10-23）
+
+在原隔离 SQL 用例内接入真正的 queueSystem、TaskExecution/TaskItem Mapper 与生产输入快照，
+PipelineAssetService 的依赖适配受控，但 validateTask 委托原 PipelineRolloutExecutionGuard。
+新增用例目标为实际 QUEUED/EID/冻结消息检查点、旧游标不重复入队，以及检查点写入失败时
+任务/执行/游标共同回滚；另核对坏周期来源由原 worker 拒绝，不能据此宣称 worker 成功执行。
+
+初次诊断原 58001 失败在周期 guard 第 84 行；原 28767 明确数据库任务 createdBy 为 null，
+而原周期负责人为 actor-1。隔离配置在 addMapper 后才设置审计填充器，改为解析 Mapper 前
+注册原 PoMetaObjectHandler。原 6070 又因提前注册的 GlobalConfig 缺少 DbConfig，SQL 上下文
+启动失败，协议 11 项通过；修正为 GlobalConfigUtils.defaults() 保留完整默认配置后继续。
+这些均为测试配置诊断，未修改框架或生产来源校验，尚不能记录新增 SQL 用例通过。
+
+当前复验原句柄 34657，日志 `/tmp/iqc-b-periodic-real-queue-audit-defaults.log`；需读取原终态
+及 fresh XML 后再追加结论。负责人上下文为受控 actor-1，不替代真实 PDP；周期发布快照仍由
+SQL 夹具提供，且未覆盖完整 Pipeline 依赖校验或实际供应商成功执行。
+
+### 周期实际入队与回滚验证终态（B，2026-10-23）
+
+原 34657 终态 1，SQL23+协议11中33通过、1错误；实际入队/检查点及回滚断言已走过，
+后续 worker 拒绝辅助方法固定插入 attempt1/2，与真实入队 attempt1 冲突。改为读取任务已有
+MAX(attempt_no) 后追加独立拒绝轮次，不改生产代码。原 50769 compiler:testCompile+surerfire
+终态 0，日志 `/tmp/iqc-b-periodic-real-queue-attempt-fixed.log`，fresh XML SQL23+协议11=34
+零失败错误跳过。专用 MySQL 自动关闭，socket 消失。
+
+新增两项证明：原 fire 事务调用真正 queueSystem 后保存 QUEUED 任务、attempt1/EID 与冻结
+消息的 PENDING 检查点；旧 Frame 不再新增执行；实际来源 guard 接受原快照、拒绝被篡改的
+周期修订列。独立构造后续轮次经过原 worker，持久 FAILED 且不调用模型/会话评估，保留
+旧轮与规则快照。检查点 INSERT trigger 抛错时任务/执行/游标共同回滚，解除故障后同 Frame
+可以真正入队。真实已入队轮次的成功 worker 运行、完整依赖校验、实际 PDP 和周期发布流程
+仍不在本轮证据范围；不将独立拒绝轮次称为原入队轮次的成功执行。
