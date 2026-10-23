@@ -36,7 +36,7 @@ public class RabbitTriggerProperties {
         return new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1",ownerUserId,owner,all,groupId);
     }
     public boolean permits(TaskTriggerRequest request){
-        return source.equals(request.source())&&pipelineIds.contains(request.pipeline().pipelineId())
+        return source.equals(request.source())&&pipelineIds.contains(request.targetPipelineId())
                 &&eventTypes.contains(request.eventType())&&(allowContent||request.content()==null);
     }
 }

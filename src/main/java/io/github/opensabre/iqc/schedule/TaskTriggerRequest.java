@@ -4,22 +4,33 @@ import io.github.opensabre.iqc.selector.SelectorAssetService;
 import java.time.Instant;
 
 public record TaskTriggerRequest(String schemaVersion,String source,String eventId,String eventType,Instant occurredAt,Instant expiresAt,
-        String name,PeriodicDefinition.PipelineReference pipeline,SelectorAssetService.Reference selector,
+        String name,@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) PeriodicDefinition.PipelineReference pipeline,SelectorAssetService.Reference selector,
         Target target,ApiConversationInput content,int concurrency,boolean requireASR,
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-        io.github.opensabre.iqc.task.retry.AutomaticRetryPolicy retryPolicy) {
+        io.github.opensabre.iqc.task.retry.AutomaticRetryPolicy retryPolicy,
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) PeriodicDefinition.RolloutReference rollout) {
+    public static final String ROLLOUT_SCHEMA="iqc-task-rollout-trigger-v1";
+    public boolean usesRollout(){return ROLLOUT_SCHEMA.equals(schemaVersion);}
+    public String targetPipelineId(){return usesRollout()?rollout.pipelineId():pipeline.pipelineId();}
     public record Target(String conversationId,String sourceType,String externalId,String inputRevision) { }
     public TaskTriggerRequest(String schemaVersion,String source,String eventId,String eventType,Instant occurredAt,Instant expiresAt,
             String name,PeriodicDefinition.PipelineReference pipeline,SelectorAssetService.Reference selector,Target target,ApiConversationInput content,int concurrency,boolean requireASR){
         this(schemaVersion,source,eventId,eventType,occurredAt,expiresAt,name,pipeline,selector,target,content,concurrency,requireASR,null);
     }
+    public TaskTriggerRequest(String schemaVersion,String source,String eventId,String eventType,Instant occurredAt,Instant expiresAt,
+            String name,PeriodicDefinition.PipelineReference pipeline,SelectorAssetService.Reference selector,Target target,ApiConversationInput content,
+            int concurrency,boolean requireASR,io.github.opensabre.iqc.task.retry.AutomaticRetryPolicy retryPolicy){
+        this(schemaVersion,source,eventId,eventType,occurredAt,expiresAt,name,pipeline,selector,target,content,concurrency,requireASR,retryPolicy,null);
+    }
     public TaskTriggerRequest {
-        if(!"iqc-task-trigger-v1".equals(schemaVersion) || source==null || !source.matches("[A-Za-z0-9:_-]{1,64}")
+        boolean gray=ROLLOUT_SCHEMA.equals(schemaVersion);
+        if((!"iqc-task-trigger-v1".equals(schemaVersion)&&!gray) || source==null || !source.matches("[A-Za-z0-9:_-]{1,64}")
                 || eventId==null || eventId.isBlank() || !eventId.equals(eventId.strip()) || eventId.length()>128 || eventId.chars().anyMatch(Character::isISOControl)
                 || eventType==null || !eventType.matches("[A-Za-z0-9:_.-]{1,64}") || occurredAt==null || expiresAt==null
                 || !expiresAt.isAfter(occurredAt) || name==null || name.isBlank() || name.length()>100
-                || concurrency<1 || concurrency>32 || pipeline==null || pipeline.pipelineId()==null
-                || !pipeline.pipelineId().matches("[A-Za-z0-9:_-]{1,64}") || pipeline.versionNo()<1
+                || concurrency<1 || concurrency>32
+                || (gray?(pipeline!=null||rollout==null||rollout.pipelineId()==null||!rollout.pipelineId().matches("[A-Za-z0-9:_-]{1,64}"))
+                        :(pipeline==null||pipeline.pipelineId()==null||!pipeline.pipelineId().matches("[A-Za-z0-9:_-]{1,64}")||pipeline.versionNo()<1||rollout!=null))
                 || (target==null)==(content==null))throw new IllegalArgumentException("invalid trigger request");
         occurredAt=occurredAt.truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
         expiresAt=expiresAt.truncatedTo(java.time.temporal.ChronoUnit.MILLIS);

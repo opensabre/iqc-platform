@@ -42,3 +42,11 @@ V1.1.46 新增两张配置表及 Task 实例引用/归档发现索引；没有�
 ## 2026-10-23 外部MQ接收增量
 
 应用内新增可选RabbitMQ适配，复用原外部TaskTriggerRequest/accept幂等事务和当前组织授权，不改变内部archive-subscription流程。配置固定来源/负责人/资产允许集合，提交后手动ACK，失败死信供原身份重投；默认关闭。详见iqc-rabbit-triggers.md及部署示例。当前仅编译，实际broker/SQL/角色/运行验证待完成，不将源码接入冒称I4全部验收通过。历史ASR/音频表述仍服从迭代页首当前范围：仅处理后会话，不开发语音转换。
+
+## 归档订阅灰度目标（2026-10-23）
+
+显式 `iqc-event-subscription-rollout-v1` 定义使用 `rollout.pipelineId`，与 `pipeline` 互斥；固定 `iqc-event-subscription-v1` 与原八/九参数构造保留。发布 `iqc-event-subscription-rollout-release-v1` 冻结路由意图、精确可选Selector及负责人，不提前分配流水线版本。发布及后台发现要求当前组织授权中已有 `iqc:pipeline:rollout:task:create`，同时保留原订阅/任务/触发/重试策略资源要求。
+
+原订阅行锁及事务内，每个归档事件经原 `receiveSubscription` 和业务事件灰度接收器，第一次接受才读取当前策略并冻结选中Prepared和分配证据；重放先查原回执，不重新分桶。Selector仍与发布时的精确快照比较，停用或变化不能悄悄更换来源。原来源保留为内部 `archive-subscription`，外部API/MQ仍不能使用；revision/conversation/fingerprint派生事件ID、扫描反连接、输入修订、等待及自动重试不变。组范围继续取负责人、流水线、Selector及会话原范围交集。
+
+本批实现与编译结果见协作记录。真实订阅发现/事务回滚/并发、发布后扩量回退及已接收任务不重选、当前组织撤权、物化工作器和页面权限须独立验证；不据此宣布I7或全PRD完成。

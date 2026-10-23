@@ -13,6 +13,7 @@ public record PipelineRolloutTaskEvidence(String schemaVersion,String taskId,Str
     public static final String SCHEMA="iqc-pipeline-rollout-task-v1";
     public static final String SELECTOR_SCHEMA="iqc-pipeline-rollout-selector-task-v1";
     public static final String PERIODIC_SCHEMA="iqc-pipeline-rollout-periodic-selector-task-v1";
+    public static final String TRIGGER_SCHEMA="iqc-pipeline-rollout-trigger-task-v1";
     public static String taskId(String actorId,String pipelineId,String requestKey,ObjectMapper json){
         if(actorId==null||!actorId.matches("[A-Za-z0-9:_-]{1,64}")||pipelineId==null||pipelineId.isBlank()
                 ||requestKey==null||!requestKey.matches("[A-Za-z0-9:_-]{1,128}"))throw IqcException.invalidArgument("灰度任务身份或请求键无效");
@@ -49,6 +50,22 @@ public record PipelineRolloutTaskEvidence(String schemaVersion,String taskId,Str
         return PipelineAssetService.hash(json.createObjectNode().put("schemaVersion",PERIODIC_SCHEMA)
                 .put("selectionRequest",selection).put("instanceKey",periodicRequestKey(identity,json)).toString());
     }
+    public static String triggerTaskId(String actorId,io.github.opensabre.iqc.schedule.TaskTriggerRequest request,ObjectMapper json){
+        try{return "t"+io.github.opensabre.iqc.selector.SelectorAssetService.hash(json.writeValueAsString(List.of(actorId,request.source(),request.eventId()))).substring(0,63);}
+        catch(Exception invalid){throw IqcException.invalidArgument("事件灰度身份无效");}
+    }
+    public static String triggerRequestKey(io.github.opensabre.iqc.schedule.TaskTriggerRequest request,ObjectMapper json){
+        try{return "event:"+io.github.opensabre.iqc.selector.SelectorAssetService.hash(json.writeValueAsString(List.of(request.source(),request.eventId())));}
+        catch(Exception invalid){throw IqcException.invalidArgument("事件灰度请求键无效");}
+    }
+    public void verifyTriggered(String actorId,io.github.opensabre.iqc.schedule.TaskTriggerRequest request,String fingerprint,JsonNode prepared,ObjectMapper json){
+        try{
+            if(!TRIGGER_SCHEMA.equals(schemaVersion)||!request.usesRollout())throw new IllegalArgumentException();
+            verifyFrozen(triggerTaskId(actorId,request,json),prepared,json);
+            if(!requestFingerprint.equals(fingerprint)||!request.targetPipelineId().equals(revision.snapshot().pipelineId())
+                    ||!revision.snapshot().policy().cohortHash(actorId,triggerRequestKey(request,json)).equals(decision.cohortHash()))throw new IllegalArgumentException();
+        }catch(Exception invalid){throw IqcException.invalidState("事件灰度原接收分配证据无效");}
+    }
     public JsonNode envelope(ObjectMapper json){
         var body=json.valueToTree(this);
         var envelope=json.createObjectNode();envelope.set("evidence",body);
@@ -65,11 +82,14 @@ public record PipelineRolloutTaskEvidence(String schemaVersion,String taskId,Str
     /** Checks the recorded choice without needing a raw account ID, request key or a mutable current policy. */
     public void verifyFrozen(String expectedTaskId,JsonNode prepared,ObjectMapper json){
         try{
-            if((!SCHEMA.equals(schemaVersion)&&!SELECTOR_SCHEMA.equals(schemaVersion)&&!PERIODIC_SCHEMA.equals(schemaVersion))||!requiresEvidence(taskId)||!Objects.equals(taskId,expectedTaskId)
+            if((!SCHEMA.equals(schemaVersion)&&!SELECTOR_SCHEMA.equals(schemaVersion)&&!PERIODIC_SCHEMA.equals(schemaVersion)&&!TRIGGER_SCHEMA.equals(schemaVersion))
+                    ||(TRIGGER_SCHEMA.equals(schemaVersion)?taskId==null||!taskId.matches("t[a-f0-9]{63}"):!requiresEvidence(taskId))||!Objects.equals(taskId,expectedTaskId)
                     ||!validHash(requestFingerprint)||revision==null||revision.snapshot()==null||decision==null
                     ||revision.id()==null||revision.id().isBlank()||revision.revisionNo()<1)throw new IllegalArgumentException();
-            if((SELECTOR_SCHEMA.equals(schemaVersion)||PERIODIC_SCHEMA.equals(schemaVersion))?!requestFingerprint.equals(prepared.path("selectorRequestHash").asText())
-                    :prepared.has("selectorRequestHash"))throw new IllegalArgumentException();
+            if(SELECTOR_SCHEMA.equals(schemaVersion)||PERIODIC_SCHEMA.equals(schemaVersion)){
+                if(!requestFingerprint.equals(prepared.path("selectorRequestHash").asText()))throw new IllegalArgumentException();
+            }else if(prepared.has("selectorRequestHash")&&(!TRIGGER_SCHEMA.equals(schemaVersion)
+                    ||!requestFingerprint.equals(prepared.path("selectorRequestHash").asText())))throw new IllegalArgumentException();
             var source=revision.snapshot();var policy=source.policy();String pipelineId=source.pipelineId();
             if(!"iqc-pipeline-rollout-revision-v1".equals(source.schemaVersion())||pipelineId==null
                     ||source.revisionNo()!=revision.revisionNo()||policy==null||!pipelineId.equals(policy.pipelineId())||source.change()==null

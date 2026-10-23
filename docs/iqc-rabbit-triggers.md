@@ -68,6 +68,9 @@ A初次交付仅编译。初始独立验证清单（后续B证据见下节）：
 发布资产为受控 fixture，目标会话尚不存在；本轮没有 AMQP Channel、Spring 监听容器、
 实际 PDP、目标物化或 worker。不能将独立 SQL 与前轮 broker 结果合称提交后 ACK 的联合验证。
 
+## 2026-10-23 灰度目标扩展
+
+同一consumer支持显式iqc-task-rollout-trigger-v1/rollout.pipelineId，原允许pipelineIds集合匹配统一目标ID，不从可空固定pipeline读取。当前组织授权额外要求既有rollout:task:create，其他发布协议/大小/原始字节/ACK与死信规则不变。分配在原接收事务冻结，重投/等待不跟随新策略，详见iqc-pipeline-rollout-tasks.md。原B broker/SQL证据属于旧固定目标原基线，不能外推新灰度路径已验证。
 ### 消费者、真实 broker 与 SQL 联合验证（B，2026-10-23）
 
 `IsolatedMysqlBrokerAcceptanceIT.realBrokerLostAckRedeliversCommittedTaskAndConflictsGoToDeadLetter`

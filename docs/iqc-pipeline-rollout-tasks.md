@@ -83,6 +83,23 @@ PeriodicScheduleService保留原事务/行锁、失火、自然实例键、游�
 
 当前仅编译/构建，无Root新增或运行测试/SQL/browser/部署。B待验证新旧定义JSON/hash与构造、发布时间/当前资源授权、实际Cron失火/空数据/游标和重试、同实例不重分配/新实例响应回退、计划锚点/组范围、并发锁序和事务回滚、worker/历史对坏周期版本/计划时间/负责人/Selector证据的拒绝及真实页面权限。事件/API/MQ灰度和A/B归因仍待下一层接入，I7/全部PRD不标完成。
 
+## 业务事件API/MQ灰度接收（2026-10-23）
+
+原POST /api/iqc/triggers及可选Rabbit接收器新增显式iqc-task-rollout-trigger-v1请求。新增字段片段为`rollout:{pipelineId}`，pipeline须缺省/null；source/eventId/eventType/occurredAt/expiresAt/name/目标或处理后正文、Selector、并发、重试政策等继续沿原TaskTriggerRequest协议。旧iqc-task-trigger-v1固定发布版本含义不变，不接受非空rollout目标。旧13/14参数请求构造、Accepted八参数和TaskTriggerService旧构造保留，新增空字段省略。
+
+灰度分配时点为原REQUIRES_NEW持久接收事务：先按原稳定负责人/source/eventId查询旧记录，同载荷返回旧任务，不同载荷拒绝；仅首次读取当前策略/两侧发布来源并冻结所选Prepared及灰度证据到原Accepted。原t任务ID命名空间和旧payload/request hash算法不改，同事件切换固定/灰度目标属于载荷变更，不能创建第二任务。等待输入、重复API/MQ投递均不再读当前策略；后续新事件才受扩量/回退影响。
+
+API新模式用当前负责人投影检查原触发/创建/执行及现有rollout:task:create授权；MQ仍由部署固定身份先resolve当前组织授权，再在收窄scope内接收。Rabbit允许pipelineIds集合通过统一targetPipelineId读取固定/灰度目标，事件类型/source/content限制与默认关闭不变。没有新增资源、接收表、执行器或传输确认算法。
+
+物化继续检查当前组织授权、已冻结的所选精确发布版本/Selector可用性、目标输入修订和原发生时刻选数，继而原工作器排队。新Rollout证据iqc-pipeline-rollout-trigger-task-v1绑定原t身份、payloadHash、事件稳定请求键和原cohort/修订；原triggerSnapshot与productionInputs同时保存，检测时不重新分配。
+
+工作器/历史来源guard读取原持久接收记录并共享readAcceptedEvidence纯校验，核对请求/载荷/负责人/原分配、triggerSnapshot时刻/类型/输入修订/过滤结果及冻结输入，Selector存在时复用原选数证据校验。已知t任务在无rolloutSnapshot时也读取原接收类型：固定请求正常继续，灰度请求缺标记拒绝，不能降级成固定任务。此事件来源校验需完整Guard依赖；旧简化构造仍供非事件旧路径。原三参数TriggerIdentity与旧触发物化调用保留，服务端不能丢失已接收的灰度证据。
+
+接收回执仍为原标量Receipt；等待输入时不构造假的执行快照/分配展示，实际物化后的任务继续原安全灰度展示。当前Root仅编译/构建，不新增或运行测试、SQL/broker/browser或部署。B待验证旧JSON/hash/ID及构造、固定/灰度互斥、API/MQ当前授权、首次冻结/等待期间扩量回退/同事件重投不读新策略、载荷冲突/过期/失败回滚/ACK联合、实际物化worker/Selector/NO_DATA/组范围、丢失标记和坏接收/时刻/输入证据拒绝。归档订阅定义仍固定版本，下一层接入同一能力；I7和全PRD不标完成。
+
+## 归档订阅接入（2026-10-23后续增量）
+
+归档订阅新增显式灰度定义与发布协议，复用上节事件接收分配：订阅发布冻结路由意图，每条新归档事件首次持久接受时冻结当前策略。原固定协议与已有任务保持原含义，详见 [归档订阅](iqc-event-subscriptions.md)。此前章节的“归档订阅待接入”是历史阶段记录；本增量代码不替代真实运行验证或A/B效果归因验收。
 ### Selector / 周期灰度组合兼容验证（B，2026-10-23）
 
 固定 A 后端 b2765c4 无冲突并入 B a7bc903，UI 99b467f 并入 73e89d7。
@@ -173,3 +190,12 @@ MAX(attempt_no) 后追加独立拒绝轮次，不改生产代码。原 50769 com
 旧轮与规则快照。检查点 INSERT trigger 抛错时任务/执行/游标共同回滚，解除故障后同 Frame
 可以真正入队。真实已入队轮次的成功 worker 运行、完整依赖校验、实际 PDP 和周期发布流程
 仍不在本轮证据范围；不将独立拒绝轮次称为原入队轮次的成功执行。
+## 生产灰度观测统计（2026-10-23）
+
+复用原业务统计接口和BusinessQualityReportService。显式选择1–20个任务及原执行轮次口径，保留组织可见范围、500个任务会话和50000项目上限；正式业务与评测任务隔离。灰度任务读取原rolloutSnapshot，复用PipelineRolloutExecutionGuard核对实际任务、不可变修订/发布来源、原选择及周期/事件专用证据。缺证据的已知灰度任务不能当普通固定任务统计；坏证据拒绝整份报告，不静默跳过。不会读取当前灰度比例替代历史分配。
+
+PolicyGroup新增可空rollout，schema为iqc-business-rollout-attribution-v1，只返回修订ID/号/Hash、策略Hash、侧别、原状态/候选比例、基线/候选/所选版本与所选发布Hash；不返回分桶盐、原actor/requestKey、cohortHash或完整比较配置。原DTO及服务构造保留，普通组不增加JSON字段。组身份由原冻结标准加该分配投影派生，拆开不同修订/侧别及非灰度来源；FIRST/LATEST去重同样在该组内，不能跨修订抹去另一组。
+
+评分、项目失败率、机器/人工对照、人工修改率与缺结果/复核覆盖复用原计算。页面显示生产灰度观测及冻结来源摘要。分桶以任务为单位，任务包含的会话数可能不同，所选范围也非全部生产流量；候选配置比例不代表实际观测会话比例。跨版本评分标准或语料不一致不能直接解释为因果提升。同Dataset受控配对对照继续使用现有Benchmark，不复制另一套评测。生产费用/时延关联、统计显著性及完整A/B验收继续。
+
+本批仅编译/构建，终态见协作记录；独立验证须覆盖新旧JSON/构造、同修订两侧和不同修订/非灰度拆组、FIRST/LATEST分母、缺失结果与复核覆盖、旧修订回退不改归属、坏证据/撤权/跨组拒绝、SQL/实际worker产物与页面隐私生命周期。

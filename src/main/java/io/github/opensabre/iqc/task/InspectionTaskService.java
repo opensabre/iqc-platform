@@ -446,6 +446,14 @@ public class InspectionTaskService {
             InspectionTask receipt,List<String> ids,Integer concurrency,
             io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,
             io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,TriggerIdentity trigger) {
+        return materializeTriggeredPipelineTask(pipeline,receipt,ids,concurrency,selector,selection,trigger,null);
+    }
+    @Transactional
+    public InspectionTask materializeTriggeredPipelineTask(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared pipeline,
+            InspectionTask receipt,List<String> ids,Integer concurrency,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,TriggerIdentity trigger,
+            io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence rollout) {
         if(receipt==null || trigger==null || !"WAITING_INPUT".equals(receipt.getStatus()) || receipt.getId()==null
                 || !dataScope.owner().equals(receipt.getCreatedBy()) || !trigger.payloadHash().equals(receipt.getTriggerPayloadHash())
                 || pipeline==null || pipeline.versionNo()==null || ids==null || concurrency==null || concurrency<1 || concurrency>32)
@@ -453,8 +461,24 @@ public class InspectionTaskService {
         if(selection!=null && (selector==null || !trigger.occurredAt().equals(selection.anchor())
                 || !selector.definition().equals(selection.definition()) || !ids.equals(selection.selectedConversationIds())))
             throw IqcException.invalidState("事件筛选证据不一致");
+        var accepted=receipt.getTriggerRequestJson()==null&&rollout==null?null:
+                io.github.opensabre.iqc.schedule.TaskTriggerService.readAcceptedEvidence(receipt,objectMapper);
+        if(accepted!=null&&((accepted.rollout()!=null)!=(rollout!=null)))throw IqcException.invalidState("事件灰度证据不能缺省或替换");
+        if(rollout!=null){
+            if(accepted==null||!io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.TRIGGER_SCHEMA.equals(rollout.schemaVersion())
+                    ||!rollout.taskId().equals(receipt.getId())||!trigger.occurredAt().equals(accepted.request().occurredAt())
+                    ||!io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(accepted.rollout())).equals(
+                            io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(rollout)))
+                    ||(accepted.selector()!=null)!=(selector!=null)||(selector!=null&&selection==null))
+                throw IqcException.invalidState("事件灰度原接收来源不一致");
+            if(selector!=null&&!io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(selector)).equals(
+                    io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(accepted.selector()))))throw IqcException.invalidState("事件灰度Selector来源不一致");
+            var marker=objectMapper.valueToTree(pipeline);
+            if(selector!=null)((com.fasterxml.jackson.databind.node.ObjectNode)marker).put("selectorRequestHash",trigger.payloadHash());
+            rollout.verifyTriggered(dataScope.actorUserId(),accepted.request(),trigger.payloadHash(),marker,objectMapper);
+        }
         return createUsingPipelineSnapshot(pipeline,receipt.getName(),ids,concurrency,null,selection,
-                selector==null?null:trigger.payloadHash(),selector,null,trigger,receipt);
+                selector==null?null:trigger.payloadHash(),selector,null,trigger,receipt,rollout);
     }
     /** Internal rollout boundary; HTTP callers cannot supply allocation evidence. */
     @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)

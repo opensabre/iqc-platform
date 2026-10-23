@@ -34,6 +34,11 @@ public class PipelineRolloutExecutionGuard {
         try{
             if(snapshot==null||!snapshot.isObject()||snapshot.has("evaluationSnapshot")||snapshot.has("schemeSnapshot")
                     ||!"PIPELINE".equals(snapshot.path("executionStrategy").path("mode").asText()))throw new IllegalArgumentException();
+            if(!snapshot.has("rolloutSnapshot")&&expectedTaskId!=null&&expectedTaskId.matches("t[a-f0-9]{63}")){
+                if(tasks==null)throw new IllegalArgumentException();var task=tasks.selectById(expectedTaskId);
+                if(task==null)throw new IllegalArgumentException();
+                if(io.github.opensabre.iqc.schedule.TaskTriggerService.readAcceptedEvidence(task,json).rollout()==null)return;
+            }
             var evidence=PipelineRolloutTaskEvidence.read(snapshot.path("rolloutSnapshot"),json);
             evidence.verifyFrozen(expectedTaskId==null?evidence.taskId():expectedTaskId,snapshot.path("pipelineSnapshot"),json);
             var marker=snapshot.path("pipelineSnapshot");
@@ -50,8 +55,37 @@ public class PipelineRolloutExecutionGuard {
             var comparison=BenchmarkVariableComparator.compare(baseline,candidate,policy.variable(),json);
             if(!Objects.equals(comparison,evidence.decision().comparison()))throw new IllegalArgumentException();
             if(PipelineRolloutTaskEvidence.PERIODIC_SCHEMA.equals(evidence.schemaVersion()))validatePeriodic(snapshot,evidence);
+            if(PipelineRolloutTaskEvidence.TRIGGER_SCHEMA.equals(evidence.schemaVersion()))validateTriggered(snapshot,evidence);
+
 
         }catch(Exception invalid){throw IqcException.invalidState("灰度任务原修订、发布来源或比较证据不一致");}
+    }
+    private void validateTriggered(JsonNode snapshot,PipelineRolloutTaskEvidence evidence) throws java.io.IOException {
+        if(tasks==null)throw new IllegalArgumentException();var task=tasks.selectById(evidence.taskId());
+        if(task==null||!evidence.taskId().equals(task.getId())||!"PIPELINE".equals(task.getTaskType()))throw new IllegalArgumentException();
+        var exact=json.copy().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));
+        var accepted=io.github.opensabre.iqc.schedule.TaskTriggerService.readAcceptedEvidence(task,exact);
+        var trigger=exact.treeToValue(snapshot.path("triggerSnapshot"),io.github.opensabre.iqc.task.InspectionTaskService.TriggerIdentity.class);
+        if(accepted.rollout()==null||trigger==null||trigger.evidence()==null
+                ||!accepted.payloadHash().equals(trigger.payloadHash())||!accepted.request().occurredAt().equals(trigger.occurredAt())
+                ||!"iqc-trigger-materialization-v1".equals(trigger.evidence().path("schemaVersion").asText())
+                ||!accepted.request().eventType().equals(trigger.evidence().path("eventType").asText())
+                ||!io.github.opensabre.iqc.selector.SelectorAssetService.hash(exact.writeValueAsString(accepted.rollout())).equals(
+                        io.github.opensabre.iqc.selector.SelectorAssetService.hash(exact.writeValueAsString(evidence))))throw new IllegalArgumentException();
+        evidence.verifyTriggered(accepted.ownerBound().userId(),accepted.request(),accepted.payloadHash(),snapshot.path("pipelineSnapshot"),exact);
+        if(accepted.selector()!=null)io.github.opensabre.iqc.task.InspectionTaskService.validateSelectorEvidence(task,accepted.payloadHash(),accepted.selector(),exact);
+        else if(task.getSelectionFilterJson()!=null||snapshot.path("pipelineSnapshot").has("selectorRequestHash"))throw new IllegalArgumentException();
+        String revision=trigger.evidence().path("inputRevision").asText();
+        if(!revision.matches("[a-f0-9]{64}")||!trigger.evidence().path("conversationId").isTextual()
+                ||!trigger.evidence().path("filteredOut").isBoolean())throw new IllegalArgumentException();
+        if(accepted.request().target()!=null&&(!accepted.request().target().inputRevision().equals(revision)
+                ||accepted.request().target().conversationId()!=null&&!accepted.request().target().conversationId().equals(trigger.evidence().path("conversationId").asText())))
+            throw new IllegalArgumentException();
+        var inputs=snapshot.path("productionInputs").path("conversations");
+        if(!inputs.isArray()||inputs.size()>1||trigger.evidence().path("filteredOut").booleanValue()!=inputs.isEmpty())throw new IllegalArgumentException();
+        for(var input:inputs)if(!revision.equals(input.path("sourceFingerprint").asText())
+                ||!trigger.evidence().path("conversationId").asText().equals(input.path("conversationId").asText()))throw new IllegalArgumentException();
     }
     private void validatePeriodic(JsonNode snapshot,PipelineRolloutTaskEvidence evidence) throws java.io.IOException {
         if(tasks==null||periodicVersions==null)throw new IllegalArgumentException();
