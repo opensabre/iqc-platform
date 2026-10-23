@@ -81,3 +81,20 @@ ACK 调用前通过无 Spring 事务的独立 JDBC 连接读取 WAITING_INPUT，
 Rabbit 原 88884/stop 98255 均终态 0、独立 epmd 关闭，34307/35672/35673/34699 均 ECONNREFUSED。
 本轮 basicGet 交付原消费者，非 Spring 注解监听容器。当前授权/发布资产仍受控，目标尚不存在，
 不能外推实际 PDP、选数物化或 worker 全链，也不包含生产 broker 或语音转换。
+
+### Spring 注解监听容器与 SQL 联合验证（B，2026-10-23）
+
+新增 `annotationListenerAutomaticallyAcceptsDuplicatesAndDeadLettersConflicts`：加载原生产
+RabbitTriggerConfiguration/配置绑定/EnableRabbit 与 RabbitTriggerConsumer，而非手工交付或
+重新实现监听器。唯一运行中的容器经原持久拓扑自动接收；首次消息独立入库，同 body 再投
+不重查资产、不新增任务；冲突载荷被拒绝并进入死信，原任务名称保持。以消费者原 accepted/
+rejected 指标等待处理结束，停止容器后确认主队列为空，随机拓扑和上下文清理。
+
+原 52237 因测试方法引用误用 listener 包接口编译失败；改用 core.MessageListenerContainer
+后，原 80072 compiler:testCompile+surerfire 终态 0，日志
+`/tmp/iqc-b-rabbit-container-sql-final.log`，fresh XML 5 项零失败错误跳过，包含前轮 SQL/broker
+回归。专用 MySQL 自动关闭；Rabbit 原 46305/stop 18415 均终态 0、epmd 关闭，四个专用端口
+34307/35672/35673/34699 均 ECONNREFUSED。无生产修改。
+
+当前组织授权与发布资产仍为受控夹具，目标输入尚不存在。本轮证明注解发现、配置绑定、
+原消息转换/人工 ACK 与数据库接收能联合工作，不证明实际 PDP、目标物化/worker 或供应商链路。
