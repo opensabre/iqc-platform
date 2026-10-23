@@ -55,3 +55,15 @@ A初次交付仅编译。初始独立验证清单（后续B证据见下节）：
 专用节点iqc_b_validation@localhost，配置/数据/日志在`/private/tmp/iqc-b-rabbit.gnovBK`；仅AMQP127.0.0.1:35672，分布式35673及独立EPMD34699，不使用已有broker。原54010节点、9133停止命令均terminal0，专用EPMD停止0，三个端口最终均ECONNREFUSED；随机队列/交换机由夹具清理。未迁移或连接共享SQL。
 
 传输成功仍不等于真实SQL幂等：当前broker测试中acceptance和组织解析为受控边界。同事件同body返回原持久任务、不同body冲突、实际REQUIRES_NEW提交后ACK、SQL竞争、Spring监听容器、内容/retryPolicy权限、WAITING_INPUT到worker产物及真实当前PDP仍须联合验证。不要把两次受控acceptance调用返回同一个fixture ID当作数据库幂等证明。无push/部署，默认enabled=false与v1不变，语音转换排除。
+
+### 独立 SQL 接收事务验证（B，2026-10-23）
+
+`IsolatedMysqlBrokerAcceptanceIT` 复用隔离 MySQL、原 InspectionTaskMapper、
+框架 PoMetaObjectHandler、真实 IqcDataScope 与 TaskTriggerService。三个测试确认：
+外层事务回滚后 REQUIRES_NEW 接收记录仍为 WAITING_INPUT 且负责人正确；同一请求重投
+返回原任务且不重新解析资产；同事件不同载荷不能覆盖原任务；缺当前授权或资产失败不留记录。
+
+原进程 34507 终态 0，日志 `/tmp/iqc-b-broker-acceptance-sql.log`，fresh Surefire XML
+3 项、零失败错误跳过。75 个迁移校验通过，版本 1.1.74；专用 34307 自动关闭、socket 已消失。
+发布资产为受控 fixture，目标会话尚不存在；本轮没有 AMQP Channel、Spring 监听容器、
+实际 PDP、目标物化或 worker。不能将独立 SQL 与前轮 broker 结果合称提交后 ACK 的联合验证。
