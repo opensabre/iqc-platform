@@ -69,6 +69,32 @@ class PipelineEvaluationReportTest {
         return new DatasetSnapshot.Member(id, 1, 1, "a".repeat(64), gold);
     }
     @Test
+    void historicalReportConstructorsOmitNewFieldsAndPreserveEvidenceHash() throws Exception {
+        var current=service.report("task","execution");
+        var legacy=new PipelineEvaluationService.Report(current.schemaVersion(),current.taskId(),current.executionId(),
+                current.datasetHash(),current.expectedSamples(),current.availableSamples(),current.successfulSamples(),
+                current.complete(),current.missingSampleIds(),current.sourceExecutionIds(),current.findingMetrics(),
+                current.businessMetrics(),current.latencyMetrics(),current.regressionMetrics(),current.structuredMetrics());
+        // Preserve serialized decimal scales; valueToTree normalizes trailing zeros in this mapper.
+        String currentJson=json.writeValueAsString(current);
+        String historicalJson=currentJson.substring(0,currentJson.indexOf(",\"citationGroundingMetrics\":"))+"}";
+        assertThat(json.writeValueAsString(legacy)).isEqualTo(historicalJson);
+        var restored=json.readValue(historicalJson,PipelineEvaluationService.Report.class);
+        assertThat(restored.inputCompletenessMetrics()).isNull();
+        assertThat(restored.citationGroundingMetrics()).isNull();
+        assertThat(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(json.writeValueAsString(restored)))
+                .isEqualTo(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(historicalJson));
+        var withCitation=new PipelineEvaluationService.Report(current.schemaVersion(),current.taskId(),current.executionId(),
+                current.datasetHash(),current.expectedSamples(),current.availableSamples(),current.successfulSamples(),
+                current.complete(),current.missingSampleIds(),current.sourceExecutionIds(),current.findingMetrics(),
+                current.businessMetrics(),current.latencyMetrics(),current.regressionMetrics(),current.structuredMetrics(),current.citationGroundingMetrics());
+        var citationTree=(com.fasterxml.jackson.databind.node.ObjectNode)json.valueToTree(current);
+        citationTree.remove("inputCompletenessMetrics");
+        assertThat(json.<com.fasterxml.jackson.databind.JsonNode>valueToTree(withCitation)).isEqualTo(citationTree);
+        assertThat(json.readValue(json.writeValueAsString(withCitation),PipelineEvaluationService.Report.class)).isEqualTo(withCitation);
+    }
+
+    @Test
     void missingArtifactsRetainEveryGoldDenominatorAndNeverPassRegression() {
         var report = service.report("task", "execution");
         assertThat(report.expectedSamples()).isEqualTo(2);
@@ -89,6 +115,26 @@ class PipelineEvaluationReportTest {
         assertThat(report.businessMetrics().highRiskRecall()).isEqualByComparingTo("0");
         assertThat(report.businessMetrics().labelGold()).isEqualTo(2);
         assertThat(report.businessMetrics().labelAccuracy()).isNull();
+    }
+    @Test
+    void frozenInputCompletenessDoesNotDependOnMissingExecutionArtifacts() {
+        var original=dataset(DatasetDraft.Type.BASIC);
+        var members=original.members().stream().map(member->{
+            var g=member.gold();var context=json.createObjectNode();
+            context.putObject("conversation").putObject("businessContext").putObject("businessFields")
+                    .put("iqcInputManifestVersion","iqc-input-count-manifest-v1")
+                    .put("iqcExpectedMessageCount","first".equals(member.sampleId())?2:1).put("iqcInputManifestRef","batch");
+            var gold=new GoldConversation(g.schemaVersion(),g.sourceSampleId(),g.conversationId(),g.messages(),context,g.findings(),
+                    g.annotatorId(),g.reviewerId(),g.source(),g.tags(),g.difficulty(),g.decision());
+            return new DatasetSnapshot.Member(member.sampleId(),member.versionNo(),member.draftRevision(),member.contentHash(),gold);
+        }).toList();
+        when(prepared.dataset()).thenReturn(new DatasetSnapshot(original.schemaVersion(),original.datasetId(),original.name(),original.type(),original.description(),members));
+        var report=service.report("task","execution");
+        assertThat(report.availableSamples()).isZero();assertThat(report.complete()).isFalse();
+        assertThat(report.inputCompletenessMetrics().measuredSamples()).isEqualTo(2);
+        assertThat(report.inputCompletenessMetrics().expectedMessages()).isEqualTo(3);
+        assertThat(report.inputCompletenessMetrics().observedMessages()).isEqualTo(2);
+        assertThat(report.inputCompletenessMetrics().declaredMessageCoverage()).isEqualByComparingTo("0.666667");
     }
     @Test
     void noMeasuredCallsOrDurationsCannotProducePerfectSuccessOrZeroLatency() {

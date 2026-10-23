@@ -61,6 +61,9 @@ class IsolatedMysqlMeasuredPublicationIT {
         var sql=context.getBean(SqlSessionTemplate.class);String suffix=UUID.randomUUID().toString().replace("-","");
         String conversation="c"+suffix,first="m1"+suffix,second="m2"+suffix;
         db.update("INSERT INTO iqc_conversation(id,source_file_name,message_count,status,created_by,owner_group_id,source_fingerprint) VALUES (?,'processed conversation',2,'READY','annotator','group',?)",conversation,suffix);
+        String manifest=json.createObjectNode().put("iqcInputManifestVersion","iqc-input-count-manifest-v1")
+                .put("iqcExpectedMessageCount",3).put("iqcInputManifestRef","export-"+suffix).put("privateField","not in message Gold").toString();
+        db.update("UPDATE iqc_conversation SET business_fields_json=? WHERE id=?",manifest,conversation);
         db.update("INSERT INTO iqc_conversation_message(id,conversation_id,sequence_no,speaker_role,content,start_ms,end_ms,relative_time,raw_line,line_number) VALUES (?,?,1,'customer','processed customer text',0,1000,'00:00:00','processed customer text',1),(?,?,2,'agent','processed agent text',2000,3000,'00:00:02','processed agent text',2)",first,conversation,second,conversation);
         var findingService=context.getBean(FindingCatalogService.class);
         var definition=new FindingDefinition(FindingDefinition.SCHEMA,"GAP_"+suffix.toUpperCase(),"Transcript interval gap","TIMING",null,
@@ -103,6 +106,14 @@ class IsolatedMysqlMeasuredPublicationIT {
             var executed=run(task);
             var report=evaluations.report(executed.getId(),executed.getCurrentExecutionId());
             assertTrue(report.complete());assertEquals(1,report.successfulSamples());
+            var completeness=report.inputCompletenessMetrics();
+            assertEquals(1,completeness.measuredSamples());assertEquals(1,completeness.deficientSamples());
+            assertEquals(3,completeness.expectedMessages());assertEquals(2,completeness.observedMessages());
+            assertEquals(1,completeness.missingMessages());
+            assertEquals(0,new BigDecimal("0.666667").compareTo(completeness.declaredMessageCoverage()));
+            var messageGold=gold.read(gold.approvedVersion(sample.getId(),1).getSnapshotJson(),GoldConversation.class);
+            assertEquals(3,messageGold.businessContext().at("/conversation/businessContext/businessFields").size());
+            assertTrue(messageGold.businessContext().at("/conversation/businessContext/businessFields/privateField").isMissingNode());
             assertEquals(0,BigDecimal.ONE.compareTo(report.findingMetrics().aggregate().f1()));
             // Real persisted metric results must never manufacture a model consistency denominator.
             var repeated=run(evaluations.create(dataset.getId(),1,asset.getId(),null,1,"Independent repeat",1,
@@ -204,6 +215,9 @@ class IsolatedMysqlMeasuredPublicationIT {
         // A reviewed candidate becomes an independently approved gold version, without recapturing live input.
         String candidateBody=captured.getContentSnapshot(),candidateLineage=captured.getExpectedJson();
         db.update("UPDATE iqc_conversation_message SET content='changed after candidate',start_ms=20000,end_ms=21000 WHERE id=?",second);
+        db.update("UPDATE iqc_conversation SET business_fields_json=? WHERE id=?",
+                json.createObjectNode().put("iqcInputManifestVersion","iqc-input-count-manifest-v1")
+                        .put("iqcExpectedMessageCount",99).put("iqcInputManifestRef","changed-after-candidate").toString(),conversation);
         gold.annotate(captured.getId(),new GoldSampleService.Annotation(0,List.of(new GoldFinding(definition.code(),Finding.ValueType.NUMBER,
                 Finding.State.KNOWN,json.valueToTree(1000),List.of(first,second))),null,List.of("feedback"),GoldConversation.Difficulty.BASIC,
                 new GoldDecision(new BigDecimal("100"),GoldDecision.ScoreStatus.FINAL,Map.of(),GoldDecision.Risk.NONE)));
@@ -214,12 +228,22 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals("processed agent text",frozenGold.messages().get(1).content());
         assertEquals(2000L,frozenGold.messages().get(1).startMs());
         assertEquals(completed.getId(),frozenGold.businessContext().path("candidateLineage").path("reviewId").asText());
+        assertEquals(3,frozenGold.businessContext().at("/conversation/businessContext/businessFields/iqcExpectedMessageCount").intValue());
+        assertEquals("export-"+suffix,frozenGold.businessContext().at("/conversation/businessContext/businessFields/iqcInputManifestRef").asText());
         var feedbackDataset=datasets.create("Feedback regression",new DatasetDraft(DatasetDraft.SCHEMA,DatasetDraft.Type.REGRESSION,null,
                 List.of(new DatasetDraft.Member(captured.getId(),approved.getVersionNo()))));
         datasets.freeze(feedbackDataset.getId(),1);
         var feedbackTask=run(evaluations.create(feedbackDataset.getId(),1,asset.getId(),null,1,"Feedback regression",1,"feedback_"+suffix));
         var feedbackReport=evaluations.report(feedbackTask.getId(),feedbackTask.getCurrentExecutionId());
         assertTrue(feedbackReport.complete());assertEquals(1,feedbackReport.successfulSamples());
+        assertEquals(3,feedbackReport.inputCompletenessMetrics().expectedMessages());
+        assertEquals(2,feedbackReport.inputCompletenessMetrics().observedMessages());
+        assertEquals(1,feedbackReport.inputCompletenessMetrics().missingMessages());
+        // Both approved source paths retain their own manifest after live archive metadata has changed.
+        var originalReport=evaluations.report(evidence.getFirst().taskId(),evidence.getFirst().executionId());
+        assertEquals(3,originalReport.inputCompletenessMetrics().expectedMessages());
+        assertEquals(99,json.readTree(db.queryForObject("SELECT business_fields_json FROM iqc_conversation WHERE id=?",String.class,conversation))
+                .path("iqcExpectedMessageCount").intValue());
         assertEquals(0,BigDecimal.ONE.compareTo(feedbackReport.findingMetrics().aggregate().f1()));
         assertEquals(0,new BigDecimal("20").compareTo(feedbackReport.businessMetrics().meanAbsoluteScoreError()));
         assertEquals(0,BigDecimal.ZERO.compareTo(feedbackReport.regressionMetrics().passRate()));
@@ -353,8 +377,57 @@ class IsolatedMysqlMeasuredPublicationIT {
                 .andReturn().getResponse().getContentAsString();
         assertEquals("IQC-1006",j.readTree(denied).path("code").asText());assertTrue(j.readTree(denied).path("data").isNull()||j.readTree(denied).path("data").isMissingNode());
         verify(grants,times(4)).current(Set.of("iqc:evaluation:report:view"));
+        verifyConversationCosts(db,s,retried,first,conversation,failedConversation,priorId);
         verify(model,times(4)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
         verify(gateway,times(4)).invokeTracked(any(),any(),any(),any(),any(),any());
+    }
+    /** Synthetic accounting rows exercise actual MySQL filtering and the shared currency result map. */
+    private void verifyConversationCosts(JdbcTemplate db,SqlSessionTemplate sql,InspectionTask task,InspectionTask other,
+            String conversation,String otherConversation,String priorId) {
+        String run=task.getCurrentExecutionId(), prefix="cost"+UUID.randomUUID().toString().replace("-","");
+        insertCost(db,prefix+"1",task.getId(),run,conversation,"USD","CONFIRMED","1.25");
+        insertCost(db,prefix+"2",task.getId(),run,conversation,"USD","UNKNOWN",null);
+        insertCost(db,prefix+"3",task.getId(),run,conversation,"USD","CONFIRMED","0.75");
+        insertCost(db,prefix+"4",task.getId(),run,conversation,"EUR","CONFIRMED","2.50");
+        insertCost(db,prefix+"5",task.getId(),run,otherConversation,"USD","CONFIRMED","50");
+        insertCost(db,prefix+"6",task.getId(),priorId,conversation,"USD","CONFIRMED","3");
+        insertCost(db,prefix+"7",other.getId(),other.getCurrentExecutionId(),conversation,"USD","CONFIRMED","99");
+        insertCost(db,prefix+"8",task.getId(),run,null,"USD","CONFIRMED","4");
+        var ledger=context.getBean(io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.class);
+        var first=ledger.taskPageWithSummary(task.getId(),run,null,1,2,conversation);
+        var second=ledger.taskPageWithSummary(task.getId(),run,null,2,2,conversation);
+        assertEquals(4,first.total());assertEquals(2,first.records().size());assertEquals(2,second.records().size());
+        assertEquals(first.costSummary(),second.costSummary());assertEquals("4",first.costSummary().callCount());
+        assertEquals("3",first.costSummary().knownCount());assertEquals("1",first.costSummary().unknownCount());
+        var ids=new java.util.HashSet<String>();
+        java.util.stream.Stream.concat(first.records().stream(),second.records().stream()).forEach(row->{
+            assertEquals(task.getId(),row.taskId());assertEquals(run,row.executionId());assertEquals(conversation,row.conversationId());
+            assertTrue(ids.add(row.callId()));
+        });
+        assertEquals(2,first.costSummary().currencies().size());
+        for(var group:first.costSummary().currencies()) {
+            assertEquals(0,new BigDecimal("USD".equals(group.currency())?"2":"2.5").compareTo(new BigDecimal(group.knownSubtotal())));
+        }
+        var unknown=ledger.taskPageWithSummary(task.getId(),run,"UNKNOWN",1,2,conversation);
+        assertEquals(1,unknown.total());assertEquals("0",unknown.costSummary().knownCount());
+        assertNull(unknown.costSummary().currencies().getFirst().knownSubtotal());
+        var historical=ledger.taskPageWithSummary(task.getId(),null,null,1,10,conversation);
+        assertEquals(5,historical.total());assertEquals("5",historical.costSummary().callCount());
+        var empty=ledger.taskPageWithSummary(task.getId(),run,null,1,2,"no-matching-conversation");
+        assertEquals(0,empty.total());assertEquals("0",empty.costSummary().callCount());assertTrue(empty.costSummary().currencies().isEmpty());
+        // Old four-parameter mapper must tolerate the missing conversationId key and share the result map.
+        var mapper=sql.getMapper(io.github.opensabre.iqc.result.llm.gateway.GatewayCallMapper.class);
+        assertEquals(6,mapper.costGroups(null,task.getId(),run,null).stream().mapToLong(g->g.getCallCount()).sum());
+        assertEquals(4,mapper.conversationCostGroups(null,task.getId(),run,null,conversation).stream().mapToLong(g->g.getCallCount()).sum());
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->ledger.taskPageWithSummary(task.getId(),other.getCurrentExecutionId(),null,1,2,conversation));
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->ledger.taskPageWithSummary(task.getId(),run,null,1,2,"bad/id"));
+        var scope=context.getBean(IqcDataScope.class);when(scope.canView(any(),any())).thenReturn(false);
+        try { assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->ledger.taskPageWithSummary(task.getId(),run,null,1,2,conversation)); }
+        finally { when(scope.canView(any(),any())).thenReturn(true); }
+    }
+    private void insertCost(JdbcTemplate db,String id,String task,String run,String conversation,String currency,String status,String amount) {
+        db.update("INSERT INTO iqc_model_gateway_call(call_id,model_key,task_id,execution_id,conversation_id,status,reserved_at_utc,pricing_currency,calculated_cost,cost_status) VALUES (?,?,?,?,?,?,UTC_TIMESTAMP(3),?,?,?)",
+                id,"a".repeat(64),task,run,conversation,status,currency,amount==null?null:new BigDecimal(amount),amount==null?"UNKNOWN":"CALCULATED_FROM_DECLARED_PRICE");
     }
     private ScheduledActorAccessService.Resolved authorizedActor() {
         return new ScheduledActorAccessService.Resolved("user-annotator","annotator",false,"group",Set.of(),
@@ -379,6 +452,9 @@ class IsolatedMysqlMeasuredPublicationIT {
                     EvaluationDatasetMapper.class,EvaluationDatasetVersionMapper.class,EvaluationSampleResultMapper.class,
                     ConversationInspectionResultMapper.class,RuleInspectionResultMapper.class,InspectionEvidenceMapper.class,InspectionResultMapper.class,ResultReviewMapper.class,ActionDiscoveryMapper.class))
                 if(!f.getConfiguration().hasMapper(type))f.getConfiguration().addMapper(type);
+            var pagination=new com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor();
+            pagination.addInnerInterceptor(new com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor(com.baomidou.mybatisplus.annotation.DbType.MYSQL));
+            f.getConfiguration().addInterceptor(pagination);
             return new SqlSessionTemplate(f);
         }
         @Bean ScheduledActorAccessService actionActors(){var service=mock(ScheduledActorAccessService.class);when(service.capture()).thenReturn(new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","user-annotator","annotator",false,"group"));return service;}
