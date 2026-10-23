@@ -54,6 +54,7 @@ class IsolatedMysqlRolloutServiceIT {
     }
     @BeforeEach void fixture() {
         jdbc=new JdbcTemplate(context.getBean(DataSource.class));service=context.getBean(PipelineRolloutService.class);
+        reset(context.getBean(io.github.opensabre.iqc.result.InspectionExecutionService.class));
         id="p"+UUID.randomUUID().toString().replace("-","");
         jdbc.update("INSERT INTO iqc_pipeline_asset(id,code,name,draft_config_json,status) VALUES(?,?,?,'{}','ACTIVE')",id,id,id);
         conversationId="c"+UUID.randomUUID().toString().replace("-","");
@@ -247,6 +248,84 @@ class IsolatedMysqlRolloutServiceIT {
         assertThat(context.getBean(ObjectMapper.class).readTree(task.getSelectionFilterJson()).at("/selection/selectedConversationIds")).isEmpty();
         service.append(id,1,policy(10000));assertThat(periodic(selector,planned).getRuleSnapshotJson()).isEqualTo(task.getRuleSnapshotJson());
     }
+    private io.github.opensabre.iqc.schedule.PeriodicScheduleService.Frame scheduleFrame(
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,java.time.Instant due,
+            io.github.opensabre.iqc.schedule.PeriodicDefinition.MisfirePolicy misfire,java.time.Instant observed) throws Exception {
+        var scope=context.getBean(IqcDataScope.class);when(scope.owner()).thenReturn("actor-1");when(scope.canViewAll()).thenReturn(true);
+        var definition=new io.github.opensabre.iqc.schedule.PeriodicDefinition("iqc-periodic-rollout-definition-v1","0 * * * * *","UTC",due,null,misfire,10,1,null,
+                new io.github.opensabre.iqc.selector.SelectorAssetService.Reference(selector.selectorId(),1),null,new io.github.opensabre.iqc.schedule.PeriodicDefinition.RolloutReference(id));
+        var bound=new io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","actor-1","actor-1",true,null);
+        var release=new io.github.opensabre.iqc.schedule.PeriodicScheduleService.Published("iqc-periodic-rollout-release-v1",definition,null,selector,bound);
+        String schedule="cron"+misfire.name()+id,revision="rev"+schedule;
+        String body=context.getBean(ObjectMapper.class).writeValueAsString(release);
+        jdbc.update("INSERT INTO iqc_periodic_schedule(id,code,name,draft_config_json,active_revision_id,status,next_planned_at_utc,created_by) VALUES(?,?,?,'{}',?,'ACTIVE',?,'actor-1')",schedule,schedule,"scheduled rollout",revision,io.github.opensabre.iqc.schedule.PeriodicScheduleService.utc(due));
+        jdbc.update("INSERT INTO iqc_periodic_schedule_revision(id,schedule_id,version_no,source_draft_revision,snapshot_json,content_hash) VALUES(?,?,1,1,?,?)",revision,schedule,body,io.github.opensabre.iqc.selector.SelectorAssetService.hash(body));
+        return context.getBean(io.github.opensabre.iqc.schedule.PeriodicScheduleService.class).peek(schedule,observed);
+    }
+    private io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved scheduleActor(io.github.opensabre.iqc.schedule.PeriodicScheduleService.Frame frame){
+        return new io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved("actor-1","actor-1",true,null,Set.of(),io.github.opensabre.iqc.schedule.PeriodicScheduleService.grants(frame.snapshot().definition()),java.time.Instant.now());
+    }
+    @Test void realFireLatestUsesPlannedTickAndStaleFrameCannotMaterializeTwice() throws Exception {
+        var selector=selector(conversationId);var due=java.time.Instant.parse("2026-10-23T04:00:00Z");var observed=due.plusSeconds(615);
+        service.append(id,0,policy(0));var frame=scheduleFrame(selector,due,io.github.opensabre.iqc.schedule.PeriodicDefinition.MisfirePolicy.FIRE_LATEST,observed);
+        service.append(id,1,policy(10000));var schedules=context.getBean(io.github.opensabre.iqc.schedule.PeriodicScheduleService.class);
+        assertThat(schedules.fire(frame,observed,scheduleActor(frame))).isTrue();
+        assertThat(schedules.fire(frame,observed,scheduleActor(frame))).isFalse();
+        var task=jdbc.queryForMap("SELECT id,planned_at_utc,rule_snapshot_json,selection_filter_json FROM iqc_inspection_task WHERE periodic_schedule_id=?",frame.scheduleId());
+        assertThat(task.get("planned_at_utc")).isEqualTo(io.github.opensabre.iqc.schedule.PeriodicScheduleService.utc(due.plusSeconds(600)));
+        var json=context.getBean(ObjectMapper.class);
+        assertThat(json.treeToValue(json.readTree((String)task.get("selection_filter_json")).at("/selection/anchor"),java.time.Instant.class)).isEqualTo(due.plusSeconds(600));
+        assertThat(json.readTree((String)task.get("rule_snapshot_json")).at("/pipelineSnapshot/versionNo").asInt()).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT next_planned_at_utc FROM iqc_periodic_schedule WHERE id=?",java.time.LocalDateTime.class,frame.scheduleId())).isEqualTo(io.github.opensabre.iqc.schedule.PeriodicScheduleService.utc(due.plusSeconds(660)));
+        verify(context.getBean(io.github.opensabre.iqc.result.InspectionExecutionService.class)).queueSystem((String)task.get("id"));
+    }
+    @Test void enqueueFailureRollsBackBothInstanceAndCursorThenOriginalFrameRetries() throws Exception {
+        var selector=selector(conversationId);var due=java.time.Instant.parse("2026-10-23T05:00:00Z");service.append(id,0,policy(0));
+        var frame=scheduleFrame(selector,due,io.github.opensabre.iqc.schedule.PeriodicDefinition.MisfirePolicy.CATCH_UP,due);
+        var schedules=context.getBean(io.github.opensabre.iqc.schedule.PeriodicScheduleService.class);var executions=context.getBean(io.github.opensabre.iqc.result.InspectionExecutionService.class);
+        doAnswer(call->{assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isTrue();throw new IllegalStateException("controlled enqueue failure");}).when(executions).queueSystem(anyString());
+        assertThatThrownBy(()->schedules.fire(frame,due,scheduleActor(frame))).hasMessageContaining("controlled enqueue failure");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE periodic_schedule_id=?",Integer.class,frame.scheduleId())).isZero();
+        assertThat(jdbc.queryForObject("SELECT next_planned_at_utc FROM iqc_periodic_schedule WHERE id=?",java.time.LocalDateTime.class,frame.scheduleId())).isEqualTo(io.github.opensabre.iqc.schedule.PeriodicScheduleService.utc(due));
+        reset(executions);assertThat(schedules.fire(frame,due,scheduleActor(frame))).isTrue();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE periodic_schedule_id=?",Integer.class,frame.scheduleId())).isOne();
+    }
+    @Test void skipAndNoDataAdvanceCursorWithoutInvokingQueue() throws Exception {
+        var selector=selector("absent"+id);var due=java.time.Instant.parse("2026-10-23T06:00:00Z");service.append(id,0,policy(0));
+        var schedules=context.getBean(io.github.opensabre.iqc.schedule.PeriodicScheduleService.class);
+        for(var mode:List.of(io.github.opensabre.iqc.schedule.PeriodicDefinition.MisfirePolicy.SKIP,io.github.opensabre.iqc.schedule.PeriodicDefinition.MisfirePolicy.FIRE_LATEST)){
+            var now=due.plusSeconds(615);var frame=scheduleFrame(selector,due,mode,now);assertThat(schedules.fire(frame,now,scheduleActor(frame))).isTrue();
+            assertThat(jdbc.queryForObject("SELECT status FROM iqc_inspection_task WHERE periodic_schedule_id=?",String.class,frame.scheduleId())).isEqualTo(mode==io.github.opensabre.iqc.schedule.PeriodicDefinition.MisfirePolicy.SKIP?"SKIPPED_MISFIRE":"NO_DATA");
+            assertThat(jdbc.queryForObject("SELECT next_planned_at_utc FROM iqc_periodic_schedule WHERE id=?",java.time.LocalDateTime.class,frame.scheduleId())).isEqualTo(io.github.opensabre.iqc.schedule.PeriodicScheduleService.utc(due.plusSeconds(660)));
+        }
+        verifyNoInteractions(context.getBean(io.github.opensabre.iqc.result.InspectionExecutionService.class));
+    }
+    @Test void competingFireCallsAdvanceOneCursorAndMaterializeOneInstance() throws Exception {
+        var selector=selector(conversationId);var due=java.time.Instant.parse("2026-10-23T07:00:00Z");service.append(id,0,policy(5000));
+        var frame=scheduleFrame(selector,due,io.github.opensabre.iqc.schedule.PeriodicDefinition.MisfirePolicy.CATCH_UP,due);
+        var schedules=context.getBean(io.github.opensabre.iqc.schedule.PeriodicScheduleService.class);
+        var ready=new CountDownLatch(2);var go=new CountDownLatch(1);
+        try(var workers=Executors.newFixedThreadPool(2)){
+            Callable<Boolean> fire=()->{ready.countDown();if(!go.await(10,TimeUnit.SECONDS))throw new IllegalStateException("fire barrier");return schedules.fire(frame,due,scheduleActor(frame));};
+            var first=workers.submit(fire);var second=workers.submit(fire);assertThat(ready.await(10,TimeUnit.SECONDS)).isTrue();go.countDown();
+            assertThat(List.of(first.get(30,TimeUnit.SECONDS),second.get(30,TimeUnit.SECONDS))).containsExactlyInAnyOrder(true,false);
+        } finally {go.countDown();}
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE periodic_schedule_id=?",Integer.class,frame.scheduleId())).isOne();
+        assertThat(jdbc.queryForObject("SELECT next_planned_at_utc FROM iqc_periodic_schedule WHERE id=?",java.time.LocalDateTime.class,frame.scheduleId())).isEqualTo(io.github.opensabre.iqc.schedule.PeriodicScheduleService.utc(due.plusSeconds(60)));
+        verify(context.getBean(io.github.opensabre.iqc.result.InspectionExecutionService.class),times(1)).queueSystem(anyString());
+    }
+    @Test void missingRolloutGrantOrExpiredAuthorizationCannotAdvanceCursor() throws Exception {
+        var selector=selector(conversationId);var due=java.time.Instant.parse("2026-10-23T08:00:00Z");service.append(id,0,policy(0));
+        var frame=scheduleFrame(selector,due,io.github.opensabre.iqc.schedule.PeriodicDefinition.MisfirePolicy.CATCH_UP,due);
+        var schedules=context.getBean(io.github.opensabre.iqc.schedule.PeriodicScheduleService.class);var valid=scheduleActor(frame);
+        var grants=new HashSet<>(valid.resourceCodes());grants.remove("iqc:pipeline:rollout:task:create");
+        var missing=new io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved(valid.userId(),valid.owner(),valid.all(),valid.groupId(),valid.roles(),Set.copyOf(grants),valid.checkedAt());
+        var expired=new io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved(valid.userId(),valid.owner(),valid.all(),valid.groupId(),valid.roles(),valid.resourceCodes(),java.time.Instant.now().minusSeconds(31));
+        for(var denied:List.of(missing,expired))assertThatThrownBy(()->schedules.fire(frame,due,denied)).hasMessageContaining("授权");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE periodic_schedule_id=?",Integer.class,frame.scheduleId())).isZero();
+        assertThat(jdbc.queryForObject("SELECT next_planned_at_utc FROM iqc_periodic_schedule WHERE id=?",java.time.LocalDateTime.class,frame.scheduleId())).isEqualTo(io.github.opensabre.iqc.schedule.PeriodicScheduleService.utc(due));
+        verifyNoInteractions(context.getBean(io.github.opensabre.iqc.result.InspectionExecutionService.class));
+    }
     private void storePublishedSources() throws Exception {
         var json=context.getBean(ObjectMapper.class);
         for(int version=1;version<=2;version++) {
@@ -350,6 +429,7 @@ class IsolatedMysqlRolloutServiceIT {
         @Bean SqlSessionFactory sessions(DataSource ds) throws Exception {
             var config=new MybatisConfiguration();config.setMapUnderscoreToCamelCase(true);
             config.addMapper(io.github.opensabre.iqc.selector.dao.SelectorAssetMapper.class);config.addMapper(io.github.opensabre.iqc.selector.dao.SelectorAssetVersionMapper.class);
+            config.addMapper(io.github.opensabre.iqc.schedule.dao.PeriodicScheduleMapper.class);config.addMapper(io.github.opensabre.iqc.schedule.dao.PeriodicScheduleRevisionMapper.class);
             config.addMapper(PipelineAssetMapper.class);config.addMapper(PipelineAssetVersionMapper.class);config.addMapper(PipelineRolloutRevisionMapper.class);
             config.addMapper(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class);
             config.addMapper(io.github.opensabre.iqc.task.dao.TaskExecutionMapper.class);
@@ -403,6 +483,16 @@ class IsolatedMysqlRolloutServiceIT {
         @Bean PipelineRolloutTaskService rolloutTasks(PipelineAssetService pipelines,PipelineRolloutService rollouts,
                 io.github.opensabre.iqc.task.InspectionTaskService tasks,ObjectMapper json,IqcDataScope scope,io.github.opensabre.iqc.selector.SelectorAssetService selectors,io.github.opensabre.iqc.selector.ConversationSelectionService selections) {
             return new PipelineRolloutTaskService(pipelines,rollouts,tasks,json,scope,selectors,selections);
+        }
+        @Bean io.github.opensabre.iqc.result.InspectionExecutionService scheduledExecutions(){return mock(io.github.opensabre.iqc.result.InspectionExecutionService.class);}
+        @Bean io.github.opensabre.iqc.schedule.PeriodicScheduleService scheduledService(SqlSessionFactory factory,PipelineAssetService pipelines,
+                io.github.opensabre.iqc.selector.SelectorAssetService selectors,io.github.opensabre.iqc.selector.ConversationSelectionService selections,
+                io.github.opensabre.iqc.task.InspectionTaskService tasks,io.github.opensabre.iqc.result.InspectionExecutionService executions,
+                IqcDataScope scope,ObjectMapper json,PipelineRolloutTaskService rollouts){
+            var session=new SqlSessionTemplate(factory);
+            return new io.github.opensabre.iqc.schedule.PeriodicScheduleService(session.getMapper(io.github.opensabre.iqc.schedule.dao.PeriodicScheduleMapper.class),
+                    session.getMapper(io.github.opensabre.iqc.schedule.dao.PeriodicScheduleRevisionMapper.class),pipelines,selectors,null,selections,tasks,
+                    session.getMapper(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class),executions,scope,json,null,rollouts);
         }
         private static PipelineRelease release(ObjectMapper json,int retries) {
             var node=new io.github.opensabre.iqc.pipeline.PipelineDefinition.Node("rule","RULE","Rule","rule-v1",List.of(),Map.of(),json.createObjectNode(),null,3000,retries,

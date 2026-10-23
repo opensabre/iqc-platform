@@ -121,3 +121,23 @@ PeriodicDefinitionTest 增加 3 项：新灰度协议往返、计划算法一致
 本轮实例身份直接进入原 createPeriodicWithSelector，尚未经过 PeriodicScheduleService.fire
 的 tick/游标/入队，也未验证新周期 worker 来源 guard。scope 与 pipeline 发布比较源仍受控；
 Selector 发布版本、选数、输入、任务与灰度修订为真实 SQL，不外推实际 PDP 或供应商链路。
+
+### 周期 fire / 游标事务专项（B，2026-10-23）
+
+在同一隔离 SQL 夹具注册原 PeriodicScheduleService 及周期/修订 Mapper，加入五项测试。
+周期修订快照由夹具 SQL 写入，fire、选数、分配、任务写入和游标更新走生产代码与真实事务：
+
+- FIRE_LATEST 迟到 615 秒时冻结原计划 +600 秒，选数锚点一致，游标到 +660 秒；
+  实际物化采用本轮扩量后的候选。旧 Frame 再调用返回 false，不再调用入队。
+- 末端入队边界抛错，实例插入和游标一同回滚；同 Frame 可重新成功。
+- SKIP 保存 SKIPPED_MISFIRE、空选数保存 NO_DATA，均前移游标且不调用入队。
+- 两个真实事务竞争同游标，仅一次返回 true、一次物化及一次入队调用，游标仅前移一格。
+- 缺少原 rollout:task:create 或授权 checkedAt 过期，均不留实例、不前移游标、不调用入队。
+
+原 53757 首轮 30 项 29 过，1 项测试将 JDBC LocalDateTime 与 Timestamp 比较失败。
+修正类型断言并补并发/授权用例后，原 54008 compiler:testCompile+surerfire 终态 0，日志
+`/tmp/iqc-b-periodic-fire-sql-final.log`，fresh XML SQL21+协议11=32 零失败错误跳过。
+随机 schema 完整迁移、75 校验及二次 migrate 无变化后测试并删除；34307 自动关闭，socket 消失。
+
+InspectionExecutionService 为受控入队边界，成功调用没有真正建立执行轮次，不能将其称为
+QUEUED/worker 成功。本轮不覆盖周期 create/publish、真实 PDP 或新周期 worker 来源 guard。
