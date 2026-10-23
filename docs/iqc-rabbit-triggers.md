@@ -67,3 +67,17 @@ A初次交付仅编译。初始独立验证清单（后续B证据见下节）：
 3 项、零失败错误跳过。75 个迁移校验通过，版本 1.1.74；专用 34307 自动关闭、socket 已消失。
 发布资产为受控 fixture，目标会话尚不存在；本轮没有 AMQP Channel、Spring 监听容器、
 实际 PDP、目标物化或 worker。不能将独立 SQL 与前轮 broker 结果合称提交后 ACK 的联合验证。
+
+### 消费者、真实 broker 与 SQL 联合验证（B，2026-10-23）
+
+`IsolatedMysqlBrokerAcceptanceIT.realBrokerLostAckRedeliversCommittedTaskAndConflictsGoToDeadLetter`
+使用原 Rabbit 连接工厂/持久拓扑、真实 Channel、原消费者及 TaskTriggerService/事务/Mapper。
+ACK 调用前通过无 Spring 事务的独立 JDBC 连接读取 WAITING_INPUT，随后模拟 ACK 发送失败。
+物理关闭通道后，真实 broker 重投同 body 且 redelivered=true；原接收路径返回唯一已存任务，
+不再解析发布资产。再次 ACK/物理重开后队列为空。同事件变更载荷进入原死信队列，原名称和任务保持。
+
+原 67110 testCompile+surerfire 终态 0，日志 `/tmp/iqc-b-broker-sql-joint.log`，fresh XML
+共 4 项、零失败错误跳过（包含前三项 SQL 回归）。随机队列/交换机清理完成；专用 MySQL 自动关闭，
+Rabbit 原 88884/stop 98255 均终态 0、独立 epmd 关闭，34307/35672/35673/34699 均 ECONNREFUSED。
+本轮 basicGet 交付原消费者，非 Spring 注解监听容器。当前授权/发布资产仍受控，目标尚不存在，
+不能外推实际 PDP、选数物化或 worker 全链，也不包含生产 broker 或语音转换。
