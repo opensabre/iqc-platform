@@ -256,3 +256,13 @@ Task/Execution/账本行。目标三条调用为两条已知USD费用（0.100000
 本轮是人工写入账本的SQL/服务集合验证，当前组织scope受控。未证明真实供应商账单、报告
 最终候选与调用引用的完整连接、跨币种/未知币种、真实撤权或页面迟到响应；周期/归因既有
 SQL随本组合回归，但新归档父来源guard仍需独立完整六依赖专项。
+
+### 报告最终结果与费用引用连接（B，2026-10-23）
+
+扩原BusinessQualityReportServiceTest三项，原28218 compiler:testCompile+surerfire终态0，
+`/tmp/iqc-b-report-usage-choice.log`及.exit=0，fresh XML22项零失败错误跳过。
+FIRST/LATEST在两任务同会话同标准中先选最终结果，再仅将对应task/EID/conversation传入
+调用汇总；缺结果和缺EID保留unbound（3个选择、1个绑定、2个未绑定），不会放宽调用范围。
+默认报告modelUsage为null且不调用费用/敏感授权服务；显式费用查询撤权在任务/结果读取前
+拒绝。报告服务真实，结果/账本服务/当前敏感授权为受控适配，非PDP或报告SQL端到端。
+前一轮37项SQL独立证明账本精确集合，不将两层证据拼成真实供应商或浏览器整链。

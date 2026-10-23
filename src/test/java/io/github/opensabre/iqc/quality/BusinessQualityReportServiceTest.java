@@ -404,4 +404,56 @@ class BusinessQualityReportServiceTest {
                 severity,List.of(),List.of(),List.of(),evidence,explanation,"fusion",1);
     }
 
+    private BusinessQualityReportService usageReport(
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService calls,
+            io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive) {
+        when(calls.taskRunUsage(anyList())).thenReturn(new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.RunUsage(
+                new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CostSummary("0","0","0",List.of()),
+                new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CallLatencySummary("0","0","0",null)));
+        return new BusinessQualityReportService(tasks,results,reviews,scope,new ObjectMapper(),executions,null,calls,sensitive);
+    }
+    @Test void modelUsageFollowsOnlyTheFinalFirstOrLatestResultChoice() {
+        var calls=mock(io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.class);
+        var sensitive=mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);var reportService=usageReport(calls,sensitive);
+        for(int index=1;index<=2;index++){
+            String taskId=index==1?"a":"b";var task=task(taskId,90,"[\"c\"]");
+            var result=new ConversationInspectionResult();result.setId("r"+index);result.setConversationId("c");
+            result.setExecutionId("e"+index);result.setCreatedTime(new java.util.Date(index*1000L));
+            when(results.selectPolicyRunsForTaskConversations(eq(taskId),eq(List.of("c")),anyBoolean())).thenReturn(List.of(result));
+            when(reviews.validatedMachineEvaluation(result,task)).thenReturn(evaluation(InspectionScoring.ItemStatus.PASS));
+        }
+        for(boolean latest:List.of(false,true)){
+            clearInvocations(calls);
+            var report=reportService.report(List.of("a","b"),null,latest?"LATEST_PER_CONVERSATION":"FIRST_PER_CONVERSATION",true);
+            assertThat(report.conversationCount()).isOne();
+            var usage=report.groups().getFirst().modelUsage();assertThat(usage.selectedResults()).isOne();assertThat(usage.boundResults()).isOne();assertThat(usage.unboundResults()).isZero();
+            verify(calls).taskRunUsage(List.of(new io.github.opensabre.iqc.result.llm.gateway.GatewayCallMapper.RunReference(latest?"b":"a",latest?"e2":"e1","c")));
+        }
+        verify(sensitive,times(2)).current(java.util.Set.of("iqc:report:view","iqc:task:model-calls:view"));
+    }
+    @Test void modelUsageKeepsMissingResultsAndMissingExecutionIdsUnbound() {
+        var calls=mock(io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.class);
+        var reportService=usageReport(calls,mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class));
+        var task=task("a",90,"[\"c1\",\"c2\",\"c3\"]");
+        var bound=new ConversationInspectionResult();bound.setId("r1");bound.setExecutionId("e1");
+        var unbound=new ConversationInspectionResult();unbound.setId("r2");
+        when(results.selectLatestForTaskConversation("a","c1")).thenReturn(bound);
+        when(results.selectLatestForTaskConversation("a","c2")).thenReturn(unbound);
+        when(reviews.validatedMachineEvaluation(any(),eq(task))).thenReturn(evaluation(InspectionScoring.ItemStatus.PASS));
+        var group=reportService.report(List.of("a"),null,"SELECTED_RUNS",true).groups().getFirst();
+        assertThat(group.modelUsage().selectedResults()).isEqualTo(3);assertThat(group.modelUsage().boundResults()).isOne();assertThat(group.modelUsage().unboundResults()).isEqualTo(2);
+        assertThat(group.missingResultCount()).isOne();
+        verify(calls).taskRunUsage(List.of(new io.github.opensabre.iqc.result.llm.gateway.GatewayCallMapper.RunReference("a","e1","c1")));
+    }
+    @Test void defaultReportSkipsUsageAndRevocationRejectsBeforeTaskOrResultReads() {
+        var calls=mock(io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.class);
+        var sensitive=mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);var reportService=usageReport(calls,sensitive);
+        task("a",90,"[\"c\"]");
+        assertThat(reportService.report(List.of("a")).groups().getFirst().modelUsage()).isNull();
+        verifyNoInteractions(calls,sensitive);clearInvocations(tasks,results,reviews);
+        when(sensitive.current(anySet())).thenThrow(io.github.opensabre.iqc.governance.IqcException.accessDenied("revoked"));
+        assertThatThrownBy(()->reportService.report(List.of("a"),null,"SELECTED_RUNS",true)).hasMessageContaining("revoked");
+        verifyNoInteractions(tasks,results,reviews,calls);
+    }
+
 }
