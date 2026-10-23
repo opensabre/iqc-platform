@@ -198,3 +198,9 @@ UI原任务模型调用组件提供会话ID筛选，显示实际生效会话/执
 原37831 terminal1新增Bean与导入原GatewayCallService重复，删除新增Bean复用原服务；原46397 terminal1遭本机时钟回拨约1秒，ID生成器在费用断言前拒绝，未改生产ID或校验规则。用已编译产物重跑原6505 terminal0，`/tmp/iqc-b-conversation-cost-sql-retry.log`，fresh XML SQL2+一致性计算5+报告23=30项无失败/错误/跳过；前轮testCompile完成，末轮surefire:test、git diff --check通过。专用34307脚本自动关闭。
 
 费用为隔离SQL合成账本而非供应商计费，数据范围服务/组织权限lookup仍受控；本轮没有验证新会话参数HTTP投影、实际PDP或浏览器费用筛选。既有模型/报告链断言保留，不将30项数量扩称全量PRD验收。
+
+### B 2026-10-23 单会话费用 HTTP 投影
+
+扩展原ModelCallReadHttpPrivacyTest：conversationId精确绑定六参数service，在最小敏感授权/全部敏感授权下HTTP data与原ResultReadProjection结果一致，费用长小数字符串与账本总数保留、预算证据按权限隐藏，源对象不变；未传EID保持null（全部重试范围），空汇总callCount为字符串0；撤销当前model-calls:view拒绝且不查询账本。修正原审计测试反射目标到实际HTTP六参数方法（原五参数Java兼容入口已不承载映射），继续断言审计不记录正文。
+
+原42445 terminal0，`/tmp/iqc-b-conversation-cost-http.log`，fresh XML17项无失败/错误/跳过；testCompile+surerfire与diff检查通过。真实MVC/响应包装/敏感投影，grant和领域服务mock；单会话真实SQL隔离证据沿上一条，不叠加宣称实际PDP/浏览器/供应商费用整链通过。

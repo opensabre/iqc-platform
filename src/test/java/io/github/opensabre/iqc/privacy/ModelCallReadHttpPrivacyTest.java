@@ -73,6 +73,41 @@ class ModelCallReadHttpPrivacyTest {
         assertEquals(original,json.writeValueAsString(source));verify(grants).current(Set.of("iqc:model-gateway:calls:view"));verify(grants).current(Set.of("iqc:task:model-calls:view"));
         verify(grants,never()).current(Set.of("iqc:task:view"));
     }
+    @ParameterizedTest @CsvSource({"false,false,false","true,true,true"})
+    void conversationFilterUsesCurrentProjectionAndPreservesExactCosts(boolean full,boolean pii,boolean prompt)throws Exception{
+        allow(full,pii,prompt);var source=source();String before=json.writeValueAsString(source);
+        when(calls.taskPageWithSummary("task","run","UNKNOWN",2,3,"conversationId-value")).thenReturn(source);
+        var response=mvc().perform(get(task).param("conversationId","conversationId-value"))
+                .andExpect(jsonPath("$.code").value("000000"))
+                .andExpect(header().string("Cache-Control","private, no-store"))
+                .andExpect(header().string("X-Content-Type-Options","nosniff"))
+                .andReturn().getResponse().getContentAsString();
+        var expected=projection.gatewayCalls(source,new SensitiveReadAccessService.Access("test",full,pii,prompt,Instant.now()));
+        assertEquals(httpTree(expected),json.readTree(response).path("data"));
+        assertTrue(response.contains("999999999999999999.123456789012345678"));
+        assertEquals(full&&pii&&prompt,response.contains("private-budgetEvidenceRef"));
+        assertEquals(before,json.writeValueAsString(source));
+        var order=inOrder(grants,calls);order.verify(grants).current(Set.of("iqc:task:model-calls:view"));
+        order.verify(calls).taskPageWithSummary("task","run","UNKNOWN",2,3,"conversationId-value");
+        verifyNoMoreInteractions(calls);
+    }
+    @Test void conversationFilterWithoutExecutionRetainsExplicitAllRetryScope()throws Exception{
+        allow(false,false,false);
+        var empty=new GatewayCallService.CallPage(List.of(),1,20,0,new GatewayCallService.CostSummary("0","0","0",List.of()));
+        when(calls.taskPageWithSummary("task",null,null,1,20,"conversation")).thenReturn(empty);
+        mvc().perform(get("/api/iqc/tasks/task/model-calls").param("conversationId","conversation"))
+                .andExpect(jsonPath("$.code").value("000000"))
+                .andExpect(jsonPath("$.data.total").value(0))
+                .andExpect(jsonPath("$.data.costSummary.callCount").value("0"));
+        verify(calls).taskPageWithSummary("task",null,null,1,20,"conversation");verifyNoMoreInteractions(calls);
+    }
+    @Test void revokedConversationReadGrantPreventsFilteredLedgerQuery()throws Exception{
+        when(grants.current(anySet())).thenThrow(IqcException.accessDenied("revoked"));
+        mvc().perform(get(task).param("conversationId","conversation"))
+                .andExpect(jsonPath("$.code").value("IQC-1005"))
+                .andExpect(jsonPath("$.data").doesNotExist());
+        verify(grants).current(Set.of("iqc:task:model-calls:view"));verifyNoInteractions(calls);
+    }
     @Test void revokedCurrentGrantPreventsBothLedgerQueries()throws Exception{
         when(grants.current(anySet())).thenThrow(IqcException.accessDenied("revoked"));var mvc=mvc();
         for(String path:List.of(global,task))mvc.perform(get(path)).andExpect(jsonPath("$.code").value("IQC-1005")).andExpect(jsonPath("$.data").doesNotExist());
@@ -98,7 +133,7 @@ class ModelCallReadHttpPrivacyTest {
     }
     @Test void readAuditDeclarationsNeverCopyLedgerBodies()throws Exception{
         var globalMethod=ModelGatewayController.class.getMethod("calls",String.class,String.class,long.class,long.class);
-        var taskMethod=TaskModelCallController.class.getMethod("page",String.class,String.class,String.class,long.class,long.class);
+        var taskMethod=TaskModelCallController.class.getMethod("page",String.class,String.class,String.class,long.class,long.class,String.class);
         for(var method:List.of(globalMethod,taskMethod)){var audit=method.getAnnotation(io.github.opensabre.governance.audit.annotations.Audit.class);assertFalse(audit.request());assertFalse(audit.response());}
     }
 }
