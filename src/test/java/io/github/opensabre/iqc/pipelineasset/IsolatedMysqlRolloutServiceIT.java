@@ -420,11 +420,27 @@ class IsolatedMysqlRolloutServiceIT {
         assertThat(accepted.request().target().conversationId()).isEqualTo(conversationId);
         assertThat(accepted.request().eventId()).isEqualTo(io.github.opensabre.iqc.schedule.EventSubscriptionService.eventId(frame.revisionId(),conversationId,accepted.request().target().inputRevision()));
         assertThat(accepted.request().requireASR()).isFalse();assertThat(accepted.pipeline().versionNo()).isEqualTo(1);
+        var session=new SqlSessionTemplate(context.getBean(SqlSessionFactory.class));
+        var mapper=session.getMapper(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class);
+        var receipt=mapper.selectById((String)row.get("id"));
+        doReturn(accepted.pipeline()).when(context.getBean(PipelineAssetService.class)).publishedReleaseForTask(id,1);
+        var runner=realQueue();var executions=context.getBean(io.github.opensabre.iqc.result.InspectionExecutionService.class);
+        doAnswer(call->runner.queueSystem(call.getArgument(0))).when(executions).queueSystem(anyString());
+        service.append(id,1,policy(10000));
+        var actor=new io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved("actor-1","actor-1",false,null,Set.of(),
+                io.github.opensabre.iqc.schedule.TaskTriggerService.grants(accepted.request()),java.time.Instant.now());
+        var triggerFrame=new io.github.opensabre.iqc.schedule.TaskTriggerService.Frame(receipt.getId(),accepted,receipt.getTriggerRequestHash());
+        var triggers=context.getBean(io.github.opensabre.iqc.schedule.TaskTriggerService.class);
+        assertThat(triggers.materialize(triggerFrame,actor)).isTrue();assertThat(triggers.materialize(triggerFrame,actor)).isFalse();
+        var queued=mapper.selectById(receipt.getId());assertThat(queued.getStatus()).isEqualTo("QUEUED");validateStoredTask(queued);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_task_execution WHERE task_id=?",Integer.class,receipt.getId())).isOne();
+        assertThat(jdbc.queryForObject("SELECT message_id FROM iqc_task_item WHERE execution_id=?",String.class,queued.getCurrentExecutionId())).isEqualTo("m"+conversationId);
+        assertThat(scanWithOwner(frame)).isZero();verify(executions,times(1)).queueSystem(receipt.getId());
         jdbc.update("UPDATE iqc_inspection_task SET status='DELETED' WHERE id=?",row.get("id"));assertThat(scanWithOwner(frame)).isZero();
         jdbc.update("UPDATE iqc_event_subscription SET active_revision_id='another-revision' WHERE id=?",frame.subscriptionId());
         assertThat(scanWithOwner(frame)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE event_subscription_id=?",Integer.class,frame.subscriptionId())).isOne();
-        verifyNoInteractions(context.getBean(io.github.opensabre.iqc.result.InspectionExecutionService.class));
+        verifyNoMoreInteractions(executions);
     }
     @Test void archiveScanUpdateFailureRollsBackReceiptAndAllowsRediscovery() throws Exception {
         var frame=archiveFrame();

@@ -86,3 +86,14 @@ receiveSubscription：重复扫描和DELETED回执阻止同事件再接收，旧
 
 父发布记录由测试初始化，Prepared与当前scope适配受控，每例使用独立历史秒区间和
 独立会话指纹；本轮不证明发布UI、真实组织PDP、多实例或模型worker成功执行。
+
+### 实际扫描回执到入队的连续链路（B，2026-10-24）
+
+原20049 compiler:testCompile+surerfire终态0，`/tmp/iqc-b-archive-scan-queue-sql.log.exit`为0；
+fresh XML SQL30+周期11=41项零失败错误跳过，专用34307已关闭且socket消失。
+在原扫描用例直接读取fire实际写入的SQL回执，灰度0→10000后经原materialize/queueSystem
+入队，完整六依赖guard验证原父及冻结版本，只有一个执行及原消息检查点。重复物化false，
+后续扫描0，queueSystem仅调用一次；DELETED去重/旧修订拒绝/故障回滚仍随组合通过。
+
+本轮增加原用例的连续链路断言，未新增测试数量；Prepared依赖及组织scope仍受控，
+不将到QUEUED的证据称为模型worker成功执行、真实PDP或跨实例验收。
