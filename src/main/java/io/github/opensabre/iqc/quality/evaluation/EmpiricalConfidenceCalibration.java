@@ -14,6 +14,13 @@ public final class EmpiricalConfidenceCalibration {
     public static final String EVENT="TYPED_VALUE_CORRECTNESS_ON_KNOWN_GOLD";
     public static final int MINIMUM_BIN_SAMPLES=20;
     private static final ObjectMapper JSON=new ObjectMapper();
+    /** Shared configurations may carry this opaque reference, never client-supplied fitted coefficients. */
+    public record Reference(String taskId,String executionId,String nodeId,String contentHash){
+        public Reference {
+            id(taskId,64);id(executionId,64);id(nodeId,256);
+            if(contentHash==null||!contentHash.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("exact calibration content hash required");
+        }
+    }
     public record Source(String taskId,String executionId,String datasetHash,String pipelineHash,String evidenceHash,
                          String nodeId,String nodeHash,String findingCode){
         public Source {

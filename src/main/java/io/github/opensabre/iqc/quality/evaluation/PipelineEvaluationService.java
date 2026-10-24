@@ -448,6 +448,66 @@ public class PipelineEvaluationService {
                 || !artifactHash(prepared.release(),row.getActualJson()).equals(row.getActualHash())) throw IqcException.invalidState("评测结果来源或摘要无效");
         return actual;
     }
+    public record PreparedCalibration(EmpiricalConfidenceCalibration.Reference reference,
+            EmpiricalConfidenceCalibration.Artifact artifact,String owner,String ownerGroupId) { }
+
+    /** Resolve only original server-fitted evidence in the caller's task transaction. */
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public PreparedCalibration calibrationForTask(EmpiricalConfidenceCalibration.Reference reference,
+            io.github.opensabre.iqc.pipeline.PipelineDefinition target){
+        if(reference==null)throw IqcException.invalidArgument("校准来源引用不能为空");
+        return calibrationsForTask(List.of(reference),target).getFirst();
+    }
+
+    /** Parent locks have one stable order, and each source execution report is computed once per batch. */
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public List<PreparedCalibration> calibrationsForTask(List<EmpiricalConfidenceCalibration.Reference> references,
+            io.github.opensabre.iqc.pipeline.PipelineDefinition target){
+        if(references==null||references.size()>200||target==null)throw IqcException.invalidArgument("校准引用须为最多200条且具有目标检测图");
+        var grouped=new java.util.TreeMap<String,List<EmpiricalConfidenceCalibration.Reference>>();
+        var nodes=new java.util.HashSet<String>();
+        for(var reference:references){
+            if(reference==null||!nodes.add(reference.nodeId()))throw IqcException.invalidArgument("每个目标节点只能有一个精确校准引用");
+            grouped.computeIfAbsent(reference.taskId(),ignored->new ArrayList<>()).add(reference);
+        }
+        if(references.isEmpty())return List.of();
+        String actor=scope.owner();
+        if(actor==null||actor.isBlank()||"system".equals(actor))throw IqcException.accessDenied("校准来源需要已认证负责人");
+        String targetGraph=io.github.opensabre.iqc.selector.SelectorAssetService.hash(json.valueToTree(target).toString());
+        var result=new ArrayList<PreparedCalibration>();
+        for(var entry:grouped.entrySet()){
+            var task=tasks.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,entry.getKey()).last("FOR UPDATE"));
+            if(task==null||!"PIPELINE_EVALUATION".equals(task.getTaskType()))throw IqcException.notFound("校准来源评测任务不存在");
+            if(!entry.getKey().equals(task.getId()))throw IqcException.invalidState("校准来源任务标识不精确");
+            // Authorize the locking read itself, not a potentially cached earlier selectById result.
+            if(!scope.canView(task.getCreatedBy(),task.getOwnerGroupId()))throw IqcException.accessDenied("无权读取校准来源任务");
+            var prepared=prepare(task,parse(task.getRuleSnapshotJson()),false);
+            String sourceGraph=io.github.opensabre.iqc.selector.SelectorAssetService.hash(json.valueToTree(prepared.release().pipeline()).toString());
+            if(!sourceGraph.equals(targetGraph))throw IqcException.invalidArgument("目标检测图与校准来源不一致");
+            var reports=new java.util.HashMap<String,Report>();
+            for(var reference:entry.getValue().stream().sorted(java.util.Comparator.comparing(EmpiricalConfidenceCalibration.Reference::executionId)
+                    .thenComparing(EmpiricalConfidenceCalibration.Reference::nodeId)).toList()){
+                var report=reports.get(reference.executionId());
+                if(report==null){
+                    var execution=requireExecution(task,reference.executionId());
+                    if(!reference.executionId().equals(execution.getId())||!"SUCCEEDED".equals(execution.getStatus()))
+                        throw IqcException.invalidState("校准来源执行未成功或标识不精确");
+                    report=report(reference.taskId(),reference.executionId());reports.put(reference.executionId(),report);
+                }
+                if(!report.complete()||report.successfulSamples()!=report.expectedSamples()||report.nodeConfidenceMetrics()==null)
+                    throw IqcException.invalidState("校准来源评测未完整成功");
+                var candidate=report.nodeConfidenceMetrics().nodes().stream().filter(node->reference.nodeId().equals(node.nodeId()))
+                        .map(NodeConfidenceMetrics.Node::calibrationCandidate).filter(java.util.Objects::nonNull).findFirst()
+                        .orElseThrow(()->IqcException.invalidState("校准来源节点没有已拟合候选"));
+                if(!reference.contentHash().equals(candidate.contentHash())||!reference.taskId().equals(candidate.source().taskId())
+                        ||!reference.executionId().equals(candidate.source().executionId())||!reference.nodeId().equals(candidate.source().nodeId()))
+                    throw IqcException.invalidState("校准候选来源或摘要已不匹配");
+                result.add(new PreparedCalibration(reference,candidate,task.getCreatedBy(),task.getOwnerGroupId()));
+            }
+        }
+        return List.copyOf(result);
+    }
+
     private InspectionTask requireTask(String id) {
         var task = tasks.selectById(id);
         if (task == null || !"PIPELINE_EVALUATION".equals(task.getTaskType())) throw IqcException.notFound("评测任务不存在");
