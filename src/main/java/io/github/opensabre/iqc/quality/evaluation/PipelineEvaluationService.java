@@ -503,6 +503,8 @@ public class PipelineEvaluationService {
                 if(!reference.contentHash().equals(candidate.contentHash())||!reference.taskId().equals(candidate.source().taskId())
                         ||!reference.executionId().equals(candidate.source().executionId())||!reference.nodeId().equals(candidate.source().nodeId()))
                     throw IqcException.invalidState("校准候选来源或摘要已不匹配");
+                if(candidate.source().modelKey()==null||candidate.source().deploymentRef()==null)
+                    throw IqcException.invalidState("校准拟合样本缺少唯一模型部署调用身份，不可作为执行来源");
                 result.add(new PreparedCalibration(reference,candidate,task.getCreatedBy(),task.getOwnerGroupId()));
             }
         }

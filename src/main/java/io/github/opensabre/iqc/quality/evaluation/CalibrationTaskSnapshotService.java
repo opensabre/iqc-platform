@@ -128,6 +128,7 @@ public class CalibrationTaskSnapshotService {
             if(source==null||!expected.remove(source.reference())||source.artifact()==null||source.owner()==null||source.owner().isBlank())
                 throw IqcException.invalidState("校准来源重复、缺少归属或未精确绑定");
             var reference=source.reference();var artifact=source.artifact();var origin=artifact.source();
+            if(origin.modelKey()==null||origin.deploymentRef()==null)throw IqcException.invalidState("校准拟合来源缺少唯一模型部署调用证据");
             var node=target.nodes().stream().filter(value->reference.nodeId().equals(value.nodeId())).findFirst()
                     .orElseThrow(()->IqcException.invalidState("校准目标节点不存在"));
             if(!reference.contentHash().equals(artifact.contentHash())||!reference.taskId().equals(origin.taskId())
