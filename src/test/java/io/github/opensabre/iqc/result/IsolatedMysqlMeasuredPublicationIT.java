@@ -347,6 +347,29 @@ class IsolatedMysqlMeasuredPublicationIT {
             assertThrows(RuntimeException.class,()->calibrationTx.execute(status->evaluations.calibrationForTask(badRef,target)));
             assertEquals(calibration.contentHash(),evaluations.report(first.getId(),first.getCurrentExecutionId()).nodeConfidenceMetrics().nodes().getFirst().calibrationCandidate().contentHash());
         } finally { db.update("UPDATE iqc_inspection_task SET owner_group_id=? WHERE id=?",originalGroup,first.getId()); }
+        // Exercise the owning task save boundary with real original-source reads and persisted private coefficients.
+        var calibrationAccess=mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
+        var freezer=new CalibrationTaskSnapshotService(context.getBeanProvider(PipelineEvaluationService.class),calibrationAccess,context.getBean(IqcDataScope.class),j);
+        ObjectProvider<CalibrationTaskSnapshotService> freezerProvider=mock(ObjectProvider.class);
+        when(freezerProvider.getObject()).thenReturn(freezer);
+        var taskCreator=new InspectionTaskService(s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationMapper.class),null,null,null,j,
+                s.getMapper(TaskExecutionMapper.class),context.getBean(IqcDataScope.class),null,null,context.getBean(ProductionInputSnapshotService.class),
+                context.getBeanProvider(PipelineAssetService.class),context.getBeanProvider(ScheduledActorAccessService.class),null,freezerProvider);
+        var originalRelease=evaluations.context(first.getId()).prepared().release();
+        var calibratedFusion=new FusionPolicy("calibrated",1,FusionPolicy.Method.CONFIDENCE,Map.of(),Map.of(),"original-evaluation",Set.of("model"),null,null,List.of(calibrationRef));
+        var calibratedRelease=new PipelineRelease(originalRelease.schemaVersion(),originalRelease.pipeline(),calibratedFusion,originalRelease.scoring(),originalRelease.items(),null,null,originalRelease.labelPolicy());
+        var calibratedPrepared=new PipelineAssetService.Prepared(asset.getId(),null,1,calibratedRelease,PipelineAssetService.hash(j.writeValueAsString(calibratedRelease)));
+        var saved=calibrationTx.execute(status->taskCreator.createUsingPipelineSnapshot(calibratedPrepared,"Calibration save "+key,List.of(conversation),1,"calibrated"+key));
+        assertNotNull(saved);
+        var persistedCalibration=s.getMapper(InspectionTaskMapper.class).selectById(saved.getId());
+        var frozenCalibration=CalibrationTaskSnapshotService.verifiedSources(persistedCalibration,j);
+        assertEquals(1,frozenCalibration.size());assertEquals(calibration,frozenCalibration.getFirst().artifact());
+        verify(calibrationAccess).current(Set.of("iqc:evaluation:report:view"));
+        String rejectedName="Calibration revoked "+key;
+        doThrow(io.github.opensabre.iqc.governance.IqcException.accessDenied("calibration revoked")).when(calibrationAccess).current(Set.of("iqc:evaluation:report:view"));
+        assertThrows(RuntimeException.class,()->calibrationTx.execute(status->taskCreator.createUsingPipelineSnapshot(calibratedPrepared,rejectedName,List.of(conversation),1,"revoked-calibration"+key)));
+        assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE name=?",Integer.class,rejectedName));
+        assertEquals(frozenCalibration,CalibrationTaskSnapshotService.verifiedSources(s.getMapper(InspectionTaskMapper.class).selectById(saved.getId()),j));
         var compared=evaluations.consistency(first.getId(),first.getCurrentExecutionId(),second.getId(),second.getCurrentExecutionId());
         assertEquals(1,compared.expectedPairs());assertEquals(1,compared.comparablePairs());assertEquals(1,compared.agreeingPairs());assertEquals(0,BigDecimal.ONE.compareTo(compared.agreementRate()));
         var duplicate=evaluations.consistency(first.getId(),first.getCurrentExecutionId(),first.getId(),first.getCurrentExecutionId());assertEquals(Map.of("SAME_ARTIFACT",1),duplicate.excludedReasons());
