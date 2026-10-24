@@ -166,3 +166,12 @@ KnowledgeTaskSnapshotService 复用原 ruleSnapshotJson：普通批次/抽样/�
 verifiedSources 从原任务 ruleSnapshotJson 读取信封；严格拒绝重复JSON键、尾随载荷、非协议字段、超限正文及摘要不符。信封负责人必须等于原任务 createdBy；任务当前组可以比信封更窄，不能从私有恢复为组共享。每份来源的有效组必须为null或原发布组；信封共享组必须被所有来源共同允许。
 
 原任务 Agent 与全部 Pipeline 节点引用组成精确引用集合，正文来源必须一一覆盖该集合，不接受多余、缺少、重复或行ID/版本/摘要替换。每个来源重建原 KnowledgeBaseVersion 元数据，复用 readPublishedEvidence 验证发布协议、语料约束、发布人和内容摘要。校验加入原执行器的入队、worker启动和恢复依赖边界，不读取可变知识库草稿，也不重新授权替换历史正文。无引用旧任务不增加知识库来源查询。真实模型有界上下文与使用来源追踪仍需继续，当前未解除模型拒绝。
+
+### B 任务知识库信封专项
+
+固定01ce566合入9d15d5d，原54315 test-compile+surerfire终态0，
+/tmp/iqc-b-knowledge-task-envelope.log.exit=0；Snapshot3+Batch3六项零失败错误跳过。
+受控来源冻结后，静态验证读取原正文且不查询当前来源，返回不可变；任务范围只允许
+收窄，私有来源使任务组为null；即使重算外层Hash，缺失引用覆盖仍拒绝，错误负责人
+拒绝；无引用旧任务兼容，注入信封/重复键/尾随JSON拒绝。
+以上不证明真实事务/SQL/PDP或模型已消费参考正文。
