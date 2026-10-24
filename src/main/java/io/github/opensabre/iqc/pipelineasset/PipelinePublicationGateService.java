@@ -52,6 +52,8 @@ public class PipelinePublicationGateService {
         minimum(criteria,"OVERALL_F1","QUALITY",q.findingMetrics().aggregate().f1(),policy.minimumOverallF1());
         minimum(criteria,"REGRESSION_PASS","REGRESSION",r.regressionMetrics().passRate(),policy.minimumRegressionPass());
         addStructured(criteria,"QUALITY",q,policy); addStructured(criteria,"REGRESSION",r,policy);
+        addCalibration(criteria,"QUALITY",q,release,policy);
+        addCalibration(criteria,"REGRESSION",r,release,policy);
         maximum(criteria,"P95_EVALUATOR_MS","QUALITY",decimal(q.latencyMetrics().p95Ms()),BigDecimal.valueOf(policy.maximumP95Ms()));
         maximum(criteria,"P95_EVALUATOR_MS","REGRESSION",decimal(r.latencyMetrics().p95Ms()),BigDecimal.valueOf(policy.maximumP95Ms()));
         var evidence=List.of(evidence("QUALITY",quality,qualityContext,q),evidence("REGRESSION",regression,regressionContext,r));
@@ -93,6 +95,33 @@ public class PipelinePublicationGateService {
         if(measured.declaredLlmNodes()==0) {
             criteria.add(new Criterion("STRUCTURED_SUCCESS",purpose,Status.NOT_APPLICABLE,null,policy.minimumStructuredSuccess(),"冻结Pipeline没有LLM节点"));
         } else minimum(criteria,"STRUCTURED_SUCCESS",purpose,measured.successRate(),policy.minimumStructuredSuccess());
+    }
+    private void addCalibration(List<Criterion> criteria,String purpose,PipelineEvaluationService.Report report,
+            PipelineRelease release,PublicationGatePolicy policy){
+        if(release.fusion().calibrationReferences().isEmpty())return;
+        var thresholds=policy.calibration();
+        if(thresholds==null){
+            criteria.add(new Criterion("CALIBRATION_POLICY",purpose,Status.FAILED,null,null,"校准发布须显式配置留出样本、覆盖和误差门槛"));
+            return;
+        }
+        for(var reference:release.fusion().calibrationReferences()){
+            String nodePurpose=purpose+"/"+reference.nodeId();
+            var matches=report.nodeConfidenceMetrics()==null?List.<NodeConfidenceMetrics.Node>of():
+                    report.nodeConfidenceMetrics().nodes().stream().filter(node->reference.nodeId().equals(node.nodeId())).toList();
+            var comparison=matches.size()==1?matches.getFirst().calibrationComparison():null;
+            if(comparison==null||!"iqc-calibration-paired-diagnostics-v1".equals(comparison.schemaVersion())
+                    ||!reference.contentHash().equals(comparison.artifactHash())){
+                criteria.add(new Criterion("CALIBRATION_MEASURED",nodePurpose,Status.FAILED,null,null,"缺少当前精确产物的配对测量"));
+                continue;
+            }
+            var calibrated=comparison.pairedCalibrated();
+            minimum(criteria,"CALIBRATION_PAIRED_SAMPLES",nodePurpose,BigDecimal.valueOf(calibrated.scored()),BigDecimal.valueOf(thresholds.minimumPairedSamples()));
+            minimum(criteria,"CALIBRATION_GOLD_COVERAGE",nodePurpose,calibrated.coverage(),thresholds.minimumGoldCoverage());
+            maximum(criteria,"CALIBRATION_BRIER",nodePurpose,calibrated.brierScore(),thresholds.maximumBrier());
+            maximum(criteria,"CALIBRATION_ECE",nodePurpose,calibrated.expectedCalibrationError(),thresholds.maximumEce());
+            maximum(criteria,"CALIBRATION_BRIER_INCREASE",nodePurpose,comparison.brierDelta(),thresholds.maximumBrierIncrease());
+            maximum(criteria,"CALIBRATION_ECE_INCREASE",nodePurpose,comparison.expectedCalibrationErrorDelta(),thresholds.maximumEceIncrease());
+        }
     }
     private void minimum(List<Criterion> criteria,String code,String purpose,BigDecimal actual,BigDecimal threshold) {
         criteria.add(new Criterion(code,purpose,actual!=null && actual.compareTo(threshold)>=0?Status.PASSED:Status.FAILED,
