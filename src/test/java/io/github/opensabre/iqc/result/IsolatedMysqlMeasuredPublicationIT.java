@@ -444,7 +444,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         db.update("INSERT INTO iqc_model_gateway_call(call_id,model_key,task_id,execution_id,conversation_id,status,reserved_at_utc,pricing_currency,calculated_cost,cost_status) VALUES (?,?,?,?,?,?,UTC_TIMESTAMP(3),?,?,?)",
                 id,"a".repeat(64),task,run,conversation,status,currency,amount==null?null:new BigDecimal(amount),amount==null?"UNKNOWN":"CALCULATED_FROM_DECLARED_PRICE");
     }
-    /** Uses the actual measured publication, receipt transaction, worker, metric engine and result SQL. */
+    /** Actual SQL publication, rollback, immutable history and task transaction boundaries. */
     @Test void knowledgeLifecyclePersistsImmutableVersionsAndRequiresTaskTransaction() {
         actor.set("annotator");
         io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of("user_name","annotator","user_id","user-annotator"));
@@ -454,6 +454,15 @@ class IsolatedMysqlMeasuredPublicationIT {
                 List.of(new io.github.opensabre.iqc.knowledge.KnowledgeCorpus.Document("reference","Reference","frozen reference text","source:manual")));
         var created=knowledge.create("K_"+UUID.randomUUID().toString().replace("-", "").toUpperCase(Locale.ROOT),"Reference corpus",corpus);
         assertEquals("DISABLED",created.getStatus());assertEquals("annotator",created.getCreatedBy());
+        var db=new JdbcTemplate(context.getBean(DataSource.class));
+        db.execute("DROP TRIGGER IF EXISTS reject_knowledge_parent_update");
+        try {
+            db.execute("CREATE TRIGGER reject_knowledge_parent_update BEFORE UPDATE ON iqc_knowledge_base FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='injected knowledge parent failure'");
+            assertThrows(org.springframework.dao.DataAccessException.class,()->knowledge.publish(created.getId(),1));
+            assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM iqc_knowledge_base_version WHERE knowledge_base_id=?",Integer.class,created.getId()));
+            assertNull(knowledge.get(created.getId()).getActivePublishedVersion());
+            assertEquals(1,knowledge.get(created.getId()).getDraftRevision());
+        } finally {db.execute("DROP TRIGGER IF EXISTS reject_knowledge_parent_update");}
         var first=knowledge.publish(created.getId(),1);assertEquals(first.getId(),knowledge.publish(created.getId(),1).getId());
         assertEquals(1,knowledge.history(created.getId()).size());
         assertThrows(org.springframework.transaction.IllegalTransactionStateException.class,()->knowledge.publishedForTask(created.getId(),1));
