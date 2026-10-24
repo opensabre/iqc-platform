@@ -222,3 +222,13 @@ ExecutionContext/router受控；未覆盖HTTP成功请求、真实远端、网�
 同为6份各16000字符文档，ASCII语料通过原发布/任务信封校验并生成低于256KiB上下文；
 中文语料同样通过原证据校验，但UTF-8参考上下文超过256KiB，material拒绝并返回
 KNOWLEDGE_CONTEXT_TOO_LARGE。此项证明字节限制；非token窗口、网关预算或真实远端证据。
+
+### B 真实SQL来源的任务冻结补验
+
+原70165专用34307 test-compile+surerfire终态0，
+/tmp/iqc-b-knowledge-task-source-sql.log.exit=0，原MeasuredPublication四项集成测试通过；
+专用实例关闭/socket消失。实际Spring代理KnowledgeService批量接口验证MANDATORY，
+原事务真实Mapper读取精确版本并冻结任务信封，核验当前敏感授权入口。
+后续来源修订/发布/恢复/停用，原信封保持不变，历史校验和模型参考保留原版本正文/Hash，
+新批量引用已停用来源拒绝。任务信封对象仍在夹具内，未写任务表；敏感授权受控，
+不据此宣称TaskService保存/worker全链、真实PDP或远端模型通过。

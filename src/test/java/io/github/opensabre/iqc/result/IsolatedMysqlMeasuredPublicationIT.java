@@ -485,6 +485,20 @@ class IsolatedMysqlMeasuredPublicationIT {
         var prepared=tx.execute(status->knowledge.publishedForTask(created.getId(),1));
         assertEquals("frozen reference text",prepared.snapshot().corpus().documents().getFirst().text());
         assertEquals("annotator",prepared.snapshot().owner());assertEquals("annotator",prepared.snapshot().publishedBy());
+        var json=context.getBean(ObjectMapper.class);
+        var binding=new io.github.opensabre.iqc.knowledge.KnowledgeBaseService.Binding(created.getId(),1,first.getId(),first.getContentHash());
+        assertThrows(org.springframework.transaction.IllegalTransactionStateException.class,()->knowledge.publishedForTask(List.of(binding)));
+        var config=new io.github.opensabre.iqc.agent.AgentConfiguration("3.0",null,"instructions",null,null,null,null,
+                "model",List.of(),List.of(),List.of(),null,null).withKnowledgeAssets(List.of(
+                new io.github.opensabre.iqc.agent.AgentConfiguration.KnowledgeReference(created.getId(),1,first.getId(),first.getContentHash())));
+        var frozenTask=new InspectionTask();frozenTask.setId("knowledge-task");frozenTask.setCreatedBy("annotator");frozenTask.setOwnerGroupId("group");
+        frozenTask.setRuleSnapshotJson("{}");frozenTask.setAgentSnapshotJson(json.createObjectNode().put("configJson",json.writeValueAsString(config)).toString());
+        var sensitive=mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
+        var freezer=new io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService(knowledge,sensitive,context.getBean(IqcDataScope.class),json);
+        tx.executeWithoutResult(status->freezer.freeze(frozenTask));
+        verify(sensitive).current(Set.of("iqc:knowledge:version:view"));
+        var originalTaskEvidence=frozenTask.getRuleSnapshotJson();
+        assertEquals(first.getId(),io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.verifiedSources(frozenTask,json).getFirst().versionId());
         var changed=new io.github.opensabre.iqc.knowledge.KnowledgeCorpus(io.github.opensabre.iqc.knowledge.KnowledgeCorpus.SCHEMA,
                 List.of(new io.github.opensabre.iqc.knowledge.KnowledgeCorpus.Document("reference","Reference","revised reference text","source:manual")));
         knowledge.update(created.getId(),1,"Revised corpus",changed);
@@ -495,6 +509,13 @@ class IsolatedMysqlMeasuredPublicationIT {
         var restored=knowledge.restore(created.getId(),2,1);assertEquals(3,restored.getDraftRevision());
         assertEquals(2,restored.getActivePublishedVersion());assertEquals(corpus,knowledge.requestCorpus(restored.getDraftConfigJson()));
         knowledge.availability(created.getId(),false);
+        assertEquals(originalTaskEvidence,frozenTask.getRuleSnapshotJson());
+        var historical=io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.verifiedSources(frozenTask,json);
+        assertEquals("frozen reference text",historical.getFirst().snapshot().corpus().documents().getFirst().text());
+        assertEquals(first.getContentHash(),historical.getFirst().contentHash());
+        var capability=io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.executionContext(frozenTask,json);
+        assertTrue(capability.material(json.valueToTree(config),"knowledge-task","annotator","group").contains("frozen reference text"));
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->tx.execute(status->knowledge.publishedForTask(List.of(binding))));
         var sql=context.getBean(SqlSessionTemplate.class);
         var actualScope=new IqcDataScope(null);
         var scoped=new io.github.opensabre.iqc.knowledge.KnowledgeBaseService(
