@@ -14,7 +14,9 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
                                  List<String> mcpServerIds, List<String> skillIds, AssetSnapshots assetSnapshots,
                                  String ruleSetId,
                                  @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-                                 PromptReference promptAsset) {
+                                 PromptReference promptAsset,
+                                 @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
+                                 List<KnowledgeReference> knowledgeAssets) {
     public static final String CURRENT_SCHEMA = "3.0";
     public static final String CAPABILITY_SCHEMA = CURRENT_SCHEMA;
 
@@ -23,6 +25,22 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
         return "2.0".equals(schema) || CAPABILITY_SCHEMA.equals(schema);
     }
 
+    public record KnowledgeReference(String knowledgeBaseId,
+            @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=KnowledgeVersionCodec.class) int versionNo,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String versionId,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String contentHash){ }
+    public static final class KnowledgeVersionCodec extends com.fasterxml.jackson.databind.JsonDeserializer<Integer>{
+        @Override public Integer deserialize(com.fasterxml.jackson.core.JsonParser parser,com.fasterxml.jackson.databind.DeserializationContext context) throws java.io.IOException{
+            if(parser.currentToken()!=com.fasterxml.jackson.core.JsonToken.VALUE_NUMBER_INT)return context.reportInputMismatch(Integer.class,"知识库版本号须为正整数JSON数字");
+            var value=parser.getBigIntegerValue();if(value.signum()<=0||value.bitLength()>31)return context.reportInputMismatch(Integer.class,"知识库版本号超出范围");return value.intValueExact();
+        }
+    }
+    public AgentConfiguration(String schemaVersion,String mode,String systemPrompt,String primaryModel,
+            List<Model> models,List<McpServer> mcpServers,List<Skill> skills,String primaryModelProfileId,List<String> fallbackModelProfileIds,
+            List<String> mcpServerIds,List<String> skillIds,AssetSnapshots assetSnapshots,String ruleSetId,PromptReference promptAsset){
+        this(schemaVersion,mode,systemPrompt,primaryModel,models,mcpServers,skills,primaryModelProfileId,fallbackModelProfileIds,
+                mcpServerIds,skillIds,assetSnapshots,ruleSetId,promptAsset,null);
+    }
     public record PromptReference(String skillId,
             @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=PromptVersionCodec.class) int versionNo,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String contentHash) { }
@@ -74,6 +92,15 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
                 ||(promptAsset.contentHash()!=null&&(!promptAsset.contentHash().matches("[a-f0-9]{64}")
                 ||!promptAsset.contentHash().equals(promptHash(promptAsset,systemPrompt))))))
             throw IqcException.invalidArgument("Prompt精确版本来源或正文摘要无效");
+        if(knowledgeAssets!=null&&!knowledgeAssets.isEmpty()){
+            if(!CAPABILITY_SCHEMA.equals(schemaVersion)||knowledgeAssets.size()>4)throw IqcException.invalidArgument("知识库引用仅支持新版能力且最多4个");
+            var ids=new HashSet<String>();for(var reference:knowledgeAssets){
+                if(reference==null||reference.knowledgeBaseId()==null||!reference.knowledgeBaseId().matches("[A-Za-z0-9:_-]{1,64}")
+                        ||!ids.add(reference.knowledgeBaseId())||reference.versionNo()<1
+                        ||(reference.versionId()!=null&&!reference.versionId().matches("[A-Za-z0-9:_-]{1,64}"))
+                        ||(reference.contentHash()!=null&&!reference.contentHash().matches("[a-f0-9]{64}")))throw IqcException.invalidArgument("知识库精确引用无效或重复");
+            }
+        }
         boolean ruleOnly = "RULE_ONLY".equalsIgnoreCase(mode);
         if (!ruleOnly && (systemPrompt == null || systemPrompt.isBlank())) throw IqcException.invalidArgument("默认提示词不能为空");
         if (systemPrompt != null && systemPrompt.length() > 8000) throw IqcException.invalidArgument("默认提示词不能超过 8000 字符");
@@ -162,11 +189,16 @@ public record AgentConfiguration(String schemaVersion, String mode, String syste
     /** Returns a copy with immutable asset details captured for approval and execution. */
     public AgentConfiguration withSnapshots(AssetSnapshots snapshots) {
         return new AgentConfiguration(schemaVersion, mode, systemPrompt, primaryModel, models, mcpServers, skills,
-                primaryModelProfileId, fallbackModelProfileIds, mcpServerIds, skillIds, snapshots, ruleSetId,promptAsset);
+                primaryModelProfileId, fallbackModelProfileIds, mcpServerIds, skillIds, snapshots, ruleSetId,promptAsset,knowledgeAssets);
     }
     public AgentConfiguration withPrompt(String text,PromptReference reference){
         return new AgentConfiguration(schemaVersion,mode,text,primaryModel,models,mcpServers,skills,primaryModelProfileId,
-                fallbackModelProfileIds,mcpServerIds,skillIds,assetSnapshots,ruleSetId,reference);
+                fallbackModelProfileIds,mcpServerIds,skillIds,assetSnapshots,ruleSetId,reference,knowledgeAssets);
+    }
+
+    public AgentConfiguration withKnowledgeAssets(List<KnowledgeReference> references){
+        return new AgentConfiguration(schemaVersion,mode,systemPrompt,primaryModel,models,mcpServers,skills,primaryModelProfileId,
+                fallbackModelProfileIds,mcpServerIds,skillIds,assetSnapshots,ruleSetId,promptAsset,references==null?null:List.copyOf(references));
     }
 
 }

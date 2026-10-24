@@ -96,3 +96,11 @@ Service.publish，使用独立事务。限时完成后两侧版本ID相同，实
 原55185 test-compile+surerfire终态0，集成4项零失败、错误、跳过，46.748秒；
 日志`/tmp/iqc-b-knowledge-group-fixed.log`，专用34307关闭/socket消失。
 此为受控组织响应的领域SQL验证，真实组织网络/PDP与并发组变更仍待联调。
+
+## Agent 精确版本引用（KB3 前置）
+
+部署采用单租户，继续复用 IqcDataScope 的 owner/group/all 与当前组织资源授权，不引入租户模型或另一套 ACL。schema3 Agent 可引用最多四个不同知识库的已发布版本；版本号必须为正整数，服务端核验当前启用状态、组织可见性、版本行及 SHA-256，并补全 versionId/contentHash。共享 Agent/Pipeline 配置仅携带 knowledgeBaseId/versionNo/versionId/contentHash，不复制知识库正文、标题或组织信息。无引用的历史配置保持原序列化行为。
+
+引用解析复用知识库领域服务，在独立只读 REPEATABLE_READ 事务内校验当前范围和不可变版本，返回不含正文的 Binding；不会跨多个知识库保留父行写锁。此检查不能代替任务物化时的授权。后续 KB3 必须在任务事务中冻结合法正文并收窄来源组织交集，处理所有任务入口以及有界上下文和来源追踪。
+
+当前尚未提供任务正文上下文，两种真实模型适配器对非空 knowledgeAssets 显式返回 KNOWLEDGE_CONTEXT_NOT_FROZEN，防止静默忽略引用。此提交仅为引用管理前置，不作为知识库推理完成或上线验收。后端离线 test-compile 与前端生产构建均退出0；本轮未新增或执行测试，未执行共享迁移或部署。

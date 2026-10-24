@@ -164,6 +164,7 @@ public class QualityAgentService {
             AgentConfiguration configuration = value == null || value.isBlank()
                     ? AgentConfiguration.defaults() : objectMapper.readValue(value, AgentConfiguration.class);
             if(configuration.promptAsset()!=null)configuration=assetReferenceValidator.resolvePrompt(configuration);
+            if(configuration.knowledgeAssets()!=null&&!configuration.knowledgeAssets().isEmpty())configuration=assetReferenceValidator.resolveKnowledge(configuration);
             configuration = configuration.validated();
             assetReferenceValidator.validate(configuration);
             return objectMapper.writeValueAsString(configuration);

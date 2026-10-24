@@ -73,6 +73,9 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
         usageCounterRecorder.record(new UsageRecord(usageId + ":attempt", null, "iqc-platform", "LLM_CALL",
                 ruleId, "QUALITY_EVALUATION", UsageOutcome.ATTEMPT));
         try {
+            JsonNode config=agentSnapshot==null?null:agentSnapshot.path("configJson");
+            if(config!=null&&config.isTextual())try{config=objectMapper.readTree(config.textValue());}catch(Exception ignored){config=null;}
+            LlmQualityProvider.requireKnowledgeContext(config);
             if(gateway==null){
             var decision = rateLimiter.check(RateLimitCheckRequest.builder()
                     .sceneCode("iqc-llm-call")

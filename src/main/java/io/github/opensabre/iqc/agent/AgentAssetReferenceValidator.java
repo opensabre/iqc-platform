@@ -14,10 +14,36 @@ import static io.github.opensabre.iqc.agent.AgentConfiguration.*;
 public class AgentAssetReferenceValidator {
     private final IqcModelProfileMapper models; private final IqcMcpServerMapper mcps; private final IqcSkillMapper skills;
     private final io.github.opensabre.iqc.skill.dao.IqcSkillVersionMapper skillVersions;
+    private final io.github.opensabre.iqc.knowledge.KnowledgeBaseService knowledge;
+    private final io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive;
     @org.springframework.beans.factory.annotation.Autowired
     public AgentAssetReferenceValidator(IqcModelProfileMapper models,IqcMcpServerMapper mcps,IqcSkillMapper skills,
-            io.github.opensabre.iqc.skill.dao.IqcSkillVersionMapper skillVersions){
-        this.models=models;this.mcps=mcps;this.skills=skills;this.skillVersions=skillVersions;
+            io.github.opensabre.iqc.skill.dao.IqcSkillVersionMapper skillVersions,
+            io.github.opensabre.iqc.knowledge.KnowledgeBaseService knowledge,io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive){
+        this.models=models;this.mcps=mcps;this.skills=skills;this.skillVersions=skillVersions;this.knowledge=knowledge;this.sensitive=sensitive;
+    }
+    public AgentAssetReferenceValidator(IqcModelProfileMapper models,IqcMcpServerMapper mcps,IqcSkillMapper skills,
+            io.github.opensabre.iqc.skill.dao.IqcSkillVersionMapper skillVersions){this(models,mcps,skills,skillVersions,null,null);}
+    public AgentConfiguration resolveKnowledge(AgentConfiguration config){
+        var references=config.knowledgeAssets();if(references==null||references.isEmpty())return config;
+        config.validated();if(knowledge==null||sensitive==null)throw IqcException.invalidState("知识库引用授权或解析依赖不可用");
+        sensitive.current(java.util.Set.of("iqc:knowledge:version:view"));
+        var bound=new java.util.ArrayList<KnowledgeReference>();
+        for(var reference:references.stream().sorted(java.util.Comparator.comparing(KnowledgeReference::knowledgeBaseId)).toList()){
+            var source=knowledge.referenceBinding(reference.knowledgeBaseId(),reference.versionNo());
+            if(source==null||!reference.knowledgeBaseId().equals(source.knowledgeBaseId())||reference.versionNo()!=source.versionNo()
+                    ||source.versionId()==null||!source.versionId().matches("[A-Za-z0-9:_-]{1,64}")||source.contentHash()==null||!source.contentHash().matches("[a-f0-9]{64}")
+                    ||(reference.versionId()!=null&&!reference.versionId().equals(source.versionId()))
+                    ||(reference.contentHash()!=null&&!reference.contentHash().equals(source.contentHash())))throw IqcException.invalidArgument("知识库版本行或摘要与原来源不一致");
+            bound.add(new KnowledgeReference(source.knowledgeBaseId(),source.versionNo(),source.versionId(),source.contentHash()));
+        }
+        return config.withKnowledgeAssets(bound);
+    }
+    public void validateKnowledge(AgentConfiguration config){
+        if(config.knowledgeAssets()!=null&&!config.knowledgeAssets().isEmpty()){
+            if(config.knowledgeAssets().stream().anyMatch(reference->reference==null||reference.versionId()==null||reference.contentHash()==null)
+                    ||!resolveKnowledge(config).equals(config))throw IqcException.invalidState("知识库引用尚未精确冻结");
+        }
     }
     public AgentAssetReferenceValidator(IqcModelProfileMapper models,IqcMcpServerMapper mcps,IqcSkillMapper skills){this(models,mcps,skills,null);}
     /** Resolve an exact independent instruction version, never the mutable current instructions. */
@@ -44,6 +70,7 @@ public class AgentAssetReferenceValidator {
     }
     public void validate(AgentConfiguration config) {
         validatePrompt(config);
+        validateKnowledge(config);
         if (!AgentConfiguration.usesManagedAssets(config.schemaVersion())) return;
         if ("RULE_ONLY".equals(config.mode())) return;
         requireEnabledModel(config.primaryModelProfileId());
