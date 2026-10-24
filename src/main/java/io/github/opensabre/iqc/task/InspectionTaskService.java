@@ -52,6 +52,19 @@ public class InspectionTaskService {
     private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.pipelineasset.PipelineAssetService> pipelineSources;
     private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.schedule.ScheduledActorAccessService> actionActors;
 
+    private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService> knowledgeInputs;
+
+    public InspectionTaskService(InspectionTaskMapper taskMapper,ConversationMapper conversationMapper,QualityAgentMapper agentMapper,
+            QualityRuleMapper ruleMapper,QualityRuleSetService ruleSetService,ObjectMapper objectMapper,TaskExecutionMapper executionMapper,
+            IqcDataScope dataScope,LabelResolutionService labelResolutionService,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.selector.ConversationSelectionService> selections,
+            io.github.opensabre.iqc.conversation.ProductionInputSnapshotService productionInputs,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.pipelineasset.PipelineAssetService> pipelineSources,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.schedule.ScheduledActorAccessService> actionActors) {
+        this(taskMapper,conversationMapper,agentMapper,ruleMapper,ruleSetService,objectMapper,executionMapper,dataScope,
+                labelResolutionService,selections,productionInputs,pipelineSources,actionActors,null);
+    }
+
     public InspectionTaskService(InspectionTaskMapper taskMapper,ConversationMapper conversationMapper,QualityAgentMapper agentMapper,
             QualityRuleMapper ruleMapper,QualityRuleSetService ruleSetService,ObjectMapper objectMapper,TaskExecutionMapper executionMapper,
             IqcDataScope dataScope,LabelResolutionService labelResolutionService,
@@ -248,6 +261,7 @@ public class InspectionTaskService {
         task.setProcessedMessages(0);
         task.setFailedMessages(0);
         task.setAttemptCount(0);
+        freezeKnowledge(task);
         taskMapper.insert(task);
         return task;
     }
@@ -801,6 +815,7 @@ public class InspectionTaskService {
         task.setProcessedMessages(0);
         task.setFailedMessages(0);
         task.setAttemptCount(0);
+        freezeKnowledge(task);
         if(receipt==null)taskMapper.insert(task);
         else {
             task.setId(receipt.getId());task.setCreatedBy(receipt.getCreatedBy());task.setCreatedTime(receipt.getCreatedTime());
@@ -901,6 +916,7 @@ public class InspectionTaskService {
         snapshotAgentAndRules(task, agentId, ruleSetId, requestedRuleIds, executionMode);
         task.setStatus("SCHEDULED"); task.setTotalMessages(0); task.setProcessedMessages(0);
         task.setFailedMessages(0); task.setAttemptCount(0); task.setOwnerGroupId((String) snapshot.get("scopeGroupId"));
+        freezeKnowledge(task);
         taskMapper.insert(task);
         return task;
     }
@@ -986,6 +1002,13 @@ public class InspectionTaskService {
             if (!conversations.isEmpty()) ready.add(candidate);
         }
         return ready;
+    }
+
+    private void freezeKnowledge(InspectionTask task){
+        if(knowledgeInputs!=null){knowledgeInputs.getObject().freeze(task);return;}
+        // Legacy direct callers may omit the optional service only when no knowledge material exists.
+        if(io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.requiresSnapshot(task,objectMapper))
+            throw IqcException.invalidState("当前物化器未启用任务知识库正文冻结");
     }
 
     private void snapshotAgentAndRules(InspectionTask task, String agentId, String ruleSetId, List<String> requestedRuleIds, String executionMode) {
