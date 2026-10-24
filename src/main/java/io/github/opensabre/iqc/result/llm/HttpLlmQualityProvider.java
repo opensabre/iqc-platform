@@ -118,8 +118,8 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
                 messages.add(Map.of("role","user","content",prompt(content,rule,preRuleFindings)));
                 var requestBody=Map.of("model",properties.getModel(),"temperature",0,
                         "response_format",Map.of("type","json_object"),"messages",messages);
-                java.util.function.Supplier<JsonNode> request=()->restClient.post().uri(properties.getPath())
-                        .body(requestBody).retrieve().body(JsonNode.class);
+                java.util.function.Supplier<JsonNode> request=()->parseResponseBody(restClient.post().uri(properties.getPath())
+                        .body(requestBody).retrieve().body(String.class));
                 JsonNode response=gateway==null?request.get():gateway.invokeTracked(
                         new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity("HTTP",properties.getEndpoint(),properties.getModel()),
                         new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context(recordId,rule.path("id").asText("unknown"),callContext==null?null:callContext.owner(),callContext),request,
@@ -147,11 +147,17 @@ public class HttpLlmQualityProvider implements LlmQualityProvider {
     private static Long tokens(JsonNode value){return value.isMissingNode() || value.isNull()?null:
             value.isIntegralNumber() && value.canConvertToLong()?value.longValue():-1L;}
 
+    private JsonNode parseResponseBody(String body){
+        if(body==null)throw new IllegalArgumentException("LLM 响应为空");
+        try{return LlmQualityProvider.readStructuredJson(objectMapper,body);}
+        catch(com.fasterxml.jackson.core.JsonProcessingException invalid){throw new IllegalArgumentException("LLM 响应不是合法 JSON",invalid);}
+    }
+
     JsonNode parseStructuredResponse(JsonNode response) {
         JsonNode content = response == null ? null : response.path("choices").path(0).path("message").path("content");
         if (content == null || content.isMissingNode()) throw new IllegalArgumentException("LLM 响应缺少 choices[0].message.content");
         try {
-            return content.isTextual() ? objectMapper.readTree(stripFence(content.asText())) : content;
+            return content.isTextual() ? LlmQualityProvider.readStructuredJson(objectMapper,stripFence(content.asText())) : content;
         } catch (Exception exception) {
             throw new IllegalArgumentException("LLM 响应不是合法 JSON", exception);
         }

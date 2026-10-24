@@ -4,6 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 /** LLM 规则的适配器边界，正式模型必须返回可校验的结构化结果。 */
 public interface LlmQualityProvider {
+    /** Keep provider decimals before any intermediate tree serialization or histogram selection. */
+    static JsonNode readStructuredJson(com.fasterxml.jackson.databind.ObjectMapper mapper,String text)
+            throws com.fasterxml.jackson.core.JsonProcessingException {
+        return mapper.readerFor(JsonNode.class)
+                .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                .with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY)
+                .with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readValue(text);
+    }
     /** A declared corpus must never disappear silently while task-authorized context is not yet materialized. */
     static void requireKnowledgeContext(JsonNode config){
         if(config!=null&&config.hasNonNull("knowledgeAssets")&&(!config.path("knowledgeAssets").isArray()||!config.path("knowledgeAssets").isEmpty()))
@@ -80,8 +88,7 @@ public interface LlmQualityProvider {
         public java.math.BigDecimal reportedConfidence(com.fasterxml.jackson.databind.ObjectMapper mapper){
             if(!supported||structuredJson==null||structuredJson.isBlank())return null;
             try{
-                JsonNode output=mapper.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-                        .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readTree(structuredJson);
+                JsonNode output=readStructuredJson(mapper,structuredJson);
                 return validJudgment(output)&&output.path("hit").booleanValue()==hit&&output.hasNonNull("confidence")
                         ?output.path("confidence").decimalValue():null;
             }catch(java.io.IOException|RuntimeException invalid){return null;}
@@ -89,7 +96,7 @@ public interface LlmQualityProvider {
         public boolean validStructuredOutput(com.fasterxml.jackson.databind.ObjectMapper mapper,boolean labelFacts) {
             if(!supported || structuredJson==null || structuredJson.isBlank()) return false;
             try {
-                JsonNode output=mapper.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(structuredJson);
+                JsonNode output=readStructuredJson(mapper,structuredJson);
                 return validJudgment(output) && output.path("hit").booleanValue()==hit
                         && (!labelFacts || "iqc-label-facts-v2".equals(output.path("schemaVersion").asText())
                         && output.path("facts").isArray());

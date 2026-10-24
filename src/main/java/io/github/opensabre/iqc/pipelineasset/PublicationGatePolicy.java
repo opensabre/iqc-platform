@@ -4,7 +4,28 @@ import java.math.BigDecimal;
 
 /** Frozen configurable thresholds. Missing whole policy uses these explicit PRD defaults at publication. */
 public record PublicationGatePolicy(String schemaVersion,BigDecimal minimumRiskRecall,BigDecimal minimumOverallF1,
-        BigDecimal minimumRegressionPass,BigDecimal minimumStructuredSuccess,Long maximumP95Ms,Integer minimumSamples) {
+        BigDecimal minimumRegressionPass,BigDecimal minimumStructuredSuccess,Long maximumP95Ms,Integer minimumSamples,
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        Calibration calibration) {
+    public PublicationGatePolicy(String schemaVersion,BigDecimal minimumRiskRecall,BigDecimal minimumOverallF1,
+            BigDecimal minimumRegressionPass,BigDecimal minimumStructuredSuccess,Long maximumP95Ms,Integer minimumSamples){
+        this(schemaVersion,minimumRiskRecall,minimumOverallF1,minimumRegressionPass,minimumStructuredSuccess,maximumP95Ms,minimumSamples,null);
+    }
+    /** Explicit operator thresholds; the PRD does not prescribe calibration error defaults. */
+    public record Calibration(Integer minimumPairedSamples,BigDecimal minimumGoldCoverage,
+            BigDecimal maximumBrier,BigDecimal maximumEce,BigDecimal maximumBrierIncrease,BigDecimal maximumEceIncrease){
+        public Calibration {
+            if(minimumPairedSamples==null||minimumPairedSamples<1||minimumPairedSamples>1000)
+                throw new IllegalArgumentException("calibration paired samples must be between 1 and 1000");
+            for(var value:new BigDecimal[]{minimumGoldCoverage,maximumBrier,maximumEce})
+                if(value==null||value.compareTo(BigDecimal.ZERO)<0||value.compareTo(BigDecimal.ONE)>0)
+                    throw new IllegalArgumentException("calibration coverage and errors must be explicit ratios");
+            if(minimumGoldCoverage.signum()==0)throw new IllegalArgumentException("calibration coverage must be positive");
+            for(var value:new BigDecimal[]{maximumBrierIncrease,maximumEceIncrease})
+                if(value==null||value.compareTo(BigDecimal.ONE.negate())<0||value.compareTo(BigDecimal.ONE)>0)
+                    throw new IllegalArgumentException("calibration error increases must be explicit values between -1 and 1");
+        }
+    }
     public static final String SCHEMA="iqc-publication-gate-v1";
     public PublicationGatePolicy {
         if(!SCHEMA.equals(schemaVersion)) throw new IllegalArgumentException("unsupported publication gate schema");

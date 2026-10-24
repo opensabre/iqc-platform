@@ -29,6 +29,36 @@ public class CalibrationTaskSnapshotService {
     private final IqcDataScope scope;
     private final ObjectMapper json;
 
+    /** Publication evidence must use held-out conversations, even when sample versions differ. */
+    @Transactional(propagation=Propagation.MANDATORY)
+    public void requireHeldOut(io.github.opensabre.iqc.pipelineasset.PipelineRelease release,
+            List<PipelineEvaluationService.Context> validations){
+        var references=release.fusion().calibrationReferences();
+        if(references.isEmpty())return;
+        access.current(Set.of("iqc:evaluation:report:view"));
+        var service=evaluations.getObject();
+        // Revalidate current source access, exact fitted artifacts and graph under original parent locks.
+        service.calibrationsForTask(references,release.pipeline());
+        var expected=new HashSet<>(references);
+        var samples=new HashSet<String>();var conversations=new HashSet<String>();
+        for(var validation:validations){
+            var frozen=verifiedSources(validation.task(),json);
+            var actual=new HashSet<EmpiricalConfidenceCalibration.Reference>();
+            for(var source:frozen)actual.add(source.reference());
+            if(!actual.equals(expected)||frozen.size()!=references.size())
+                throw IqcException.invalidState("发布验证未应用当前精确校准产物");
+            for(var member:validation.prepared().dataset().members()){
+                samples.add(member.sampleId());conversations.add(member.gold().conversationId());
+            }
+        }
+        for(var taskId:references.stream().map(EmpiricalConfidenceCalibration.Reference::taskId).distinct().sorted().toList()){
+            var source=service.context(taskId);
+            for(var member:source.prepared().dataset().members())
+                if(samples.contains(member.sampleId())||conversations.contains(member.gold().conversationId()))
+                    throw IqcException.invalidState("校准拟合与发布验证的样本或会话重叠，必须使用留出数据");
+        }
+    }
+
     @Transactional(propagation=Propagation.MANDATORY)
     public void freeze(InspectionTask task){
         if(!marked(task))return;
