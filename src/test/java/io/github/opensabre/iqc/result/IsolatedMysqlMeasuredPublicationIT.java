@@ -491,12 +491,19 @@ class IsolatedMysqlMeasuredPublicationIT {
         var config=new io.github.opensabre.iqc.agent.AgentConfiguration("3.0",null,"instructions",null,null,null,null,
                 "model",List.of(),List.of(),List.of(),null,null).withKnowledgeAssets(List.of(
                 new io.github.opensabre.iqc.agent.AgentConfiguration.KnowledgeReference(created.getId(),1,first.getId(),first.getContentHash())));
-        var frozenTask=new InspectionTask();frozenTask.setId("knowledge-task");frozenTask.setCreatedBy("annotator");frozenTask.setOwnerGroupId("group");
+        var frozenTask=new InspectionTask();frozenTask.setId("kt"+UUID.randomUUID().toString().replace("-",""));frozenTask.setCreatedBy("annotator");frozenTask.setOwnerGroupId("group");
         frozenTask.setRuleSnapshotJson("{}");frozenTask.setAgentSnapshotJson(json.createObjectNode().put("configJson",json.writeValueAsString(config)).toString());
         var sensitive=mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
         var freezer=new io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService(knowledge,sensitive,context.getBean(IqcDataScope.class),json);
         tx.executeWithoutResult(status->freezer.freeze(frozenTask));
         verify(sensitive).current(Set.of("iqc:knowledge:version:view"));
+        frozenTask.setName("SQL frozen knowledge task");frozenTask.setTaskType("BATCH");frozenTask.setStatus("CREATED");
+        var taskMapper=context.getBean(SqlSessionTemplate.class).getMapper(InspectionTaskMapper.class);
+        tx.executeWithoutResult(status->assertEquals(1,taskMapper.insert(frozenTask)));
+        var persistedKnowledgeTask=taskMapper.selectById(frozenTask.getId());
+        assertEquals(frozenTask.getAgentSnapshotJson(),persistedKnowledgeTask.getAgentSnapshotJson());
+        assertEquals(frozenTask.getRuleSnapshotJson(),persistedKnowledgeTask.getRuleSnapshotJson());
+        assertEquals(first.getId(),io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.verifiedSources(persistedKnowledgeTask,json).getFirst().versionId());
         var originalTaskEvidence=frozenTask.getRuleSnapshotJson();
         assertEquals(first.getId(),io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.verifiedSources(frozenTask,json).getFirst().versionId());
         var changed=new io.github.opensabre.iqc.knowledge.KnowledgeCorpus(io.github.opensabre.iqc.knowledge.KnowledgeCorpus.SCHEMA,
@@ -510,11 +517,13 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals(2,restored.getActivePublishedVersion());assertEquals(corpus,knowledge.requestCorpus(restored.getDraftConfigJson()));
         knowledge.availability(created.getId(),false);
         assertEquals(originalTaskEvidence,frozenTask.getRuleSnapshotJson());
-        var historical=io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.verifiedSources(frozenTask,json);
+        persistedKnowledgeTask=taskMapper.selectById(frozenTask.getId());
+        assertEquals(originalTaskEvidence,persistedKnowledgeTask.getRuleSnapshotJson());
+        var historical=io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.verifiedSources(persistedKnowledgeTask,json);
         assertEquals("frozen reference text",historical.getFirst().snapshot().corpus().documents().getFirst().text());
         assertEquals(first.getContentHash(),historical.getFirst().contentHash());
-        var capability=io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.executionContext(frozenTask,json);
-        assertTrue(capability.material(json.valueToTree(config),"knowledge-task","annotator","group").contains("frozen reference text"));
+        var capability=io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.executionContext(persistedKnowledgeTask,json);
+        assertTrue(capability.material(json.valueToTree(config),frozenTask.getId(),"annotator","group").contains("frozen reference text"));
         assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->tx.execute(status->knowledge.publishedForTask(List.of(binding))));
         var sql=context.getBean(SqlSessionTemplate.class);
         var actualScope=new IqcDataScope(null);

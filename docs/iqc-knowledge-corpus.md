@@ -232,3 +232,12 @@ KNOWLEDGE_CONTEXT_TOO_LARGE。此项证明字节限制；非token窗口、网关
 后续来源修订/发布/恢复/停用，原信封保持不变，历史校验和模型参考保留原版本正文/Hash，
 新批量引用已停用来源拒绝。任务信封对象仍在夹具内，未写任务表；敏感授权受控，
 不据此宣称TaskService保存/worker全链、真实PDP或远端模型通过。
+
+### B 任务信封SQL持久化补验
+
+原53070专用34307 test-compile+surerfire终态0，
+/tmp/iqc-b-knowledge-task-persistence.log.exit=0，原MeasuredPublication四项集成测试通过。
+沿原InspectionTaskMapper和事务写入已冻结Agent/规则信封并重读，正文及版本证据一致。
+来源修订/停用后再次从任务表读取，原信封不变，仍可校验原版本/Hash并生成历史参考。
+唯一任务ID支持重复执行；实例关闭/socket消失。此项补齐上节任务未落表缺口，
+仍未经过TaskService创建/worker知识上下文全链，敏感授权受控，非真实PDP或远端证据。
