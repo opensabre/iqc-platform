@@ -61,6 +61,59 @@ public class KnowledgeTaskSnapshotService {
         task.setRuleSnapshotJson(result.toString());
     }
 
+    /** Validate the persisted original before queueing, resuming or executing; never resolve mutable corpus here. */
+    public static List<KnowledgeBaseService.Prepared> verifiedSources(InspectionTask task,ObjectMapper json){
+        var root=parse(task.getRuleSnapshotJson(),json);
+        var references=new ArrayList<KnowledgeBaseService.Binding>();
+        collect(parse(task.getAgentSnapshotJson(),json),references,json);
+        for(var node:root.path("pipelineSnapshot").path("release").path("pipeline").path("nodes"))
+            collect(node.path("config").path("agentSnapshot"),references,json);
+        if(references.isEmpty()){
+            if(root.has("knowledgeInputs"))throw IqcException.invalidState("无引用任务不能携带知识库正文");
+            return List.of();
+        }
+        try{
+            var envelope=root.path("knowledgeInputs");var body=envelope.path("body");
+            fields(envelope,Set.of("schemaVersion","hashAlgorithm","contentHash","body"));
+            fields(body,Set.of("owner","ownerGroupId","sources"));
+            String group=body.path("ownerGroupId").isNull()?null:body.path("ownerGroupId").textValue();
+            if(!SCHEMA.equals(envelope.path("schemaVersion").asText())
+                    ||!"selector-decimal-sha256-v1".equals(envelope.path("hashAlgorithm").asText())
+                    ||envelope.toString().getBytes(StandardCharsets.UTF_8).length>MAX_BYTES
+                    ||!SelectorAssetService.hash(body.toString()).equals(envelope.path("contentHash").asText())
+                    ||task.getCreatedBy()==null||!task.getCreatedBy().equals(body.path("owner").textValue())
+                    ||(!body.path("ownerGroupId").isNull()&&!body.path("ownerGroupId").isTextual())
+                    ||(task.getOwnerGroupId()!=null&&!task.getOwnerGroupId().equals(group)))throw new IllegalArgumentException();
+            var expected=new java.util.HashSet<>(references);
+            if(expected.size()>400)throw new IllegalArgumentException();
+            var sources=body.path("sources");if(!sources.isArray()||sources.size()!=expected.size())throw new IllegalArgumentException();
+            var result=new ArrayList<KnowledgeBaseService.Prepared>();
+            for(var source:sources){
+                var exact=json.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                        .disable(com.fasterxml.jackson.databind.DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+                        .disable(com.fasterxml.jackson.databind.MapperFeature.ALLOW_COERCION_OF_SCALARS);
+                var value=exact.treeToValue(source,KnowledgeBaseService.Prepared.class);
+                var published=value.snapshot();
+                if(published==null||!expected.remove(new KnowledgeBaseService.Binding(published.knowledgeBaseId(),published.versionNo(),value.versionId(),value.contentHash()))
+                        ||(value.ownerGroupId()!=null&&!value.ownerGroupId().equals(published.ownerGroupId()))
+                        ||(group!=null&&!group.equals(value.ownerGroupId())))throw new IllegalArgumentException();
+                var version=new io.github.opensabre.iqc.knowledge.model.KnowledgeBaseVersion();
+                version.setId(value.versionId());version.setKnowledgeBaseId(published.knowledgeBaseId());
+                version.setVersionNo(published.versionNo());version.setSourceDraftRevision(published.sourceDraftRevision());
+                version.setSnapshotJson(json.writeValueAsString(published));version.setContentHash(value.contentHash());
+                version.setCreatedBy(published.publishedBy());
+                KnowledgeBaseService.readPublishedEvidence(version,json);
+                result.add(value);
+            }
+            if(!expected.isEmpty())throw new IllegalArgumentException();
+            return List.copyOf(result);
+        }catch(Exception invalid){throw IqcException.invalidState("任务知识库正文归属、引用覆盖或摘要无效");}
+    }
+    private static void fields(JsonNode value,Set<String> names){
+        if(!value.isObject()||value.size()!=names.size())throw new IllegalArgumentException();
+        value.fieldNames().forEachRemaining(name->{if(!names.contains(name))throw new IllegalArgumentException();});
+    }
+
     public static boolean requiresSnapshot(InspectionTask task,ObjectMapper json){
         var root=parse(task.getRuleSnapshotJson(),json);
         if(root.has("knowledgeInputs"))return true;
@@ -85,7 +138,9 @@ public class KnowledgeTaskSnapshotService {
     }
     private static JsonNode parse(String value,ObjectMapper json){
         if(value==null||value.isBlank())return json.createObjectNode();
-        try{var result=json.readTree(value);if(result==null)throw new IllegalArgumentException();return result;}
+        try(var parser=json.copy().enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION).createParser(value)){
+            JsonNode result=parser.readValueAsTree();if(result==null||parser.nextToken()!=null)throw new IllegalArgumentException();return result;
+        }
         catch(Exception invalid){throw IqcException.invalidState("任务知识库来源快照无效");}
     }
 }
