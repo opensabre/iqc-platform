@@ -141,11 +141,12 @@ class InvocationFingerprintTest {
             return new ModelGateway.Invocation<>(result,new GatewayCallService.Handle("actual-call",identity.key()));
         }).when(gateway).invokeTracked(any(),any(),any(),any(),any(),any());
         var snapshot=(com.fasterxml.jackson.databind.node.ObjectNode)managedSnapshot();
-        var fallback=(com.fasterxml.jackson.databind.node.ObjectNode)profile();fallback.put("id","fallback").put("modelName","fallback");
+        var fallback=(com.fasterxml.jackson.databind.node.ObjectNode)profile();fallback.put("id","fallback").put("modelName","fallback").put("deploymentRef","fallback-v2");
         ((com.fasterxml.jackson.databind.node.ObjectNode)snapshot.path("configJson").path("assetSnapshots")).putArray("fallbackModels").add(fallback);
         var result=router.call(new Prompt("input"),snapshot);
         var expected=new GatewayCallService.ModelIdentity("OPENAI","https://invalid.example/v1","fallback");
         assertThat(SnapshotChatModelRouter.invocationFingerprint(result).modelKey()).isEqualTo(expected.key());
+        assertThat(SnapshotChatModelRouter.invocationFingerprint(result).deploymentRef()).isEqualTo("fallback-v2");
         verify(primary).call(any(Prompt.class));verify(model).call(any(Prompt.class));
     }
     @Test void oldEvaluationJsonOmitsNewEvidenceAndRoundTrips() throws Exception {
@@ -156,4 +157,18 @@ class InvocationFingerprintTest {
         assertThatThrownBy(()->new SnapshotChatModelRouter.InvocationFingerprint("iqc-llm-invocation-fingerprint-v1","invalid","a".repeat(64)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+    @Test void selectedDeploymentIsPreservedWithoutChangingLegacyFingerprintJson() throws Exception {
+        var profile=(com.fasterxml.jackson.databind.node.ObjectNode)profile();profile.put("deploymentRef","primary-v3");
+        var response=router.callProfile(new Prompt("input"),profile,new GatewayCallService.Context("task","rule","owner"));
+        var selected=SnapshotChatModelRouter.invocationFingerprint(response);
+        assertThat(selected.deploymentRef()).isEqualTo("primary-v3");
+        assertThat(json.readValue(json.writeValueAsString(selected),SnapshotChatModelRouter.InvocationFingerprint.class)).isEqualTo(selected);
+        var legacy=new SnapshotChatModelRouter.InvocationFingerprint("iqc-llm-invocation-fingerprint-v1","a".repeat(64),"b".repeat(64));
+        String expected="{\"schemaVersion\":\"iqc-llm-invocation-fingerprint-v1\",\"modelKey\":\""+"a".repeat(64)+"\",\"inputHash\":\""+"b".repeat(64)+"\"}";
+        assertThat(json.writeValueAsString(legacy)).isEqualTo(expected);
+        assertThat(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(json.writeValueAsString(legacy)))
+                .isEqualTo(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(expected));
+        assertThat(SnapshotChatModelRouter.invocationFingerprint(invoke(new Prompt("input"),"task")).deploymentRef()).isNull();
+    }
+
 }

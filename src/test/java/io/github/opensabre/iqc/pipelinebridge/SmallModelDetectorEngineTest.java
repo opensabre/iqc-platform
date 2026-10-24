@@ -108,6 +108,12 @@ class SmallModelDetectorEngineTest {
             assertThat(run.findings()).hasSize(1);
             assertThat(run.findings().getFirst().confidence()).isEqualByComparingTo("0.5");
             var trace=run.trace().getFirst().result();
+            var invocation=json.treeToValue(trace.metrics().get("modelInvocation"),io.github.opensabre.iqc.result.llm.SnapshotChatModelRouter.InvocationFingerprint.class);
+            assertThat(invocation.deploymentRef()).isEqualTo("classifier-v3");
+            assertThat(invocation.modelKey()).matches("[a-f0-9]{64}");
+            assertThat(invocation.inputHash()).isEqualTo(run.findings().getFirst().source().inputHash());
+            assertThat(json.readValue(json.writeValueAsString(trace),NodeResult.class).metrics().get("modelInvocation"))
+                    .isEqualTo(trace.metrics().get("modelInvocation"));
             assertThat(trace.metrics().get(io.github.opensabre.iqc.quality.evaluation.CalibrationRuntime.KEY)
                     .path("rawConfidence").decimalValue()).isEqualByComparingTo("0.75");
             io.github.opensabre.iqc.quality.evaluation.CalibrationRuntime.verify(task,run,json);
