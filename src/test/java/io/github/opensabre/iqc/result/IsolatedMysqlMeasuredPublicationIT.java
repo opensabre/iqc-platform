@@ -519,6 +519,13 @@ class IsolatedMysqlMeasuredPublicationIT {
         var servicePersisted=taskMapper.selectById(serviceCreated.getId());
         assertEquals("annotator",servicePersisted.getCreatedBy());
         assertEquals(first.getId(),io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.verifiedSources(servicePersisted,json).getFirst().versionId());
+        int beforeRevocation=db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE agent_id=?",Integer.class,taskAgent);
+        when(sensitive.current(Set.of("iqc:knowledge:version:view"))).thenThrow(io.github.opensabre.iqc.governance.IqcException.accessDenied("revoked knowledge access"));
+        try {
+            assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->tx.execute(status->taskCreator.createBatch("Rejected revoked knowledge",List.of(taskConversation),taskAgent,null,List.of(taskRule),1,"AGENT_LLM")));
+            assertEquals(beforeRevocation,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE agent_id=?",Integer.class,taskAgent));
+            assertEquals(first.getId(),io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.verifiedSources(taskMapper.selectById(serviceCreated.getId()),json).getFirst().versionId());
+        } finally {reset(sensitive);}
         var originalTaskEvidence=frozenTask.getRuleSnapshotJson();
         assertEquals(first.getId(),io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.verifiedSources(frozenTask,json).getFirst().versionId());
         var changed=new io.github.opensabre.iqc.knowledge.KnowledgeCorpus(io.github.opensabre.iqc.knowledge.KnowledgeCorpus.SCHEMA,

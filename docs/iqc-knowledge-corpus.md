@@ -251,3 +251,12 @@ freezer并落任务表；重读校验原版本。来源停用后新建拒绝，�
 仍验证原版本。TaskService由夹具直接构造，原freezer通过受控ObjectProvider注入，
 敏感授权受控；不代表完整Spring装配/真实PDP/worker执行或远端模型验收。
 专用实例关闭/socket消失。
+
+### B 创建时撤权SQL回滚验证
+
+原30993专用34307 test-compile+surerfire终态0，
+/tmp/iqc-b-knowledge-task-revocation.log.exit=0，MeasuredPublication四项通过。
+当前knowledge:version:view受控拒绝时，真实TaskService/事务新建拒绝，数据库按Agent
+统计任务数量不增；既有持久化任务的原版本证据仍可独立验证。finally恢复本地授权mock，
+实例关闭/socket消失。此项证明受控授权失败到真实SQL保存边界的行为，非真实PDP、
+worker模型执行或线上撤权验收。
