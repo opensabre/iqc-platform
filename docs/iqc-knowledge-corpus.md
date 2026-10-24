@@ -96,3 +96,12 @@ Service.publish，使用独立事务。限时完成后两侧版本ID相同，实
 前端/knowledge-bases复用原权限与路由、表格/抽屉/表单，逐文档编辑ID/标题/正文/来源引用并检查边界。草稿修改未保存时不能切其他资产或发布/恢复覆盖；命令回执后清正文并独立重读，失败保留对象身份并要求重新读取。正文/目录/版本/维护权限变化清空状态和请求代次，关闭/切换资产/版本的旧响应不恢复文档。敏感受限详情为元数据视图，不能用空正文覆盖。
 
 本批仅管理与阅读，不声明Agent/Pipeline精确引用、任务授权正文冻结或LLM上下文已完成；这些继续KB2引用/KB3。编译构建终态见协作记录，真实HTTP/PDP/四角色/SQL脚本/浏览器及源对象不变专项待独立验证。
+
+## B KB2敏感正文投影验证（2026-10-24）
+
+固定同步59aa155后，KnowledgeReadProjectionTest遍历FULL/PII/PROMPT八种组合：
+目录/命令元数据与历史均无正文，详情与精确版本仅三项权限齐备时返回正文，
+canonicalPayloadVisible与实际正文一致，原草稿/历史/Prepared对象不被修改。
+原15682 test-compile+surerfire终态0；新增1项、语料4项、原ResultReadProjection9项，
+共14项零失败、错误、跳过，日志`/tmp/iqc-b-knowledge-read-matrix.log`。
+此为原投影器验证，非HTTP当前授权、四角色迁移或浏览器交互证据。
