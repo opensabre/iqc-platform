@@ -291,7 +291,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         var provider=context.getBean(LlmQualityProvider.class);
         // Exercise production prompt construction, parsing and router fingerprint generation.
         var model=mock(org.springframework.ai.chat.model.ChatModel.class);
-        when(model.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(new org.springframework.ai.chat.model.ChatResponse(List.of(new org.springframework.ai.chat.model.Generation(new org.springframework.ai.chat.messages.AssistantMessage("{\"hit\":true,\"reason\":\"controlled\",\"evidence\":[]}")))));
+        when(model.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(new org.springframework.ai.chat.model.ChatResponse(List.of(new org.springframework.ai.chat.model.Generation(new org.springframework.ai.chat.messages.AssistantMessage("{\"hit\":true,\"reason\":\"controlled\",\"confidence\":0.75,\"evidence\":[]}")))));
         ObjectProvider<org.springframework.ai.chat.model.ChatModel> defaults=mock(ObjectProvider.class);
         when(defaults.getIfAvailable()).thenReturn(model);
         var gateway=mock(io.github.opensabre.iqc.result.llm.gateway.ModelGateway.class);
@@ -313,6 +313,24 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals(0,citationReport.citationGroundingMetrics().claimedQuotes());
         assertNull(citationReport.citationGroundingMetrics().observedQuoteErrorRate());
         assertEquals(0,BigDecimal.ONE.compareTo(citationReport.citationGroundingMetrics().measurementCoverage()));
+        // Resolve the original fitted evidence through the real transactional proxy and SQL mappers.
+        var calibration=citationReport.nodeConfidenceMetrics().nodes().getFirst().calibrationCandidate();
+        assertNotNull(calibration);assertEquals(1,calibration.scored());
+        var calibrationRef=new EmpiricalConfidenceCalibration.Reference(first.getId(),first.getCurrentExecutionId(),"model",calibration.contentHash());
+        var target=evaluations.context(first.getId()).prepared().release().pipeline();
+        assertThrows(org.springframework.transaction.IllegalTransactionStateException.class,
+                ()->evaluations.calibrationForTask(calibrationRef,target));
+        var calibrationTx=new org.springframework.transaction.support.TransactionTemplate(context.getBean(org.springframework.transaction.PlatformTransactionManager.class));
+        String originalGroup=db.queryForObject("SELECT owner_group_id FROM iqc_inspection_task WHERE id=?",String.class,first.getId());
+        db.update("UPDATE iqc_inspection_task SET owner_group_id='calibration-group' WHERE id=?",first.getId());
+        try {
+            var resolved=calibrationTx.execute(status->evaluations.calibrationForTask(calibrationRef,target));
+            assertNotNull(resolved);assertEquals(calibration,resolved.artifact());
+            assertEquals("calibration-group",resolved.ownerGroupId());assertEquals("annotator",resolved.owner());
+            var badRef=new EmpiricalConfidenceCalibration.Reference(first.getId(),first.getCurrentExecutionId(),"model","0".repeat(64));
+            assertThrows(RuntimeException.class,()->calibrationTx.execute(status->evaluations.calibrationForTask(badRef,target)));
+            assertEquals(calibration.contentHash(),evaluations.report(first.getId(),first.getCurrentExecutionId()).nodeConfidenceMetrics().nodes().getFirst().calibrationCandidate().contentHash());
+        } finally { db.update("UPDATE iqc_inspection_task SET owner_group_id=? WHERE id=?",originalGroup,first.getId()); }
         var compared=evaluations.consistency(first.getId(),first.getCurrentExecutionId(),second.getId(),second.getCurrentExecutionId());
         assertEquals(1,compared.expectedPairs());assertEquals(1,compared.comparablePairs());assertEquals(1,compared.agreeingPairs());assertEquals(0,BigDecimal.ONE.compareTo(compared.agreementRate()));
         var duplicate=evaluations.consistency(first.getId(),first.getCurrentExecutionId(),first.getId(),first.getCurrentExecutionId());assertEquals(Map.of("SAME_ARTIFACT",1),duplicate.excludedReasons());
