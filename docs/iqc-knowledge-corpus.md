@@ -133,3 +133,12 @@ canonicalPayloadVisible与实际正文一致，原草稿/历史/Prepared对象�
 引用解析复用知识库领域服务，在独立只读 REPEATABLE_READ 事务内校验当前范围和不可变版本，返回不含正文的 Binding；不会跨多个知识库保留父行写锁。此检查不能代替任务物化时的授权。后续 KB3 必须在任务事务中冻结合法正文并收窄来源组织交集，处理所有任务入口以及有界上下文和来源追踪。
 
 当前尚未提供任务正文上下文，两种真实模型适配器对非空 knowledgeAssets 显式返回 KNOWLEDGE_CONTEXT_NOT_FROZEN，防止静默忽略引用。此提交仅为引用管理前置，不作为知识库推理完成或上线验收。后端离线 test-compile 与前端生产构建均退出0；本轮未新增或执行测试，未执行共享迁移或部署。
+
+### B Agent精确引用专项验证
+
+固定fad71e0已合入5ff95b9。KnowledgeAssetReferenceTest三项验证精确版本元数据
+绑定、调用者不变与JSON往返，当前授权撤销先于来源读取，错误来源/版本/摘要拒绝，
+旧配置不调用知识库依赖。联跑原PromptAssetVersionTest四项，原21830终态0，
+/tmp/iqc-b-knowledge-reference-tests-agent.log.exit=0，七项零失败错误跳过。
+原59754编译终态0；原7358因Mockito自动附加失败终态1，未执行业务断言，
+使用既有显式ByteBuddy agent后通过。来源服务及授权受控，非SQL/PDP/任务正文冻结证明。
