@@ -132,6 +132,33 @@ public class KnowledgeBaseService {
     @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
     public Prepared publishedForTask(String id,int number){var row=require(id,true);
         if(!"ACTIVE".equals(row.getStatus()))throw IqcException.invalidState("知识库已停用");return prepared(row,number);}
+    /** Resolve the complete task reference set in a stable parent-lock order in the caller transaction. */
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public List<Prepared> publishedForTask(List<Binding> references){
+        if(references==null||references.size()>400)throw IqcException.invalidArgument("任务知识库引用数量无效");
+        var ordered=new TreeMap<String,TreeMap<Integer,Binding>>();
+        for(var reference:references){
+            if(reference==null||reference.knowledgeBaseId()==null||!reference.knowledgeBaseId().matches("[A-Za-z0-9:_-]{1,64}")
+                    ||reference.versionNo()<1||reference.versionId()==null||!reference.versionId().matches("[A-Za-z0-9:_-]{1,64}")
+                    ||reference.contentHash()==null||!reference.contentHash().matches("[a-f0-9]{64}"))
+                throw IqcException.invalidArgument("任务知识库引用未精确绑定");
+            var previous=ordered.computeIfAbsent(reference.knowledgeBaseId(),ignored->new TreeMap<>())
+                    .putIfAbsent(reference.versionNo(),reference);
+            if(previous!=null&&!previous.equals(reference))throw IqcException.invalidArgument("任务知识库版本引用冲突");
+        }
+        var result=new ArrayList<Prepared>();
+        for(var entry:ordered.entrySet()){
+            var row=require(entry.getKey(),true);
+            if(!"ACTIVE".equals(row.getStatus()))throw IqcException.invalidState("知识库已停用");
+            for(var reference:entry.getValue().values()){
+                var value=prepared(row,reference.versionNo());
+                if(!reference.versionId().equals(value.versionId())||!reference.contentHash().equals(value.contentHash()))
+                    throw IqcException.invalidState("任务知识库版本来源已不匹配");
+                result.add(value);
+            }
+        }
+        return List.copyOf(result);
+    }
     private Prepared prepared(KnowledgeBase row,int number){
         var version=version(row,number);var snapshot=readPublishedEvidence(version,json);
         String group=Objects.equals(row.getOwnerGroupId(),snapshot.ownerGroupId())?row.getOwnerGroupId():null;
