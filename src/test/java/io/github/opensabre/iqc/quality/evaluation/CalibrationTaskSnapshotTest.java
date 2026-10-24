@@ -71,4 +71,40 @@ class CalibrationTaskSnapshotTest {
         var legacy=new InspectionTask();legacy.setRuleSnapshotJson("{}");service.freeze(legacy);
         assertThat(legacy.getRuleSnapshotJson()).isEqualTo("{}");assertThat(CalibrationTaskSnapshotService.verifiedSources(legacy,json)).isEmpty();
     }
+    @Test void recognizesEscapedReferenceKeysAndRejectsAmbiguousJson() {
+        var task=draft("group");
+        String escaped="\\"+"u0063alibrationReferences";
+        task.setRuleSnapshotJson(task.getRuleSnapshotJson().replace("calibrationReferences",escaped));
+        assertThat(CalibrationTaskSnapshotService.requiresSnapshot(task,json)).isTrue();
+        service.freeze(task);
+        String frozen=task.getRuleSnapshotJson();
+        assertThat(CalibrationTaskSnapshotService.verifiedSources(task,json)).hasSize(1);
+        task.setRuleSnapshotJson(frozen.replace("\"calibrationInputs\":", "\"calibrationInputs\":null,\"calibrationInputs\":"));
+        assertThatThrownBy(()->CalibrationTaskSnapshotService.verifiedSources(task,json)).hasMessageContaining("JSON无效");
+        task.setRuleSnapshotJson(frozen+" {}");
+        assertThatThrownBy(()->CalibrationTaskSnapshotService.verifiedSources(task,json)).hasMessageContaining("JSON无效");
+    }
+    @Test void rejectsRehashedEnvelopeWithUnknownFieldsFractionalCountsOrChangedProbability() throws Exception {
+        var task=draft("group");service.freeze(task);String frozen=task.getRuleSnapshotJson();
+        for(String mutation:List.of("extra","fractional","probability")) {
+            var root=(ObjectNode)PipelineAssetService.readFrozenTree(json,frozen);
+            var envelope=(ObjectNode)root.path("calibrationInputs");var body=(ObjectNode)envelope.path("body");
+            var source=(ObjectNode)body.path("sources").get(0);
+            var artifact=(ObjectNode)source.path("artifact");
+            var bin=(ObjectNode)artifact.path("bins").get(9);
+            switch(mutation) {
+                case "extra" -> source.put("clientApproved",true);
+                case "fractional" -> bin.put("samples",new BigDecimal("20.5"));
+                case "probability" -> bin.put("calibratedProbability",new BigDecimal("0.99"));
+                default -> throw new AssertionError(mutation);
+            }
+            envelope.put("contentHash",SelectorAssetService.hash(body.toString()));
+            task.setRuleSnapshotJson(root.toString());
+            assertThatThrownBy(()->CalibrationTaskSnapshotService.verifiedSources(task,json))
+                    .as(mutation).hasMessageContaining("来源摘要无效");
+        }
+        task.setRuleSnapshotJson(frozen);
+        assertThat(CalibrationTaskSnapshotService.verifiedSources(task,json)).hasSize(1);
+    }
+
 }
