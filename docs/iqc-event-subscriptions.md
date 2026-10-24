@@ -74,3 +74,57 @@ TaskTriggerService物化与实际queueSystem：首次接收后灰度0→10000且
 
 发布Prepared和组织scope为受控适配，SQL记录由测试初始化；不替代发布UI、真实PDP、
 扫描anti-join、多实例扫描、实际MQ投递或worker成功执行。完整适用I1–I7继续，输入仅处理后会话。
+
+### 归档扫描去重与事务回滚（B，2026-10-24）
+
+原71040 compiler:testCompile+surerfire终态0，`/tmp/iqc-b-archive-scan-sql.log.exit`为0；
+fresh XML SQL30+周期协议11=41项零失败错误跳过，专用34307已关闭且socket消失。
+新增两项使用真实EventSubscriptionService.fire/Spring事务、原会话查询anti-join及
+receiveSubscription：重复扫描和DELETED回执阻止同事件再接收，旧活动修订返回0；
+实际稳定事件ID/目标/原version1/无需ASR得到核对。扫描末尾订阅UPDATE注入SQL失败，
+已写入接收记录和公平扫描时间均回滚，移除故障后重新接收一次且随后去重。
+
+父发布记录由测试初始化，Prepared与当前scope适配受控，每例使用独立历史秒区间和
+独立会话指纹；本轮不证明发布UI、真实组织PDP、多实例或模型worker成功执行。
+
+### 实际扫描回执到入队的连续链路（B，2026-10-24）
+
+原20049 compiler:testCompile+surerfire终态0，`/tmp/iqc-b-archive-scan-queue-sql.log.exit`为0；
+fresh XML SQL30+周期11=41项零失败错误跳过，专用34307已关闭且socket消失。
+在原扫描用例直接读取fire实际写入的SQL回执，灰度0→10000后经原materialize/queueSystem
+入队，完整六依赖guard验证原父及冻结版本，只有一个执行及原消息检查点。重复物化false，
+后续扫描0，queueSystem仅调用一次；DELETED去重/旧修订拒绝/故障回滚仍随组合通过。
+
+本轮增加原用例的连续链路断言，未新增测试数量；Prepared依赖及组织scope仍受控，
+不将到QUEUED的证据称为模型worker成功执行、真实PDP或跨实例验收。
+
+### 固定版本归档接收到真实工作器成功（B，2026-10-24）
+
+复用IsolatedMysqlMeasuredPublicationIT完整目录、Gold独立审核、冻结数据集、真实试跑及
+发布门禁产生的已发布METRIC流水线，在原集成场景加入内部receiveSubscription事务→
+materialize/queue→executePersisted。PipelineAssetService/Runtime/Evaluator/HierarchicalResultService
+及任务/检查点/结果SQL均为原真实实现，父订阅与原发布引用由测试初始化。处理后会话
+无需ASR，最终SUCCEEDED，两消息检查点成功，结果80分/HIGH、原1000ms轨迹，单执行，
+同事件重放返回原ID。
+
+原30131 compiler:testCompile+surerfire终态0，`/tmp/iqc-b-archive-measured-worker.log.exit`为0；
+fresh IsolatedMysqlMeasuredPublicationIT两项零失败错误跳过，93.869秒，专用34307关闭且
+socket消失。新增断言扩原第一项，不新增测试数量；原第二项评测部分失败后重试继承与
+一致性/标签组合随本轮通过，不当作归档任务自身重试证据。
+
+本轮为固定版本归档内部接收到实际工作器成功；不冒称灰度worker或扫描到worker整链。
+组织scope、Agent资产校验及另一模型场景供应商适配仍沿原受控夹具；真实PDP/发布UI、
+跨实例重启恢复、实际供应商和其它适用I1–I7继续。
+
+### 实际归档扫描到工作器连续链路（B，2026-10-24）
+
+在上述实测发布场景中，改由真实EventSubscriptionService.fire扫描处理后会话，
+经anti-join和接收事务产生原回执，再连续执行物化、入队、工作器与结果持久化。
+断言重复扫描不再接收，完成后重复投递同一执行不新增执行、不改变结果；
+原80分/HIGH/1000ms轨迹和两消息成功检查点继续成立。无需语音转换或转写。
+
+原27170终态0，`/tmp/iqc-b-archive-scan-measured-worker.log.exit`为0；
+fresh集成两项零失败、错误、跳过，53.396秒；专用34307关闭且socket消失。
+本轮扩原场景，不新增测试数量。固定版本父订阅发布记录由夹具初始化，
+流水线发布门禁与执行引擎真实，组织scope、Agent校验及另一模型适配受控。
+不外推灰度工作器、真实PDP、定时调度循环或跨进程重启恢复。
