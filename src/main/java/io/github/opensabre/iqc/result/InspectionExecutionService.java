@@ -1289,7 +1289,12 @@ public class InspectionExecutionService {
             if(measured.path("invocationFingerprints").isArray())measured.path("invocationFingerprints").forEach(fingerprints::add);
         }
         if(calls>0){var metrics=(ObjectNode)readSnapshot(structuredOutputMetrics(calls,validOutputs));
-            metrics.set("invocationFingerprints",fingerprints);aggregate.setDetectorMetricsJson(metrics.toString());}
+            metrics.set("invocationFingerprints",fingerprints);
+            if(results.size()==1&&calls==1&&validOutputs==1&&List.of("HIT","NOT_HIT").contains(status)){
+                var single=readSnapshot(results.getFirst().getDetectorMetricsJson()).get("reportedConfidence");
+                if(single!=null&&single.isNumber())metrics.set("reportedConfidence",single);
+            }
+            aggregate.setDetectorMetricsJson(metrics.toString());}
         var evidence = objectMapper.createArrayNode();
         results.forEach(result -> {
             var values = readSnapshot(result.getEvidenceJson());
@@ -1443,7 +1448,10 @@ public class InspectionExecutionService {
                     evaluation = priorRuns.get(runIndex);
                 } else evaluation=llmQualityProvider.evaluate(message.getContent(),rule,readSnapshot(task.getAgentSnapshotJson()),
                         preRuleFindings,recordId,callContext);
-                result.setDetectorMetricsJson(structuredOutputMetrics(1,evaluation.validStructuredOutput(objectMapper,conversationFacts)?1:0,evaluation.invocationFingerprint()));
+                var outputMetrics=(ObjectNode)readSnapshot(structuredOutputMetrics(1,evaluation.validStructuredOutput(objectMapper,conversationFacts)?1:0,evaluation.invocationFingerprint()));
+                var reportedConfidence=evaluation.reportedConfidence(objectMapper);
+                if(reportedConfidence!=null)outputMetrics.put("reportedConfidence",reportedConfidence);
+                result.setDetectorMetricsJson(outputMetrics.toString());
                 if (!evaluation.supported()) {
                     result.setResultStatus("ERROR"); result.setScore(0); result.setRiskLevel("HIGH"); result.setDeduction(0);
                     result.setReason(evaluation.reason()); result.setFindingJson("[]"); result.setEvidenceJson("[]"); result.setSuggestionJson("[]");

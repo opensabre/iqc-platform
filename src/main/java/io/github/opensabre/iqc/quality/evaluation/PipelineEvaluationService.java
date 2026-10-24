@@ -235,7 +235,19 @@ public class PipelineEvaluationService {
                          @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
                          CitationGroundingMetrics.Summary citationGroundingMetrics,
                          @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-                         InputCompletenessMetrics.Summary inputCompletenessMetrics) {
+                         InputCompletenessMetrics.Summary inputCompletenessMetrics,
+                         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                         NodeConfidenceMetrics.Summary nodeConfidenceMetrics) {
+        public Report(String schemaVersion,String taskId,String executionId,String datasetHash,int expectedSamples,
+                      int availableSamples,int successfulSamples,boolean complete,List<String> missingSampleIds,
+                      Map<String,String> sourceExecutionIds,FindingEvaluationMetrics.Result findingMetrics,
+                      BusinessMetrics businessMetrics,LatencyMetrics latencyMetrics,RegressionMetrics regressionMetrics,
+                      StructuredMetrics structuredMetrics,CitationGroundingMetrics.Summary citationGroundingMetrics,
+                      InputCompletenessMetrics.Summary inputCompletenessMetrics){
+            this(schemaVersion,taskId,executionId,datasetHash,expectedSamples,availableSamples,successfulSamples,complete,
+                    missingSampleIds,sourceExecutionIds,findingMetrics,businessMetrics,latencyMetrics,regressionMetrics,
+                    structuredMetrics,citationGroundingMetrics,inputCompletenessMetrics,null);
+        }
         public Report(String schemaVersion,String taskId,String executionId,String datasetHash,int expectedSamples,
                       int availableSamples,int successfulSamples,boolean complete,List<String> missingSampleIds,
                       Map<String,String> sourceExecutionIds,FindingEvaluationMetrics.Result findingMetrics,
@@ -281,6 +293,8 @@ public class PipelineEvaluationService {
         var structured=new StructuredCounter(prepared.release());
         var citations=new CitationGroundingMetrics(prepared.release(),prepared.dataset().members().size());
         var completeness=new InputCompletenessMetrics();
+        var nodeConfidence=new NodeConfidenceMetrics(prepared.release(),json);
+        var calibrationEvidence=json.createArrayNode();
         for (var member : prepared.dataset().members()) {
             completeness.add(member.gold());
             var row = bySample.get(member.sampleId());
@@ -293,11 +307,15 @@ public class PipelineEvaluationService {
             }
             if (row == null) {
                 missing.add(member.sampleId()); metricSamples.add(new FindingEvaluationMetrics.Sample(member.gold(), List.of()));
+                nodeConfidence.add(member.gold(),List.of());
                 if (regression) regressionFailed.add(member.sampleId());
                 continue;
             }
             var actual = validatedRow(task, prepared, row); sources.put(member.sampleId(), row.getExecutionId());
+            calibrationEvidence.addObject().put("sampleId",row.getSampleId()).put("sampleVersion",row.getSampleVersion())
+                    .put("executionId",row.getExecutionId()).put("goldHash",row.getGoldHash()).put("actualHash",row.getActualHash());
             structured.add(actual); citations.add(actual);
+            nodeConfidence.add(member.gold(),actual.run().findings(),actual.run().trace());
             var labelCounts=LabelEvaluationMetrics.evaluate(expected==null?Map.of():expected.labels(),prepared.release().labelPolicy(),actual.fusion());
             comparableLabels+=labelCounts.comparable(); correctLabels+=labelCounts.correct();
             if ("SUCCESS".equals(row.getStatus())) successful++;
@@ -329,7 +347,11 @@ public class PipelineEvaluationService {
                 FindingEvaluationMetrics.evaluate(metricSamples),business,latency,
                 new RegressionMetrics("EXACT_LABELLED_FINDING_EVIDENCE_SCORE_RISK",regression?prepared.dataset().members().size():0,
                         regressionPassed,regression?ratio(regressionPassed,prepared.dataset().members().size()):null,List.copyOf(regressionFailed)),
-                structured.summary(),citations.summary(),completeness.summary());
+                structured.summary(),citations.summary(),completeness.summary(),
+                "SUCCEEDED".equals(execution.getStatus())&&missing.isEmpty()&&successful==prepared.dataset().members().size()
+                        ?nodeConfidence.summary(taskId,execution.getId(),prepared.datasetHash(),
+                        parse(task.getRuleSnapshotJson()).path("pipelineSnapshot").path("contentHash").asText(),
+                        io.github.opensabre.iqc.selector.SelectorAssetService.hash(calibrationEvidence.toString())):nodeConfidence.summary());
     }
     /** Explicit repeated-run comparison reuses the existing ownership, artifact and source-execution checks. */
     public ModelConsistencyMetrics.Report consistency(String taskId,String executionId,String referenceTaskId,String referenceExecutionId){

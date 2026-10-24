@@ -49,34 +49,49 @@ public final class FindingEvaluationMetrics {
                                         List<ConfidenceBin> bins) {
         public ConfidenceDiagnostics { bins=List.copyOf(bins); }
     }
+    /** Shared arithmetic for final-fusion and raw-node diagnostics; no calibration declaration is inferred. */
+    static final class ConfidenceCounter {
+        long eligible,scored;private final long[] counts=new long[10],correct=new long[10];
+        private final BigDecimal[] confidenceSums=new BigDecimal[10];
+        private BigDecimal squaredError=BigDecimal.ZERO;
+        ConfidenceCounter(){java.util.Arrays.fill(confidenceSums,BigDecimal.ZERO);}
+        void add(BigDecimal confidence,boolean match){
+            if(confidence==null||confidence.signum()<0||confidence.compareTo(BigDecimal.ONE)>0)
+                throw new IllegalArgumentException("invalid confidence");
+            int bin=Math.min(9,confidence.multiply(BigDecimal.TEN).intValue());
+            scored++;counts[bin]++;if(match)correct[bin]++;confidenceSums[bin]=confidenceSums[bin].add(confidence);
+            BigDecimal difference=confidence.subtract(match?BigDecimal.ONE:BigDecimal.ZERO);
+            squaredError=squaredError.add(difference.multiply(difference));
+        }
+        EmpiricalConfidenceCalibration.Artifact fit(EmpiricalConfidenceCalibration.Source source){
+            return scored==0?null:EmpiricalConfidenceCalibration.fit(source,eligible,scored,counts,correct);
+        }
+        ConfidenceDiagnostics summary(String scope){
+            if(scored>eligible)throw new IllegalArgumentException("confidence observations exceed eligible gold");
+            var bins=new java.util.ArrayList<ConfidenceBin>();BigDecimal calibrationError=BigDecimal.ZERO;
+            for(int i=0;i<10;i++){
+                calibrationError=calibrationError.add(confidenceSums[i].subtract(BigDecimal.valueOf(correct[i])).abs());
+                bins.add(new ConfidenceBin(i,BigDecimal.valueOf(i,1),BigDecimal.valueOf(i+1,1),i==9,counts[i],
+                        counts[i]==0?null:confidenceSums[i].divide(BigDecimal.valueOf(counts[i]),6,RoundingMode.HALF_UP),ratio(correct[i],counts[i])));
+            }
+            return new ConfidenceDiagnostics("iqc-finding-confidence-diagnostics-v1",scope,eligible,scored,eligible-scored,
+                    ratio(scored,eligible),scored==0?null:squaredError.divide(BigDecimal.valueOf(scored),6,RoundingMode.HALF_UP),
+                    scored==0?null:calibrationError.divide(BigDecimal.valueOf(scored),6,RoundingMode.HALF_UP),bins);
+        }
+    }
     private static ConfidenceDiagnostics confidenceDiagnostics(List<Sample> samples){
-        long eligible=0,scored=0;long[] counts=new long[10],correct=new long[10];
-        BigDecimal[] confidenceSums=new BigDecimal[10];java.util.Arrays.fill(confidenceSums,BigDecimal.ZERO);
-        BigDecimal squaredError=BigDecimal.ZERO;
+        var counter=new ConfidenceCounter();
         for(var sample:samples){
             var actual=new LinkedHashMap<String,FindingFusion.Result>();sample.actual().forEach(fact->actual.put(fact.code(),fact));
             for(var gold:sample.gold().findings()){
-                if(gold.state()!=Finding.State.KNOWN)continue;eligible++;
+                if(gold.state()!=Finding.State.KNOWN)continue;counter.eligible++;
                 var result=actual.get(gold.code());
                 if(result==null||result.state()!=Finding.State.KNOWN||result.valueType()!=gold.valueType()
                         ||!Finding.validValue(result.valueType(),result.value())||result.finalConfidence()==null)continue;
-                BigDecimal confidence=result.finalConfidence();
-                if(confidence.signum()<0||confidence.compareTo(BigDecimal.ONE)>0)throw new IllegalArgumentException("invalid final confidence");
-                boolean match=equal(gold.value(),result.value());int bin=Math.min(9,confidence.multiply(BigDecimal.TEN).intValue());
-                scored++;counts[bin]++;if(match)correct[bin]++;confidenceSums[bin]=confidenceSums[bin].add(confidence);
-                BigDecimal difference=confidence.subtract(match?BigDecimal.ONE:BigDecimal.ZERO);
-                squaredError=squaredError.add(difference.multiply(difference));
+                counter.add(result.finalConfidence(),equal(gold.value(),result.value()));
             }
         }
-        var bins=new java.util.ArrayList<ConfidenceBin>();BigDecimal calibrationError=BigDecimal.ZERO;
-        for(int i=0;i<10;i++){
-            calibrationError=calibrationError.add(confidenceSums[i].subtract(BigDecimal.valueOf(correct[i])).abs());
-            bins.add(new ConfidenceBin(i,BigDecimal.valueOf(i,1),BigDecimal.valueOf(i+1,1),i==9,counts[i],
-                    counts[i]==0?null:confidenceSums[i].divide(BigDecimal.valueOf(counts[i]),6,RoundingMode.HALF_UP),ratio(correct[i],counts[i])));
-        }
-        return new ConfidenceDiagnostics("iqc-finding-confidence-diagnostics-v1","FINAL_VALUE_CORRECTNESS_ON_KNOWN_GOLD",eligible,scored,eligible-scored,
-                ratio(scored,eligible),scored==0?null:squaredError.divide(BigDecimal.valueOf(scored),6,RoundingMode.HALF_UP),
-                scored==0?null:calibrationError.divide(BigDecimal.valueOf(scored),6,RoundingMode.HALF_UP),bins);
+        return counter.summary("FINAL_VALUE_CORRECTNESS_ON_KNOWN_GOLD");
     }
 
     public static Result evaluate(List<Sample> samples) {
@@ -149,7 +164,7 @@ public final class FindingEvaluationMetrics {
         }
         return c;
     }
-    private static boolean equal(JsonNode expected, JsonNode actual) {
+    static boolean equal(JsonNode expected, JsonNode actual) {
         if (expected.isNumber() && actual.isNumber()) return expected.decimalValue().compareTo(actual.decimalValue()) == 0;
         if (expected.isObject() && actual.isObject()) {
             if (expected.size() != actual.size()) return false;
