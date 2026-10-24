@@ -107,4 +107,4 @@ CUSTOM目标政策重算也在原raw副本中按目标冻结定义补缺失来�
 
 FusionPolicy新增可选calibrationReferences，每条只含taskId/executionId/nodeId/contentHash，不携带系数。引用最多200条，按nodeId规范排序，节点唯一且须完整覆盖calibratedNodeIds，并保留非空confidenceCalibrationId作为策略标识；7/8/9参数旧构造器保留，空引用不进入JSON，旧摘要不变。引用本身不等于产物已独立验证或已执行校准。
 
-任务物化在原事务中，经当前iqc:evaluation:report:view和原来源任务组织范围校验后读取精确服务端产物；校准系数冻结为独立calibrationInputs信封（最多1MiB），共享流水线只保留引用。任务组与知识库及全部校准来源取交集。原任务信封核验负责人、检测图Hash、引用全集、原候选内容Hash/节点Hash与组不得放宽；拒绝未知字段、重复/尾随JSON以及小数计数截断，遵循原v1/v2数值协议。运行转换尚未接入，本阶段新引用任务在入队/worker/恢复边界明确拒绝，防止按原始值冒充校准结果；旧无引用路径保持。不得据此部署或声称校准整链完成。
+任务物化在原事务中，经当前iqc:evaluation:report:view和原来源任务组织范围校验后读取精确服务端产物；校准系数冻结为独立calibrationInputs信封（最多1MiB），共享流水线只保留引用。任务组与知识库及全部校准来源取交集。原任务信封核验负责人、检测图Hash、引用全集、原候选内容Hash/节点Hash与组不得放宽；拒绝未知字段、重复/尾随JSON以及小数计数截断，遵循原v1/v2数值协议。原LLM/SMALL_MODEL桥接已在向后续分支/融合发布结果前应用冻结系数，并在生产/评测/复核边界重算核验；缺乏支持的分箱保留null，旧无引用路径保持。独立验证、发布准入与实际模型绑定仍待完成。不得据此部署或声称校准整链完成。

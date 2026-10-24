@@ -160,7 +160,7 @@ public class PipelineEvaluationService {
         if (!json.valueToTree(convert(member.gold())).equals(json.valueToTree(messages))
                 || !prepared.datasetHash().equals(snapshot.path("evaluationSnapshot").path("contentHash").asText()))
             throw IqcException.invalidState("评测输入与冻结金标不一致");
-        validateActual(prepared, member, evaluated,executionId);
+        validateActual(task,prepared, member, evaluated,executionId);
         var existing = results.selectOne(Wrappers.<EvaluationSampleResult>lambdaQuery().eq(EvaluationSampleResult::getTaskId, task.getId())
                 .eq(EvaluationSampleResult::getExecutionId, executionId).eq(EvaluationSampleResult::getSampleId, member.sampleId()));
         String actual = write(evaluated), digest = artifactHash(prepared.release(), actual);
@@ -187,11 +187,12 @@ public class PipelineEvaluationService {
             item.setErrorMessage("ERROR".equals(result.getStatus()) ? "评测执行失败，可重试" : null); items.updateById(item);
         }
     }
-    private void validateActual(Prepared prepared, DatasetSnapshot.Member member, PipelineConversationEvaluator.Evaluation actual,String executionId) {
+    private void validateActual(InspectionTask task,Prepared prepared, DatasetSnapshot.Member member, PipelineConversationEvaluator.Evaluation actual,String executionId) {
         if (actual == null || actual.mode() != PipelineRuntime.Mode.EVALUATION
                 || !PipelineConversationEvaluator.executionInputHash(prepared.release().schemaVersion(),
                         evaluator.executionInput(convert(member.gold()), member.gold().businessContext())).equals(actual.inputHash()))
             throw IqcException.invalidState("评测模式或运行输入摘要无效");
+        CalibrationRuntime.verify(task,actual.run(),json);
         BusinessItemReviewEvaluator.evaluatePipeline("evaluation", prepared.release(), actual, actual.items(), List.of(),
                 member.gold().messages().stream().map(GoldConversation.Message::id).collect(Collectors.toSet()),member.gold().businessContext());
         if(!io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.riskLevel(prepared.release(),actual.fusion(),actual.scoring(),member.gold().businessContext()).equals(actual.riskLevel()))
@@ -435,7 +436,7 @@ public class PipelineEvaluationService {
         PipelineConversationEvaluator.Evaluation actual;
         try { actual = PipelineAssetService.readFrozenValue(json,row.getActualJson(),PipelineConversationEvaluator.Evaluation.class,prepared.release()); }
         catch (com.fasterxml.jackson.core.JsonProcessingException exception) { throw IqcException.invalidState("评测轨迹格式无效"); }
-        validateActual(prepared, member, actual,row.getExecutionId());
+        validateActual(task,prepared, member, actual,row.getExecutionId());
         boolean failed=actual.run().status()!=PipelineRuntime.Status.SUCCESS
                 || actual.items().stream().anyMatch(item->item.status()==InspectionScoring.ItemStatus.ERROR);
         var marker=parse(task.getRuleSnapshotJson()).path("evaluationSnapshot");

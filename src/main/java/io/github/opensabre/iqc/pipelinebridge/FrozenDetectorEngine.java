@@ -115,6 +115,7 @@ public final class FrozenDetectorEngine implements EngineAdapter {
         var variables=new LinkedHashMap<String,JsonNode>();
         variables.put(context.node().nodeId()+"_state",json.valueToTree(fact.state()));
         if(fact.state()==Finding.State.KNOWN) variables.put(context.node().nodeId()+"_value",fact.value());
-        return new NodeResult(NodeResult.Status.SUCCESS,List.of(fact),variables,metrics,null);
+        var result=new NodeResult(NodeResult.Status.SUCCESS,List.of(fact),variables,metrics,null);
+        return "LLM".equals(type)?io.github.opensabre.iqc.quality.evaluation.CalibrationRuntime.apply(task,context.node(),result,json):result;
     }
 }

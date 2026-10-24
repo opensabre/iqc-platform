@@ -57,7 +57,13 @@ public final class SmallModelDetectorEngine implements EngineAdapter {
                 throw new IllegalArgumentException("Inference receipt differs from frozen request");
             return result;
         },SmallModelDetectorEngine::usage);
-        return StructuredToolFindingCodec.decode(json,context,output,provenance.executionId(),hash,type(),SmallModelContract.VERSION);
+        var decoded=StructuredToolFindingCodec.decode(json,context,output,provenance.executionId(),hash,type(),SmallModelContract.VERSION);
+        var calibrationTask=new io.github.opensabre.iqc.task.model.InspectionTask();
+        calibrationTask.setRuleSnapshotJson(task.path("ruleSnapshotJson").textValue());
+        if(!io.github.opensabre.iqc.quality.evaluation.CalibrationTaskSnapshotService.requiresSnapshot(calibrationTask,json))return decoded;
+        calibrationTask.setId(provenance.taskId());calibrationTask.setCurrentExecutionId(provenance.executionId());
+        calibrationTask.setCreatedBy(provenance.owner());calibrationTask.setOwnerGroupId(provenance.ownerGroupId());
+        return io.github.opensabre.iqc.quality.evaluation.CalibrationRuntime.apply(calibrationTask,context.node(),decoded,json);
     }
     private static String required(JsonNode node,String key){
         if(!node.path(key).isTextual()||node.path(key).asText().isBlank())throw new IllegalArgumentException("Trusted inference identity required");

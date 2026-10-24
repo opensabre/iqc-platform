@@ -86,9 +86,9 @@ public class CalibrationTaskSnapshotService {
             validateSources(references,sources,target,json);return List.copyOf(sources);
         }catch(Exception invalid){throw IqcException.invalidState("原任务校准系数归属、检测图或来源摘要无效");}
     }
-    /** Staged references cannot silently run with untransformed raw confidence. */
+    /** Admission requires original frozen coefficients; runtime bridges apply them before downstream consumption. */
     public static void requireRunnable(InspectionTask task,ObjectMapper json){
-        if(!verifiedSources(task,json).isEmpty())throw IqcException.invalidState("校准系数运行转换尚未接入");
+        verifiedSources(task,json);
     }
     private static void validateSources(List<EmpiricalConfidenceCalibration.Reference> references,
             List<PipelineEvaluationService.PreparedCalibration> sources,PipelineDefinition target,ObjectMapper json){
