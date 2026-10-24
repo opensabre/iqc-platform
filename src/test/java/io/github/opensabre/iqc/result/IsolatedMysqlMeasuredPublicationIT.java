@@ -445,7 +445,7 @@ class IsolatedMysqlMeasuredPublicationIT {
                 id,"a".repeat(64),task,run,conversation,status,currency,amount==null?null:new BigDecimal(amount),amount==null?"UNKNOWN":"CALCULATED_FROM_DECLARED_PRICE");
     }
     /** Actual SQL publication, rollback, immutable history and task transaction boundaries. */
-    @Test void knowledgeLifecyclePersistsImmutableVersionsAndRequiresTaskTransaction() {
+    @Test void knowledgeLifecyclePersistsImmutableVersionsAndRequiresTaskTransaction() throws Exception {
         actor.set("annotator");
         io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of("user_name","annotator","user_id","user-annotator"));
         var knowledge=context.getBean(io.github.opensabre.iqc.knowledge.KnowledgeBaseService.class);
@@ -463,7 +463,21 @@ class IsolatedMysqlMeasuredPublicationIT {
             assertNull(knowledge.get(created.getId()).getActivePublishedVersion());
             assertEquals(1,knowledge.get(created.getId()).getDraftRevision());
         } finally {db.execute("DROP TRIGGER IF EXISTS reject_knowledge_parent_update");}
-        var first=knowledge.publish(created.getId(),1);assertEquals(first.getId(),knowledge.publish(created.getId(),1).getId());
+        var ready=new java.util.concurrent.CyclicBarrier(2);
+        var publishers=java.util.concurrent.Executors.newFixedThreadPool(2);
+        io.github.opensabre.iqc.knowledge.model.KnowledgeBaseVersion first;
+        try {
+            java.util.concurrent.Callable<io.github.opensabre.iqc.knowledge.model.KnowledgeBaseVersion> publish=()->{
+                io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of("user_name","annotator","user_id","user-annotator"));
+                try {ready.await(10,java.util.concurrent.TimeUnit.SECONDS);return knowledge.publish(created.getId(),1);}
+                finally {io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of());}
+            };
+            var left=publishers.submit(publish);var right=publishers.submit(publish);
+            first=left.get(20,java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals(first.getId(),right.get(20,java.util.concurrent.TimeUnit.SECONDS).getId());
+            assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_knowledge_base_version WHERE knowledge_base_id=?",Integer.class,created.getId()));
+        } finally {publishers.shutdownNow();assertTrue(publishers.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS));}
+        assertEquals(first.getId(),knowledge.publish(created.getId(),1).getId());
         assertEquals(1,knowledge.history(created.getId()).size());
         assertThrows(org.springframework.transaction.IllegalTransactionStateException.class,()->knowledge.publishedForTask(created.getId(),1));
         assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->tx.execute(status->knowledge.publishedForTask(created.getId(),1)));
