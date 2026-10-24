@@ -25,12 +25,13 @@ class CalibrationTaskSnapshotTest {
     private final SensitiveReadAccessService access=mock(SensitiveReadAccessService.class);
     private final IqcDataScope scope=mock(IqcDataScope.class);
     private final CalibrationTaskSnapshotService service=new CalibrationTaskSnapshotService(provider,access,scope,json);
-    private InspectionTask draft(String sourceGroup) {
+    private InspectionTask draft(String sourceGroup) { return draft(sourceGroup,20,7); }
+    private InspectionTask draft(String sourceGroup,int samples,int successes) {
         var config=json.createObjectNode().put("threshold",new BigDecimal("0.900000000000000001"));
         var node=new PipelineDefinition.Node("node","SMALL_MODEL","Model","1",List.of(),Map.of(),config,null,1000,0,PipelineDefinition.OnError.FAIL_PIPELINE,null,null,true);
         var graph=new PipelineDefinition(PipelineDefinition.SCHEMA,List.of(node));
-        long[] counts=new long[10],correct=new long[10];counts[9]=20;correct[9]=7;
-        var artifact=EmpiricalConfidenceCalibration.fit(new EmpiricalConfidenceCalibration.Source("evaluation","execution","a".repeat(64),"b".repeat(64),"c".repeat(64),"node",SelectorAssetService.hash(json.valueToTree(node).toString()),"QUALITY_HIT"),20,20,counts,correct);
+        long[] counts=new long[10],correct=new long[10];counts[9]=samples;correct[9]=successes;
+        var artifact=EmpiricalConfidenceCalibration.fit(new EmpiricalConfidenceCalibration.Source("evaluation","execution","a".repeat(64),"b".repeat(64),"c".repeat(64),"node",SelectorAssetService.hash(json.valueToTree(node).toString()),"QUALITY_HIT"),samples,samples,counts,correct);
         var reference=new EmpiricalConfidenceCalibration.Reference("evaluation","execution","node",artifact.contentHash());
         var policy=new FusionPolicy("fusion",1,FusionPolicy.Method.CONFIDENCE,Map.of(),Map.of(),"calibration",Set.of("node"),null,null,List.of(reference));
         var root=json.createObjectNode().put("businessAmount",new BigDecimal("0.900000000000000002"));
@@ -51,7 +52,7 @@ class CalibrationTaskSnapshotTest {
             assertThatThrownBy(sources::clear).isInstanceOf(UnsupportedOperationException.class);
             assertThat(task.getRuleSnapshotJson()).contains("0.900000000000000001","0.900000000000000002");
             verifyNoInteractions(provider,evaluations,access,scope);
-            assertThatThrownBy(()->CalibrationTaskSnapshotService.requireRunnable(task,json)).hasMessageContaining("运行转换尚未接入");
+            assertThatCode(()->CalibrationTaskSnapshotService.requireRunnable(task,json)).doesNotThrowAnyException();
         }
     }
     @Test void rejectsRehashedMissingCoverageChangedOwnershipAndScopeWidening() throws Exception {
@@ -105,6 +106,50 @@ class CalibrationTaskSnapshotTest {
         }
         task.setRuleSnapshotJson(frozen);
         assertThat(CalibrationTaskSnapshotService.verifiedSources(task,json)).hasSize(1);
+    }
+
+    private PipelineDefinition.Node frozenNode(InspectionTask task) throws Exception {
+        return json.treeToValue(PipelineAssetService.readFrozenTree(json,task.getRuleSnapshotJson())
+                .path("pipelineSnapshot").path("release").path("pipeline"),PipelineDefinition.class).nodes().getFirst();
+    }
+    private io.github.opensabre.iqc.pipeline.NodeResult raw(PipelineDefinition.Node node) {
+        var fact=new io.github.opensabre.iqc.finding.Finding("finding","QUALITY_HIT","quality",
+                io.github.opensabre.iqc.finding.Finding.ValueType.BOOLEAN,json.getNodeFactory().booleanNode(true),
+                io.github.opensabre.iqc.finding.Finding.State.KNOWN,new BigDecimal("0.95"),
+                io.github.opensabre.iqc.finding.Finding.Severity.NONE,"original",List.of(),
+                new io.github.opensabre.iqc.finding.Finding.Source(node.nodeId(),node.type(),node.version(),1,"input"));
+        return new io.github.opensabre.iqc.pipeline.NodeResult(io.github.opensabre.iqc.pipeline.NodeResult.Status.SUCCESS,List.of(fact),Map.of(),Map.of(),null);
+    }
+    private io.github.opensabre.iqc.pipeline.PipelineRuntime.Run run(io.github.opensabre.iqc.pipeline.NodeResult result,int attempt) {
+        return new io.github.opensabre.iqc.pipeline.PipelineRuntime.Run(io.github.opensabre.iqc.pipeline.PipelineRuntime.Status.SUCCESS,
+                List.of(new io.github.opensabre.iqc.pipeline.PipelineRuntime.Trace("node",attempt,java.time.Instant.EPOCH,1,result)),result.findings(),Map.of(),false);
+    }
+    @Test void appliesSupportedZeroAndUnknownBinsWithoutChangingFactOrOriginalDiagnosticSignal() throws Exception {
+        for(int samples:List.of(19,20))for(int correct:List.of(0,7)) {
+            var task=draft("group",samples,correct);service.freeze(task);var node=frozenNode(task);var original=raw(node);
+            var transformed=CalibrationRuntime.apply(task,node,original,json);
+            var probability=samples<20?null:BigDecimal.valueOf(correct).divide(BigDecimal.valueOf(samples));
+            assertThat(transformed.findings().getFirst().confidence()).isEqualTo(probability);
+            var before=(ObjectNode)json.valueToTree(original.findings().getFirst());before.remove("confidence");
+            var after=(ObjectNode)json.valueToTree(transformed.findings().getFirst());after.remove("confidence");assertThat(after).isEqualTo(before);
+            assertThat(original.findings().getFirst().confidence()).isEqualByComparingTo("0.95");
+            assertThat(CalibrationRuntime.rawConfidence(transformed.findings().getFirst(),transformed,true)).isEqualByComparingTo("0.95");
+            assertThat(transformed.metrics().get(CalibrationRuntime.KEY).path("supported").booleanValue()).isEqualTo(samples>=20);
+            CalibrationRuntime.verify(task,run(transformed,1),json);
+            assertThatThrownBy(()->CalibrationRuntime.apply(task,node,transformed,json)).hasMessageContaining("重复应用");
+        }
+    }
+    @Test void replayRejectsChangedProofMissingTraceAndWrongAttempt() throws Exception {
+        var task=draft("group");service.freeze(task);var node=frozenNode(task);
+        var transformed=CalibrationRuntime.apply(task,node,raw(node),json);
+        var metrics=new HashMap<>(transformed.metrics());
+        ((ObjectNode)metrics.get(CalibrationRuntime.KEY)).put("calibratedConfidence",new BigDecimal("0.99"));
+        var changed=new io.github.opensabre.iqc.pipeline.NodeResult(transformed.status(),transformed.findings(),transformed.variables(),metrics,null);
+        assertThatThrownBy(()->CalibrationRuntime.verify(task,run(changed,1),json)).hasMessageContaining("不符合");
+        assertThatThrownBy(()->CalibrationRuntime.verify(task,run(transformed,2),json)).hasMessageContaining("尝试轮次");
+        var missing=new io.github.opensabre.iqc.pipeline.PipelineRuntime.Run(io.github.opensabre.iqc.pipeline.PipelineRuntime.Status.SUCCESS,List.of(),transformed.findings(),Map.of(),false);
+        assertThatThrownBy(()->CalibrationRuntime.verify(task,missing,json)).hasMessageContaining("运行事实与校准轨迹");
+        CalibrationRuntime.verify(task,run(transformed,1),json);
     }
 
 }
