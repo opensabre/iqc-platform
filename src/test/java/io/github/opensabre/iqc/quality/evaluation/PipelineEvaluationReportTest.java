@@ -50,7 +50,7 @@ class PipelineEvaluationReportTest {
         when(prepared.datasetHash()).thenReturn("frozen-dataset");
         var release = mock(PipelineRelease.class);
         when(release.pipeline()).thenReturn(new PipelineDefinition(PipelineDefinition.SCHEMA,
-                List.of(new PipelineDefinition.Node("llm", "LLM", "model", "v1", List.of(), Map.of(), null,
+                List.of(new PipelineDefinition.Node("llm", "LLM", "model", "v1", List.of(), Map.of(), json.createObjectNode().set("findingDefinition", json.createObjectNode().put("code","REDLINE")),
                         null, 1000, 0, PipelineDefinition.OnError.FAIL_PIPELINE, null, null, true))));
         when(prepared.release()).thenReturn(release);
     }
@@ -81,6 +81,7 @@ class PipelineEvaluationReportTest {
         assertThat(json.writeValueAsString(legacy)).isEqualTo(historicalJson);
         var restored=json.readValue(historicalJson,PipelineEvaluationService.Report.class);
         assertThat(restored.inputCompletenessMetrics()).isNull();
+        assertThat(restored.nodeConfidenceMetrics()).isNull();
         assertThat(restored.citationGroundingMetrics()).isNull();
         assertThat(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(json.writeValueAsString(restored)))
                 .isEqualTo(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(historicalJson));
@@ -90,6 +91,7 @@ class PipelineEvaluationReportTest {
                 current.businessMetrics(),current.latencyMetrics(),current.regressionMetrics(),current.structuredMetrics(),current.citationGroundingMetrics());
         var citationTree=(com.fasterxml.jackson.databind.node.ObjectNode)json.valueToTree(current);
         citationTree.remove("inputCompletenessMetrics");
+        citationTree.remove("nodeConfidenceMetrics");
         assertThat(json.<com.fasterxml.jackson.databind.JsonNode>valueToTree(withCitation)).isEqualTo(citationTree);
         assertThat(json.readValue(json.writeValueAsString(withCitation),PipelineEvaluationService.Report.class)).isEqualTo(withCitation);
     }
@@ -484,6 +486,40 @@ class PipelineEvaluationReportTest {
         assertThatThrownBy(()->service.consistency("task","execution","reference","other"))
                 .hasMessageContaining("相同冻结数据集与流水线版本");
         verifyNoInteractions(results);
+    }
+
+    @Test void calibrationRequiresSuccessfulCompleteMeasuredOriginalReport() throws Exception {
+        artifactSnapshot();
+        var first=artifact("first","execution",10);
+        var second=artifact("second","execution",20);
+        structuredMetrics(first,counters(1,1,0).put("reportedConfidence",new BigDecimal("0.75")));
+        structuredMetrics(second,counters(1,1,0).put("reportedConfidence",new BigDecimal("0.75")));
+        String datasetHash="a".repeat(64);
+        when(prepared.datasetHash()).thenReturn(datasetHash);
+        first.setDatasetHash(datasetHash); second.setDatasetHash(datasetHash);
+        tasks.selectById("task").setRuleSnapshotJson("{\"evaluationSnapshot\":{\"versionNo\":1},\"pipelineSnapshot\":{\"contentHash\":\""+"b".repeat(64)+"\"}}");
+        when(results.selectList(any())).thenReturn(List.of(first,second));
+        var candidate=service.report("task","execution").nodeConfidenceMetrics().nodes().getFirst().calibrationCandidate();
+        assertThat(candidate).isNotNull();
+        assertThat(candidate.scored()).isEqualTo(2);
+        assertThat(candidate.source().taskId()).isEqualTo("task");
+        assertThat(candidate.source().executionId()).isEqualTo("execution");
+        assertThat(candidate.source().datasetHash()).isEqualTo(datasetHash);
+        assertThat(candidate.apply(new BigDecimal("0.75"))).isNull();
+        for(String status:List.of("RUNNING","FAILED","PARTIAL_FAILED","CANCELLED")) {
+            execution.setStatus(status);
+            assertThat(service.report("task","execution").nodeConfidenceMetrics().nodes().getFirst().calibrationCandidate()).isNull();
+        }
+        execution.setStatus("SUCCEEDED");
+        when(results.selectList(any())).thenReturn(List.of(first));
+        assertThat(service.report("task","execution").nodeConfidenceMetrics().nodes().getFirst().calibrationCandidate()).isNull();
+        var failed=artifact("second","execution",20,true); failed.setDatasetHash(datasetHash);
+        when(results.selectList(any())).thenReturn(List.of(first,failed));
+        assertThat(service.report("task","execution").nodeConfidenceMetrics().nodes().getFirst().calibrationCandidate()).isNull();
+        structuredMetrics(first,counters(1,1,0));
+        structuredMetrics(second,counters(1,1,0));
+        when(results.selectList(any())).thenReturn(List.of(first,second));
+        assertThat(service.report("task","execution").nodeConfidenceMetrics().nodes().getFirst().calibrationCandidate()).isNull();
     }
 
 }
