@@ -152,4 +152,44 @@ class CalibrationTaskSnapshotTest {
         CalibrationRuntime.verify(task,run(transformed,1),json);
     }
 
+    private PipelineEvaluationService.Context publicationContext(InspectionTask task,String sample,String conversation) {
+        var gold=mock(GoldConversation.class);when(gold.conversationId()).thenReturn(conversation);
+        var member=mock(DatasetSnapshot.Member.class);when(member.sampleId()).thenReturn(sample);when(member.gold()).thenReturn(gold);
+        var dataset=mock(DatasetSnapshot.class);when(dataset.members()).thenReturn(List.of(member));
+        var prepared=mock(PipelineEvaluationService.Prepared.class);when(prepared.dataset()).thenReturn(dataset);
+        return new PipelineEvaluationService.Context(task,json.createObjectNode(),prepared);
+    }
+    private PipelineRelease publicationRelease(InspectionTask task) throws Exception {
+        var frozen=PipelineAssetService.readFrozenTree(json,task.getRuleSnapshotJson()).path("pipelineSnapshot").path("release");
+        var release=mock(PipelineRelease.class);when(release.pipeline()).thenReturn(json.treeToValue(frozen.path("pipeline"),PipelineDefinition.class));
+        when(release.fusion()).thenReturn(json.treeToValue(frozen.path("fusion"),FusionPolicy.class));return release;
+    }
+    @Test void publicationRejectsEitherSampleOrConversationOverlapAgainstBothValidationSets() throws Exception {
+        var task=draft("group");service.freeze(task);var release=publicationRelease(task);
+        var quality=publicationContext(task,"quality-sample","quality-conversation");
+        var regression=publicationContext(task,"regression-sample","regression-conversation");
+        clearInvocations(evaluations);
+        for(String[] source:List.of(new String[]{"quality-sample","different"},new String[]{"different","quality-conversation"},
+                new String[]{"regression-sample","different"},new String[]{"different","regression-conversation"})) {
+            var sourceContext=publicationContext(task,source[0],source[1]);
+            when(evaluations.context("evaluation")).thenReturn(sourceContext);
+            assertThatThrownBy(()->service.requireHeldOut(release,List.of(quality,regression))).hasMessageContaining("样本或会话重叠");
+        }
+        var independent=publicationContext(task,"fit-sample","fit-conversation");
+        when(evaluations.context("evaluation")).thenReturn(independent);
+        assertThatCode(()->service.requireHeldOut(release,List.of(quality,regression))).doesNotThrowAnyException();
+        verify(evaluations,times(5)).calibrationsForTask(release.fusion().calibrationReferences(),release.pipeline());
+    }
+    @Test void publicationRequiresCurrentAccessAndTheSameFrozenArtifactBeforeCheckingOverlap() throws Exception {
+        var task=draft("group");service.freeze(task);var release=publicationRelease(task);
+        var legacy=new InspectionTask();legacy.setRuleSnapshotJson("{}");
+        var validation=publicationContext(legacy,"validation","conversation");clearInvocations(evaluations,provider,access);
+        assertThatThrownBy(()->service.requireHeldOut(release,List.of(validation))).hasMessageContaining("未应用当前精确校准产物");
+        verify(evaluations,never()).context(anyString());
+        clearInvocations(evaluations,provider,access);
+        doThrow(io.github.opensabre.iqc.governance.IqcException.accessDenied("revoked")).when(access).current(Set.of("iqc:evaluation:report:view"));
+        assertThatThrownBy(()->service.requireHeldOut(release,List.of(publicationContext(task,"validation","conversation")))).hasMessageContaining("revoked");
+        verifyNoInteractions(evaluations,provider);
+    }
+
 }
