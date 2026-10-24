@@ -46,7 +46,8 @@ class SmallModelDetectorEngineTest {
                 "__task",json.createObjectNode().put("id","task").put("currentExecutionId","execution").put("createdBy","owner")),Map.of(),PipelineRuntime.Mode.EVALUATION,1);
     }
     private void response(boolean wrongDeployment){response(wrongDeployment,"CLASSIFICATION",true);}
-    private void response(boolean wrongDeployment,String operation,Object value){
+    private void response(boolean wrongDeployment,String operation,Object value){response(wrongDeployment,operation,value,null);}
+    private void response(boolean wrongDeployment,String operation,Object value,Double confidence){
         when(client.callTool(any())).thenAnswer(invocation->{
             var request=invocation.getArgument(0,McpSchema.CallToolRequest.class);
             assertThat(((Map<?,?>)request.arguments().get("model")).containsKey("secretRef")).isFalse();
@@ -58,6 +59,7 @@ class SmallModelDetectorEngineTest {
             output.put("modelId","model");output.put("modelVersion",3);output.put("modelName","classifier");
             output.put("deploymentRef",wrongDeployment?"other":"classifier-v3");output.put("operation",operation);
             output.put("state","KNOWN");output.put("value",value);output.put("reason","Classified");
+            if(confidence!=null)output.put("confidence",confidence);
             output.put("evidence",List.of(Map.of("reference","inference:1")));
             output.put("usage",Map.of("inputTokens",10,"outputTokens",2,"totalTokens",12));
             return new McpSchema.CallToolResult(List.of(),false,output,null);
@@ -94,4 +96,28 @@ class SmallModelDetectorEngineTest {
             assertThat(result.findings().getFirst().valueType().name()).isEqualTo(entry[1]);
         }
     }
+    @Test void calibratedInferencePublishesTransformedConfidenceToRuntimeAndFusion() throws Exception {
+        var engine=engine();response(false,"CLASSIFICATION",true,0.75);
+        var context=context();
+        var task=io.github.opensabre.iqc.quality.evaluation.CalibrationBridgeFixture.freeze(json,context.node());
+        var variables=new HashMap<>(context.variables());variables.put("__task",json.valueToTree(task));
+        var graph=new PipelineDefinition(PipelineDefinition.SCHEMA,List.of(context.node()));
+        try(var runtime=new PipelineRuntime(List.of(engine),1,2)) {
+            var run=runtime.execute(graph,context.input(),variables,PipelineRuntime.Mode.EVALUATION);
+            assertThat(run.status()).isEqualTo(PipelineRuntime.Status.SUCCESS);
+            assertThat(run.findings()).hasSize(1);
+            assertThat(run.findings().getFirst().confidence()).isEqualByComparingTo("0.5");
+            var trace=run.trace().getFirst().result();
+            assertThat(trace.metrics().get(io.github.opensabre.iqc.quality.evaluation.CalibrationRuntime.KEY)
+                    .path("rawConfidence").decimalValue()).isEqualByComparingTo("0.75");
+            io.github.opensabre.iqc.quality.evaluation.CalibrationRuntime.verify(task,run,json);
+            var root=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenTree(json,task.getRuleSnapshotJson());
+            var policy=json.treeToValue(root.path("pipelineSnapshot").path("release").path("fusion"),io.github.opensabre.iqc.fusion.FusionPolicy.class);
+            var fused=io.github.opensabre.iqc.fusion.FindingFusion.fuse(run.findings(),policy).getFirst();
+            assertThat(fused.finalConfidence()).isEqualByComparingTo("0.5");
+            assertThat(fused.value().booleanValue()).isTrue();
+            assertThat(settled.totalTokens()).isEqualTo(12);
+        }
+    }
+
 }
