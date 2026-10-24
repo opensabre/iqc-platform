@@ -58,6 +58,12 @@ public final class SmallModelDetectorEngine implements EngineAdapter {
             return result;
         },SmallModelDetectorEngine::usage);
         var decoded=StructuredToolFindingCodec.decode(json,context,output,provenance.executionId(),hash,type(),SmallModelContract.VERSION);
+        // invoke() uses the original tracked gateway; its successful receipt is checked against this exact identity above.
+        var fingerprint=new SnapshotChatModelRouter.InvocationFingerprint("iqc-llm-invocation-fingerprint-v1",identity.key(),hash,
+                model.path("deploymentRef").textValue());
+        var invocationMetrics=new LinkedHashMap<>(decoded.metrics());
+        invocationMetrics.put("modelInvocation",json.valueToTree(fingerprint));
+        decoded=new NodeResult(decoded.status(),decoded.findings(),decoded.variables(),invocationMetrics,decoded.error());
         var calibrationTask=new io.github.opensabre.iqc.task.model.InspectionTask();
         calibrationTask.setRuleSnapshotJson(task.path("ruleSnapshotJson").textValue());
         if(!io.github.opensabre.iqc.quality.evaluation.CalibrationTaskSnapshotService.requiresSnapshot(calibrationTask,json))return decoded;

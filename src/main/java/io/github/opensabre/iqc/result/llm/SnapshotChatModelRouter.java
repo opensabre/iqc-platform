@@ -91,10 +91,15 @@ public class SnapshotChatModelRouter {
                 if(gateway!=null)gateway.assertToolExecutionAllowed(context);return delegate.call(arguments,toolContext);}
         }).toArray(ToolCallback[]::new);
     }
-    public record InvocationFingerprint(String schemaVersion,String modelKey,String inputHash) {
+    public record InvocationFingerprint(String schemaVersion,String modelKey,String inputHash,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            String deploymentRef) {
+        public InvocationFingerprint(String schemaVersion,String modelKey,String inputHash){this(schemaVersion,modelKey,inputHash,null);}
         public InvocationFingerprint {
             if(!"iqc-llm-invocation-fingerprint-v1".equals(schemaVersion)||modelKey==null||!modelKey.matches("[a-f0-9]{64}")
                     ||inputHash==null||!inputHash.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("Invalid invocation fingerprint");
+            if(deploymentRef!=null&&!deploymentRef.matches("[A-Za-z0-9][A-Za-z0-9:_./@+-]{0,127}"))
+                throw new IllegalArgumentException("Invalid invocation deployment reference");
         }
     }
     public static InvocationFingerprint invocationFingerprint(ChatResponse response){
@@ -103,10 +108,10 @@ public class SnapshotChatModelRouter {
     private static final class MeteredResponse extends ChatResponse {
         private final io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Handle handle;
         private final InvocationFingerprint fingerprint;
-        MeteredResponse(ChatResponse response,io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Handle handle,String inputHash){
+        MeteredResponse(ChatResponse response,io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Handle handle,String inputHash,String deploymentRef){
             super(response.getResults(),response.getMetadata());this.handle=handle;
             fingerprint=inputHash!=null&&handle!=null&&handle.modelKey()!=null&&handle.modelKey().matches("[a-f0-9]{64}")
-                    ?new InvocationFingerprint("iqc-llm-invocation-fingerprint-v1",handle.modelKey(),inputHash):null;
+                    ?new InvocationFingerprint("iqc-llm-invocation-fingerprint-v1",handle.modelKey(),inputHash,deploymentRef):null;
         }
     }
     /** Marker prevents business-output parsing failures from replaying completed external tools. */
@@ -168,7 +173,7 @@ public class SnapshotChatModelRouter {
         String inputHash=invocationInputHash(prompt,profile);
         var result=gateway.invokeTracked(identity,context,()->model.call(prompt),SnapshotChatModelRouter::usage,
                 ()->diagnosticRequest(prompt),this::diagnosticResponse);
-        return result.response()==null?null:new MeteredResponse(result.response(),result.handle(),inputHash);
+        return result.response()==null?null:new MeteredResponse(result.response(),result.handle(),inputHash,identity.deployment()==null?null:identity.deployment().deploymentRef());
     }
     /** Best-effort measurement only: never changes admission, retry, model output or diagnostic retention. */
     private String invocationInputHash(Prompt prompt,JsonNode profile){
