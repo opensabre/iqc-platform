@@ -184,3 +184,12 @@ verifiedSources 从原任务 ruleSnapshotJson 读取信封；严格拒绝重复J
 Spring AI与HTTP适配器把参考资料作为单独用户消息加入，系统提示明确其为数据、不得执行资料指令或把资料当成会话证据；原会话引用及Finding校验保持。未提供类型化上下文、当前调用任务/负责人/组不匹配、引用不属于原任务、或有引用但缺少Gateway路径时，在模型I/O之前拒绝。会话重复运行复制ModelCallContext时保留同一已核验上下文。
 
 这是静态有界语料上下文，不包含向量检索或自动采样。当前知识库任务仍会随调用上下文重新核验信封，容量优化与真实worker/供应商/网关预算验收待完成；编译不能替代这些证据。
+
+### B 模型参考上下文专项
+
+固定4b17567合入95bf7bb。原12020 test-compile+surerfire终态0，
+/tmp/iqc-b-knowledge-model-context.log.exit=0；Snapshot5+Batch3八项零失败错误跳过。
+已核验任务信封生成的上下文保留原参考正文及版本来源，任务ID/owner/group不匹配、
+节点版本行不属于原任务、缺少已核验上下文均拒绝。ModelCallContext JSON不含
+knowledgeContext或参考正文，旧无引用调用无需该上下文。
+来源受控，本轮未覆盖真实provider请求构造、网关预算/窗口或SQL/PDP。
