@@ -34,6 +34,7 @@ class PipelinePublicationGateServiceTest {
     }
     @BeforeEach
     void prepare() {
+        when(release.fusion()).thenReturn(new io.github.opensabre.iqc.fusion.FusionPolicy("fusion",1,io.github.opensabre.iqc.fusion.FusionPolicy.Method.PRIORITY,Map.of(),Map.of(),null,java.util.Set.of()));
         qualityTarget = context("quality", DatasetDraft.Type.RISK);
         context("regression", DatasetDraft.Type.REGRESSION);
         qualityExecution = execution("quality");
@@ -157,4 +158,54 @@ class PipelinePublicationGateServiceTest {
         assertThat(criterion(decision, "QUALITY", "MINIMUM_GOLD_SAMPLES").status()).isEqualTo(PipelinePublicationGateService.Status.FAILED);
         assertThat(criterion(decision, "QUALITY", "HIGH_RISK_RECALL").threshold()).isEqualByComparingTo("1");
     }
+    private final CalibrationTaskSnapshotService calibration=mock(CalibrationTaskSnapshotService.class);
+    private PipelinePublicationGateService.Decision calibratedDecision() {
+        return new PipelinePublicationGateService(evaluations,json,executions,calibration)
+                .evaluate("pipeline",3,"frozen-hash",release,quality,regression);
+    }
+    private void calibratedPolicy(boolean configured) {
+        var reference=new EmpiricalConfidenceCalibration.Reference("source","source-run","model","a".repeat(64));
+        when(release.fusion()).thenReturn(new io.github.opensabre.iqc.fusion.FusionPolicy("fusion",1,
+                io.github.opensabre.iqc.fusion.FusionPolicy.Method.CONFIDENCE,Map.of(),Map.of(),"calibration",java.util.Set.of("model"),null,null,List.of(reference)));
+        var defaults=PublicationGatePolicy.defaults();
+        when(release.publicationGate()).thenReturn(new PublicationGatePolicy(defaults.schemaVersion(),defaults.minimumRiskRecall(),defaults.minimumOverallF1(),defaults.minimumRegressionPass(),defaults.minimumStructuredSuccess(),defaults.maximumP95Ms(),defaults.minimumSamples(),configured?
+                new PublicationGatePolicy.Calibration(20,number("0.8"),number("0.2"),number("0.1"),number("0"),number("0")):null));
+    }
+    private void calibrationReport(String task,long scored,String coverage,String brier,String ece,String delta) {
+        var base=report(task,25,25,25,true,1,"1","1","1","1",1L);
+        var measured=new FindingEvaluationMetrics.ConfidenceDiagnostics("diagnostics","paired",25,scored,25-scored,number(coverage),number(brier),number(ece),List.of());
+        var comparison=new NodeConfidenceMetrics.CalibrationComparison("iqc-calibration-paired-diagnostics-v1","a".repeat(64),25,number(coverage),measured,measured,number(delta),number(delta));
+        var node=new NodeConfidenceMetrics.Node("model","LLM","1","QUALITY_HIT",measured,null,comparison);
+        when(evaluations.report(task,task+"-execution")).thenReturn(new PipelineEvaluationService.Report(
+                base.schemaVersion(),base.taskId(),base.executionId(),base.datasetHash(),base.expectedSamples(),base.availableSamples(),base.successfulSamples(),base.complete(),base.missingSampleIds(),base.sourceExecutionIds(),base.findingMetrics(),base.businessMetrics(),base.latencyMetrics(),base.regressionMetrics(),base.structuredMetrics(),null,null,new NodeConfidenceMetrics.Summary("nodes",List.of(node))));
+    }
+    @Test void calibratedPublicationChecksBothPurposesAtExactThresholds() {
+        calibratedPolicy(true);calibrationReport("quality",20,"0.8","0.2","0.1","0");calibrationReport("regression",20,"0.8","0.2","0.1","0");
+        var decision=calibratedDecision();assertThat(decision.passed()).isTrue();
+        assertThat(decision.criteria().stream().filter(c->c.code().startsWith("CALIBRATION_"))).hasSize(12)
+                .allMatch(c->c.status()==PipelinePublicationGateService.Status.PASSED);
+        verify(calibration).requireHeldOut(eq(release),argThat(contexts->contexts.size()==2));
+    }
+    @Test void calibratedPublicationFailsUnconfiguredUnmeasuredAndEachRegressionThreshold() {
+        calibratedPolicy(false);
+        var missing=calibratedDecision();
+        assertThat(criterion(missing,"QUALITY","CALIBRATION_POLICY").status()).isEqualTo(PipelinePublicationGateService.Status.FAILED);
+        calibratedPolicy(true);calibrationReport("quality",20,"0.8","0.2","0.1","0");
+        assertThat(criterion(calibratedDecision(),"REGRESSION/model","CALIBRATION_MEASURED").status()).isEqualTo(PipelinePublicationGateService.Status.FAILED);
+        calibrationReport("regression",19,"0.79","0.21","0.11","0.01");
+        var failed=calibratedDecision();assertThat(failed.passed()).isFalse();
+        for(String code:List.of("CALIBRATION_PAIRED_SAMPLES","CALIBRATION_GOLD_COVERAGE","CALIBRATION_BRIER","CALIBRATION_ECE","CALIBRATION_BRIER_INCREASE","CALIBRATION_ECE_INCREASE"))
+            assertThat(criterion(failed,"REGRESSION/model",code).status()).isEqualTo(PipelinePublicationGateService.Status.FAILED);
+        calibrationReport("regression",0,"0",null,null,null);
+        assertThat(criterion(calibratedDecision(),"REGRESSION/model","CALIBRATION_BRIER").actual()).isNull();
+        calibrationReport("regression",25,"1","0","0","-0.1");
+        assertThat(calibratedDecision().passed()).isTrue();
+    }
+    @Test void heldOutEvidenceFailurePreventsMetricReportsAndCannotBecomeFailedCriterion() {
+        calibratedPolicy(true);
+        doThrow(new IllegalStateException("overlapping calibration evidence")).when(calibration).requireHeldOut(any(),anyList());
+        assertThatThrownBy(this::calibratedDecision).hasMessageContaining("overlapping");
+        verify(evaluations,never()).report(anyString(),anyString());
+    }
+
 }
