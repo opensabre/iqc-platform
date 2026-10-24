@@ -33,6 +33,8 @@ public final class NodeConfidenceMetrics {
         boolean calibrated(){return calibrationHash!=null;}
     }
     private final Map<String,Source> sources=new TreeMap<>();
+    private final Map<String,io.github.opensabre.iqc.result.llm.SnapshotChatModelRouter.InvocationFingerprint> identities=new TreeMap<>();
+    private final java.util.Set<String> unavailableIdentities=new java.util.HashSet<>();
     private final Map<String,FindingEvaluationMetrics.ConfidenceCounter> counters=new TreeMap<>();
     private final Map<String,FindingEvaluationMetrics.ConfidenceCounter> pairedRaw=new TreeMap<>(),pairedCalibrated=new TreeMap<>();
     public NodeConfidenceMetrics(PipelineRelease release){this(release,new com.fasterxml.jackson.databind.ObjectMapper());}
@@ -79,6 +81,14 @@ public final class NodeConfidenceMetrics {
             }
             if(confidence!=null){
                 boolean correct=FindingEvaluationMetrics.equal(expected.value(),actual.value());counter.add(confidence,correct);
+                if(outcome==null){
+                    var attempts=trace.stream().filter(value->entry.getKey().equals(value.nodeId())&&value.attempt()==last).toList();
+                    if(attempts.size()==1&&attempts.getFirst().result().status()==io.github.opensabre.iqc.pipeline.NodeResult.Status.SUCCESS)outcome=attempts.getFirst().result();
+                }
+                var identity=CalibrationRuntime.invocationIdentity(outcome,actual);var prior=identities.get(entry.getKey());
+                if(identity==null||prior!=null&&(!prior.modelKey().equals(identity.modelKey())||!prior.deploymentRef().equals(identity.deploymentRef())))
+                    unavailableIdentities.add(entry.getKey());
+                else identities.putIfAbsent(entry.getKey(),identity);
                 if(source.calibrated()&&outcome!=null&&actual.confidence()!=null&&bound(source,outcome,confidence,actual)){
                     pairedRaw.get(entry.getKey()).add(confidence,correct);
                     pairedCalibrated.get(entry.getKey()).add(actual.confidence(),correct);
@@ -89,10 +99,10 @@ public final class NodeConfidenceMetrics {
     public Summary summary(){return summary(null,null,null,null,null);}
     public Summary summary(String taskId,String executionId,String datasetHash,String pipelineHash,String evidenceHash){
         return new Summary("iqc-node-confidence-diagnostics-v1",sources.entrySet().stream().map(entry->{
-            var source=entry.getValue();return new Node(entry.getKey(),source.engineType(),source.version(),source.code(),
+            var source=entry.getValue();var identity=unavailableIdentities.contains(entry.getKey())?null:identities.get(entry.getKey());return new Node(entry.getKey(),source.engineType(),source.version(),source.code(),
                     counters.get(entry.getKey()).summary("RAW_NODE_VALUE_CORRECTNESS_ON_KNOWN_GOLD"),taskId==null||counters.get(entry.getKey()).scored==0?null:
                     counters.get(entry.getKey()).fit(new EmpiricalConfidenceCalibration.Source(taskId,executionId,datasetHash,
-                            pipelineHash,evidenceHash,entry.getKey(),source.nodeHash(),source.code())),comparison(entry.getKey(),source));
+                            pipelineHash,evidenceHash,entry.getKey(),source.nodeHash(),source.code(),identity==null?null:identity.modelKey(),identity==null?null:identity.deploymentRef())),comparison(entry.getKey(),source));
         }).toList());
     }
     private CalibrationComparison comparison(String nodeId,Source source){

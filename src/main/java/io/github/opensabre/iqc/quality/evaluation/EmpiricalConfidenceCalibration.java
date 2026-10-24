@@ -50,9 +50,17 @@ public final class EmpiricalConfidenceCalibration {
         }
     }
     public record Source(String taskId,String executionId,String datasetHash,String pipelineHash,String evidenceHash,
-                         String nodeId,String nodeHash,String findingCode){
+                         String nodeId,String nodeHash,String findingCode,
+                         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String modelKey,
+                         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String deploymentRef){
+        public Source(String taskId,String executionId,String datasetHash,String pipelineHash,String evidenceHash,String nodeId,String nodeHash,String findingCode){
+            this(taskId,executionId,datasetHash,pipelineHash,evidenceHash,nodeId,nodeHash,findingCode,null,null);
+        }
         public Source {
             id(taskId,64);id(executionId,64);id(nodeId,256);
+            if((modelKey==null)!=(deploymentRef==null)||modelKey!=null&&(!modelKey.matches("[a-f0-9]{64}")
+                    ||!deploymentRef.matches("[A-Za-z0-9][A-Za-z0-9:_./@+-]{0,127}")))
+                throw new IllegalArgumentException("calibration requires a complete model deployment identity");
             for(String hash:List.of(datasetHash,pipelineHash,evidenceHash,nodeHash))
                 if(!hash.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("calibration source hash required");
             if(findingCode==null||!findingCode.matches("[A-Z][A-Z0-9_]{1,63}"))throw new IllegalArgumentException("calibration finding code required");

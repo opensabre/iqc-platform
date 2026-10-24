@@ -25,6 +25,7 @@ public final class CalibrationRuntime {
             throw IqcException.invalidState("校准节点定义与原任务不一致");
         var fact=single(source,raw,node);
         BigDecimal original=rawConfidence(fact,raw,false);
+        if(original!=null&&fact.state()==Finding.State.KNOWN)requireIdentity(source.artifact().source(),raw,fact);
         BigDecimal calibrated=fact.state()==Finding.State.KNOWN?source.artifact().apply(original):null;
         var proof=json.createObjectNode().put("schemaVersion",SCHEMA).put("artifactHash",source.artifact().contentHash())
                 .put("findingId",fact.id()).put("rawConfidence",original).put("calibratedConfidence",calibrated)
@@ -75,6 +76,7 @@ public final class CalibrationRuntime {
         BigDecimal original=probability(proof.get("rawConfidence"));
         if("LLM".equals(fact.source().engineType())&&!same(original,rawConfidence(fact,result,false)))
             throw IqcException.invalidState("校准原始值与模型逻辑调用不一致");
+        if(original!=null&&fact.state()==Finding.State.KNOWN)requireIdentity(source.artifact().source(),result,fact);
         BigDecimal expected=fact.state()==Finding.State.KNOWN?source.artifact().apply(original):null;
         if(!same(expected,probability(proof.get("calibratedConfidence")))||!same(expected,fact.confidence())
                 ||proof.path("supported").booleanValue()!=(expected!=null))throw IqcException.invalidState("校准值不符合原冻结系数");
@@ -86,6 +88,35 @@ public final class CalibrationRuntime {
                 ||!Set.of("LLM","SMALL_MODEL").contains(fact.source().engineType())||!node.type().equals(fact.source().engineType())
                 ||!node.version().equals(fact.source().engineVersion()))throw IqcException.invalidState("校准事实不属于原节点");
         return fact;
+    }
+    /** Reuse the admitted invocation fingerprint; input hashes vary across fitting samples. */
+    public static io.github.opensabre.iqc.result.llm.SnapshotChatModelRouter.InvocationFingerprint invocationIdentity(NodeResult result,Finding fact){
+        if(result==null||result.status()!=NodeResult.Status.SUCCESS||result.findings().size()!=1)return null;
+        var traced=result.findings().getFirst();
+        if(!traced.id().equals(fact.id())||!traced.source().equals(fact.source())||traced.state()!=fact.state()
+                ||traced.valueType()!=fact.valueType()||!FindingEvaluationMetrics.equal(traced.value(),fact.value()))return null;
+        JsonNode value;
+        if("LLM".equals(fact.source().engineType())){
+            var metrics=result.metrics().get("llmStructuredOutput");
+            if(metrics==null||!"iqc-llm-structured-metrics-v1".equals(metrics.path("schemaVersion").asText())
+                    ||!one(metrics.path("logicalInvocations"))||!one(metrics.path("validOutputs"))
+                    ||!metrics.path("invalidOrFailedOutputs").isIntegralNumber()||metrics.path("invalidOrFailedOutputs").asLong()!=0)return null;
+            var values=metrics.path("invocationFingerprints");if(!values.isArray()||values.size()!=1)return null;
+            value=values.get(0);
+        }else if("SMALL_MODEL".equals(fact.source().engineType()))value=result.metrics().get("modelInvocation");
+        else return null;
+        if(value==null||!value.isObject()||value.size()!=4)return null;
+        for(String key:List.of("schemaVersion","modelKey","inputHash","deploymentRef"))if(!value.path(key).isTextual())return null;
+        try{
+            var identity=new io.github.opensabre.iqc.result.llm.SnapshotChatModelRouter.InvocationFingerprint(value.path("schemaVersion").textValue(),
+                    value.path("modelKey").textValue(),value.path("inputHash").textValue(),value.path("deploymentRef").textValue());
+            return "SMALL_MODEL".equals(fact.source().engineType())&&!identity.inputHash().equals(fact.source().inputHash())?null:identity;
+        }catch(IllegalArgumentException invalid){return null;}
+    }
+    private static void requireIdentity(EmpiricalConfidenceCalibration.Source source,NodeResult result,Finding fact){
+        var current=invocationIdentity(result,fact);
+        if(source.modelKey()==null||current==null||!source.modelKey().equals(current.modelKey())||!source.deploymentRef().equals(current.deploymentRef()))
+            throw IqcException.invalidState("当前模型或部署调用身份与校准拟合来源不一致或无法测量");
     }
     /** Diagnostic readers must retain the pre-transform signal rather than fit calibrated values again. */
     public static BigDecimal rawConfidence(Finding fact,NodeResult result,boolean transformed){
