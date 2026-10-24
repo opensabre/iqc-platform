@@ -2,7 +2,12 @@ package io.github.opensabre.iqc.result.llm;
 
 /** Explicit immutable execution provenance; never inherited from executor thread locals. */
 public record ModelCallContext(String taskId,String executionId,String nodeId,int runIndex,
-                               String owner,String ownerGroupId,String conversationId) {
+                               String owner,String ownerGroupId,String conversationId,
+                               @com.fasterxml.jackson.annotation.JsonIgnore
+                               io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.ExecutionContext knowledgeContext) {
+    public ModelCallContext(String taskId,String executionId,String nodeId,int runIndex,String owner,String ownerGroupId,String conversationId){
+        this(taskId,executionId,nodeId,runIndex,owner,ownerGroupId,conversationId,null);
+    }
     public ModelCallContext {
         id(taskId,64,false);id(executionId,64,false);id(nodeId,256,true);id(ownerGroupId,64,true);id(conversationId,64,false);
         if(runIndex<0 || owner==null || owner.isBlank() || owner.length()>128 || owner.codePoints().anyMatch(Character::isISOControl))

@@ -9,6 +9,12 @@ public interface LlmQualityProvider {
         if(config!=null&&config.hasNonNull("knowledgeAssets")&&(!config.path("knowledgeAssets").isArray()||!config.path("knowledgeAssets").isEmpty()))
             throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("KNOWLEDGE_CONTEXT_NOT_FROZEN");
     }
+    static String knowledgeMaterial(JsonNode config,ModelCallContext context){
+        if(config==null||!config.hasNonNull("knowledgeAssets")||(config.path("knowledgeAssets").isArray()&&config.path("knowledgeAssets").isEmpty()))return "";
+        if(context==null||context.knowledgeContext()==null)
+            throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("KNOWLEDGE_CONTEXT_NOT_FROZEN");
+        return context.knowledgeContext().material(config,context.taskId(),context.owner(),context.ownerGroupId());
+    }
     default LlmEvaluation evaluate(String content,JsonNode rule,JsonNode agentSnapshot,JsonNode preRuleFindings,String recordId,ModelCallContext context){
         return evaluate(content,rule,agentSnapshot,preRuleFindings,recordId);
     }
