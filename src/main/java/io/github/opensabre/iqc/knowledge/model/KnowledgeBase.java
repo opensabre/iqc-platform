@@ -8,5 +8,7 @@ public class KnowledgeBase extends io.github.opensabre.persistence.entity.po.Bas
     private Integer draftRevision;
     private Integer activePublishedVersion;
     private String status;
+    /** Null explicitly narrows a previously shared corpus to its owner. */
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy=com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private String ownerGroupId;
 }

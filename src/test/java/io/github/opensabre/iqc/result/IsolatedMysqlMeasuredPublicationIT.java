@@ -503,6 +503,26 @@ class IsolatedMysqlMeasuredPublicationIT {
         var userContext=io.github.opensabre.common.core.util.UserContextHolder.getInstance();
         try {
             assertEquals(created.getId(),scoped.get(created.getId()).getId());
+            var organization=mock(io.github.opensabre.iqc.shared.IqcOrganizationClient.class);
+            when(organization.getUserByUniqueId(anyString())).thenAnswer(call->io.github.opensabre.common.core.entity.vo.Result.success(
+                    new io.github.opensabre.iqc.shared.IqcOrganizationClient.OrganizationUser("member-id","Member",call.getArgument(0),"group","Group")));
+            var grouped=new io.github.opensabre.iqc.knowledge.KnowledgeBaseService(
+                    sql.getMapper(io.github.opensabre.iqc.knowledge.dao.KnowledgeBaseMapper.class),
+                    sql.getMapper(io.github.opensabre.iqc.knowledge.dao.KnowledgeBaseVersionMapper.class),new IqcDataScope(organization),context.getBean(ObjectMapper.class));
+            userContext.setContext(Map.of("user_name","group-member","user_id","member-id"));
+            assertEquals(created.getId(),grouped.get(created.getId()).getId());
+            assertEquals(2,grouped.history(created.getId()).size());
+            assertEquals(4,tx.execute(status->grouped.update(created.getId(),3,"Shared maintenance",corpus)).getDraftRevision());
+            var shared=tx.execute(status->grouped.publish(created.getId(),4));
+            var sharedEvidence=io.github.opensabre.iqc.knowledge.KnowledgeBaseService.readPublishedEvidence(shared,context.getBean(ObjectMapper.class));
+            assertEquals("annotator",sharedEvidence.owner());assertEquals("group-member",sharedEvidence.publishedBy());
+            userContext.setContext(Map.of("user_name","annotator","user_id","user-annotator"));
+            var narrowed=tx.execute(status->scoped.update(created.getId(),4,"Private maintenance",corpus));
+            assertNull(narrowed.getOwnerGroupId());
+            assertNull(tx.execute(status->scoped.viewVersion(created.getId(),1)).ownerGroupId());
+            userContext.setContext(Map.of("user_name","group-member","user_id","member-id"));
+            assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->grouped.history(created.getId()));
+            assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->tx.execute(status->grouped.update(created.getId(),5,"forbidden",corpus)));
             userContext.setContext(Map.of("user_name","outsider","user_id","user-outsider"));
             assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->scoped.get(created.getId()));
             assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->scoped.history(created.getId()));

@@ -74,3 +74,14 @@ Service.publish，使用独立事务。限时完成后两侧版本ID相同，实
 原9737终态0，集成4项零失败、错误、跳过，62.889秒；日志
 `/tmp/iqc-b-knowledge-owner-scope.log`，专用34307关闭且socket消失。
 没有接入组织服务，同组共享、跨组变更竞态和真实PDP/HTTP授权仍待联调。
+
+## B 同组协作与私有收窄修复（2026-10-24）
+
+实际IqcDataScope配受控组织响应验证同组读取、维护、发布；发布证据保留原owner，
+实际publishedBy记录协作者。owner在无组上下文维护后，数据库组范围必须清空，
+历史Prepared有效组为空，原同组用户历史读取及更新均拒绝。
+首轮SQL发现ownerGroupId默认更新策略忽略null，旧组留存；现为该字段显式ALWAYS
+更新，保证私有收窄落库，无DDL或框架变更。
+原55185 test-compile+surerfire终态0，集成4项零失败、错误、跳过，46.748秒；
+日志`/tmp/iqc-b-knowledge-group-fixed.log`，专用34307关闭/socket消失。
+此为受控组织响应的领域SQL验证，真实组织网络/PDP与并发组变更仍待联调。
