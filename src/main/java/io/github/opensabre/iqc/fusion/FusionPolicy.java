@@ -12,8 +12,16 @@ public record FusionPolicy(String id, int version, Method method, Map<String, In
                            @tools.jackson.databind.annotation.JsonDeserialize(using=HttpWeightsCodec.class)
                            Map<String,String> nodeWeights,
                            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-                           FusionExtensionBinding custom) {
+                           FusionExtensionBinding custom,
+                           @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
+                           java.util.List<io.github.opensabre.iqc.quality.evaluation.EmpiricalConfidenceCalibration.Reference> calibrationReferences) {
     public enum Method { PRIORITY, CONFIDENCE, VOTING, OVERRIDE, WEIGHTED, CUSTOM }
+    public FusionPolicy(String id,int version,Method method,Map<String,Integer> nodePriority,
+            Map<String,String> overrideNodeByCode,String confidenceCalibrationId,Set<String> calibratedNodeIds,
+            Map<String,String> nodeWeights,FusionExtensionBinding custom){
+        this(id,version,method,nodePriority,overrideNodeByCode,confidenceCalibrationId,calibratedNodeIds,nodeWeights,custom,null);
+    }
+
     public FusionPolicy(String id,int version,Method method,Map<String,Integer> nodePriority,
             Map<String,String> overrideNodeByCode,String confidenceCalibrationId,Set<String> calibratedNodeIds,Map<String,String> nodeWeights){
         this(id,version,method,nodePriority,overrideNodeByCode,confidenceCalibrationId,calibratedNodeIds,nodeWeights,null);
@@ -29,6 +37,17 @@ public record FusionPolicy(String id, int version, Method method, Map<String, In
         nodePriority = Map.copyOf(nodePriority == null ? Map.of() : nodePriority);
         overrideNodeByCode = Map.copyOf(overrideNodeByCode == null ? Map.of() : overrideNodeByCode);
         calibratedNodeIds = Set.copyOf(calibratedNodeIds == null ? Set.of() : calibratedNodeIds);
+        calibrationReferences=java.util.List.copyOf(calibrationReferences==null?java.util.List.of():calibrationReferences);
+        if(calibrationReferences.size()>200)throw new IllegalArgumentException("calibration references exceed 200 nodes");
+        calibrationReferences=calibrationReferences.stream().sorted(java.util.Comparator.comparing(
+                io.github.opensabre.iqc.quality.evaluation.EmpiricalConfidenceCalibration.Reference::nodeId)).toList();
+        if(!calibrationReferences.isEmpty()){
+            var referenced=new java.util.HashSet<String>();
+            for(var reference:calibrationReferences)if(!referenced.add(reference.nodeId()))throw new IllegalArgumentException("duplicate calibration node reference");
+            if(!referenced.equals(calibratedNodeIds)||confidenceCalibrationId==null||confidenceCalibrationId.isBlank())
+                throw new IllegalArgumentException("exact calibration references must cover all declared calibrated nodes");
+        }
+
         var normalizedWeights=new java.util.TreeMap<String,String>();
         if(nodeWeights!=null){
             if(nodeWeights.size()>200)throw new IllegalArgumentException("weighted fusion supports at most 200 nodes");

@@ -132,6 +132,7 @@ public class InspectionExecutionService {
     }
     private void validatePipelineDependencies(InspectionTask task,JsonNode snapshot) {
         io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.verifiedSources(task,objectMapper);
+        io.github.opensabre.iqc.quality.evaluation.CalibrationTaskSnapshotService.requireRunnable(task,objectMapper);
         boolean rollout=io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.requiresEvidence(task.getId())
                 ||snapshot!=null&&snapshot.has("rolloutSnapshot");
         if (!rollout&&!io.github.opensabre.iqc.pipelineasset.PipelineAssetService.isPipeline(snapshot)) return;
