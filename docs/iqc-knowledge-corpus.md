@@ -105,3 +105,12 @@ canonicalPayloadVisible与实际正文一致，原草稿/历史/Prepared对象�
 原15682 test-compile+surerfire终态0；新增1项、语料4项、原ResultReadProjection9项，
 共14项零失败、错误、跳过，日志`/tmp/iqc-b-knowledge-read-matrix.log`。
 此为原投影器验证，非HTTP当前授权、四角色迁移或浏览器交互证据。
+
+## B HTTP参数与回执验证（2026-10-24）
+
+默认MVC转换器下9种非法修订值和5种非法启停值均返回参数错误且不调用领域服务；
+当前详情grant被拒绝时领域读取不发生。合法boolean启停检查对应固定资源，
+即使具备全部敏感阅读权限，命令回执仍无语料正文且Cache-Control为private, no-store。
+原44435终态0，HTTP16项、投影1项、语料4项共21项零失败、错误、跳过，
+日志`/tmp/iqc-b-knowledge-http-contract.log`。领域与授权服务受控，
+不代表真实PDP、角色迁移、SQL或浏览器端到端验收。
