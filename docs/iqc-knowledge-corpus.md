@@ -204,3 +204,13 @@ knowledgeContext或参考正文，旧无引用调用无需该上下文。
 HTTP缺gateway返回supported=false/KNOWLEDGE_REQUIRES_MODEL_GATEWAY且限流入口零调用。
 原56367两项失败是测试误期望异常外抛，按现有失败结果契约修正后通过，未修改生产实现。
 ExecutionContext/router受控；未覆盖HTTP成功请求、真实远端、网关预算或SQL/PDP。
+
+### B HTTP成功请求构造补验
+
+原1615 compiler:testCompile+surerfire终态0，
+/tmp/iqc-b-knowledge-http-request-configured.log.exit=0，ProviderBoundary四项通过。
+实际HTTP provider的requestData回调捕获三消息：system声明证据边界，第二条user仅为
+参考正文，第三条user含原会话且无参考正文；网关接收同一ModelCallContext，调用一次，
+成功响应解析通过，不走旧限流入口。网关返回受控响应且不执行网络supplier，故此项证明
+成功请求构造及上下文传递，不证明HTTP传输/远端服务/实际预算。
+前两轮分别因测试访问器名称错误和漏填必填模型配置失败，修正测试后通过，未改生产。

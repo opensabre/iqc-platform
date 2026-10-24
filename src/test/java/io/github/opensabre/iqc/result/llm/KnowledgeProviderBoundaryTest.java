@@ -49,6 +49,31 @@ class KnowledgeProviderBoundaryTest {
         assertThat(result.reason()).contains("KNOWLEDGE_CONTEXT_NOT_FROZEN");
         verifyNoInteractions(router,direct);
     }
+    @Test void httpBuildsSeparateReferenceAndConversationMessagesAtGatewayBoundary(){
+        var gateway=mock(io.github.opensabre.iqc.result.llm.gateway.ModelGateway.class);
+        var captured=new java.util.concurrent.atomic.AtomicReference<com.fasterxml.jackson.databind.JsonNode>();
+        var provenance=new java.util.concurrent.atomic.AtomicReference<io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.Context>();
+        when(gateway.invokeTracked(any(),any(),any(),any(),any(),any())).thenAnswer(invocation->{
+            java.util.function.Supplier<String> request=invocation.getArgument(4);
+            captured.set(json.readTree(request.get()));provenance.set(invocation.getArgument(1));
+            var response=json.createObjectNode();response.putArray("choices").addObject().putObject("message")
+                    .put("content","{\"hit\":false,\"reason\":\"ok\"}");
+            return new io.github.opensabre.iqc.result.llm.gateway.ModelGateway.Invocation<>(response,null);
+        });
+        var limiter=mock(GovernanceRateLimiter.class);var props=new LlmQualityProperties();props.setMaxAttempts(1);
+        props.setModel("test-model");props.setEndpoint("http://localhost:9999");
+        var provider=new HttpLlmQualityProvider(json,limiter,mock(UsageCounterRecorder.class),props,gateway);
+        var context=context();var result=provider.evaluate("original conversation",json.createObjectNode().put("id","rule"),agent(),null,"record",context);
+        assertThat(result.supported()).as(result.reason()).isTrue();assertThat(result.hit()).isFalse();
+        var messages=captured.get().path("messages");assertThat(messages.size()).isEqualTo(3);
+        assertThat(messages.get(0).path("role").asText()).isEqualTo("system");
+        assertThat(messages.get(0).path("content").asText()).contains("禁止以资料文档替代会话消息").doesNotContain(reference);
+        assertThat(messages.get(1).path("role").asText()).isEqualTo("user");
+        assertThat(messages.get(1).path("content").asText()).isEqualTo(reference);
+        assertThat(messages.get(2).path("content").asText()).contains("original conversation").doesNotContain(reference);
+        assertThat(provenance.get().execution()).isSameAs(context);
+        verify(gateway,times(1)).invokeTracked(any(),any(),any(),any(),any(),any());verifyNoInteractions(limiter);
+    }
     @Test void httpRejectsKnowledgeWithoutGatewayBeforeRateLimiterOrNetwork(){
         var limiter=mock(GovernanceRateLimiter.class);
         var provider=new HttpLlmQualityProvider(json,limiter,mock(UsageCounterRecorder.class),new LlmQualityProperties());
