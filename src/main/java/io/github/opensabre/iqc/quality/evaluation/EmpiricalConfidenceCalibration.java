@@ -15,10 +15,38 @@ public final class EmpiricalConfidenceCalibration {
     public static final int MINIMUM_BIN_SAMPLES=20;
     private static final ObjectMapper JSON=new ObjectMapper();
     /** Shared configurations may carry this opaque reference, never client-supplied fitted coefficients. */
+    @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=ReferenceCodec.class)
+    @tools.jackson.databind.annotation.JsonDeserialize(using=HttpReferenceCodec.class)
     public record Reference(String taskId,String executionId,String nodeId,String contentHash){
         public Reference {
             id(taskId,64);id(executionId,64);id(nodeId,256);
             if(contentHash==null||!contentHash.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("exact calibration content hash required");
+        }
+    }
+    /** Both wire codecs require exactly four textual fields, without scalar coercion. */
+    private static Reference reference(com.fasterxml.jackson.databind.JsonNode tree){
+        var names=java.util.Set.of("taskId","executionId","nodeId","contentHash");
+        if(tree==null||!tree.isObject()||tree.size()!=4
+                ||tree.properties().stream().anyMatch(entry->!names.contains(entry.getKey())||!entry.getValue().isTextual()))
+            throw new IllegalArgumentException("exact four-field calibration reference required");
+        return new Reference(tree.path("taskId").textValue(),tree.path("executionId").textValue(),
+                tree.path("nodeId").textValue(),tree.path("contentHash").textValue());
+    }
+    public static final class ReferenceCodec extends com.fasterxml.jackson.databind.JsonDeserializer<Reference>{
+        @Override public Reference deserialize(com.fasterxml.jackson.core.JsonParser parser,com.fasterxml.jackson.databind.DeserializationContext context) throws java.io.IOException{
+            com.fasterxml.jackson.databind.JsonNode tree=new ObjectMapper().readerFor(com.fasterxml.jackson.databind.JsonNode.class)
+                    .with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY).readValue(parser);
+            try{return reference(tree);}catch(RuntimeException invalid){return context.reportInputMismatch(Reference.class,"Invalid exact calibration reference");}
+        }
+    }
+    public static final class HttpReferenceCodec extends tools.jackson.databind.ValueDeserializer<Reference>{
+        private static final tools.jackson.databind.json.JsonMapper HTTP=tools.jackson.databind.json.JsonMapper.builder()
+                .enable(tools.jackson.databind.DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY)
+                .disable(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
+        @Override public Reference deserialize(tools.jackson.core.JsonParser parser,tools.jackson.databind.DeserializationContext context){
+            var tree=HTTP.readTree(parser);
+            try{return reference(new ObjectMapper().readTree(tree.toString()));}
+            catch(java.io.IOException|RuntimeException invalid){return context.reportInputMismatch(Reference.class,"Invalid exact calibration reference");}
         }
     }
     public record Source(String taskId,String executionId,String datasetHash,String pipelineHash,String evidenceHash,
