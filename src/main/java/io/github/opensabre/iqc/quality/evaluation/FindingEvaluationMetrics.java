@@ -179,7 +179,7 @@ public final class FindingEvaluationMetrics {
         }
         return expected.equals(actual);
     }
-    private static BigDecimal ratio(long numerator, long denominator) {
+    static BigDecimal ratio(long numerator, long denominator) {
         return denominator == 0 ? null : BigDecimal.valueOf(numerator).divide(BigDecimal.valueOf(denominator), 6, RoundingMode.HALF_UP);
     }
     private static final class Counter {

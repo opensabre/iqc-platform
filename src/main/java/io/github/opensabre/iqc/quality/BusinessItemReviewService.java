@@ -58,6 +58,7 @@ public class BusinessItemReviewService {
             var trace=mapper.readerFor(io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation.class)
                     .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
                     .<io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation>readValue(result.getExecutionTraceJson());
+            io.github.opensabre.iqc.quality.evaluation.CalibrationRuntime.verify(task,trace.run(),mapper);
             var input=io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.validatedExecutionInput(task,snapshot,trace,result.getConversationId(),mapper);
             var allowed=new java.util.HashSet<String>();input.path("messages").forEach(message->allowed.add(message.path("id").asText()));
             BusinessItemReviewEvaluator.evaluatePipeline(resultId,release,trace,trace.items(),List.of(),allowed,input.path("businessContext"));
@@ -634,6 +635,7 @@ public class BusinessItemReviewService {
                     :mapper.readerFor(io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation.class)
                     .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
                     .<io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation>readValue(result.getExecutionTraceJson());
+            io.github.opensabre.iqc.quality.evaluation.CalibrationRuntime.verify(task,trace.run(),mapper);
             if(!findingDecisions.isEmpty()){
                 var input=io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.validatedExecutionInput(task,snapshot,trace,result.getConversationId(),mapper);
                 var reviewAllowed=new java.util.HashSet<String>();input.path("messages").forEach(message->reviewAllowed.add(message.path("id").asText()));

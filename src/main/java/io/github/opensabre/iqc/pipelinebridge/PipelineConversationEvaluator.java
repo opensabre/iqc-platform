@@ -74,6 +74,7 @@ public class PipelineConversationEvaluator {
                             .eq(InspectionTask::getCurrentExecutionId,task.getCurrentExecutionId()).eq(InspectionTask::getStatus,"RUNNING"));
                     if(renewed!=1) Thread.currentThread().interrupt(); // stop before scheduling another node after pause/cancel/lease loss
                 });
+        io.github.opensabre.iqc.quality.evaluation.CalibrationRuntime.verify(task,run,json);
         var observations=new ArrayList<>(run.findings());
         for(var node:release.pipeline().nodes()) {
             boolean produced=observations.stream().anyMatch(value->node.nodeId().equals(value.source().nodeId()));

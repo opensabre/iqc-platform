@@ -159,6 +159,7 @@ public class ProductionInputSnapshotService {
     public void validateResult(InspectionTask task,JsonNode snapshot,List<ConversationMessage> messages,
             io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation evaluated,Prepared prepared) {
         if(!hasSnapshot(snapshot))return;
+        io.github.opensabre.iqc.quality.evaluation.CalibrationRuntime.verify(task,evaluated==null?null:evaluated.run(),json);
         if(prepared==null || !Objects.equals(prepared.taskId,task.getId()) || !Objects.equals(prepared.snapshotJson,task.getRuleSnapshotJson()))
             throw IqcException.invalidState("生产结果不属于已核验的冻结任务");
         if(messages==null || messages.isEmpty() || evaluated==null || evaluated.mode()!=io.github.opensabre.iqc.pipeline.PipelineRuntime.Mode.PRODUCTION)
