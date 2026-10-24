@@ -146,7 +146,7 @@ public class KnowledgeBaseService {
                     .putIfAbsent(reference.versionNo(),reference);
             if(previous!=null&&!previous.equals(reference))throw IqcException.invalidArgument("任务知识库版本引用冲突");
         }
-        var result=new ArrayList<Prepared>();
+        var result=new ArrayList<Prepared>();long frozenBytes=0;
         for(var entry:ordered.entrySet()){
             var row=require(entry.getKey(),true);
             if(!"ACTIVE".equals(row.getStatus()))throw IqcException.invalidState("知识库已停用");
@@ -154,6 +154,8 @@ public class KnowledgeBaseService {
                 var value=prepared(row,reference.versionNo());
                 if(!reference.versionId().equals(value.versionId())||!reference.contentHash().equals(value.contentHash()))
                     throw IqcException.invalidState("任务知识库版本来源已不匹配");
+                frozenBytes+=write(value).getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+                if(frozenBytes>8L*1024*1024)throw IqcException.invalidArgument("任务知识库正文冻结超过8MiB，请缩小引用语料");
                 result.add(value);
             }
         }
