@@ -96,6 +96,35 @@ Service.publish，使用独立事务。限时完成后两侧版本ID相同，实
 原55185 test-compile+surerfire终态0，集成4项零失败、错误、跳过，46.748秒；
 日志`/tmp/iqc-b-knowledge-group-fixed.log`，专用34307关闭/socket消失。
 此为受控组织响应的领域SQL验证，真实组织网络/PDP与并发组变更仍待联调。
+## KB2 管理入口增量（2026-10-24）
+
+新增/api/iqc/knowledge-bases的目录GET/创建POST、/{id}详情GET/修订PUT、availability POST、versions元数据GET、publish POST、versions/{versionNo}精确GET及restore POST。草稿请求为code/name/corpusJson或expectedRevision/name/corpusJson，corpusJson由原严格语料解析器验证；修订须正整数JSON数字，启停须JSON布尔值，拒绝字符串/小数或隐式取整。恢复为新草稿，不移动当前发布指针。每个URL/方法使用独立iqc:knowledge:*资源，并在查询前复用SensitiveReadAccessService检查当前资源和组织范围，所有回执private,no-store，审计不记录正文。
+
+原ResultReadProjection新增知识库DTO投影，source对象不被修改：目录、历史列表和创建/修订/发布/启停/恢复回执一律不返回正文；详情与精确版本只有三项既有FULL/PII/PROMPT敏感阅读齐备才显示正文。版本元数据列表查询直接排除snapshotJson，不批量加载/解析100份大型语料；其contentHash为存储的版本摘要，实际正文/来源校验在精确版本读取中完成。缺少正文时canonicalPayloadVisible=false，不能把回执当作空白可编辑配置。
+
+权限迁移V20261024_01在组织服务注册九项资源和知识库菜单：IQC_ADMIN/IQC_QUALITY_MANAGER具有维护资源，IQC_INSPECTOR/IQC_VIEWER仅目录/详情/历史/精确版本阅读；不会额外授予敏感阅读或全局ADMIN。沿用现有产品菜单父级与资源代码upsert，不重写既有URL/方法/身份。脚本仅交付，未执行共享SQL。
+
+前端/knowledge-bases复用原权限与路由、表格/抽屉/表单，逐文档编辑ID/标题/正文/来源引用并检查边界。草稿修改未保存时不能切其他资产或发布/恢复覆盖；命令回执后清正文并独立重读，失败保留对象身份并要求重新读取。正文/目录/版本/维护权限变化清空状态和请求代次，关闭/切换资产/版本的旧响应不恢复文档。敏感受限详情为元数据视图，不能用空正文覆盖。
+
+本批仅管理与阅读，不声明Agent/Pipeline精确引用、任务授权正文冻结或LLM上下文已完成；这些继续KB2引用/KB3。编译构建终态见协作记录，真实HTTP/PDP/四角色/SQL脚本/浏览器及源对象不变专项待独立验证。
+
+## B KB2敏感正文投影验证（2026-10-24）
+
+固定同步59aa155后，KnowledgeReadProjectionTest遍历FULL/PII/PROMPT八种组合：
+目录/命令元数据与历史均无正文，详情与精确版本仅三项权限齐备时返回正文，
+canonicalPayloadVisible与实际正文一致，原草稿/历史/Prepared对象不被修改。
+原15682 test-compile+surerfire终态0；新增1项、语料4项、原ResultReadProjection9项，
+共14项零失败、错误、跳过，日志`/tmp/iqc-b-knowledge-read-matrix.log`。
+此为原投影器验证，非HTTP当前授权、四角色迁移或浏览器交互证据。
+
+## B HTTP参数与回执验证（2026-10-24）
+
+默认MVC转换器下9种非法修订值和5种非法启停值均返回参数错误且不调用领域服务；
+当前详情grant被拒绝时领域读取不发生。合法boolean启停检查对应固定资源，
+即使具备全部敏感阅读权限，命令回执仍无语料正文且Cache-Control为private, no-store。
+原44435终态0，HTTP16项、投影1项、语料4项共21项零失败、错误、跳过，
+日志`/tmp/iqc-b-knowledge-http-contract.log`。领域与授权服务受控，
+不代表真实PDP、角色迁移、SQL或浏览器端到端验收。
 
 ## Agent 精确版本引用（KB3 前置）
 
@@ -105,10 +134,25 @@ Service.publish，使用独立事务。限时完成后两侧版本ID相同，实
 
 当前尚未提供任务正文上下文，两种真实模型适配器对非空 knowledgeAssets 显式返回 KNOWLEDGE_CONTEXT_NOT_FROZEN，防止静默忽略引用。此提交仅为引用管理前置，不作为知识库推理完成或上线验收。后端离线 test-compile 与前端生产构建均退出0；本轮未新增或执行测试，未执行共享迁移或部署。
 
+### B Agent精确引用专项验证
+
+固定fad71e0已合入5ff95b9。KnowledgeAssetReferenceTest三项验证精确版本元数据
+绑定、调用者不变与JSON往返，当前授权撤销先于来源读取，错误来源/版本/摘要拒绝，
+旧配置不调用知识库依赖。联跑原PromptAssetVersionTest四项，原21830终态0，
+/tmp/iqc-b-knowledge-reference-tests-agent.log.exit=0，七项零失败错误跳过。
+原59754编译终态0；原7358因Mockito自动附加失败终态1，未执行业务断言，
+使用既有显式ByteBuddy agent后通过。来源服务及授权受控，非SQL/PDP/任务正文冻结证明。
 ### KB3 批量任务读取前置
 
 publishedForTask(List<Binding>) 必须加入调用方事务，先检查全部精确引用和重复冲突，再按知识库ID、版本排序，每个父库只锁一次。相同精确版本去重；不同版本保留各自不可变语料和有效来源组；任一库停用、不可见或版本行/摘要不匹配则拒绝整批。上限400条用于限制多节点提交开销，不替代每个Agent最多四库的规则。返回不可变列表，空引用不访问数据库。调用方仍须负责当前资源授权、任务组交集和有界正文冻结；本批未接入任务调用链。
 
+### B 批量任务读取前置验证
+
+固定b5c46d1合入37b1aa3。原85688 test-compile+surerfire终态0，
+/tmp/iqc-b-knowledge-batch.log.exit=0；Batch3+Corpus4+Reference3十项零失败错误跳过。
+全批无效参数、相同版本冲突及超量在任何来源IO前拒绝；倒序输入先查询字典序首个
+父资源并带FOR UPDATE；空批无IO且结果不可变。Mapper受控并在首资源不存在时中止，
+不据此宣称完整成功批次、多事务无死锁或任务正文冻结通过。
 ### KB3 任务保存边界接入（模型上下文仍待完成）
 
 KnowledgeTaskSnapshotService 复用原 ruleSnapshotJson：普通批次/抽样/方案、Pipeline及评测共用保存边界，另覆盖两处定时创建。收集原 Agent 与 Pipeline 节点 Agent 的精确引用，使用当前 iqc:knowledge:version:view 资源校验，再加入原事务批量读取；版本正文独立冻结为 knowledgeInputs，不改共享 Pipeline 发布体及摘要。信封包含原负责人、来源 Prepared、来源有效组交集及 selector-decimal-sha256-v1 摘要，序列化不得超过8MiB；无引用任务不新增正文信封或资源查询。禁止调用者传入已有 knowledgeInputs。旧直接构造路径缺少服务时，只允许无引用任务。
@@ -123,6 +167,14 @@ verifiedSources 从原任务 ruleSnapshotJson 读取信封；严格拒绝重复J
 
 原任务 Agent 与全部 Pipeline 节点引用组成精确引用集合，正文来源必须一一覆盖该集合，不接受多余、缺少、重复或行ID/版本/摘要替换。每个来源重建原 KnowledgeBaseVersion 元数据，复用 readPublishedEvidence 验证发布协议、语料约束、发布人和内容摘要。校验加入原执行器的入队、worker启动和恢复依赖边界，不读取可变知识库草稿，也不重新授权替换历史正文。无引用旧任务不增加知识库来源查询。真实模型有界上下文与使用来源追踪仍需继续，当前未解除模型拒绝。
 
+### B 任务知识库信封专项
+
+固定01ce566合入9d15d5d，原54315 test-compile+surerfire终态0，
+/tmp/iqc-b-knowledge-task-envelope.log.exit=0；Snapshot3+Batch3六项零失败错误跳过。
+受控来源冻结后，静态验证读取原正文且不查询当前来源，返回不可变；任务范围只允许
+收窄，私有来源使任务组为null；即使重算外层Hash，缺失引用覆盖仍拒绝，错误负责人
+拒绝；无引用旧任务兼容，注入信封/重复键/尾随JSON拒绝。
+以上不证明真实事务/SQL/PDP或模型已消费参考正文。
 ### KB3 模型参考上下文消费（当前实现）
 
 前述阶段性全量拒绝已由类型化上下文校验替代。原任务信封核验后，由私有构造器创建 ExecutionContext，沿原 ModelCallContext 传递；七参数旧构造器保留，新增上下文通过 JsonIgnore 排除在调用元数据JSON之外。没有知识库标记的历史任务不在每次模型调用前解码完整生产输入；入队/worker/恢复仍检查原任务。
