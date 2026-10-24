@@ -145,3 +145,7 @@ FrozenDetectorEngine增加过滤前的llmCitationGrounding计数，复用原Lega
 ### 2026-10-24 Knowledge管理入口
 
 KB2管理端点与原ResultReadProjection敏感投影、组织资源脚本/角色矩阵、知识库文档表单页面及菜单已编码。元数据列表/回执不返回正文，独立详情/版本当前授权后按既有三敏感grant投影，历史元数据直接排除大正文；写后独立重读和撤权/旧响应清理。迁移脚本未执行，编译构建终态见协作记录；真实HTTP/SQL/角色/browser专项待，Agent/Pipeline引用和任务冻结/运行上下文及完整I1–I7继续。
+
+### 知识库模型上下文接入（2026-10-24）
+
+KB3原任务授权正文冻结、负责人/组交集/引用全集/原版本摘要校验已接入保存与执行边界；两种真实模型适配器现沿类型化ModelCallContext消费当前节点的精确版本参考资料，来源信息进入参考消息，调用元数据JSON不含正文。256KiB参考JSON上限、缺少原Gateway或未核验上下文均在模型I/O前拒绝，旧七参数调用与无引用消息保持。具体约束见iqc-knowledge-corpus.md；实际SQL/撤权/worker/模型Token预算及容量验收仍待补齐，未据此完成KB整链或I1–I7。

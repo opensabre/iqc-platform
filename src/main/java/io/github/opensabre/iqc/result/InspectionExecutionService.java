@@ -1365,10 +1365,11 @@ public class InspectionExecutionService {
         return evaluateSingle(task,message,rule,preRuleFindings,conversationMessages,conversationLlmRuns,conversationFactOwners,runIndex,
                 modelCallContext(task,null,runIndex,message.getConversationId()));
     }
-    private static io.github.opensabre.iqc.result.llm.ModelCallContext modelCallContext(InspectionTask task,String nodeId,int runIndex,String conversationId){
+    private io.github.opensabre.iqc.result.llm.ModelCallContext modelCallContext(InspectionTask task,String nodeId,int runIndex,String conversationId){
         if(task.getId()==null || task.getCurrentExecutionId()==null || task.getCreatedBy()==null || conversationId==null)return null;
         return new io.github.opensabre.iqc.result.llm.ModelCallContext(task.getId(),task.getCurrentExecutionId(),nodeId,runIndex,
-                task.getCreatedBy(),task.getOwnerGroupId(),conversationId);
+                task.getCreatedBy(),task.getOwnerGroupId(),conversationId,
+                io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.executionContext(task,objectMapper));
     }
     private InspectionResult evaluateSingle(InspectionTask task,ConversationMessage message,JsonNode rule,JsonNode preRuleFindings,
             List<ConversationMessage> conversationMessages,Map<String,List<LlmQualityProvider.LlmEvaluation>> conversationLlmRuns,
@@ -1435,7 +1436,7 @@ public class InspectionExecutionService {
                         String conversationRecordId = "inspection-conversation:" + task.getId() + ":"
                                 + task.getCurrentExecutionId() + ":" + message.getConversationId() + ":rule:" + contextKey + ":run:" + nextRun;
                         var measured=callContext==null?null:new io.github.opensabre.iqc.result.llm.ModelCallContext(callContext.taskId(),callContext.executionId(),
-                                callContext.nodeId(),callContext.nodeId()==null?nextRun:callContext.runIndex(),callContext.owner(),callContext.ownerGroupId(),callContext.conversationId());
+                                callContext.nodeId(),callContext.nodeId()==null?nextRun:callContext.runIndex(),callContext.owner(),callContext.ownerGroupId(),callContext.conversationId(),callContext.knowledgeContext());
                         priorRuns.add(llmQualityProvider.evaluateConversation(conversationMessages,rule,readSnapshot(task.getAgentSnapshotJson()),
                                 preRuleFindings,conversationRecordId,measured));
                     }
