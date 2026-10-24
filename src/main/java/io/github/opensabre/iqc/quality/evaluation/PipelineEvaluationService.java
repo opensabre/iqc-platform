@@ -312,7 +312,7 @@ public class PipelineEvaluationService {
             }
             var actual = validatedRow(task, prepared, row); sources.put(member.sampleId(), row.getExecutionId());
             structured.add(actual); citations.add(actual);
-            nodeConfidence.add(member.gold(),actual.run().findings());
+            nodeConfidence.add(member.gold(),actual.run().findings(),actual.run().trace());
             var labelCounts=LabelEvaluationMetrics.evaluate(expected==null?Map.of():expected.labels(),prepared.release().labelPolicy(),actual.fusion());
             comparableLabels+=labelCounts.comparable(); correctLabels+=labelCounts.correct();
             if ("SUCCESS".equals(row.getStatus())) successful++;

@@ -25,7 +25,8 @@ public final class NodeConfidenceMetrics {
             counters.put(node.nodeId(),new FindingEvaluationMetrics.ConfidenceCounter());
         }
     }
-    public void add(GoldConversation gold,List<Finding> findings){
+    public void add(GoldConversation gold,List<Finding> findings){add(gold,findings,List.of());}
+    public void add(GoldConversation gold,List<Finding> findings,List<io.github.opensabre.iqc.pipeline.PipelineRuntime.Trace> trace){
         for(var entry:sources.entrySet()){
             var source=entry.getValue();var counter=counters.get(entry.getKey());
             var expected=gold.findings().stream().filter(value->source.code().equals(value.code())&&value.state()==Finding.State.KNOWN)
@@ -38,9 +39,24 @@ public final class NodeConfidenceMetrics {
             // Multiple outputs for the same node/code/attempt are ambiguous, never cherry-pick the correct or confident one.
             if(finalAttempt.size()!=1)continue;
             var actual=finalAttempt.getFirst();
-            if(actual.state()!=Finding.State.KNOWN||actual.valueType()!=expected.valueType()||actual.confidence()==null
+            if(actual.state()!=Finding.State.KNOWN||actual.valueType()!=expected.valueType()
                     ||!source.engineType().equals(actual.source().engineType())||!source.version().equals(actual.source().engineVersion()))continue;
-            counter.add(actual.confidence(),FindingEvaluationMetrics.equal(expected.value(),actual.value()));
+            var confidence=actual.confidence();
+            if("LLM".equals(source.engineType())){
+                // Self-reported LLM confidence is diagnostic metadata, never silently promoted into calibrated fusion input.
+                var attempts=trace.stream().filter(value->entry.getKey().equals(value.nodeId())&&value.attempt()==last).toList();
+                confidence=null;
+                if(attempts.size()==1&&attempts.getFirst().result().status()==io.github.opensabre.iqc.pipeline.NodeResult.Status.SUCCESS){
+                    var metrics=attempts.getFirst().result().metrics().get("llmStructuredOutput");
+                    if(metrics!=null&&metrics.path("logicalInvocations").isIntegralNumber()&&metrics.path("logicalInvocations").canConvertToLong()&&metrics.path("logicalInvocations").longValue()==1
+                            &&metrics.path("validOutputs").isIntegralNumber()&&metrics.path("validOutputs").canConvertToLong()&&metrics.path("validOutputs").longValue()==1
+                            &&metrics.path("reportedConfidence").isNumber()&&Double.isFinite(metrics.path("reportedConfidence").doubleValue())){
+                        var value=metrics.path("reportedConfidence").decimalValue();
+                        if(value.signum()>=0&&value.compareTo(java.math.BigDecimal.ONE)<=0)confidence=value;
+                    }
+                }
+            }
+            if(confidence!=null)counter.add(confidence,FindingEvaluationMetrics.equal(expected.value(),actual.value()));
         }
     }
     public Summary summary(){

@@ -63,7 +63,11 @@ public interface LlmQualityProvider {
     /** Shared structural contract for provider parsing and measured logical-output diagnostics. */
     static boolean validJudgment(JsonNode output) {
         return output != null && output.isObject() && output.path("hit").isBoolean()
-                && output.path("reason").isTextual() && !output.path("reason").asText().trim().isEmpty();
+                && output.path("reason").isTextual() && !output.path("reason").asText().trim().isEmpty()
+                && (!output.hasNonNull("confidence") || output.path("confidence").isNumber()
+                && Double.isFinite(output.path("confidence").doubleValue())
+                && output.path("confidence").decimalValue().signum()>=0
+                && output.path("confidence").decimalValue().compareTo(java.math.BigDecimal.ONE)<=0);
     }
 
     record LlmEvaluation(boolean supported, boolean hit, String reason, String structuredJson,
@@ -72,6 +76,15 @@ public interface LlmQualityProvider {
         public LlmEvaluation(boolean supported,boolean hit,String reason,String structuredJson){this(supported,hit,reason,structuredJson,null);}
         public LlmEvaluation(boolean supported, boolean hit, String reason) {
             this(supported, hit, reason, null);
+        }
+        public java.math.BigDecimal reportedConfidence(com.fasterxml.jackson.databind.ObjectMapper mapper){
+            if(!supported||structuredJson==null||structuredJson.isBlank())return null;
+            try{
+                JsonNode output=mapper.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                        .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readTree(structuredJson);
+                return validJudgment(output)&&output.path("hit").booleanValue()==hit&&output.hasNonNull("confidence")
+                        ?output.path("confidence").decimalValue():null;
+            }catch(java.io.IOException|RuntimeException invalid){return null;}
         }
         public boolean validStructuredOutput(com.fasterxml.jackson.databind.ObjectMapper mapper,boolean labelFacts) {
             if(!supported || structuredJson==null || structuredJson.isBlank()) return false;
