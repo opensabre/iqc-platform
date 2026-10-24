@@ -327,6 +327,22 @@ class IsolatedMysqlMeasuredPublicationIT {
             var resolved=calibrationTx.execute(status->evaluations.calibrationForTask(calibrationRef,target));
             assertNotNull(resolved);assertEquals(calibration,resolved.artifact());
             assertEquals("calibration-group",resolved.ownerGroupId());assertEquals("annotator",resolved.owner());
+            calibrationTx.execute(status->{
+                evaluations.calibrationForTask(calibrationRef,target);
+                // A separate physical SQL session must not change the source while this transaction holds its row lock.
+                try(var contender=context.getBean(DataSource.class).getConnection()) {
+                    try(var settings=contender.createStatement()){settings.execute("SET SESSION innodb_lock_wait_timeout=1");}
+                    try(var update=contender.prepareStatement("UPDATE iqc_inspection_task SET owner_group_id='concurrent-calibration' WHERE id=?")) {
+                        update.setString(1,first.getId());
+                        var blocked=assertThrows(java.sql.SQLException.class,update::executeUpdate);
+                        assertEquals(1205,blocked.getErrorCode());
+                    }
+                } catch(java.sql.SQLException failure) {throw new IllegalStateException(failure);}
+                assertEquals("calibration-group",db.queryForObject("SELECT owner_group_id FROM iqc_inspection_task WHERE id=?",String.class,first.getId()));
+                return null;
+            });
+            assertEquals(1,db.update("UPDATE iqc_inspection_task SET owner_group_id='after-calibration-lock' WHERE id=?",first.getId()));
+            assertEquals("after-calibration-lock",calibrationTx.execute(status->evaluations.calibrationForTask(calibrationRef,target)).ownerGroupId());
             var badRef=new EmpiricalConfidenceCalibration.Reference(first.getId(),first.getCurrentExecutionId(),"model","0".repeat(64));
             assertThrows(RuntimeException.class,()->calibrationTx.execute(status->evaluations.calibrationForTask(badRef,target)));
             assertEquals(calibration.contentHash(),evaluations.report(first.getId(),first.getCurrentExecutionId()).nodeConfidenceMetrics().nodes().getFirst().calibrationCandidate().contentHash());
