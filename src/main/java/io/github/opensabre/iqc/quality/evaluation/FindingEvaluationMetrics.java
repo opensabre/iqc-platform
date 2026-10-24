@@ -63,6 +63,9 @@ public final class FindingEvaluationMetrics {
             BigDecimal difference=confidence.subtract(match?BigDecimal.ONE:BigDecimal.ZERO);
             squaredError=squaredError.add(difference.multiply(difference));
         }
+        EmpiricalConfidenceCalibration.Artifact fit(EmpiricalConfidenceCalibration.Source source){
+            return scored==0?null:EmpiricalConfidenceCalibration.fit(source,eligible,scored,counts,correct);
+        }
         ConfidenceDiagnostics summary(String scope){
             if(scored>eligible)throw new IllegalArgumentException("confidence observations exceed eligible gold");
             var bins=new java.util.ArrayList<ConfidenceBin>();BigDecimal calibrationError=BigDecimal.ZERO;

@@ -9,18 +9,25 @@ import java.util.TreeMap;
 /** Diagnostics of raw model-reported confidence, never a claim that a model has been calibrated. */
 public final class NodeConfidenceMetrics {
     public record Node(String nodeId,String engineType,String engineVersion,String findingCode,
-                       FindingEvaluationMetrics.ConfidenceDiagnostics diagnostics) { }
+                       FindingEvaluationMetrics.ConfidenceDiagnostics diagnostics,
+                       @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                       EmpiricalConfidenceCalibration.Artifact calibrationCandidate) {
+        public Node(String nodeId,String engineType,String engineVersion,String findingCode,FindingEvaluationMetrics.ConfidenceDiagnostics diagnostics){
+            this(nodeId,engineType,engineVersion,findingCode,diagnostics,null);
+        }
+    }
     public record Summary(String schemaVersion,List<Node> nodes){
         public Summary {nodes=List.copyOf(nodes);}
     }
-    private record Source(String engineType,String version,String code) { }
+    private record Source(String engineType,String version,String code,String nodeHash) { }
     private final Map<String,Source> sources=new TreeMap<>();
     private final Map<String,FindingEvaluationMetrics.ConfidenceCounter> counters=new TreeMap<>();
-    public NodeConfidenceMetrics(PipelineRelease release){
+    public NodeConfidenceMetrics(PipelineRelease release){this(release,new com.fasterxml.jackson.databind.ObjectMapper());}
+    public NodeConfidenceMetrics(PipelineRelease release,com.fasterxml.jackson.databind.ObjectMapper json){
         for(var node:release.pipeline().nodes()){
             if(!List.of("LLM","SMALL_MODEL").contains(node.type()))continue;
             String code=node.config().path("findingDefinition").path("code").asText();
-            if(code.isBlank()||sources.putIfAbsent(node.nodeId(),new Source(node.type(),node.version(),code))!=null)
+            if(code.isBlank()||sources.putIfAbsent(node.nodeId(),new Source(node.type(),node.version(),code,io.github.opensabre.iqc.selector.SelectorAssetService.hash(json.valueToTree(node).toString())))!=null)
                 throw new IllegalArgumentException("model node confidence requires unique declared node and finding code");
             counters.put(node.nodeId(),new FindingEvaluationMetrics.ConfidenceCounter());
         }
@@ -59,10 +66,13 @@ public final class NodeConfidenceMetrics {
             if(confidence!=null)counter.add(confidence,FindingEvaluationMetrics.equal(expected.value(),actual.value()));
         }
     }
-    public Summary summary(){
+    public Summary summary(){return summary(null,null,null,null,null);}
+    public Summary summary(String taskId,String executionId,String datasetHash,String pipelineHash,String evidenceHash){
         return new Summary("iqc-node-confidence-diagnostics-v1",sources.entrySet().stream().map(entry->{
             var source=entry.getValue();return new Node(entry.getKey(),source.engineType(),source.version(),source.code(),
-                    counters.get(entry.getKey()).summary("RAW_NODE_VALUE_CORRECTNESS_ON_KNOWN_GOLD"));
+                    counters.get(entry.getKey()).summary("RAW_NODE_VALUE_CORRECTNESS_ON_KNOWN_GOLD"),taskId==null||counters.get(entry.getKey()).scored==0?null:
+                    counters.get(entry.getKey()).fit(new EmpiricalConfidenceCalibration.Source(taskId,executionId,datasetHash,
+                            pipelineHash,evidenceHash,entry.getKey(),source.nodeHash(),source.code())));
         }).toList());
     }
 }
