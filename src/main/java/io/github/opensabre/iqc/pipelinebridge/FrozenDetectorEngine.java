@@ -75,7 +75,7 @@ public final class FrozenDetectorEngine implements EngineAdapter {
                 phase,scope,context.node().nodeId(),context.attempt());
         Map<String,JsonNode> metrics=new LinkedHashMap<>();
         if("LLM".equals(type)){
-            if(outcome.getDetectorMetricsJson()!=null)metrics.put("llmStructuredOutput",json.readTree(outcome.getDetectorMetricsJson()));
+            if(outcome.getDetectorMetricsJson()!=null)metrics.put("llmStructuredOutput",io.github.opensabre.iqc.result.llm.LlmQualityProvider.readStructuredJson(json,outcome.getDetectorMetricsJson()));
             try{
                 var raw=outcome.getFindingJson()==null?null:json.readTree(outcome.getFindingJson());
                 metrics.put("llmCitationGrounding",json.valueToTree(LlmCitationGrounding.inspect(raw,inputs)));

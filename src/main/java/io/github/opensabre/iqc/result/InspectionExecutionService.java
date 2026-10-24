@@ -1292,7 +1292,7 @@ public class InspectionExecutionService {
         if(calls>0){var metrics=(ObjectNode)readSnapshot(structuredOutputMetrics(calls,validOutputs));
             metrics.set("invocationFingerprints",fingerprints);
             if(results.size()==1&&calls==1&&validOutputs==1&&List.of("HIT","NOT_HIT").contains(status)){
-                var single=readSnapshot(results.getFirst().getDetectorMetricsJson()).get("reportedConfidence");
+                var single=readDetectorMetrics(results.getFirst().getDetectorMetricsJson()).get("reportedConfidence");
                 if(single!=null&&single.isNumber())metrics.set("reportedConfidence",single);
             }
             aggregate.setDetectorMetricsJson(metrics.toString());}
@@ -1506,6 +1506,10 @@ public class InspectionExecutionService {
             }
             return compiled;
         }
+    }
+    private JsonNode readDetectorMetrics(String body){
+        try{return io.github.opensabre.iqc.result.llm.LlmQualityProvider.readStructuredJson(objectMapper,body);}
+        catch(com.fasterxml.jackson.core.JsonProcessingException invalid){throw new IllegalStateException("Invalid detector metrics",invalid);}
     }
     private String structuredOutputMetrics(long calls,long valid,io.github.opensabre.iqc.result.llm.SnapshotChatModelRouter.InvocationFingerprint fingerprint){
         var metrics=(ObjectNode)readSnapshot(structuredOutputMetrics(calls,valid));
