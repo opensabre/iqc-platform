@@ -214,3 +214,11 @@ ExecutionContext/router受控；未覆盖HTTP成功请求、真实远端、网�
 成功响应解析通过，不走旧限流入口。网关返回受控响应且不执行网络supplier，故此项证明
 成功请求构造及上下文传递，不证明HTTP传输/远端服务/实际预算。
 前两轮分别因测试访问器名称错误和漏填必填模型配置失败，修正测试后通过，未改生产。
+
+### B UTF-8参考上下文大小验证
+
+原46797 compiler:testCompile+surerfire终态0，
+/tmp/iqc-b-knowledge-context-size.log.exit=0；Snapshot6+ProviderBoundary4十项通过。
+同为6份各16000字符文档，ASCII语料通过原发布/任务信封校验并生成低于256KiB上下文；
+中文语料同样通过原证据校验，但UTF-8参考上下文超过256KiB，material拒绝并返回
+KNOWLEDGE_CONTEXT_TOO_LARGE。此项证明字节限制；非token窗口、网关预算或真实远端证据。

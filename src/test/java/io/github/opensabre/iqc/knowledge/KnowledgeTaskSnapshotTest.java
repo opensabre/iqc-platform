@@ -20,7 +20,9 @@ class KnowledgeTaskSnapshotTest {
     private final IqcDataScope scope=mock(IqcDataScope.class);
     private final KnowledgeTaskSnapshotService service=new KnowledgeTaskSnapshotService(knowledge,access,scope,json);
     private InspectionTask frozen(String sourceGroup) throws Exception {
-        var corpus=new KnowledgeCorpus(KnowledgeCorpus.SCHEMA,List.of(new KnowledgeCorpus.Document("doc","Title","private reference","source")));
+        return frozen(sourceGroup,new KnowledgeCorpus(KnowledgeCorpus.SCHEMA,List.of(new KnowledgeCorpus.Document("doc","Title","private reference","source"))));
+    }
+    private InspectionTask frozen(String sourceGroup,KnowledgeCorpus corpus) throws Exception {
         var published=new KnowledgeBaseService.Published("iqc-knowledge-release-v1","kb",2,3,"Knowledge",corpus,"source-owner","group","publisher");
         String hash=SelectorAssetService.hash(json.writeValueAsString(published));
         var prepared=new KnowledgeBaseService.Prepared("version",published,hash,sourceGroup);
@@ -65,6 +67,24 @@ class KnowledgeTaskSnapshotTest {
         assertThatThrownBy(()->capability.material(changed,"task","owner","group")).hasMessageContaining("不属于原任务");
         assertThatThrownBy(()->io.github.opensabre.iqc.result.llm.LlmQualityProvider.knowledgeMaterial(config,null))
                 .hasMessageContaining("KNOWLEDGE_CONTEXT_NOT_FROZEN");
+    }
+    @Test void contextLimitCountsUtf8BytesAndRejectsOversizedReferenceMaterial() throws Exception {
+        for(String character:List.of("a","中")){
+            var documents=new java.util.ArrayList<KnowledgeCorpus.Document>();
+            for(int i=0;i<6;i++)documents.add(new KnowledgeCorpus.Document("doc"+i,"Title",character.repeat(16000),"source"));
+            var task=frozen("group",new KnowledgeCorpus(KnowledgeCorpus.SCHEMA,documents));
+            var capability=KnowledgeTaskSnapshotService.executionContext(task,json);
+            var config=json.readTree(json.readTree(task.getAgentSnapshotJson()).path("configJson").asText());
+            if(character.equals("a")){
+                String material=capability.material(config,"task","owner","group");
+                assertThat(material.getBytes(java.nio.charset.StandardCharsets.UTF_8).length).isLessThan(256*1024);
+                assertThat(material).contains("doc0","doc5");
+            }else{
+                assertThatThrownBy(()->capability.material(config,"task","owner","group"))
+                        .isInstanceOf(io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException.class)
+                        .hasMessageContaining("KNOWLEDGE_CONTEXT_TOO_LARGE");
+            }
+        }
     }
     @Test void legacyModelContextNeedsNoKnowledgeCapability() throws Exception {
         var task=new InspectionTask();task.setRuleSnapshotJson("{}");
