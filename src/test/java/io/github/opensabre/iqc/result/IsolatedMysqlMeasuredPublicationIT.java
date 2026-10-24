@@ -509,6 +509,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         db.update("INSERT INTO iqc_quality_agent(id,name,code,status,config_json) VALUES(?,?,?,'PUBLISHED',?)",taskAgent,taskAgent,taskAgent,json.writeValueAsString(config));
         db.update("INSERT INTO iqc_quality_rule(id,name,code,rule_type,status) VALUES(?,?,?,'LLM','PUBLISHED')",taskRule,taskRule,taskRule);
         db.update("INSERT INTO iqc_conversation(id,source_file_name,message_count,status,created_by,owner_group_id,source_fingerprint) VALUES (?,'processed knowledge conversation',1,'READY','annotator','group',?)",taskConversation,taskKey);
+        db.update("INSERT INTO iqc_conversation_message(id,conversation_id,sequence_no,speaker_role,content,relative_time,raw_line,line_number) VALUES (?,?,1,'agent','processed knowledge conversation text','00:00:00','processed knowledge conversation text',1)","km"+taskKey,taskConversation);
         var knowledgeProvider=mock(org.springframework.beans.factory.ObjectProvider.class);
         when(knowledgeProvider.getObject()).thenReturn(freezer);
         var taskCreator=new InspectionTaskService(taskMapper,context.getBean(SqlSessionTemplate.class).getMapper(ConversationMapper.class),
@@ -551,6 +552,22 @@ class IsolatedMysqlMeasuredPublicationIT {
         int beforeRejected=db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE agent_id=?",Integer.class,taskAgent);
         assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->tx.execute(status->taskCreator.createBatch("Rejected disabled knowledge",List.of(taskConversation),taskAgent,null,List.of(taskRule),1,"AGENT_LLM")));
         assertEquals(beforeRejected,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE agent_id=?",Integer.class,taskAgent));
+        var workerModel=context.getBean(LlmQualityProvider.class);
+        var observedContext=new java.util.concurrent.atomic.AtomicReference<ModelCallContext>();
+        when(workerModel.evaluate(anyString(),any(),any(),any(),anyString(),any())).thenAnswer(invocation->{
+            ModelCallContext call=invocation.getArgument(5);observedContext.set(call);
+            assertEquals(serviceCreated.getId(),call.taskId());assertNotNull(call.knowledgeContext());
+            var agentSnapshot=(com.fasterxml.jackson.databind.JsonNode)invocation.getArgument(2);
+            var workerConfig=agentSnapshot.path("configJson");if(workerConfig.isTextual())workerConfig=json.readTree(workerConfig.asText());
+            String material=LlmQualityProvider.knowledgeMaterial(workerConfig,call);
+            assertTrue(material.contains("frozen reference text"));assertFalse(material.contains("revised reference text"));
+            return new LlmQualityProvider.LlmEvaluation(true,false,"controlled worker", "{\"hit\":false,\"reason\":\"controlled worker\"}");
+        });
+        try {
+            var completed=run(serviceCreated);
+            assertNotNull(observedContext.get());assertEquals(completed.getCurrentExecutionId(),observedContext.get().executionId());
+            verify(workerModel,times(1)).evaluate(anyString(),any(),any(),any(),anyString(),any());
+        } finally {reset(workerModel);}
         var sql=context.getBean(SqlSessionTemplate.class);
         var actualScope=new IqcDataScope(null);
         var scoped=new io.github.opensabre.iqc.knowledge.KnowledgeBaseService(
@@ -699,7 +716,7 @@ class IsolatedMysqlMeasuredPublicationIT {
             // Reuse the production framework filler; this test owns only the supplied user context.
             com.baomidou.mybatisplus.core.toolkit.GlobalConfigUtils.getGlobalConfig(f.getConfiguration())
                     .setMetaObjectHandler(new io.github.opensabre.persistence.handler.PoMetaObjectHandler());
-            for(var type:List.of(io.github.opensabre.iqc.knowledge.dao.KnowledgeBaseMapper.class,io.github.opensabre.iqc.knowledge.dao.KnowledgeBaseVersionMapper.class,io.github.opensabre.iqc.skill.dao.IqcSkillMapper.class,io.github.opensabre.iqc.skill.dao.IqcSkillVersionMapper.class,io.github.opensabre.iqc.modelprofile.dao.IqcModelProfileMapper.class,io.github.opensabre.iqc.mcp.dao.IqcMcpServerMapper.class,io.github.opensabre.iqc.label.dao.LabelCategoryMapper.class,io.github.opensabre.iqc.label.dao.LabelGroupMapper.class,io.github.opensabre.iqc.label.dao.InsightLabelMapper.class,io.github.opensabre.iqc.label.dao.LabelRuleBindingMapper.class,io.github.opensabre.iqc.label.dao.LabelValueDefinitionMapper.class,io.github.opensabre.iqc.label.dao.LabelCollectionMapper.class,io.github.opensabre.iqc.label.dao.LabelCollectionMemberMapper.class,QualityRuleMapper.class,QualityRuleVersionMapper.class,QualityAgentMapper.class,QualityAgentVersionMapper.class,ConversationMapper.class,ConversationMessageMapper.class,FindingCatalogMapper.class,FindingCatalogVersionMapper.class,
+            for(var type:List.of(io.github.opensabre.iqc.label.dao.InspectionLabelResultMapper.class,io.github.opensabre.iqc.knowledge.dao.KnowledgeBaseMapper.class,io.github.opensabre.iqc.knowledge.dao.KnowledgeBaseVersionMapper.class,io.github.opensabre.iqc.skill.dao.IqcSkillMapper.class,io.github.opensabre.iqc.skill.dao.IqcSkillVersionMapper.class,io.github.opensabre.iqc.modelprofile.dao.IqcModelProfileMapper.class,io.github.opensabre.iqc.mcp.dao.IqcMcpServerMapper.class,io.github.opensabre.iqc.label.dao.LabelCategoryMapper.class,io.github.opensabre.iqc.label.dao.LabelGroupMapper.class,io.github.opensabre.iqc.label.dao.InsightLabelMapper.class,io.github.opensabre.iqc.label.dao.LabelRuleBindingMapper.class,io.github.opensabre.iqc.label.dao.LabelValueDefinitionMapper.class,io.github.opensabre.iqc.label.dao.LabelCollectionMapper.class,io.github.opensabre.iqc.label.dao.LabelCollectionMemberMapper.class,QualityRuleMapper.class,QualityRuleVersionMapper.class,QualityAgentMapper.class,QualityAgentVersionMapper.class,ConversationMapper.class,ConversationMessageMapper.class,FindingCatalogMapper.class,FindingCatalogVersionMapper.class,
                     io.github.opensabre.iqc.schedule.dao.EventSubscriptionMapper.class,io.github.opensabre.iqc.schedule.dao.EventSubscriptionRevisionMapper.class,
                     PipelineAssetMapper.class,PipelineAssetVersionMapper.class,QualitySampleMapper.class,QualitySampleVersionMapper.class,
                     EvaluationDatasetMapper.class,EvaluationDatasetVersionMapper.class,EvaluationSampleResultMapper.class,
@@ -749,7 +766,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         @Bean PipelineConversationEvaluator evaluator(PipelineRuntime runtime,ObjectMapper j,SqlSessionTemplate s){return new PipelineConversationEvaluator(runtime,j,s.getMapper(InspectionTaskMapper.class));}
         @Bean PipelineEvaluationService evaluations(EvaluationDatasetService datasets,PipelineAssetService pipelines,InspectionTaskService tasks,SqlSessionTemplate s,PipelineConversationEvaluator evaluator,ObjectMapper j,IqcDataScope scope){return new PipelineEvaluationService(datasets,pipelines,tasks,s.getMapper(InspectionTaskMapper.class),s.getMapper(TaskExecutionMapper.class),s.getMapper(TaskItemMapper.class),s.getMapper(EvaluationSampleResultMapper.class),evaluator,j,scope);}
         @Bean PipelinePublicationGateService gates(PipelineEvaluationService evaluations,ObjectMapper j,SqlSessionTemplate s){return new PipelinePublicationGateService(evaluations,j,s.getMapper(TaskExecutionMapper.class));}
-        @Bean HierarchicalResultService hierarchy(SqlSessionTemplate s,ObjectMapper j){return new HierarchicalResultService(s.getMapper(ConversationInspectionResultMapper.class),s.getMapper(RuleInspectionResultMapper.class),s.getMapper(InspectionEvidenceMapper.class),j,null,s.getMapper(InspectionTaskMapper.class),s.getMapper(InspectionResultMapper.class),s.getMapper(TaskItemMapper.class));}
+        @Bean HierarchicalResultService hierarchy(SqlSessionTemplate s,ObjectMapper j){return new HierarchicalResultService(s.getMapper(ConversationInspectionResultMapper.class),s.getMapper(RuleInspectionResultMapper.class),s.getMapper(InspectionEvidenceMapper.class),j,new io.github.opensabre.iqc.label.LabelResultService(s.getMapper(io.github.opensabre.iqc.label.dao.InspectionLabelResultMapper.class),j),s.getMapper(InspectionTaskMapper.class),s.getMapper(InspectionResultMapper.class),s.getMapper(TaskItemMapper.class));}
         @Bean io.github.opensabre.iqc.schedule.TaskTriggerService triggers(SqlSessionTemplate s,PipelineAssetService pipelines,
                 IqcDataScope scope,InspectionTaskService tasks,InspectionExecutionService runner,ObjectMapper j,
                 org.springframework.transaction.PlatformTransactionManager transactionManager){

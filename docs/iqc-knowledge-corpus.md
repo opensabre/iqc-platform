@@ -260,3 +260,14 @@ freezer并落任务表；重读校验原版本。来源停用后新建拒绝，�
 统计任务数量不增；既有持久化任务的原版本证据仍可独立验证。finally恢复本地授权mock，
 实例关闭/socket消失。此项证明受控授权失败到真实SQL保存边界的行为，非真实PDP、
 worker模型执行或线上撤权验收。
+
+### B 真实worker传递原知识上下文
+
+原5798专用34307 test-compile+surerfire终态0，
+/tmp/iqc-b-knowledge-worker-final.log.exit=0，MeasuredPublication四项集成测试通过。
+TaskService创建落库后，来源修订/停用，沿真实queue/executePersisted运行至SUCCEEDED；
+受控模型恰好调用一次，收到实际task/execution上下文及原冻结参考正文，不含新修订正文。
+原70059因测试Config缺LabelResultService导致物化FAILED，补真实服务/Mapper后通过，
+未弱化成功要求、未修改生产。专用实例关闭/socket消失。
+该证据补齐worker知识上下文路径；模型及敏感授权受控，仍非真实PDP/远端模型或完整
+Spring应用装配验收。
