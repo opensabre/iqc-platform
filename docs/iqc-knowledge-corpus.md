@@ -1,12 +1,12 @@
-# Knowledge Base 语料版本基础（KB1）
+# Knowledge Base 语料版本与管理（KB1/KB2）
 
-本批为内部领域服务和DDL；没有尚未配套授权/敏感投影的HTTP接口，不表示知识库整体功能已完成。后续管理/引用与运行上下文分KB2/KB3推进，见ADR 20261024-knowledge-corpus-versions。
+KB1为领域服务和DDL，KB2已增加配套授权/敏感投影的管理HTTP与页面入口（见后文）。Agent精确引用、任务授权正文冻结与运行上下文继续KB2引用/KB3；不表示知识库整体功能或实际运行验收已完成，见ADR 20261024-knowledge-corpus-versions。
 
 ## 语料协议
 
 `iqc-knowledge-corpus-v1`包含documents，每份文档为documentId/title/text/sourceReference四个字符串。文档ID须为1–64位字母数字或:_-且唯一；标题1–200字，正文1–16000字，来源引用1–512字符且无控制字符/首尾空白。集合1–100份文档，正文总长度最多200000个Java字符，序列化正文最多2MiB。文档按ID排序，输入列表不被修改；字符串数字不被自动当文档正文，未知字段/重复JSON字段/尾随JSON/空正文及不完整Unicode代理字符拒绝。来源引用只作证据定位，不下载内容或自动视为可信会话证据。
 
-语料示例（仅协议样例，当前没有HTTP入口）：
+语料示例（管理表单提交时生成该结构）：
 
 ```json
 {"schemaVersion":"iqc-knowledge-corpus-v1","documents":[{"documentId":"service-hours","title":"服务时段示例","text":"示例服务时段为工作日09:00至18:00。","sourceReference":"manual:service-v1#hours"}]}
@@ -85,3 +85,14 @@ Service.publish，使用独立事务。限时完成后两侧版本ID相同，实
 原55185 test-compile+surerfire终态0，集成4项零失败、错误、跳过，46.748秒；
 日志`/tmp/iqc-b-knowledge-group-fixed.log`，专用34307关闭/socket消失。
 此为受控组织响应的领域SQL验证，真实组织网络/PDP与并发组变更仍待联调。
+## KB2 管理入口增量（2026-10-24）
+
+新增/api/iqc/knowledge-bases的目录GET/创建POST、/{id}详情GET/修订PUT、availability POST、versions元数据GET、publish POST、versions/{versionNo}精确GET及restore POST。草稿请求为code/name/corpusJson或expectedRevision/name/corpusJson，corpusJson由原严格语料解析器验证；修订须正整数JSON数字，启停须JSON布尔值，拒绝字符串/小数或隐式取整。恢复为新草稿，不移动当前发布指针。每个URL/方法使用独立iqc:knowledge:*资源，并在查询前复用SensitiveReadAccessService检查当前资源和组织范围，所有回执private,no-store，审计不记录正文。
+
+原ResultReadProjection新增知识库DTO投影，source对象不被修改：目录、历史列表和创建/修订/发布/启停/恢复回执一律不返回正文；详情与精确版本只有三项既有FULL/PII/PROMPT敏感阅读齐备才显示正文。版本元数据列表查询直接排除snapshotJson，不批量加载/解析100份大型语料；其contentHash为存储的版本摘要，实际正文/来源校验在精确版本读取中完成。缺少正文时canonicalPayloadVisible=false，不能把回执当作空白可编辑配置。
+
+权限迁移V20261024_01在组织服务注册九项资源和知识库菜单：IQC_ADMIN/IQC_QUALITY_MANAGER具有维护资源，IQC_INSPECTOR/IQC_VIEWER仅目录/详情/历史/精确版本阅读；不会额外授予敏感阅读或全局ADMIN。沿用现有产品菜单父级与资源代码upsert，不重写既有URL/方法/身份。脚本仅交付，未执行共享SQL。
+
+前端/knowledge-bases复用原权限与路由、表格/抽屉/表单，逐文档编辑ID/标题/正文/来源引用并检查边界。草稿修改未保存时不能切其他资产或发布/恢复覆盖；命令回执后清正文并独立重读，失败保留对象身份并要求重新读取。正文/目录/版本/维护权限变化清空状态和请求代次，关闭/切换资产/版本的旧响应不恢复文档。敏感受限详情为元数据视图，不能用空正文覆盖。
+
+本批仅管理与阅读，不声明Agent/Pipeline精确引用、任务授权正文冻结或LLM上下文已完成；这些继续KB2引用/KB3。编译构建终态见协作记录，真实HTTP/PDP/四角色/SQL脚本/浏览器及源对象不变专项待独立验证。

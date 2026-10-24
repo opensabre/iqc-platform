@@ -106,6 +106,19 @@ public class KnowledgeBaseService {
         for(var value:values){var source=readPublishedEvidence(value,json);if(!id.equals(source.knowledgeBaseId())||!Objects.equals(row.getCreatedBy(),source.owner()))throw IqcException.invalidState("知识库历史来源不一致");}
         return values;
     }
+    /** Bulk catalog reads declared version identities only; exact reads verify the original body before revealing it. */
+    @Transactional(readOnly=true,isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public List<KnowledgeBaseVersion> historyMetadata(String id){
+        require(id,false);
+        var query=Wrappers.<KnowledgeBaseVersion>lambdaQuery().eq(KnowledgeBaseVersion::getKnowledgeBaseId,id)
+                .orderByDesc(KnowledgeBaseVersion::getVersionNo).last("LIMIT 100");
+        query.select(KnowledgeBaseVersion.class,field->!"snapshotJson".equals(field.getProperty()));
+        var values=versions.selectList(query);
+        for(var value:values)if(!id.equals(value.getKnowledgeBaseId())||value.getId()==null||value.getVersionNo()==null||value.getVersionNo()<1
+                ||value.getSourceDraftRevision()==null||value.getSourceDraftRevision()<1||value.getContentHash()==null
+                ||!value.getContentHash().matches("[a-f0-9]{64}"))throw IqcException.invalidState("知识库历史元数据无效");
+        return values;
+    }
     @Transactional(readOnly=true,isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public Prepared viewVersion(String id,int number){return prepared(require(id,false),number);}
     @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)

@@ -141,3 +141,7 @@ FrozenDetectorEngine增加过滤前的llmCitationGrounding计数，复用原Lega
 ### 2026-10-24 Knowledge语料版本基础（KB1）
 
 已建立独立参考语料协议与知识库草稿/不可变版本领域服务，复用原MySQL/BasePo/Mapper/IqcDataScope/摘要/CAS发布，新增V1.1.75唯一领域持久化模型，见iqc-knowledge-corpus.md及事前复用ADR。当前只有内部服务，未新增未配套授权的HTTP接口；KB2管理/敏感投影/资源注册及精确引用、KB3任务授权正文冻结与有界LLM上下文仍待实施。共享Agent目录只存引用/Hash，不能嵌入私有语料绕过组织范围。根任务/完整适用I1–I7继续，编译不代替真实SQL/权限/worker验收。
+
+### 2026-10-24 Knowledge管理入口
+
+KB2管理端点与原ResultReadProjection敏感投影、组织资源脚本/角色矩阵、知识库文档表单页面及菜单已编码。元数据列表/回执不返回正文，独立详情/版本当前授权后按既有三敏感grant投影，历史元数据直接排除大正文；写后独立重读和撤权/旧响应清理。迁移脚本未执行，编译构建终态见协作记录；真实HTTP/SQL/角色/browser专项待，Agent/Pipeline引用和任务冻结/运行上下文及完整I1–I7继续。

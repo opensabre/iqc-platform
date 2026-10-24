@@ -821,6 +821,29 @@ public final class ResultReadProjection {
         metadata.put("canReadPii",access.pii());metadata.put("canReadPrompt",access.prompt());
         metadata.put("withheldFields",canonical?List.of():withheld);return metadata;
     }
+    public record KnowledgeView(String id,String code,String name,Integer draftRevision,Integer activePublishedVersion,
+            String status,String ownerGroupId,String draftConfigJson,Map<String,Object> privacy) { }
+    public record KnowledgeVersionView(String id,String knowledgeBaseId,int versionNo,int sourceDraftRevision,String contentHash,
+            String snapshotJson,Map<String,Object> privacy) { }
+    public KnowledgeView knowledge(io.github.opensabre.iqc.knowledge.model.KnowledgeBase source,SensitiveReadAccessService.Access access,boolean detail){
+        Objects.requireNonNull(access);Objects.requireNonNull(source);
+        boolean reveal=detail&&access.fullConversation()&&access.pii()&&access.prompt()&&source.getDraftConfigJson()!=null;
+        return new KnowledgeView(source.getId(),source.getCode(),text(source.getName(),access.fullConversation()&&access.pii()),source.getDraftRevision(),
+                source.getActivePublishedVersion(),source.getStatus(),source.getOwnerGroupId(),reveal?source.getDraftConfigJson():null,
+                configurationPrivacy("iqc-knowledge-read-v1",access,reveal,List.of("draftConfigJson")));
+    }
+    public KnowledgeVersionView knowledgeHistory(io.github.opensabre.iqc.knowledge.model.KnowledgeBaseVersion source,SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(access);Objects.requireNonNull(source);
+        return new KnowledgeVersionView(source.getId(),source.getKnowledgeBaseId(),source.getVersionNo(),source.getSourceDraftRevision(),source.getContentHash(),null,
+                configurationPrivacy("iqc-knowledge-read-v1",access,false,List.of("snapshotJson")));
+    }
+    public KnowledgeVersionView knowledgeVersion(io.github.opensabre.iqc.knowledge.KnowledgeBaseService.Prepared source,SensitiveReadAccessService.Access access){
+        Objects.requireNonNull(access);Objects.requireNonNull(source);boolean reveal=access.fullConversation()&&access.pii()&&access.prompt();
+        String body=null;if(reveal)try{body=json.writeValueAsString(source.snapshot());}
+        catch(com.fasterxml.jackson.core.JsonProcessingException invalid){throw io.github.opensabre.iqc.governance.IqcException.invalidState("知识库版本展示不可用");}
+        var snapshot=source.snapshot();return new KnowledgeVersionView(source.versionId(),snapshot.knowledgeBaseId(),snapshot.versionNo(),snapshot.sourceDraftRevision(),source.contentHash(),body,
+                configurationPrivacy("iqc-knowledge-read-v1",access,reveal,List.of("snapshotJson")));
+    }
     public io.github.opensabre.iqc.pipelineasset.model.PipelineAsset pipelineAsset(
             io.github.opensabre.iqc.pipelineasset.model.PipelineAsset source,SensitiveReadAccessService.Access access,boolean detailRead){
         Objects.requireNonNull(access);if(source==null)return null;
