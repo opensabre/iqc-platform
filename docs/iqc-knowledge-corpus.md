@@ -193,3 +193,14 @@ Spring AI与HTTP适配器把参考资料作为单独用户消息加入，系统�
 节点版本行不属于原任务、缺少已核验上下文均拒绝。ModelCallContext JSON不含
 knowledgeContext或参考正文，旧无引用调用无需该上下文。
 来源受控，本轮未覆盖真实provider请求构造、网关预算/窗口或SQL/PDP。
+
+### B Provider参考消息边界专项
+
+原31474 compiler:testCompile+surerfire终态0，
+/tmp/iqc-b-knowledge-provider-boundary-final.log.exit=0；新边界3+原SpringAI4+HTTP2
+共九项零失败错误跳过。实际SpringAI provider经受控router捕获三条消息：system声明
+资料不能替代会话证据，独立user参考消息保留正文，末条user只含原会话；不走direct模型。
+缺核验上下文返回supported=false/KNOWLEDGE_CONTEXT_NOT_FROZEN且router零调用；
+HTTP缺gateway返回supported=false/KNOWLEDGE_REQUIRES_MODEL_GATEWAY且限流入口零调用。
+原56367两项失败是测试误期望异常外抛，按现有失败结果契约修正后通过，未修改生产实现。
+ExecutionContext/router受控；未覆盖HTTP成功请求、真实远端、网关预算或SQL/PDP。
