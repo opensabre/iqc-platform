@@ -184,3 +184,90 @@ verifiedSources 从原任务 ruleSnapshotJson 读取信封；严格拒绝重复J
 Spring AI与HTTP适配器把参考资料作为单独用户消息加入，系统提示明确其为数据、不得执行资料指令或把资料当成会话证据；原会话引用及Finding校验保持。未提供类型化上下文、当前调用任务/负责人/组不匹配、引用不属于原任务、或有引用但缺少Gateway路径时，在模型I/O之前拒绝。会话重复运行复制ModelCallContext时保留同一已核验上下文。
 
 这是静态有界语料上下文，不包含向量检索或自动采样。当前知识库任务仍会随调用上下文重新核验信封，容量优化与真实worker/供应商/网关预算验收待完成；编译不能替代这些证据。
+
+### B 模型参考上下文专项
+
+固定4b17567合入95bf7bb。原12020 test-compile+surerfire终态0，
+/tmp/iqc-b-knowledge-model-context.log.exit=0；Snapshot5+Batch3八项零失败错误跳过。
+已核验任务信封生成的上下文保留原参考正文及版本来源，任务ID/owner/group不匹配、
+节点版本行不属于原任务、缺少已核验上下文均拒绝。ModelCallContext JSON不含
+knowledgeContext或参考正文，旧无引用调用无需该上下文。
+来源受控，本轮未覆盖真实provider请求构造、网关预算/窗口或SQL/PDP。
+
+### B Provider参考消息边界专项
+
+原31474 compiler:testCompile+surerfire终态0，
+/tmp/iqc-b-knowledge-provider-boundary-final.log.exit=0；新边界3+原SpringAI4+HTTP2
+共九项零失败错误跳过。实际SpringAI provider经受控router捕获三条消息：system声明
+资料不能替代会话证据，独立user参考消息保留正文，末条user只含原会话；不走direct模型。
+缺核验上下文返回supported=false/KNOWLEDGE_CONTEXT_NOT_FROZEN且router零调用；
+HTTP缺gateway返回supported=false/KNOWLEDGE_REQUIRES_MODEL_GATEWAY且限流入口零调用。
+原56367两项失败是测试误期望异常外抛，按现有失败结果契约修正后通过，未修改生产实现。
+ExecutionContext/router受控；未覆盖HTTP成功请求、真实远端、网关预算或SQL/PDP。
+
+### B HTTP成功请求构造补验
+
+原1615 compiler:testCompile+surerfire终态0，
+/tmp/iqc-b-knowledge-http-request-configured.log.exit=0，ProviderBoundary四项通过。
+实际HTTP provider的requestData回调捕获三消息：system声明证据边界，第二条user仅为
+参考正文，第三条user含原会话且无参考正文；网关接收同一ModelCallContext，调用一次，
+成功响应解析通过，不走旧限流入口。网关返回受控响应且不执行网络supplier，故此项证明
+成功请求构造及上下文传递，不证明HTTP传输/远端服务/实际预算。
+前两轮分别因测试访问器名称错误和漏填必填模型配置失败，修正测试后通过，未改生产。
+
+### B UTF-8参考上下文大小验证
+
+原46797 compiler:testCompile+surerfire终态0，
+/tmp/iqc-b-knowledge-context-size.log.exit=0；Snapshot6+ProviderBoundary4十项通过。
+同为6份各16000字符文档，ASCII语料通过原发布/任务信封校验并生成低于256KiB上下文；
+中文语料同样通过原证据校验，但UTF-8参考上下文超过256KiB，material拒绝并返回
+KNOWLEDGE_CONTEXT_TOO_LARGE。此项证明字节限制；非token窗口、网关预算或真实远端证据。
+
+### B 真实SQL来源的任务冻结补验
+
+原70165专用34307 test-compile+surerfire终态0，
+/tmp/iqc-b-knowledge-task-source-sql.log.exit=0，原MeasuredPublication四项集成测试通过；
+专用实例关闭/socket消失。实际Spring代理KnowledgeService批量接口验证MANDATORY，
+原事务真实Mapper读取精确版本并冻结任务信封，核验当前敏感授权入口。
+后续来源修订/发布/恢复/停用，原信封保持不变，历史校验和模型参考保留原版本正文/Hash，
+新批量引用已停用来源拒绝。任务信封对象仍在夹具内，未写任务表；敏感授权受控，
+不据此宣称TaskService保存/worker全链、真实PDP或远端模型通过。
+
+### B 任务信封SQL持久化补验
+
+原53070专用34307 test-compile+surerfire终态0，
+/tmp/iqc-b-knowledge-task-persistence.log.exit=0，原MeasuredPublication四项集成测试通过。
+沿原InspectionTaskMapper和事务写入已冻结Agent/规则信封并重读，正文及版本证据一致。
+来源修订/停用后再次从任务表读取，原信封不变，仍可校验原版本/Hash并生成历史参考。
+唯一任务ID支持重复执行；实例关闭/socket消失。此项补齐上节任务未落表缺口，
+仍未经过TaskService创建/worker知识上下文全链，敏感授权受控，非真实PDP或远端证据。
+
+### B TaskService自动冻结创建补验
+
+原93669专用34307 test-compile+surerfire终态0，
+/tmp/iqc-b-knowledge-task-service.log.exit=0，MeasuredPublication四项集成测试通过。
+真实TaskService.createBatch在原事务内读取数据库Agent/规则/处理后会话，自动调用知识库
+freezer并落任务表；重读校验原版本。来源停用后新建拒绝，任务数量不增加，原任务
+仍验证原版本。TaskService由夹具直接构造，原freezer通过受控ObjectProvider注入，
+敏感授权受控；不代表完整Spring装配/真实PDP/worker执行或远端模型验收。
+专用实例关闭/socket消失。
+
+### B 创建时撤权SQL回滚验证
+
+原30993专用34307 test-compile+surerfire终态0，
+/tmp/iqc-b-knowledge-task-revocation.log.exit=0，MeasuredPublication四项通过。
+当前knowledge:version:view受控拒绝时，真实TaskService/事务新建拒绝，数据库按Agent
+统计任务数量不增；既有持久化任务的原版本证据仍可独立验证。finally恢复本地授权mock，
+实例关闭/socket消失。此项证明受控授权失败到真实SQL保存边界的行为，非真实PDP、
+worker模型执行或线上撤权验收。
+
+### B 真实worker传递原知识上下文
+
+原5798专用34307 test-compile+surerfire终态0，
+/tmp/iqc-b-knowledge-worker-final.log.exit=0，MeasuredPublication四项集成测试通过。
+TaskService创建落库后，来源修订/停用，沿真实queue/executePersisted运行至SUCCEEDED；
+受控模型恰好调用一次，收到实际task/execution上下文及原冻结参考正文，不含新修订正文。
+原70059因测试Config缺LabelResultService导致物化FAILED，补真实服务/Mapper后通过，
+未弱化成功要求、未修改生产。专用实例关闭/socket消失。
+该证据补齐worker知识上下文路径；模型及敏感授权受控，仍非真实PDP/远端模型或完整
+Spring应用装配验收。

@@ -79,4 +79,37 @@ class PipelineReleaseHttpContractTest {
         assertThat(result.getResponse().getContentAsString()).doesNotContain("\"code\":\"000000\"");
         verifyNoInteractions(assets);
     }
+    private String calibrationBody(String references) {
+        return body("\"0.900000000000000004\"")
+                .replace("\"calibratedNodeIds\":[]", "\"confidenceCalibrationId\":\"calibration\",\"calibratedNodeIds\":[\"rule\"],\"calibrationReferences\":"+references);
+    }
+    private String reference(String hash) {
+        return "{\"taskId\":\"source-task\",\"executionId\":\"source-execution\",\"nodeId\":\"rule\",\"contentHash\":\""+hash+"\"}";
+    }
+    @Test void calibrationReferenceSurvivesDefaultMvcCodecWithoutClientCoefficients() throws Exception {
+        when(assets.create(anyString(),anyString(),any())).thenReturn(receipt());
+        mvc().perform(post("/api/iqc/pipelines").contentType("application/json")
+                .content(calibrationBody("["+reference("a".repeat(64))+"]")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value("000000"));
+        var value=org.mockito.ArgumentCaptor.forClass(PipelineRelease.class);
+        verify(assets).create(eq("pipeline"),eq("Pipeline"),value.capture());
+        assertThat(value.getValue().fusion().calibrationReferences()).containsExactly(
+                new io.github.opensabre.iqc.quality.evaluation.EmpiricalConfidenceCalibration.Reference("source-task","source-execution","rule","a".repeat(64)));
+        exact(value.getValue());
+    }
+    @Test void rejectsMalformedCalibrationReferencesBeforeCallingService() throws Exception {
+        String valid=reference("a".repeat(64));
+        for(String references:java.util.List.of("["+reference("A".repeat(64))+"]",
+                "["+valid+","+valid+"]", "["+valid.replace("}",",\"coefficient\":0.99}")+"]",
+                "["+valid.replace("\"source-task\"","123")+"]",
+                "["+valid.replace("\"source-task\"","null")+"]",
+                "["+valid.replace("}",",\"taskId\":\"source-task\"}")+"]")) {
+            var result=mvc().perform(post("/api/iqc/pipelines").contentType("application/json")
+                    .content(calibrationBody(references))).andReturn();
+            assertThat(result.getResolvedException()).as(references).isNotNull();
+            assertThat(result.getResponse().getContentAsString()).doesNotContain("\"code\":\"000000\"");
+        }
+        verifyNoInteractions(assets);
+    }
+
 }
