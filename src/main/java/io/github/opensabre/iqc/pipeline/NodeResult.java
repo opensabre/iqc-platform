@@ -6,7 +6,22 @@ import java.util.List;
 import java.util.Map;
 
 public record NodeResult(Status status, List<Finding> findings, Map<String,JsonNode> variables,
+                         @com.fasterxml.jackson.databind.annotation.JsonDeserialize(contentUsing=MetricCodec.class)
                          Map<String,JsonNode> metrics, String error) {
+    /** Only new model-confidence protocols opt into exact metrics on legacy releases. */
+    public static final class MetricCodec extends com.fasterxml.jackson.databind.JsonDeserializer<JsonNode> {
+        private static final com.fasterxml.jackson.databind.ObjectMapper JSON=new com.fasterxml.jackson.databind.ObjectMapper();
+        @Override public JsonNode deserialize(com.fasterxml.jackson.core.JsonParser parser,
+                com.fasterxml.jackson.databind.DeserializationContext context) throws java.io.IOException {
+            String key=parser.currentName();
+            if("llmStructuredOutput".equals(key)||"iqcConfidenceCalibration".equals(key))
+                return JSON.readerFor(JsonNode.class)
+                        .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                        .with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY)
+                        .without(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readValue(parser);
+            return parser.getCodec().readTree(parser);
+        }
+    }
     public enum Status { SUCCESS, SKIPPED, ERROR, TIMEOUT, CANCELLED }
     public NodeResult {
         java.util.Objects.requireNonNull(status);

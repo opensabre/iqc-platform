@@ -535,8 +535,18 @@ public class PipelineEvaluationService {
     }
     /** Stored artifacts inherit the immutable release protocol; no legacy retry after mismatch. */
     private String artifactHash(PipelineRelease release, String body) {
-        return PipelineRelease.EXACT_SCHEMA.equals(release.schemaVersion())
-                ? io.github.opensabre.iqc.selector.SelectorAssetService.hash(body) : PipelineAssetService.hash(body);
+        if(PipelineRelease.EXACT_SCHEMA.equals(release.schemaVersion())||!release.fusion().calibrationReferences().isEmpty())
+            return io.github.opensabre.iqc.selector.SelectorAssetService.hash(body);
+        // New raw confidence evidence needs an exact digest even on a legacy detector graph.
+        try{
+            var tree=json.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readTree(body);
+            for(var trace:tree.path("run").path("trace")){
+                var metrics=trace.path("result").path("metrics").path("llmStructuredOutput");
+                if("iqc-llm-structured-metrics-v1".equals(metrics.path("schemaVersion").asText())&&metrics.hasNonNull("reportedConfidence"))
+                    return io.github.opensabre.iqc.selector.SelectorAssetService.hash(body);
+            }
+        }catch(com.fasterxml.jackson.core.JsonProcessingException invalid){throw IqcException.invalidState("评测轨迹JSON无效");}
+        return PipelineAssetService.hash(body);
     }
     private JsonNode parse(String value) { return read(value, JsonNode.class); }
     /** Applies the same bound before both ordinary and protocol-specific decoding. */
