@@ -26,6 +26,17 @@ Agent共享目录只携带精确知识库引用/Hash；私有正文应在有当�
 
 本批V1.1.75仅写入迁移，不执行共享SQL或部署。编译终态见协作记录；真实迁移/Mapper、当前授权操作者/跨组/撤权、CAS并发发布/恢复/停用、Hash及坏原父来源、参数边界和实际任务/页面均需独立验证。编译不能证明SQL/角色/worker或全适用I1–I7已完成。
 
+## KB2 管理入口增量（2026-10-24）
+
+新增/api/iqc/knowledge-bases的目录GET/创建POST、/{id}详情GET/修订PUT、availability POST、versions元数据GET、publish POST、versions/{versionNo}精确GET及restore POST。草稿请求为code/name/corpusJson或expectedRevision/name/corpusJson，corpusJson由原严格语料解析器验证；修订须正整数JSON数字，启停须JSON布尔值，拒绝字符串/小数或隐式取整。恢复为新草稿，不移动当前发布指针。每个URL/方法使用独立iqc:knowledge:*资源，并在查询前复用SensitiveReadAccessService检查当前资源和组织范围，所有回执private,no-store，审计不记录正文。
+
+原ResultReadProjection新增知识库DTO投影，source对象不被修改：目录、历史列表和创建/修订/发布/启停/恢复回执一律不返回正文；详情与精确版本只有三项既有FULL/PII/PROMPT敏感阅读齐备才显示正文。版本元数据列表查询直接排除snapshotJson，不批量加载/解析100份大型语料；其contentHash为存储的版本摘要，实际正文/来源校验在精确版本读取中完成。缺少正文时canonicalPayloadVisible=false，不能把回执当作空白可编辑配置。
+
+权限迁移V20261024_01在组织服务注册九项资源和知识库菜单：IQC_ADMIN/IQC_QUALITY_MANAGER具有维护资源，IQC_INSPECTOR/IQC_VIEWER仅目录/详情/历史/精确版本阅读；不会额外授予敏感阅读或全局ADMIN。沿用现有产品菜单父级与资源代码upsert，不重写既有URL/方法/身份。脚本仅交付，未执行共享SQL。
+
+前端/knowledge-bases复用原权限与路由、表格/抽屉/表单，逐文档编辑ID/标题/正文/来源引用并检查边界。草稿修改未保存时不能切其他资产或发布/恢复覆盖；命令回执后清正文并独立重读，失败保留对象身份并要求重新读取。正文/目录/版本/维护权限变化清空状态和请求代次，关闭/切换资产/版本的旧响应不恢复文档。敏感受限详情为元数据视图，不能用空正文覆盖。
+
+本批仅管理与阅读，不声明Agent/Pipeline精确引用、任务授权正文冻结或LLM上下文已完成；这些继续KB2引用/KB3。编译构建终态见协作记录，真实HTTP/PDP/四角色/SQL脚本/浏览器及源对象不变专项待独立验证。
 ## B 协议与发布来源验证（2026-10-24）
 
 固定同步a095f7a后新增KnowledgeCorpusTest：规范排序且不改变原列表、输出列表只读、
@@ -114,3 +125,11 @@ canonicalPayloadVisible与实际正文一致，原草稿/历史/Prepared对象�
 原44435终态0，HTTP16项、投影1项、语料4项共21项零失败、错误、跳过，
 日志`/tmp/iqc-b-knowledge-http-contract.log`。领域与授权服务受控，
 不代表真实PDP、角色迁移、SQL或浏览器端到端验收。
+
+## Agent 精确版本引用（KB3 前置）
+
+部署采用单租户，继续复用 IqcDataScope 的 owner/group/all 与当前组织资源授权，不引入租户模型或另一套 ACL。schema3 Agent 可引用最多四个不同知识库的已发布版本；版本号必须为正整数，服务端核验当前启用状态、组织可见性、版本行及 SHA-256，并补全 versionId/contentHash。共享 Agent/Pipeline 配置仅携带 knowledgeBaseId/versionNo/versionId/contentHash，不复制知识库正文、标题或组织信息。无引用的历史配置保持原序列化行为。
+
+引用解析复用知识库领域服务，在独立只读 REPEATABLE_READ 事务内校验当前范围和不可变版本，返回不含正文的 Binding；不会跨多个知识库保留父行写锁。此检查不能代替任务物化时的授权。后续 KB3 必须在任务事务中冻结合法正文并收窄来源组织交集，处理所有任务入口以及有界上下文和来源追踪。
+
+当前尚未提供任务正文上下文，两种真实模型适配器对非空 knowledgeAssets 显式返回 KNOWLEDGE_CONTEXT_NOT_FROZEN，防止静默忽略引用。此提交仅为引用管理前置，不作为知识库推理完成或上线验收。后端离线 test-compile 与前端生产构建均退出0；本轮未新增或执行测试，未执行共享迁移或部署。

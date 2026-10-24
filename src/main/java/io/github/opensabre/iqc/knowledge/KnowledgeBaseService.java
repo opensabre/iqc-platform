@@ -22,6 +22,8 @@ public class KnowledgeBaseService {
     public record Published(String schemaVersion,String knowledgeBaseId,int versionNo,int sourceDraftRevision,String name,
                             KnowledgeCorpus corpus,String owner,String ownerGroupId,String publishedBy){ }
     public record Prepared(String versionId,Published snapshot,String contentHash,String ownerGroupId){ }
+    /** Safe for shared capability configurations: no corpus, owner, title or source group. */
+    public record Binding(String knowledgeBaseId,int versionNo,String versionId,String contentHash){ }
     private final KnowledgeBaseMapper bases;
     private final KnowledgeBaseVersionMapper versions;
     private final IqcDataScope scope;
@@ -121,6 +123,12 @@ public class KnowledgeBaseService {
     }
     @Transactional(readOnly=true,isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public Prepared viewVersion(String id,int number){return prepared(require(id,false),number);}
+    @Transactional(readOnly=true,isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ,
+            propagation=org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public Binding referenceBinding(String id,int number){
+        var row=require(id,false);if(!"ACTIVE".equals(row.getStatus()))throw IqcException.invalidState("知识库已停用");
+        var value=prepared(row,number);return new Binding(id,value.snapshot().versionNo(),value.versionId(),value.contentHash());
+    }
     @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
     public Prepared publishedForTask(String id,int number){var row=require(id,true);
         if(!"ACTIVE".equals(row.getStatus()))throw IqcException.invalidState("知识库已停用");return prepared(row,number);}

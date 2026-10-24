@@ -265,6 +265,7 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
             try { config = objectMapper.readTree(config.asText()); }
             catch (Exception ignored) { return SYSTEM_PROMPT; }
         }
+        LlmQualityProvider.requireKnowledgeContext(config);
         String instruction = config.path("systemPrompt").asText(config.path("instructions").asText("")).trim();
         if (instruction.isBlank()) return SYSTEM_PROMPT;
         StringBuilder configuredPrompt = new StringBuilder(instruction);

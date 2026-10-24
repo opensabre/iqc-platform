@@ -4,6 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 /** LLM 规则的适配器边界，正式模型必须返回可校验的结构化结果。 */
 public interface LlmQualityProvider {
+    /** A declared corpus must never disappear silently while task-authorized context is not yet materialized. */
+    static void requireKnowledgeContext(JsonNode config){
+        if(config!=null&&config.hasNonNull("knowledgeAssets")&&(!config.path("knowledgeAssets").isArray()||!config.path("knowledgeAssets").isEmpty()))
+            throw new io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException("KNOWLEDGE_CONTEXT_NOT_FROZEN");
+    }
     default LlmEvaluation evaluate(String content,JsonNode rule,JsonNode agentSnapshot,JsonNode preRuleFindings,String recordId,ModelCallContext context){
         return evaluate(content,rule,agentSnapshot,preRuleFindings,recordId);
     }
