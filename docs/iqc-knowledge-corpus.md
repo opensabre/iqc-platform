@@ -65,3 +65,12 @@ Service.publish，使用独立事务。限时完成后两侧版本ID相同，实
 原94472终态0，集成4项零失败、错误、跳过，103.585秒；日志
 `/tmp/iqc-b-knowledge-concurrent-publish.log`，专用34307关闭且socket消失。
 本轮不增加用例数量，不代表多进程压力测试或跨组真实权限验收。
+
+## B 实际负责人范围验证（2026-10-24）
+
+在原SQL生命周期中独立使用实际IqcDataScope(null)与实际Mapper服务，验证负责人
+可读、其他用户get/history/update被拒绝且page不含记录、ADMIN可读、无认证get/page
+被拒绝；用户上下文finally还原。更新调用使用原事务管理器。
+原9737终态0，集成4项零失败、错误、跳过，62.889秒；日志
+`/tmp/iqc-b-knowledge-owner-scope.log`，专用34307关闭且socket消失。
+没有接入组织服务，同组共享、跨组变更竞态和真实PDP/HTTP授权仍待联调。

@@ -495,6 +495,25 @@ class IsolatedMysqlMeasuredPublicationIT {
         var restored=knowledge.restore(created.getId(),2,1);assertEquals(3,restored.getDraftRevision());
         assertEquals(2,restored.getActivePublishedVersion());assertEquals(corpus,knowledge.requestCorpus(restored.getDraftConfigJson()));
         knowledge.availability(created.getId(),false);
+        var sql=context.getBean(SqlSessionTemplate.class);
+        var actualScope=new IqcDataScope(null);
+        var scoped=new io.github.opensabre.iqc.knowledge.KnowledgeBaseService(
+                sql.getMapper(io.github.opensabre.iqc.knowledge.dao.KnowledgeBaseMapper.class),
+                sql.getMapper(io.github.opensabre.iqc.knowledge.dao.KnowledgeBaseVersionMapper.class),actualScope,context.getBean(ObjectMapper.class));
+        var userContext=io.github.opensabre.common.core.util.UserContextHolder.getInstance();
+        try {
+            assertEquals(created.getId(),scoped.get(created.getId()).getId());
+            userContext.setContext(Map.of("user_name","outsider","user_id","user-outsider"));
+            assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->scoped.get(created.getId()));
+            assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->scoped.history(created.getId()));
+            assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->tx.execute(status->scoped.update(created.getId(),3,"unauthorized",corpus)));
+            assertEquals(0,scoped.page(1,100).records().size());
+            userContext.setContext(Map.of("user_name","administrator","user_id","user-admin",userContext.KEY_ROLES,"ADMIN"));
+            assertEquals(created.getId(),scoped.get(created.getId()).getId());
+            userContext.setContext(Map.of());
+            assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->scoped.get(created.getId()));
+            assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->scoped.page(1,100));
+        } finally {userContext.setContext(Map.of("user_name","annotator","user_id","user-annotator"));}
         assertEquals(first.getContentHash(),knowledge.viewVersion(created.getId(),1).contentHash());
         assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->tx.execute(status->knowledge.publishedForTask(created.getId(),1)));
     }
