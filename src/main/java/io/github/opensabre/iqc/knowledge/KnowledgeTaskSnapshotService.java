@@ -180,8 +180,11 @@ public class KnowledgeTaskSnapshotService {
     }
     private static JsonNode parse(String value,ObjectMapper json){
         if(value==null||value.isBlank())return json.createObjectNode();
-        try(var parser=json.copy().enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION).createParser(value)){
-            JsonNode result=parser.readValueAsTree();if(result==null||parser.nextToken()!=null)throw new IllegalArgumentException();return result;
+        try{
+            var reader=json.copy().enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+                    .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+            JsonNode result=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenTree(reader,value);
+            if(result==null)throw new IllegalArgumentException();return result;
         }
         catch(Exception invalid){throw IqcException.invalidState("任务知识库来源快照无效");}
     }

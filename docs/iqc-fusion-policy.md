@@ -102,3 +102,9 @@ CUSTOM目标政策重算也在原raw副本中按目标冻结定义补缺失来�
 原PipelineReleaseEditor增加CUSTOM选项，按目录明确选择id/version/hash，参数以JSON字符串对象编辑。刷新不替换已冻结绑定；未知/缺失版本提示并要求重新试跑/评测/发布，页面不自动升级。切回其它方法不发送残留custom或nodeWeights。发布后被冻结的CUSTOM仍由同一个fuse执行；失去目录读取权限不改已有原绑定，服务端始终校验部署可用性。
 
 后端原12690及最终29380 skipTests test-compile均terminal exit0；前端首轮63145 vue-tsc+Vite通过（2m4s），最终补当前绑定不可用提示的构建以协作台账为准。未新增/运行Root测试、共享SQL或部署。B须覆盖两codec/旧JSON、注册冲突与hash不符、真实一致同意/未知/false/不足来源、恶意输出/证据冲突、缺失来源重算原数据不变、目录fresh权限和角色迁移、前端精确选择/切换/刷新/卸载及完整发布/评测/重算实际路径。源码/构建不证明全PRD或可信插件纯度已验收。
+
+### 精确校准引用与私有任务系数
+
+FusionPolicy新增可选calibrationReferences，每条只含taskId/executionId/nodeId/contentHash，不携带系数。引用最多200条，按nodeId规范排序，节点唯一且须完整覆盖calibratedNodeIds，并保留非空confidenceCalibrationId作为策略标识；7/8/9参数旧构造器保留，空引用不进入JSON，旧摘要不变。引用本身不等于产物已独立验证或已执行校准。
+
+任务物化在原事务中，经当前iqc:evaluation:report:view和原来源任务组织范围校验后读取精确服务端产物；校准系数冻结为独立calibrationInputs信封（最多1MiB），共享流水线只保留引用。任务组与知识库及全部校准来源取交集。原任务信封核验负责人、检测图Hash、引用全集、原候选内容Hash/节点Hash与组不得放宽；拒绝未知字段、重复/尾随JSON以及小数计数截断，遵循原v1/v2数值协议。运行转换尚未接入，本阶段新引用任务在入队/worker/恢复边界明确拒绝，防止按原始值冒充校准结果；旧无引用路径保持。不得据此部署或声称校准整链完成。
