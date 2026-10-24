@@ -504,6 +504,21 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals(frozenTask.getAgentSnapshotJson(),persistedKnowledgeTask.getAgentSnapshotJson());
         assertEquals(frozenTask.getRuleSnapshotJson(),persistedKnowledgeTask.getRuleSnapshotJson());
         assertEquals(first.getId(),io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.verifiedSources(persistedKnowledgeTask,json).getFirst().versionId());
+        String taskKey=UUID.randomUUID().toString().replace("-","");
+        String taskAgent="ka"+taskKey,taskRule="kr"+taskKey,taskConversation="kc"+taskKey;
+        db.update("INSERT INTO iqc_quality_agent(id,name,code,status,config_json) VALUES(?,?,?,'PUBLISHED',?)",taskAgent,taskAgent,taskAgent,json.writeValueAsString(config));
+        db.update("INSERT INTO iqc_quality_rule(id,name,code,rule_type,status) VALUES(?,?,?,'LLM','PUBLISHED')",taskRule,taskRule,taskRule);
+        db.update("INSERT INTO iqc_conversation(id,source_file_name,message_count,status,created_by,owner_group_id,source_fingerprint) VALUES (?,'processed knowledge conversation',1,'READY','annotator','group',?)",taskConversation,taskKey);
+        var knowledgeProvider=mock(org.springframework.beans.factory.ObjectProvider.class);
+        when(knowledgeProvider.getObject()).thenReturn(freezer);
+        var taskCreator=new InspectionTaskService(taskMapper,context.getBean(SqlSessionTemplate.class).getMapper(ConversationMapper.class),
+                context.getBean(SqlSessionTemplate.class).getMapper(QualityAgentMapper.class),context.getBean(SqlSessionTemplate.class).getMapper(QualityRuleMapper.class),
+                null,json,context.getBean(SqlSessionTemplate.class).getMapper(TaskExecutionMapper.class),context.getBean(IqcDataScope.class),null,null,
+                context.getBean(ProductionInputSnapshotService.class),null,null,knowledgeProvider);
+        var serviceCreated=tx.execute(status->taskCreator.createBatch("Service knowledge task",List.of(taskConversation),taskAgent,null,List.of(taskRule),1,"AGENT_LLM"));
+        var servicePersisted=taskMapper.selectById(serviceCreated.getId());
+        assertEquals("annotator",servicePersisted.getCreatedBy());
+        assertEquals(first.getId(),io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.verifiedSources(servicePersisted,json).getFirst().versionId());
         var originalTaskEvidence=frozenTask.getRuleSnapshotJson();
         assertEquals(first.getId(),io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.verifiedSources(frozenTask,json).getFirst().versionId());
         var changed=new io.github.opensabre.iqc.knowledge.KnowledgeCorpus(io.github.opensabre.iqc.knowledge.KnowledgeCorpus.SCHEMA,
@@ -525,6 +540,10 @@ class IsolatedMysqlMeasuredPublicationIT {
         var capability=io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.executionContext(persistedKnowledgeTask,json);
         assertTrue(capability.material(json.valueToTree(config),frozenTask.getId(),"annotator","group").contains("frozen reference text"));
         assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->tx.execute(status->knowledge.publishedForTask(List.of(binding))));
+        assertEquals(first.getId(),io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.verifiedSources(taskMapper.selectById(serviceCreated.getId()),json).getFirst().versionId());
+        int beforeRejected=db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE agent_id=?",Integer.class,taskAgent);
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->tx.execute(status->taskCreator.createBatch("Rejected disabled knowledge",List.of(taskConversation),taskAgent,null,List.of(taskRule),1,"AGENT_LLM")));
+        assertEquals(beforeRejected,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE agent_id=?",Integer.class,taskAgent));
         var sql=context.getBean(SqlSessionTemplate.class);
         var actualScope=new IqcDataScope(null);
         var scoped=new io.github.opensabre.iqc.knowledge.KnowledgeBaseService(

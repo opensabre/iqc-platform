@@ -241,3 +241,13 @@ KNOWLEDGE_CONTEXT_TOO_LARGE。此项证明字节限制；非token窗口、网关
 来源修订/停用后再次从任务表读取，原信封不变，仍可校验原版本/Hash并生成历史参考。
 唯一任务ID支持重复执行；实例关闭/socket消失。此项补齐上节任务未落表缺口，
 仍未经过TaskService创建/worker知识上下文全链，敏感授权受控，非真实PDP或远端证据。
+
+### B TaskService自动冻结创建补验
+
+原93669专用34307 test-compile+surerfire终态0，
+/tmp/iqc-b-knowledge-task-service.log.exit=0，MeasuredPublication四项集成测试通过。
+真实TaskService.createBatch在原事务内读取数据库Agent/规则/处理后会话，自动调用知识库
+freezer并落任务表；重读校验原版本。来源停用后新建拒绝，任务数量不增加，原任务
+仍验证原版本。TaskService由夹具直接构造，原freezer通过受控ObjectProvider注入，
+敏感授权受控；不代表完整Spring装配/真实PDP/worker执行或远端模型验收。
+专用实例关闭/socket消失。
