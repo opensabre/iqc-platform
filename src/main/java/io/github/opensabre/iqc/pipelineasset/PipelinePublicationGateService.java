@@ -3,17 +3,24 @@ package io.github.opensabre.iqc.pipelineasset;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.opensabre.iqc.governance.IqcException;
 import io.github.opensabre.iqc.quality.evaluation.*;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.util.*;
 
 /** All measurements come from validated immutable evaluation artifacts, never client-reported scores. */
-@Service @RequiredArgsConstructor
+@Service
 public class PipelinePublicationGateService {
     private final PipelineEvaluationService evaluations;
     private final ObjectMapper json;
     private final io.github.opensabre.iqc.task.dao.TaskExecutionMapper executions;
+    private final CalibrationTaskSnapshotService calibration;
+    @org.springframework.beans.factory.annotation.Autowired
+    public PipelinePublicationGateService(PipelineEvaluationService evaluations,ObjectMapper json,
+            io.github.opensabre.iqc.task.dao.TaskExecutionMapper executions,CalibrationTaskSnapshotService calibration){
+        this.evaluations=evaluations;this.json=json;this.executions=executions;this.calibration=calibration;
+    }
+    public PipelinePublicationGateService(PipelineEvaluationService evaluations,ObjectMapper json,
+            io.github.opensabre.iqc.task.dao.TaskExecutionMapper executions){this(evaluations,json,executions,null);}
     public record ExecutionEvidence(String taskId,String executionId) { }
     public enum Status { PASSED,FAILED,NOT_APPLICABLE }
     public record Criterion(String code,String purpose,Status status,BigDecimal actual,BigDecimal threshold,String reason) { }
@@ -23,12 +30,17 @@ public class PipelinePublicationGateService {
                            PublicationGatePolicy policy,boolean passed,List<Criterion> criteria,List<ReportEvidence> evidence) {
         public Decision {criteria=List.copyOf(criteria);evidence=List.copyOf(evidence);}
     }
+    @org.springframework.transaction.annotation.Transactional
     public Decision evaluate(String pipelineId,int revision,String releaseHash,PipelineRelease release,
                              ExecutionEvidence quality,ExecutionEvidence regression) {
         var qualityContext=context(quality,pipelineId,revision,releaseHash);
         var regressionContext=context(regression,pipelineId,revision,releaseHash);
         if(regressionContext.prepared().dataset().type()!=DatasetDraft.Type.REGRESSION)
             throw IqcException.invalidArgument("回归准入必须使用REGRESSION冻结数据集");
+        if(!release.fusion().calibrationReferences().isEmpty()){
+            if(calibration==null)throw IqcException.invalidState("校准发布验证服务不可用");
+            calibration.requireHeldOut(release,List.of(qualityContext,regressionContext));
+        }
         var q=evaluations.report(quality.taskId(),quality.executionId());
         var r=evaluations.report(regression.taskId(),regression.executionId());
         // A force publication can override failed measured criteria, never missing or fabricated execution evidence.
