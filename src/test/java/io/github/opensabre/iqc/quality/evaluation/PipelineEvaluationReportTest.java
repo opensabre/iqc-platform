@@ -522,4 +522,60 @@ class PipelineEvaluationReportTest {
         assertThat(service.report("task","execution").nodeConfidenceMetrics().nodes().getFirst().calibrationCandidate()).isNull();
     }
 
+    @Test void calibrationBatchRejectsInvalidReferencesBeforeSourceReads() {
+        var target=prepared.release().pipeline();
+        assertThat(service.calibrationsForTask(List.of(),target)).isEmpty();
+        var reference=new EmpiricalConfidenceCalibration.Reference("task","execution","llm","a".repeat(64));
+        assertThatThrownBy(()->service.calibrationsForTask(List.of(reference,reference),target)).hasMessageContaining("每个目标节点");
+        assertThatThrownBy(()->service.calibrationsForTask(java.util.Collections.nCopies(201,reference),target)).hasMessageContaining("最多200");
+        assertThatThrownBy(()->service.calibrationForTask(null,target)).hasMessageContaining("不能为空");
+        verify(tasks,never()).selectOne(any());
+        verifyNoInteractions(results);
+        assertThatThrownBy(()->service.calibrationsForTask(List.of(reference),target)).hasMessageContaining("已认证负责人");
+        verify(tasks,never()).selectOne(any());
+    }
+
+    @Test void calibrationUsesLockedOwnerGroupAndExactOriginalCandidate() throws Exception {
+        artifactSnapshot();
+        var first=artifact("first","execution",10); var second=artifact("second","execution",20);
+        structuredMetrics(first,counters(1,1,0).put("reportedConfidence",new BigDecimal("0.75")));
+        structuredMetrics(second,counters(1,1,0).put("reportedConfidence",new BigDecimal("0.75")));
+        String datasetHash="a".repeat(64);
+        when(prepared.datasetHash()).thenReturn(datasetHash);
+        first.setDatasetHash(datasetHash);second.setDatasetHash(datasetHash);
+        tasks.selectById("task").setRuleSnapshotJson("{\"evaluationSnapshot\":{\"versionNo\":1},\"pipelineSnapshot\":{\"contentHash\":\""+"b".repeat(64)+"\"}}");
+        when(results.selectList(any())).thenReturn(List.of(first,second));
+        var candidate=service.report("task","execution").nodeConfidenceMetrics().nodes().getFirst().calibrationCandidate();
+        var reference=new EmpiricalConfidenceCalibration.Reference("task","execution","llm",candidate.contentHash());
+        var target=prepared.release().pipeline();
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(new org.apache.ibatis.builder.MapperBuilderAssistant(new org.apache.ibatis.session.Configuration(),"calibration"),InspectionTask.class);
+        var locked=new InspectionTask(); locked.setId("task");locked.setTaskType("PIPELINE_EVALUATION");
+        locked.setCreatedBy("locked-owner");locked.setOwnerGroupId("locked-group");
+        locked.setRuleSnapshotJson(tasks.selectById("task").getRuleSnapshotJson());
+        when(scope.owner()).thenReturn("actor");
+        doReturn(prepared).when(service).prepare(eq(locked),any(),eq(false));
+        when(tasks.selectOne(any())).thenAnswer(call->{
+            var query=(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<?>)call.getArgument(0);
+            assertThat(query.getSqlSegment()).contains("FOR UPDATE");
+            assertThat(query.getParamNameValuePairs().values()).contains("task");
+            return locked;
+        });
+        var resolved=service.calibrationsForTask(List.of(reference),target);
+        assertThat(resolved).hasSize(1);
+        assertThat(resolved.getFirst().artifact()).isEqualTo(candidate);
+        assertThat(resolved.getFirst().owner()).isEqualTo("locked-owner");
+        assertThat(resolved.getFirst().ownerGroupId()).isEqualTo("locked-group");
+        verify(scope).canView("locked-owner","locked-group");
+        assertThatThrownBy(resolved::clear).isInstanceOf(UnsupportedOperationException.class);
+        var forged=new EmpiricalConfidenceCalibration.Reference("task","execution","llm","0".repeat(64));
+        assertThatThrownBy(()->service.calibrationForTask(forged,target)).hasMessageContaining("摘要已不匹配");
+        execution.setStatus("FAILED");
+        assertThatThrownBy(()->service.calibrationForTask(reference,target)).hasMessageContaining("未成功");
+        execution.setStatus("SUCCEEDED");
+        when(scope.canView("locked-owner","locked-group")).thenReturn(false);
+        clearInvocations(results);
+        assertThatThrownBy(()->service.calibrationForTask(reference,target)).hasMessageContaining("无权读取");
+        verifyNoInteractions(results);
+    }
+
 }
