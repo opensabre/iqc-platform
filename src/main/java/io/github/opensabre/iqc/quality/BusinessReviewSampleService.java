@@ -152,13 +152,7 @@ public class BusinessReviewSampleService {
                     || !sequences.add(message.getSequenceNo()) || message.getContent() == null || message.getId().length() > 64
                     || message.getSpeakerRole() == null || message.getSpeakerRole().isBlank() || message.getSpeakerRole().length() > 128)
                 throw IqcException.invalidState("候选会话消息或顺序损坏");
-            io.github.opensabre.iqc.conversation.TranscriptAlignment.validate(message.getStartMs(),message.getEndMs(),message.getConfidence());
-            var segment = segments.addObject().put("id", message.getId()).put("sequenceNo", message.getSequenceNo())
-                    .put("speakerRole", message.getSpeakerRole()).put("relativeTime", message.getRelativeTime() == null ? null : message.getRelativeTime().toString())
-                    .put("content", message.getContent());
-            if(message.getStartMs()!=null)segment.put("startMs",message.getStartMs());
-            if(message.getEndMs()!=null)segment.put("endMs",message.getEndMs());
-            if(message.getConfidence()!=null)segment.put("confidence",message.getConfidence());
+            segments.add(candidateSegment(message,json));
         }
         boolean pipeline = snapshot.has("pipelineSnapshot");
         var marker = snapshot.path(pipeline ? "pipelineSnapshot" : "schemeSnapshot");
@@ -219,6 +213,17 @@ public class BusinessReviewSampleService {
             return winner;
         }
         return sample;
+    }
+    /** Shared frozen segment representation; callers own source/sequence-set validation. */
+    public static com.fasterxml.jackson.databind.node.ObjectNode candidateSegment(ConversationMessage message,ObjectMapper json){
+        io.github.opensabre.iqc.conversation.TranscriptAlignment.validate(message.getStartMs(),message.getEndMs(),message.getConfidence());
+        var segment=json.createObjectNode().put("id",message.getId()).put("sequenceNo",message.getSequenceNo())
+                .put("speakerRole",message.getSpeakerRole()).put("relativeTime",message.getRelativeTime()==null?null:message.getRelativeTime().toString())
+                .put("content",message.getContent());
+        if(message.getStartMs()!=null)segment.put("startMs",message.getStartMs());
+        if(message.getEndMs()!=null)segment.put("endMs",message.getEndMs());
+        if(message.getConfidence()!=null)segment.put("confidence",message.getConfidence());
+        return segment;
     }
     private void authorize(InspectionTask task) {
         if (task == null || !scope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权沉淀该会话候选");

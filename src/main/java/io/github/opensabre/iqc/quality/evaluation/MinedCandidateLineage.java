@@ -11,14 +11,14 @@ import java.util.Objects;
 
 /** Provenance for an unlabelled mining candidate, never machine-generated ground truth. */
 public record MinedCandidateLineage(String schemaVersion,String sourceResultId,String taskId,String executionId,
-        String conversationId,String owner,String ownerGroupId,String sourceHash,String inputHash,String executionInputHash,
+        String conversationId,String owner,@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS) String ownerGroupId,String sourceHash,String inputHash,String executionInputHash,
         String miningPolicyHash,String miningStrategy,int miningVersion,List<String> reasonCodes,String requestFingerprint) {
     public static final String SCHEMA="iqc-ai-mined-candidate-v1";
     public static final String SAMPLE_TYPE="UNCLASSIFIED";
     public MinedCandidateLineage {
         if(!SCHEMA.equals(schemaVersion))throw new IllegalArgumentException("Unsupported mined candidate lineage");
         for(String id:List.of(sourceResultId,taskId,executionId,conversationId))
-            if(!id.matches("[A-Za-z0-9:_-]{1,64}"))throw new IllegalArgumentException("Mined candidate requires exact source identities");
+            if(!id.matches("[A-Za-z0-9][A-Za-z0-9:_./@+-]{0,63}"))throw new IllegalArgumentException("Mined candidate requires exact source identities");
         if(owner==null||owner.isBlank()||owner.length()>128||ownerGroupId!=null&&(ownerGroupId.isBlank()||ownerGroupId.length()>128))
             throw new IllegalArgumentException("Mined candidate requires bounded ownership");
         for(String hash:List.of(sourceHash,inputHash,executionInputHash,miningPolicyHash,requestFingerprint))
