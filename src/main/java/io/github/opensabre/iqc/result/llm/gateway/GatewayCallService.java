@@ -181,7 +181,12 @@ public class GatewayCallService {
         return new CostSummary(count.toString(),known.toString(),count.subtract(known).toString(),List.copyOf(groups));
     }
     public record CallLatencySummary(String callCount,String measuredCount,String unknownCount,String averageMillis) { }
-    public record RunUsage(CostSummary costs,CallLatencySummary latency) { }
+    public record TokenMeasure(String knownCount,String unknownCount,String knownSubtotal) { }
+    public record CallTokenSummary(String callCount,TokenMeasure input,TokenMeasure output,TokenMeasure total) { }
+    public record RunUsage(CostSummary costs,CallLatencySummary latency,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) CallTokenSummary tokens) {
+        public RunUsage(CostSummary costs,CallLatencySummary latency){this(costs,latency,null);}
+    }
     /** Exact result-run scope, including every recorded retry/tool call; never widen an absent execution ID. */
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public RunUsage taskRunUsage(List<GatewayCallMapper.RunReference> references){
@@ -195,13 +200,26 @@ public class GatewayCallService {
             if(executionIds.add(key)){var execution=executionRows.selectById(run.executionId());
                 if(execution==null||!run.taskId().equals(execution.getTaskId()))throw IqcException.invalidState("调用统计执行来源无效");}
         }
-        if(runs.isEmpty())return new RunUsage(new CostSummary("0","0","0",List.of()),new CallLatencySummary("0","0","0",null));
+        if(runs.isEmpty()){
+            var empty=tokenMeasure(0,0L,null);
+            return new RunUsage(new CostSummary("0","0","0",List.of()),new CallLatencySummary("0","0","0",null),new CallTokenSummary("0",empty,empty,empty));
+        }
         var costs=summarizeCosts(calls.runCostGroups(runs));var latency=calls.runLatency(runs);
         if(latency==null||latency.getCallCount()==null||latency.getMeasuredCount()==null)throw IqcException.invalidState("调用耗时汇总无效");
         long count=latency.getCallCount(),measured=latency.getMeasuredCount();
         if(count<0||measured<0||measured>count||!Long.toString(count).equals(costs.callCount())
                 ||(measured==0)!=(latency.getAverageMillis()==null))throw IqcException.invalidState("调用汇总范围不一致");
-        return new RunUsage(costs,new CallLatencySummary(Long.toString(count),Long.toString(measured),Long.toString(count-measured),decimal(latency.getAverageMillis())));
+        var tokens=latency;
+        if(tokens==null||tokens.getCallCount()==null||tokens.getCallCount()!=count)throw IqcException.invalidState("调用Token汇总范围不一致");
+        return new RunUsage(costs,new CallLatencySummary(Long.toString(count),Long.toString(measured),Long.toString(count-measured),decimal(latency.getAverageMillis())),
+                new CallTokenSummary(Long.toString(count),tokenMeasure(count,tokens.getInputKnown(),tokens.getInputSubtotal()),
+                        tokenMeasure(count,tokens.getOutputKnown(),tokens.getOutputSubtotal()),tokenMeasure(count,tokens.getTotalKnown(),tokens.getTotalSubtotal())));
+    }
+    private static TokenMeasure tokenMeasure(long count,Long known,java.math.BigDecimal subtotal){
+        if(known==null||known<0||known>count||(known==0)!=(subtotal==null)||subtotal!=null&&subtotal.signum()<0)
+            throw IqcException.invalidState("调用Token已知覆盖或小计无效");
+        try{return new TokenMeasure(Long.toString(known),Long.toString(count-known),subtotal==null?null:subtotal.toBigIntegerExact().toString());}
+        catch(ArithmeticException invalid){throw IqcException.invalidState("调用Token小计必须为精确整数");}
     }
     public record CapacityView(String modelKey,
             @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) Long occupied,

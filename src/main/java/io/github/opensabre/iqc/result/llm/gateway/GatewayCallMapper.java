@@ -21,6 +21,8 @@ import java.util.List;
         private Long callCount;
         private Long measuredCount;
         private java.math.BigDecimal averageMillis;
+        private Long inputKnown,outputKnown,totalKnown;
+        private java.math.BigDecimal inputSubtotal,outputSubtotal,totalSubtotal;
     }
     String COST_GROUP_QUERY="""
         <script>
@@ -60,13 +62,23 @@ import java.util.List;
         SELECT COUNT(*) AS call_count,
           COALESCE(SUM(CASE WHEN status='CONFIRMED' AND reserved_at_utc IS NOT NULL AND settled_at_utc &gt;= reserved_at_utc THEN 1 ELSE 0 END),0) AS measured_count,
           AVG(CASE WHEN status='CONFIRMED' AND reserved_at_utc IS NOT NULL AND settled_at_utc &gt;= reserved_at_utc
-            THEN TIMESTAMPDIFF(MICROSECOND,reserved_at_utc,settled_at_utc)/1000 ELSE NULL END) AS average_millis
+            THEN TIMESTAMPDIFF(MICROSECOND,reserved_at_utc,settled_at_utc)/1000 ELSE NULL END) AS average_millis,
+          COUNT(CASE WHEN status='CONFIRMED' AND usage_status IN ('COMPLETE','PARTIAL') AND input_tokens &gt;= 0 THEN 1 END) AS input_known,
+          COUNT(CASE WHEN status='CONFIRMED' AND usage_status IN ('COMPLETE','PARTIAL') AND output_tokens &gt;= 0 THEN 1 END) AS output_known,
+          COUNT(CASE WHEN status='CONFIRMED' AND usage_status IN ('COMPLETE','PARTIAL') AND total_tokens &gt;= 0 THEN 1 END) AS total_known,
+          SUM(CASE WHEN status='CONFIRMED' AND usage_status IN ('COMPLETE','PARTIAL') AND input_tokens &gt;= 0 THEN input_tokens ELSE NULL END) AS input_subtotal,
+          SUM(CASE WHEN status='CONFIRMED' AND usage_status IN ('COMPLETE','PARTIAL') AND output_tokens &gt;= 0 THEN output_tokens ELSE NULL END) AS output_subtotal,
+          SUM(CASE WHEN status='CONFIRMED' AND usage_status IN ('COMPLETE','PARTIAL') AND total_tokens &gt;= 0 THEN total_tokens ELSE NULL END) AS total_subtotal
         FROM iqc_model_gateway_call WHERE 1=1
         """+RUN_SCOPE+"""
         </script>
         """)
     @Results(value={@Result(column="call_count",property="callCount"),@Result(column="measured_count",property="measuredCount"),
-        @Result(column="average_millis",property="averageMillis")})
+        @Result(column="average_millis",property="averageMillis"),@Result(column="input_known",property="inputKnown"),
+        @Result(column="output_known",property="outputKnown"),@Result(column="total_known",property="totalKnown"),
+        @Result(column="input_subtotal",property="inputSubtotal"),@Result(column="output_subtotal",property="outputSubtotal"),
+        @Result(column="total_subtotal",property="totalSubtotal")})
     LatencyGroup runLatency(@Param("runs") List<RunReference> runs);
+
 
 }

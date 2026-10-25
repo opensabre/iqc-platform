@@ -71,3 +71,9 @@ MODEL可以选择SMALL_MODEL同名节点，slot只接受null/0；先验证small-
 复用原币种分组、knownCount/unknownCount/knownSubtotal和已知调用耗时。费用来自原网关冻结的声明价目计算，不等于供应商最终账单。金额和账本计数均保留精确字符串，不跨币种相加、不从未知成本推零、不以没有调用记录断言免费，也不自动推荐胜者或宣称节省。来源范围最多为已有Dataset的1000个样本，原内部RunUsage上限相应从500扩为1000，业务报告原选择数量不变。完整效果验收仍需真实调用/账本覆盖、独立质量门禁与容量证据。
 
 界面在原对照面板提供可选统计开关、两侧来源覆盖/记录调用/未知费用/耗时及分币种小计。改轮次或开关立即清旧报告，权限撤销清除已取统计；旧后端/报告无可选字段保持质量展示。没有新增页面、组件、API端点、表或Framework变更。
+
+### 来源执行Token覆盖
+
+RunUsage可选tokens延用同一来源执行集合和RR读取，直接扩展原runLatency聚合及结果映射，不为Token新增一次同范围查询。只汇总CONFIRMED且usage_status为COMPLETE/PARTIAL的供应商已报告非负输入/输出/总Token，三种计量独立knownCount/unknownCount/knownSubtotal；不以input+output补total，也不拿INVALID/MISSING/UNKNOWN/RESERVED填零。零是合法已知值，没有贡献字段时小计为null。按数据库精确聚合结果转整数字符串，跨调用总量可大于Long，不转浮点或截断。
+
+服务核对调用总分母与原费用/耗时范围一致，并拒绝负数、错误覆盖、分数Token小计或known=0仍有小计的汇总。无来源集合不查询全表，返回0调用及null小计；旧两参RunUsage构造省略tokens，旧报告/客户端仍可读取。UI沿原可选调用统计显示三项覆盖与小计，缺字段时不显示，不声明供应商最终账单或完整实验总量。真实SQL/大数/部分usage与发布/容量仍须专项验收。
