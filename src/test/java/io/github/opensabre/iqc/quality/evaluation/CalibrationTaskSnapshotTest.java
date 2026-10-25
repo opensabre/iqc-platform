@@ -31,7 +31,7 @@ class CalibrationTaskSnapshotTest {
         var node=new PipelineDefinition.Node("node","SMALL_MODEL","Model","1",List.of(),Map.of(),config,null,1000,0,PipelineDefinition.OnError.FAIL_PIPELINE,null,null,true);
         var graph=new PipelineDefinition(PipelineDefinition.SCHEMA,List.of(node));
         long[] counts=new long[10],correct=new long[10];counts[9]=samples;correct[9]=successes;
-        var artifact=EmpiricalConfidenceCalibration.fit(new EmpiricalConfidenceCalibration.Source("evaluation","execution","a".repeat(64),"b".repeat(64),"c".repeat(64),"node",SelectorAssetService.hash(json.valueToTree(node).toString()),"QUALITY_HIT"),samples,samples,counts,correct);
+        var artifact=EmpiricalConfidenceCalibration.fit(new EmpiricalConfidenceCalibration.Source("evaluation","execution","a".repeat(64),"b".repeat(64),"c".repeat(64),"node",SelectorAssetService.hash(json.valueToTree(node).toString()),"QUALITY_HIT","a".repeat(64),"deployment-v1"),samples,samples,counts,correct);
         var reference=new EmpiricalConfidenceCalibration.Reference("evaluation","execution","node",artifact.contentHash());
         var policy=new FusionPolicy("fusion",1,FusionPolicy.Method.CONFIDENCE,Map.of(),Map.of(),"calibration",Set.of("node"),null,null,List.of(reference));
         var root=json.createObjectNode().put("businessAmount",new BigDecimal("0.900000000000000002"));
@@ -117,8 +117,8 @@ class CalibrationTaskSnapshotTest {
                 io.github.opensabre.iqc.finding.Finding.ValueType.BOOLEAN,json.getNodeFactory().booleanNode(true),
                 io.github.opensabre.iqc.finding.Finding.State.KNOWN,new BigDecimal("0.95"),
                 io.github.opensabre.iqc.finding.Finding.Severity.NONE,"original",List.of(),
-                new io.github.opensabre.iqc.finding.Finding.Source(node.nodeId(),node.type(),node.version(),1,"input"));
-        return new io.github.opensabre.iqc.pipeline.NodeResult(io.github.opensabre.iqc.pipeline.NodeResult.Status.SUCCESS,List.of(fact),Map.of(),Map.of(),null);
+                new io.github.opensabre.iqc.finding.Finding.Source(node.nodeId(),node.type(),node.version(),1,"d".repeat(64)));
+        return new io.github.opensabre.iqc.pipeline.NodeResult(io.github.opensabre.iqc.pipeline.NodeResult.Status.SUCCESS,List.of(fact),Map.of(),Map.of("modelInvocation",json.createObjectNode().put("schemaVersion","iqc-llm-invocation-fingerprint-v1").put("modelKey","a".repeat(64)).put("inputHash","d".repeat(64)).put("deploymentRef","deployment-v1")),null);
     }
     private io.github.opensabre.iqc.pipeline.PipelineRuntime.Run run(io.github.opensabre.iqc.pipeline.NodeResult result,int attempt) {
         return new io.github.opensabre.iqc.pipeline.PipelineRuntime.Run(io.github.opensabre.iqc.pipeline.PipelineRuntime.Status.SUCCESS,
@@ -190,6 +190,18 @@ class CalibrationTaskSnapshotTest {
         doThrow(io.github.opensabre.iqc.governance.IqcException.accessDenied("revoked")).when(access).current(Set.of("iqc:evaluation:report:view"));
         assertThatThrownBy(()->service.requireHeldOut(release,List.of(publicationContext(task,"validation","conversation")))).hasMessageContaining("revoked");
         verifyNoInteractions(evaluations,provider);
+    }
+
+    @Test void rejectsMissingChangedDeploymentModelOrWrongSmallModelInputBinding() throws Exception {
+        var task=draft("group");service.freeze(task);var node=frozenNode(task);var original=raw(node);
+        for(String mutation:List.of("missing","modelKey","deploymentRef","inputHash")) {
+            var metrics=new HashMap<>(original.metrics());
+            if(mutation.equals("missing"))metrics.clear();
+            else ((ObjectNode)metrics.get("modelInvocation")).put(mutation,mutation.equals("deploymentRef")?"different-deployment":"b".repeat(64));
+            var changed=new io.github.opensabre.iqc.pipeline.NodeResult(original.status(),original.findings(),original.variables(),metrics,null);
+            assertThatThrownBy(()->CalibrationRuntime.apply(task,node,changed,json)).as(mutation).hasMessageContaining("调用身份");
+        }
+        CalibrationRuntime.verify(task,run(CalibrationRuntime.apply(task,node,original,json),1),json);
     }
 
 }

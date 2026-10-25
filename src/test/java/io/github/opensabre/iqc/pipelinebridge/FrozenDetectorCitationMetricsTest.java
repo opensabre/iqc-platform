@@ -44,7 +44,9 @@ class FrozenDetectorCitationMetricsTest {
     @Test void llmReportedConfidenceReachesFusionOnlyThroughFrozenCalibration() throws Exception {
         for(boolean measured:List.of(true,false)) {
             var outcome=new InspectionResult();outcome.setResultStatus("HIT");outcome.setReason("detected");outcome.setEvidenceJson("[]");
-            var metrics=json.createObjectNode().put("schemaVersion","iqc-llm-structured-metrics-v1").put("logicalInvocations",1).put("validOutputs",1);
+            var metrics=json.createObjectNode().put("schemaVersion","iqc-llm-structured-metrics-v1").put("logicalInvocations",1).put("validOutputs",1).put("invalidOrFailedOutputs",0);
+            metrics.putArray("invocationFingerprints").addObject().put("schemaVersion","iqc-llm-invocation-fingerprint-v1")
+                    .put("modelKey","a".repeat(64)).put("inputHash","d".repeat(64)).put("deploymentRef","deployment-v1");
             if(measured)metrics.put("reportedConfidence",new java.math.BigDecimal("0.75"));
             outcome.setDetectorMetricsJson(metrics.toString());
             when(executor.evaluateFrozenPipelineNode(any(),any(),any(),anyList(),any(),anyString(),anyString(),anyString(),anyInt())).thenReturn(outcome);
