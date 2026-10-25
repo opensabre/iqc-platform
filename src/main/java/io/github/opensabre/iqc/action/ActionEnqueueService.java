@@ -44,6 +44,9 @@ public class ActionEnqueueService {
             for(var action:validated.policy().actions()) {
                 requireFresh(actor);
                 if(ActionPolicy.evaluate(action.condition(),validated.context())!=ActionPolicy.Match.MATCH)continue;
+                if(action.type()==ActionExecutionContract.Type.ADD_TO_EVALUATION_CANDIDATE
+                        &&action.effectiveAdapterVersion()==MinedEvaluationCandidateService.ADAPTER_VERSION
+                        &&io.github.opensabre.iqc.quality.evaluation.MinedCandidateSelection.reasons(validated.context(),action.configuration()).isEmpty())continue;
                 var source=new ActionExecutionContract.Source(reference.taskId(),reference.executionId(),reference.conversationId(),
                         reference.resultId(),validated.decisionReference(),policyHash,action.actionId(),reference.owner());
                 String key=source.idempotencyKey(action.type());

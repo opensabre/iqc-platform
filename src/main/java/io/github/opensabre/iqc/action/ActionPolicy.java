@@ -135,7 +135,14 @@ public record ActionPolicy(String schemaVersion,List<Action> actions) {
     }
     /** Validate consumers against the same published finding/item declarations. */
     public void validateReferences(Set<String> findingCodes,Set<String> itemCodes) {
-        for(var action:actions)validateReferences(action.condition(),findingCodes,itemCodes);
+        for(var action:actions){
+            validateReferences(action.condition(),findingCodes,itemCodes);
+            if(action.type()==ActionExecutionContract.Type.ADD_TO_EVALUATION_CANDIDATE&&action.effectiveAdapterVersion()==MinedEvaluationCandidateService.ADAPTER_VERSION){
+                io.github.opensabre.iqc.quality.evaluation.MinedCandidateSelection.validateConfiguration(action.configuration());
+                for(var code:action.configuration().path("findingCodes"))if(!findingCodes.contains(code.textValue()))
+                    throw new IllegalArgumentException("Candidate mining references an undeclared finding");
+            }
+        }
     }
     public static Match evaluate(Condition condition,Context context) {
         Objects.requireNonNull(condition);Objects.requireNonNull(context);
