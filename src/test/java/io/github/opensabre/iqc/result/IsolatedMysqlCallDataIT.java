@@ -124,6 +124,38 @@ class IsolatedMysqlCallDataIT {
         assertThat(empty.costs().currencies()).isEmpty();
         assertThat(empty.latency().averageMillis()).isNull();
     }
+    @Test void recordedTokensPreserveIndependentCoverageZeroAndSumsBeyondLong() {
+        for (String id : java.util.List.of("large-a", "large-b", "complete", "zero", "invalid", "missing", "unknown", "pending", "outside")) {
+            insert(id);
+            jdbc.update("UPDATE iqc_model_gateway_call SET task_id='task',execution_id='old',conversation_id='conversation',usage_status='PARTIAL',input_tokens=NULL,output_tokens=NULL,total_tokens=NULL WHERE call_id=?", id);
+        }
+        jdbc.update("UPDATE iqc_model_gateway_call SET input_tokens=9223372036854775807,output_tokens=0 WHERE call_id IN ('large-a','large-b')");
+        jdbc.update("UPDATE iqc_model_gateway_call SET usage_status='COMPLETE',input_tokens=1,output_tokens=2,total_tokens=3 WHERE call_id='complete'");
+        jdbc.update("UPDATE iqc_model_gateway_call SET total_tokens=0 WHERE call_id='zero'");
+        for (String status : java.util.List.of("INVALID", "MISSING", "UNKNOWN"))
+            jdbc.update("UPDATE iqc_model_gateway_call SET usage_status=?,input_tokens=99,output_tokens=99,total_tokens=198 WHERE call_id=?", status, status.toLowerCase(java.util.Locale.ROOT));
+        jdbc.update("UPDATE iqc_model_gateway_call SET status='RESERVED',usage_status='COMPLETE',input_tokens=99,output_tokens=99,total_tokens=198 WHERE call_id='pending'");
+        jdbc.update("UPDATE iqc_model_gateway_call SET execution_id='different',usage_status='COMPLETE',input_tokens=99,output_tokens=99,total_tokens=198 WHERE call_id='outside'");
+        var executions = org.mockito.Mockito.mock(io.github.opensabre.iqc.task.dao.TaskExecutionMapper.class);
+        var execution = new io.github.opensabre.iqc.task.model.TaskExecution();
+        execution.setId("old"); execution.setTaskId("task");
+        org.mockito.Mockito.when(executions.selectById("old")).thenReturn(execution);
+        var tasks = org.mockito.Mockito.mock(io.github.opensabre.iqc.task.InspectionTaskService.class);
+        @SuppressWarnings("unchecked") ObjectProvider<io.github.opensabre.iqc.task.InspectionTaskService> provider = org.mockito.Mockito.mock(ObjectProvider.class);
+        org.mockito.Mockito.when(provider.getObject()).thenReturn(tasks);
+        var accounting = new GatewayCallService(null, context.getBean(GatewayCallMapper.class), null, executions, null, null, provider);
+        var result = accounting.taskRunUsage(java.util.List.of(new GatewayCallMapper.RunReference("task", "old", "conversation"))).tokens();
+        assertThat(result.callCount()).isEqualTo("8");
+        assertThat(result.input()).isEqualTo(new GatewayCallService.TokenMeasure("3", "5", "18446744073709551615"));
+        assertThat(result.output()).isEqualTo(new GatewayCallService.TokenMeasure("3", "5", "2"));
+        assertThat(result.total()).isEqualTo(new GatewayCallService.TokenMeasure("2", "6", "3"));
+        // A reported zero is known; absent input/output and total are never inferred from each other.
+        var zero=accounting.taskRunUsage(java.util.List.of(new GatewayCallMapper.RunReference("task", "old", "no-calls"))).tokens();
+        assertThat(zero.callCount()).isEqualTo("0");
+        assertThat(zero.input()).isEqualTo(new GatewayCallService.TokenMeasure("0", "0", null));
+        assertThat(zero.output()).isEqualTo(new GatewayCallService.TokenMeasure("0", "0", null));
+        assertThat(zero.total()).isEqualTo(new GatewayCallService.TokenMeasure("0", "0", null));
+    }
     @Configuration(proxyBeanMethods=false) @EnableTransactionManagement static class DatabaseConfiguration{
         @Bean DataSource dataSource(){return new DriverManagerDataSource(SERVER+SCHEMA+OPTIONS,"root","");}
         @Bean DataSourceTransactionManager transactionManager(DataSource source){return new DataSourceTransactionManager(source);}
