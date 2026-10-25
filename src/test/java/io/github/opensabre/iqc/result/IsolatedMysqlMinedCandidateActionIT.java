@@ -167,4 +167,37 @@ class IsolatedMysqlMinedCandidateActionIT {
         }finally{go.countDown();}
     }
 
+    @Test void thresholdEqualAndAboveCompleteDiscoveryWithoutAnyLedgerOrCandidate() throws Exception {
+        for(String confidence:List.of("0.5","0.500000000000000001","1")){
+            new IsolatedMysqlActionSourceIT().fixture("ADD_TO_EVALUATION_CANDIDATE",java.time.LocalTime.MIDNIGHT,
+                    io.github.opensabre.iqc.pipelineasset.PipelineRelease.EXACT_SCHEMA,true,new java.math.BigDecimal(confidence));
+            var reference=new ActionProductionSourceValidator.Reference("task","execution","conversation","result","alice");
+            var discovery=context.getBean(ActionDiscoveryMapper.class);
+            assertFalse(discovery.isComplete("result"));
+            assertEquals(List.of(),workflow(actor->context.getBean(ActionEnqueueService.class).enqueue(reference,actor)));
+            assertTrue(discovery.isComplete("result"));
+            assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM iqc_action_execution",Integer.class));
+            assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM iqc_action_execution_event",Integer.class));assertEquals(0,count());
+            assertTrue(discovery.findDue(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)).stream().noneMatch(row->row.resultId().equals("result")));
+        }
+    }
+    @Test void competingV2ClaimsGrantExactlyOneAttemptWithoutCapturing() throws Exception {
+        var reference=new ActionProductionSourceValidator.Reference("task","execution","conversation","result","alice");
+        String id=workflow(actor->context.getBean(ActionEnqueueService.class).enqueue(reference,actor).getFirst());
+        var ready=new java.util.concurrent.CountDownLatch(2);var go=new java.util.concurrent.CountDownLatch(1);
+        try(var pool=java.util.concurrent.Executors.newFixedThreadPool(2)){
+            java.util.concurrent.Callable<ActionClaimService.Claim> operation=()->{
+                ready.countDown();assertTrue(go.await(10,java.util.concurrent.TimeUnit.SECONDS));
+                return workflow(actor->context.getBean(ActionClaimService.class).claim(id,0,actor));
+            };
+            var first=pool.submit(operation);var second=pool.submit(operation);
+            assertTrue(ready.await(10,java.util.concurrent.TimeUnit.SECONDS));go.countDown();
+            var a=first.get(20,java.util.concurrent.TimeUnit.SECONDS);var b=second.get(20,java.util.concurrent.TimeUnit.SECONDS);
+            assertTrue((a==null)!=(b==null));
+            var winner=a==null?b:a;assertEquals(2,winner.request().adapter().version());
+            var row=context.getBean(ActionExecutionMapper.class).selectById(id);
+            assertEquals("RUNNING",row.getStatus());assertEquals(1,row.getAttemptCount());assertEquals(1L,row.getVersion());assertEquals(0,count());
+        }finally{go.countDown();}
+    }
+
 }
