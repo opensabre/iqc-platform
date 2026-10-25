@@ -17,11 +17,22 @@ public record PipelineDefinition(String schemaVersion, List<Node> nodes,
     public static final String SCHEMA = "iqc-pipeline-v1";
     public static final String PARALLEL_SCHEMA = "iqc-pipeline-parallel-v1";
     public enum OnError { FAIL_PIPELINE, CONTINUE, MARK_REVIEW, FALLBACK }
-    public enum Operator { EXISTS, EQUALS, NOT_EQUALS, GREATER_OR_EQUAL, LESS_OR_EQUAL, GREATER_THAN, LESS_THAN }
+    public enum Operator { EXISTS, EQUALS, NOT_EQUALS, GREATER_OR_EQUAL, LESS_OR_EQUAL, GREATER_THAN, LESS_THAN, CALIBRATED_CONFIDENCE_BELOW }
     public record Condition(String pointer, Operator operator, @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.HttpExactValueDeserializer.class)
             @tools.jackson.databind.annotation.JsonSerialize(using=io.github.opensabre.iqc.quality.evaluation.BenchmarkService.HttpTreeSerializer.class)
             JsonNode value) {
-        public Condition { value = value == null ? null : value.deepCopy(); }
+        public Condition {
+            value = value == null ? null : value.deepCopy();
+            if(operator==Operator.CALIBRATED_CONFIDENCE_BELOW){
+                if(pointer==null||value==null||!value.isNumber()||!Double.isFinite(value.doubleValue())
+                        ||value.decimalValue().signum()<0||value.decimalValue().compareTo(java.math.BigDecimal.ONE)>0)
+                    throw new IllegalArgumentException("Calibrated cascade requires a threshold between 0 and 1");
+                var path=com.fasterxml.jackson.core.JsonPointer.compile(pointer);
+                if(!"upstream".equals(path.getMatchingProperty())||path.tail().getMatchingProperty()==null
+                        ||path.tail().getMatchingProperty().isBlank()||!path.tail().tail().matches())
+                    throw new IllegalArgumentException("Calibrated cascade must address one upstream node result");
+            }
+        }
         @Override public JsonNode value() { return value == null ? null : value.deepCopy(); }
     }
     public record Node(String nodeId, String type, String name, String version,

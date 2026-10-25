@@ -500,3 +500,9 @@ LLM/SMALL_MODEL节点在结果进入upstream和融合前按原任务冻结产物
 ### HTTP模型部署证据接入
 
 HTTP Provider保留原tracked Gateway返回身份，并支持可选iqc.llm.deployment-ref，成功调用沿原InvocationFingerprint记录请求输入摘要/模型key/部署引用。无Gateway或缺部署不伪造完整证据，不改变供应商请求字段、密钥处理或网关旧身份桶。校准来源/运行约束仍使用原服务，不新增资产或API。网络/usage/持久化与正式发布验收继续，完整适用I1–I7未完成。
+
+### 成本级联：校准不足时升级
+
+PRD8.3/25成本优化路由沿原Condition/依赖/Trace增加CALIBRATED_CONFIDENCE_BELOW，指向完整/upstream/节点，显式依赖该源、0–1阈值。只有SUCCESS、唯一KNOWN模型事实、合法校准证明且置信度达到阈值才不执行升级节点；低值、未支持、未知、缺失或坏证明均需升级。不把原始自报值或仅有calibrated标签当可靠概率；数值业务比较白名单保持原六操作，不引入升级语义。
+
+上游ERROR/TIMEOUT仍受原依赖及Fallback策略约束，新条件不绕过依赖成功规则。顺序/并行/保存/发布沿原能力；原Trace记录Condition not met跳过，原网关只计实际调用，不估算或伪造节省费用。界面原条件选择/路径/JSON阈值编辑，保留原操作含义。实际调用减少、质量不退化、SQL及容量验收待专项，完整适用I1–I7继续，未部署。

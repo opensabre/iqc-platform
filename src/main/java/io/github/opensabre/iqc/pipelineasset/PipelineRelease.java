@@ -71,7 +71,9 @@ public record PipelineRelease(String schemaVersion, PipelineDefinition pipeline,
             @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=DecimalThresholdDeserializer.class)
             @tools.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.pipelineasset.PipelineRelease.HttpDecimalThresholdDeserializer.class) String threshold) {
         public NumericPredicate {
-            if(operator==null || operator==PipelineDefinition.Operator.EXISTS || threshold==null || threshold.length()>64
+            if(operator==null || !java.util.Set.of(PipelineDefinition.Operator.EQUALS,PipelineDefinition.Operator.NOT_EQUALS,
+                    PipelineDefinition.Operator.GREATER_OR_EQUAL,PipelineDefinition.Operator.LESS_OR_EQUAL,
+                    PipelineDefinition.Operator.GREATER_THAN,PipelineDefinition.Operator.LESS_THAN).contains(operator) || threshold==null || threshold.length()>64
                     || !threshold.matches("[-+]?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?"))
                 throw new IllegalArgumentException("Numeric predicate requires a comparison and exact decimal string");
             var decimal=new java.math.BigDecimal(threshold);
