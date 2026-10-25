@@ -218,3 +218,5 @@ HTTP Provider可选配置iqc.llm.deployment-ref（环境变量IQC_LLM_DEPLOYMENT
 这使HTTP路径具备校准来源所需的身份测量入口，不等于网络/供应商/SQL/发布验证完成；服务端仍须原拟合身份一致、留出集隔离和发布测量门禁。运营方需保证deployment-ref实际对应版本，系统不能从一个自报标签证明供应商权重不可变。
 
 HTTP客户端记录的端点与构造该RestClient时的baseUrl一致；每次尝试在调用前捕获model/path/deploymentRef，正文、准入身份与成功后的指纹复用同一份值，不在网络返回后重读可变配置。重试仍按各次实际尝试记录，不将先前失败尝试身份冒充最终成功身份。修改端点需重建客户端，不能仅改属性对象就声称HTTP目标已经切换。
+
+业务质量报告沿原includeModelUsage读取原RunUsage.tokens并返回可选tokens字段，不再丢弃原查询的Token汇总。所选task/EID/conversation来源、当前report:view与task:model-calls:view及原分组口径保持；没有新增查询或权限。输入/输出/总量各自已知覆盖/小计，旧六参ModelUsageSummary构造省略可选字段，旧报告可读。页面沿原调用统计卡展示精确字符串，缺贡献为未测量，0为合法已知值，不推算total；仍非任务所有历史或供应商最终账单。
