@@ -52,6 +52,9 @@ class IsolatedMysqlActionSourceIT {
         fixture(type,relativeTime,schema,false);
     }
     void fixture(String type,java.time.LocalTime relativeTime,String schema,boolean mined) throws Exception {
+        fixture(type,relativeTime,schema,mined,null);
+    }
+    void fixture(String type,java.time.LocalTime relativeTime,String schema,boolean mined,java.math.BigDecimal confidence) throws Exception {
         jdbc.update("DELETE FROM iqc_inspection_conversation_result");jdbc.update("DELETE FROM iqc_task_execution");jdbc.update("DELETE FROM iqc_inspection_task");
         var release=json.readerFor(PipelineRelease.class)
                 .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).<PipelineRelease>readValue("""
@@ -67,6 +70,7 @@ class IsolatedMysqlActionSourceIT {
           .replace("\"configuration\":{}", "CREATE_REVIEW".equals(type)?"\"configuration\":{\"reason\":\"automated review\"}":
                   mined?"\"adapterVersion\":2,\"configuration\":{\"findingCodes\":[\"RISK\"],\"threshold\":\"0.5\"}":
                   "ADD_TO_EVALUATION_CANDIDATE".equals(type)?"\"configuration\":{\"sampleType\":\"FALSE_POSITIVE\",\"reviewRevision\":1}":"\"configuration\":{}")
+          .replace("\"method\":\"PRIORITY\"",confidence==null?"\"method\":\"PRIORITY\"":"\"method\":\"CONFIDENCE\",\"confidenceCalibrationId\":\"isolated-calibration\",\"calibratedNodeIds\":[\"llm\"]")
           .replace(PipelineRelease.SCHEMA,schema));
         var business=json.createObjectNode().put("businessType","frozen");
         if(PipelineRelease.EXACT_SCHEMA.equals(schema))business.put("amount",new java.math.BigDecimal("0.900000000000000001"));
@@ -82,7 +86,7 @@ class IsolatedMysqlActionSourceIT {
         jdbc.update("INSERT INTO iqc_task_execution(id,task_id,attempt_no,status) VALUES ('execution','task',1,'RUNNING')");
         InspectionTask task=tasks.selectById("task");
         var inputs=new ProductionInputSnapshotService(null,null,null,json);var prepared=inputs.prepare(task,root);
-        var fact=new Finding("fact","RISK","risk",Finding.ValueType.BOOLEAN,json.valueToTree(true),Finding.State.KNOWN,null,Finding.Severity.HIGH,
+        var fact=new Finding("fact","RISK","risk",Finding.ValueType.BOOLEAN,json.valueToTree(true),Finding.State.KNOWN,confidence,Finding.Severity.HIGH,
                 "risk",List.of(new Finding.Evidence("evidence",Finding.EvidenceType.CONVERSATION,"message",null)),new Finding.Source("llm","LLM","1",1,null));
         PipelineConversationEvaluator.Evaluation evaluation;
         if(PipelineRelease.EXACT_SCHEMA.equals(schema)) {
