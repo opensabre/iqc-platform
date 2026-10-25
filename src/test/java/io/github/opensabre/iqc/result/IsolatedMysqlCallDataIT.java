@@ -84,6 +84,46 @@ class IsolatedMysqlCallDataIT {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_model_gateway_call WHERE status='CONFIRMED' AND total_tokens=9007199254740993 AND calculated_cost=0.123456789012345678 AND cost_status='CALCULATED'",Integer.class)).isEqualTo(206);
         service.purgeExpired();assertThat(row("future")).isEqualTo(future);
     }
+    @Test void recordedRunUsageUsesExactSqlScopeAndKeepsCurrenciesAndUnknownsSeparate() {
+        for (String id : java.util.List.of("cny", "usd", "unknown", "reserved", "other-task", "other-execution", "other-conversation")) {
+            insert(id);
+            jdbc.update("UPDATE iqc_model_gateway_call SET task_id='task',execution_id='old',conversation_id='conversation',cost_status='UNKNOWN_USAGE',calculated_cost=NULL WHERE call_id=?", id);
+        }
+        jdbc.update("UPDATE iqc_model_gateway_call SET pricing_currency='CNY',cost_status='CALCULATED_FROM_DECLARED_PRICE',calculated_cost=0.125,settled_at_utc=reserved_at_utc+INTERVAL 10000 MICROSECOND WHERE call_id='cny'");
+        jdbc.update("UPDATE iqc_model_gateway_call SET pricing_currency='USD',cost_status='CALCULATED_FROM_DECLARED_PRICE',calculated_cost=0.25,settled_at_utc=reserved_at_utc+INTERVAL 20000 MICROSECOND WHERE call_id='usd'");
+        jdbc.update("UPDATE iqc_model_gateway_call SET status='RESERVED' WHERE call_id='reserved'");
+        jdbc.update("UPDATE iqc_model_gateway_call SET task_id='foreign-task' WHERE call_id='other-task'");
+        jdbc.update("UPDATE iqc_model_gateway_call SET execution_id='current' WHERE call_id='other-execution'");
+        jdbc.update("UPDATE iqc_model_gateway_call SET conversation_id='foreign-conversation' WHERE call_id='other-conversation'");
+        var executions = org.mockito.Mockito.mock(io.github.opensabre.iqc.task.dao.TaskExecutionMapper.class);
+        var execution = new io.github.opensabre.iqc.task.model.TaskExecution();
+        execution.setId("old"); execution.setTaskId("task");
+        org.mockito.Mockito.when(executions.selectById("old")).thenReturn(execution);
+        var tasks = org.mockito.Mockito.mock(io.github.opensabre.iqc.task.InspectionTaskService.class);
+        @SuppressWarnings("unchecked") ObjectProvider<io.github.opensabre.iqc.task.InspectionTaskService> provider = org.mockito.Mockito.mock(ObjectProvider.class);
+        org.mockito.Mockito.when(provider.getObject()).thenReturn(tasks);
+        var accounting = new GatewayCallService(null, context.getBean(GatewayCallMapper.class), null, executions, null, null, provider);
+        var reference = new GatewayCallMapper.RunReference("task", "old", "conversation");
+        var result = accounting.taskRunUsage(java.util.List.of(reference, reference));
+        assertThat(result.costs().callCount()).isEqualTo("4");
+        assertThat(result.costs().knownCount()).isEqualTo("2");
+        assertThat(result.costs().unknownCount()).isEqualTo("2");
+        assertThat(result.costs().currencies()).hasSize(3);
+        var currencies = result.costs().currencies().stream().filter(value -> value.currency()!=null)
+                .collect(java.util.stream.Collectors.toMap(GatewayCallService.CurrencyCost::currency, value -> value));
+        assertThat(new java.math.BigDecimal(currencies.get("CNY").knownSubtotal())).isEqualByComparingTo("0.125");
+        assertThat(new java.math.BigDecimal(currencies.get("USD").knownSubtotal())).isEqualByComparingTo("0.25");
+        assertThat(result.latency().callCount()).isEqualTo("4");
+        assertThat(result.latency().measuredCount()).isEqualTo("2");
+        assertThat(result.latency().unknownCount()).isEqualTo("2");
+        assertThat(new java.math.BigDecimal(result.latency().averageMillis())).isEqualByComparingTo("15");
+        org.mockito.Mockito.verify(tasks).get("task");
+        org.mockito.Mockito.verify(executions).selectById("old");
+        var empty = accounting.taskRunUsage(java.util.List.of());
+        assertThat(empty.costs().callCount()).isEqualTo("0");
+        assertThat(empty.costs().currencies()).isEmpty();
+        assertThat(empty.latency().averageMillis()).isNull();
+    }
     @Configuration(proxyBeanMethods=false) @EnableTransactionManagement static class DatabaseConfiguration{
         @Bean DataSource dataSource(){return new DriverManagerDataSource(SERVER+SCHEMA+OPTIONS,"root","");}
         @Bean DataSourceTransactionManager transactionManager(DataSource source){return new DataSourceTransactionManager(source);}
