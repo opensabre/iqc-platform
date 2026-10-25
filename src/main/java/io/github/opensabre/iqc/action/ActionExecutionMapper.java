@@ -8,6 +8,23 @@ import java.time.LocalDateTime;
 import java.util.List;
 @Mapper
 public interface ActionExecutionMapper extends BaseMapper<ActionExecution> {
+    /** Exact authorized result sources only; no frozen inputs, policies or attempt payloads. */
+    record ResultReference(String taskId,String executionId,String conversationId,String resultId,String owner) { }
+    record StatusCount(String status,String outcome,long actionCount) { }
+    @Select("""
+        <script>
+        SELECT status,outcome,COUNT(*) AS action_count FROM iqc_action_execution
+        WHERE <choose><when test="sources != null and sources.size() > 0">
+          <foreach collection="sources" item="source" open="(" separator=" OR " close=")">
+            (task_id=#{source.taskId} AND execution_id=#{source.executionId}
+             AND conversation_id=#{source.conversationId} AND source_result_id=#{source.resultId} AND owner=#{source.owner})
+          </foreach>
+        </when><otherwise>1=0</otherwise></choose>
+        GROUP BY status,outcome ORDER BY status,outcome
+        </script>
+        """)
+    List<StatusCount> countSelectedResultStates(@Param("sources") List<ResultReference> sources);
+
     /** Advisory keyset page; failures remain durable and can be revisited after a restart. */
     @Select("<script>SELECT id,version FROM iqc_action_execution WHERE status='FAILED' AND outcome IN ('CONFIRMED_FINAL_FAILURE','CONFIRMED_RETRYABLE_FAILURE')<if test='after != null'> AND id &gt; #{after}</if> ORDER BY id ASC LIMIT 100</script>")
     List<ActionExecution> findConfirmedFailures(@Param("after") String after);
