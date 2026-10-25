@@ -27,3 +27,11 @@ Report.actionMetrics 使用 iqc-business-action-metrics-v1：
 Root 仅 test-compile 与前端 vue-tsc/Vite 构建，具体原句柄和终态见根协作记录。B 需独立验证零分母、状态/结果组合、等待/阻塞/UNKNOWN 不算成功、精确五字段与空来源/跨轮次/跨组拒绝、当前授权在 IO 前拒绝、旧响应和直接签名兼容、SQL 映射及浏览器撤权/迟到响应。本增量不代表整个 PRD18 或 I1–I7 完成；未启用动作开关或部署。
 
 Root 原11097 test-compile 已终态0，/tmp/iqc-action-metrics-compile.exit=0，diff检查通过。仅编译，不是上述行为/SQL授权专项证据；前端与 B 独立专项另按原句柄记录。
+
+## Service boundary verification
+
+BusinessQualityReportServiceTest adds five action-metrics scenarios. Original 30210 compiled main/tests and exited 1 (25 passes, two fixture authorization errors): the new source helper changed owner to alice but retained the old null-owner scope stub. After adding the matching controlled alice visibility, original 88734 recompiled tests against the unchanged compiled main classes and exited 0; fresh XML: 27 tests, no failures/errors/skips, 5.742s. `/tmp/iqc-b-action-metrics-service-final.log.exit=0`.
+
+Verified fixed report/history grants before task/result/ledger IO; default report skips metrics authorization and ledger and omits the JSON property; legacy Report constructor remains valid. Missing result sources skip ledger queries and retain null failure-rate denominator. All 36 combinations of nine statuses and four outcomes count only COMPLETE/CONFIRMED_SUCCESS and FAILED/confirmed failure as resolved; five source binding fields match exactly. Counts above JavaScript safe integer remain decimal strings and unresolved-only rates remain null.
+
+Mocks control mapper and access responses. This does not prove real SQL source filtering, HTTP/cache headers, PDP or browser behavior. No production code changed in this validation.
