@@ -112,10 +112,12 @@ public class GoldSampleService {
     private Input reviewedCandidate(QualitySample sample) {
         JsonNode input = read(sample.getContentSnapshot(), JsonNode.class);
         JsonNode lineage = read(sample.getExpectedJson(), JsonNode.class);
+        boolean mined=MinedCandidateLineage.SCHEMA.equals(lineage.path("schemaVersion").asText());
+        if(mined)MinedCandidateLineage.validate(sample,json);
         boolean aligned = "iqc-conversation-candidate-input-v2".equals(input.path("schemaVersion").asText())
                 || io.github.opensabre.iqc.quality.BusinessReviewSampleService.EXACT_INPUT_SCHEMA.equals(input.path("schemaVersion").asText());
         if ((!aligned && !"iqc-conversation-candidate-input-v1".equals(input.path("schemaVersion").asText()))
-                || !"iqc-reviewed-business-candidate-v1".equals(lineage.path("schemaVersion").asText())
+                || !mined&&!"iqc-reviewed-business-candidate-v1".equals(lineage.path("schemaVersion").asText())
                 || !sample.getConversationId().equals(input.path("conversationId").asText())
                 || !Objects.equals(sample.getSourceResultId(), lineage.path("sourceResultId").asText())
                 || !io.github.opensabre.iqc.quality.BusinessReviewSampleService.candidateInputHash(input).equals(lineage.path("inputHash").asText())
@@ -148,6 +150,10 @@ public class GoldSampleService {
         for (String field : List.of("sourceResultId", "taskId", "executionId", "reviewId", "reviewRevision", "reviewerId",
                 "reviewedTime", "sourceHash", "inputHash", "executionInputHash", "policySource"))
             if (lineage.has(field)) origin.set(field, lineage.get(field).deepCopy());
+        if(mined){
+            origin.put("schemaVersion",MinedCandidateLineage.SCHEMA);
+            for(String field:List.of("miningPolicyHash","miningStrategy","miningVersion","reasonCodes"))origin.set(field,lineage.get(field).deepCopy());
+        }
         return new Input(List.copyOf(frozen), context);
     }
 
