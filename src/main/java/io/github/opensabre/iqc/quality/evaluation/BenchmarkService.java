@@ -8,7 +8,6 @@ import io.github.opensabre.iqc.pipelineasset.PipelineAssetService;
 import io.github.opensabre.iqc.task.InspectionTaskService;
 import io.github.opensabre.iqc.task.dao.InspectionTaskMapper;
 import io.github.opensabre.iqc.task.model.InspectionTask;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
@@ -16,7 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /** Persistent experiments reuse two immutable evaluation tasks and their existing execution leases. */
-@Service @RequiredArgsConstructor
+@Service
 public class BenchmarkService {
     public static final String SCHEMA="iqc-benchmark-pair-v1";
     private final PipelineEvaluationService evaluations;
@@ -24,6 +23,18 @@ public class BenchmarkService {
     private final InspectionTaskService taskService;
     private final InspectionTaskMapper tasks;
     private final ObjectMapper json;
+    private final io.github.opensabre.iqc.result.llm.gateway.GatewayCallService modelCalls;
+    private final io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive;
+    @org.springframework.beans.factory.annotation.Autowired
+    public BenchmarkService(PipelineEvaluationService evaluations,PipelineAssetService pipelines,InspectionTaskService taskService,
+            InspectionTaskMapper tasks,ObjectMapper json,io.github.opensabre.iqc.result.llm.gateway.GatewayCallService modelCalls,
+            io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive){
+        this.evaluations=evaluations;this.pipelines=pipelines;this.taskService=taskService;this.tasks=tasks;this.json=json;
+        this.modelCalls=modelCalls;this.sensitive=sensitive;
+    }
+    public BenchmarkService(PipelineEvaluationService evaluations,PipelineAssetService pipelines,InspectionTaskService taskService,
+            InspectionTaskMapper tasks,ObjectMapper json){this(evaluations,pipelines,taskService,tasks,json,null,null);}
+
 
     public record Target(String pipelineId,Integer pipelineVersion,Integer draftRevision) { }
     public record Create(String name,String datasetId,Integer datasetVersion,Target baseline,Target candidate,
@@ -43,7 +54,15 @@ public class BenchmarkService {
         }
     }
     public record Report(String schemaVersion,Pair experiment,PipelineEvaluationService.Report baseline,
-                         PipelineEvaluationService.Report candidate,boolean complete,Map<String,BigDecimal> deltas) { }
+                         PipelineEvaluationService.Report candidate,boolean complete,Map<String,BigDecimal> deltas,
+                         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) ModelUsage modelUsage) {
+        public Report(String schemaVersion,Pair experiment,PipelineEvaluationService.Report baseline,PipelineEvaluationService.Report candidate,boolean complete,Map<String,BigDecimal> deltas){
+            this(schemaVersion,experiment,baseline,candidate,complete,deltas,null);
+        }
+    }
+    public record UsageSide(int expectedSamples,int boundSamples,int unboundSamples,
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.RunUsage recorded) { }
+    public record ModelUsage(String schemaVersion,String scope,UsageSide baseline,UsageSide candidate) { }
 
     @Transactional
     public Pair create(Create request) {
@@ -139,6 +158,14 @@ public class BenchmarkService {
         var common=(ObjectNode)marker.deepCopy(); common.remove(List.of("side","peerTaskId")); return common;
     }
     public Report report(String baselineId,String baselineExecutionId,String candidateExecutionId) {
+        return report(baselineId,baselineExecutionId,candidateExecutionId,false);
+    }
+    @Transactional(readOnly=true,isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public Report report(String baselineId,String baselineExecutionId,String candidateExecutionId,boolean includeModelUsage) {
+        if(includeModelUsage){
+            if(sensitive==null||modelCalls==null)throw IqcException.invalidState("对照调用统计授权或汇总组件不可用");
+            sensitive.current(Set.of("iqc:benchmark:report:view","iqc:task:model-calls:view"));
+        }
         if(baselineExecutionId==null || baselineExecutionId.isBlank() || candidateExecutionId==null || candidateExecutionId.isBlank())
             throw IqcException.invalidArgument("对照报告必须固定双方执行轮次");
         var pair=pair(baselineId);
@@ -157,7 +184,19 @@ public class BenchmarkService {
         delta.put("structuredSuccessRate",difference(candidate.structuredMetrics().successRate(),baseline.structuredMetrics().successRate()));
         delta.put("p95Ms",candidate.latencyMetrics().p95Ms()==null || baseline.latencyMetrics().p95Ms()==null?null:
                 BigDecimal.valueOf(candidate.latencyMetrics().p95Ms()).subtract(BigDecimal.valueOf(baseline.latencyMetrics().p95Ms())));
-        return new Report("iqc-benchmark-report-v1",pair,baseline,candidate,baseline.complete()&&candidate.complete(),Collections.unmodifiableMap(delta));
+        return new Report("iqc-benchmark-report-v1",pair,baseline,candidate,baseline.complete()&&candidate.complete(),Collections.unmodifiableMap(delta),includeModelUsage?new ModelUsage("iqc-benchmark-model-usage-v1",
+                "RECORDED_CALLS_OF_VALIDATED_SAMPLE_SOURCE_RUNS",usageSide(pair.baseline().getId(),baseline),usageSide(pair.candidate().getId(),candidate)):null);
+    }
+    private UsageSide usageSide(String taskId,PipelineEvaluationService.Report report){
+        var prepared=evaluations.context(taskId).prepared();
+        var references=new ArrayList<io.github.opensabre.iqc.result.llm.gateway.GatewayCallMapper.RunReference>();
+        for(var member:prepared.dataset().members()){
+            String executionId=report.sourceExecutionIds().get(member.sampleId());
+            if(executionId!=null)references.add(new io.github.opensabre.iqc.result.llm.gateway.GatewayCallMapper.RunReference(taskId,executionId,member.gold().conversationId()));
+        }
+        if(references.size()!=report.sourceExecutionIds().size()||prepared.dataset().members().size()!=report.expectedSamples())
+            throw IqcException.invalidState("对照调用统计的样本来源范围不一致");
+        return new UsageSide(report.expectedSamples(),references.size(),report.expectedSamples()-references.size(),modelCalls.taskRunUsage(references));
     }
     private BigDecimal difference(BigDecimal candidate,BigDecimal baseline){return candidate==null || baseline==null?null:candidate.subtract(baseline);}
     private JsonNode parse(String value) {

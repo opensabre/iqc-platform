@@ -61,3 +61,13 @@ SKILL选择支持LLM提示槽位和SKILL_API单一引用。独立节点slot为nu
 MODEL可以选择SMALL_MODEL同名节点，slot只接受null/0；先验证small-model-v1及Finding语义，再验证模型引用id/version与快照一致、Agent版本为正整数。变量为完整modelSnapshot，四个允许路径为modelReference.id/versionNo、modelSnapshot和agentReference.versionNo；后者只解除版本锚点，不允许Agent id变化。所有未列入路径的配置保持不变量，额外引用字段也不删除。两个有效prompt摘要为null，LLM主模型与备用限制保持原逻辑。
 
 前端MODEL列出LLM与SMALL_MODEL，SKILL仍列出LLM与SKILL_API；切换维度会清除不适用节点。此次后端编译16163、前端94760仍运行中，不作为通过证据；前一轮SmallModel来源兼容后台13097与前端67578均已terminal exit0。实际固定Dataset双Task、模型调用、报告/权限/浏览器与完整PRD验收继续。
+
+## 原样本来源执行的已记录模型调用
+
+现有GET报告可选includeModelUsage=true，默认旧报告形式。原BenchmarkService当前检查iqc:benchmark:report:view和iqc:task:model-calls:view后才读取配对/报告/成本；复用组织数据范围和原TaskRunUsage，不新增资源或另建调用账本。报告新增可省略modelUsage，六参Report/五参Service构造兼容，敏感投影保留已授权聚合字段。
+
+每侧先使用原已校验报告的sourceExecutionIds（sampleId→原执行），经冻结Dataset映射为task/EID/conversation三元组，再走原GatewayCallService.taskRunUsage。来源覆盖单列expected/bound/unbound，缺失产物不凭当前EID猜测。继承旧执行产物时统计其原来源执行；包含该三元组全部已记录重试和工具调用，不等于所选当前执行账单或跨轮次整个实验生命周期账单。坏/无来源不能扩大为全任务调用。
+
+复用原币种分组、knownCount/unknownCount/knownSubtotal和已知调用耗时。费用来自原网关冻结的声明价目计算，不等于供应商最终账单。金额和账本计数均保留精确字符串，不跨币种相加、不从未知成本推零、不以没有调用记录断言免费，也不自动推荐胜者或宣称节省。来源范围最多为已有Dataset的1000个样本，原内部RunUsage上限相应从500扩为1000，业务报告原选择数量不变。完整效果验收仍需真实调用/账本覆盖、独立质量门禁与容量证据。
+
+界面在原对照面板提供可选统计开关、两侧来源覆盖/记录调用/未知费用/耗时及分币种小计。改轮次或开关立即清旧报告，权限撤销清除已取统计；旧后端/报告无可选字段保持质量展示。没有新增页面、组件、API端点、表或Framework变更。

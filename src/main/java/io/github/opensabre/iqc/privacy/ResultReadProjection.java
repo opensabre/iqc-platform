@@ -422,7 +422,7 @@ public final class ResultReadProjection {
             SensitiveReadAccessService.Access access) {
         Objects.requireNonNull(access);if(source==null)return null;
         return new io.github.opensabre.iqc.quality.evaluation.BenchmarkService.Report(source.schemaVersion(),
-                benchmarkPair(source.experiment(),access),source.baseline(),source.candidate(),source.complete(),source.deltas());
+                benchmarkPair(source.experiment(),access),source.baseline(),source.candidate(),source.complete(),source.deltas(),source.modelUsage());
     }
 
     public io.github.opensabre.iqc.quality.model.EvaluationDataset dataset(
