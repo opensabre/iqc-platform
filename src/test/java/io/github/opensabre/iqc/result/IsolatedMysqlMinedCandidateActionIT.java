@@ -35,6 +35,34 @@ class IsolatedMysqlMinedCandidateActionIT {
     @Configuration(proxyBeanMethods=false)
     @Import(IsolatedMysqlEvaluationCandidateActionIT.Config.class)
     static class Config {
+        @Bean ActionExecutionMapper actionRows(SqlSessionTemplate session){
+            var configuration=session.getSqlSessionFactory().getConfiguration();
+            if(!configuration.hasMapper(ActionExecutionMapper.class))configuration.addMapper(ActionExecutionMapper.class);
+            return session.getMapper(ActionExecutionMapper.class);
+        }
+        @Bean ActionDiscoveryMapper discovery(SqlSessionTemplate session){
+            var configuration=session.getSqlSessionFactory().getConfiguration();
+            if(!configuration.hasMapper(ActionDiscoveryMapper.class))configuration.addMapper(ActionDiscoveryMapper.class);
+            return session.getMapper(ActionDiscoveryMapper.class);
+        }
+        @Bean ActionAdapterRegistry registry(MinedEvaluationCandidateActionAdapter mined,EvaluationCandidateActionAdapter reviewed){
+            return new ActionAdapterRegistry(List.of(mined,reviewed));
+        }
+        @Bean ActionEnqueueService enqueue(ActionProductionSourceValidator sources,ActionExecutionMapper rows,
+                ActionDiscoveryMapper discovery,ActionAdapterRegistry registry,IqcDataScope scope,ObjectMapper json){
+            return new ActionEnqueueService(sources,rows,discovery,registry,scope,json);
+        }
+        @Bean ActionClaimService claims(ActionExecutionMapper rows,ActionProductionSourceValidator sources,
+                ActionAdapterRegistry registry,IqcDataScope scope,ObjectMapper json){
+            return new ActionClaimService(rows,sources,registry,scope,json);
+        }
+        @Bean ActionSettlementService settlements(ActionExecutionMapper rows,ActionAdapterRegistry registry,ObjectMapper json){
+            return new ActionSettlementService(rows,registry,json);
+        }
+        @Bean ActionExecutionService dispatch(ActionClaimService claims,ActionSettlementService settlements,
+                ActionAdapterRegistry registry,ActionExecutionMapper rows,IqcDataScope scope,ObjectMapper json){
+            return new ActionExecutionService(claims,settlements,registry,rows,scope,json);
+        }
         @Bean MinedEvaluationCandidateService mined(ActionProductionSourceValidator sources, BusinessReviewSampleService initialized,
                 SqlSessionTemplate session,IqcDataScope scope,ObjectMapper json){
             return new MinedEvaluationCandidateService(sources,session.getMapper(QualitySampleMapper.class),
@@ -56,7 +84,7 @@ class IsolatedMysqlMinedCandidateActionIT {
     }
     @BeforeEach void prepare() throws Exception {
         jdbc.execute("DROP TRIGGER IF EXISTS reject_mined_candidate_insert");
-        for(String table:List.of("iqc_quality_sample_version","iqc_quality_sample","iqc_result_review",
+        for(String table:List.of("iqc_action_execution_event","iqc_action_execution","iqc_quality_sample_version","iqc_quality_sample","iqc_result_review",
                 "iqc_conversation_message","iqc_conversation","iqc_inspection_rule_result"))jdbc.update("DELETE FROM "+table);
         new IsolatedMysqlActionSourceIT().fixture("ADD_TO_EVALUATION_CANDIDATE",java.time.LocalTime.MIDNIGHT,
                 io.github.opensabre.iqc.pipelineasset.PipelineRelease.EXACT_SCHEMA,true);
@@ -103,4 +131,40 @@ class IsolatedMysqlMinedCandidateActionIT {
         jdbc.update("UPDATE iqc_inspection_task SET status='CANCELLED' WHERE id='task'");
         assertEquals(ActionExecutionContract.Outcome.UNKNOWN,execute(Set.of("iqc:sample:manage")).outcome());assertEquals(0,count());
     }
+    private <T> T workflow(java.util.function.Function<ScheduledActorAccessService.Resolved,T> operation){
+        var grants=new java.util.HashSet<>(ActionEnqueueService.REQUIRED_GRANTS);grants.add("iqc:sample:manage");
+        var actor=new ScheduledActorAccessService.Resolved("user","alice",false,"group",Set.of(),Set.copyOf(grants),Instant.now());
+        return scope.asScheduledActor(actor,()->operation.apply(actor));
+    }
+    @Test void actualDiscoveryEnqueueClaimAndSettlementUseV2AndCannotResend(){
+        var discovery=context.getBean(ActionDiscoveryMapper.class);
+        assertTrue(discovery.findDue(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)).stream().anyMatch(row->row.resultId().equals("result")));
+        var reference=new ActionProductionSourceValidator.Reference("task","execution","conversation","result","alice");
+        var enqueue=context.getBean(ActionEnqueueService.class);
+        String id=workflow(actor->enqueue.enqueue(reference,actor).getFirst());
+        assertTrue(discovery.isComplete("result"));assertEquals(0,count());
+        assertEquals("PENDING",context.getBean(ActionExecutionMapper.class).selectById(id).getStatus());
+        assertEquals(ActionExecutionService.Dispatch.SETTLED,workflow(actor->context.getBean(ActionExecutionService.class).execute(id,0,actor)));
+        var row=context.getBean(ActionExecutionMapper.class).selectById(id);
+        assertEquals("COMPLETE",row.getStatus());assertEquals(1,row.getAttemptCount());assertEquals(2L,row.getVersion());assertEquals(1,count());
+        assertEquals(List.of(id),workflow(actor->enqueue.enqueue(reference,actor)));
+        assertEquals(ActionExecutionService.Dispatch.NOT_CLAIMED,workflow(actor->context.getBean(ActionExecutionService.class).execute(id,2,actor)));
+        assertEquals(1,count());
+    }
+    @Test void concurrentActualProducerTransactionsConvergeOnOneArtifact() throws Exception {
+        var ready=new java.util.concurrent.CountDownLatch(2);var go=new java.util.concurrent.CountDownLatch(1);
+        try(var pool=java.util.concurrent.Executors.newFixedThreadPool(2)){
+            java.util.concurrent.Callable<ActionAdapter.Receipt> operation=()->{
+                ready.countDown();assertTrue(go.await(10,java.util.concurrent.TimeUnit.SECONDS));
+                return execute(Set.of("iqc:sample:manage"));
+            };
+            var first=pool.submit(operation);var second=pool.submit(operation);
+            assertTrue(ready.await(10,java.util.concurrent.TimeUnit.SECONDS));go.countDown();
+            var a=first.get(20,java.util.concurrent.TimeUnit.SECONDS);var b=second.get(20,java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals(ActionExecutionContract.Outcome.CONFIRMED_SUCCESS,a.outcome());
+            assertEquals(ActionExecutionContract.Outcome.CONFIRMED_SUCCESS,b.outcome());
+            assertEquals(a.resultReference(),b.resultReference());assertEquals(1,count());
+        }finally{go.countDown();}
+    }
+
 }
