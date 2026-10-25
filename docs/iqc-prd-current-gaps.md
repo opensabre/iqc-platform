@@ -51,3 +51,11 @@ PRD14.3要求业务层标签准确率。当前 `PipelineEvaluationService.report
 既有IsolatedMysqlMeasuredPublicationIT模型场景接入真实FindingLabelFreezeService/LabelResolutionService与原标签mapper，已发布标签/规则绑定/BOOLEAN值定义为隔离SQL夹具；不mock目录解析或投影。真实Gold标注/独立审核/数据集冻结/worker产物落库：双样本首次第二条失败，report标签Gold=2、可比=1、accuracy=1；恢复adapter重试后Gold=2、可比=2、accuracy=1，首条source仍prior，当前执行SQL结果仅1行。原模型一致性与SQL/MVC组合断言仍通过。
 
 原6341终态0，`/tmp/iqc-b-label-sql.log`，fresh XML：隔离SQL2（94.309秒）+一致性计算5+报告23=30项无失败/错误/跳过；testCompile+surerfire及diff检查通过，专用127.0.0.1:34307脚本自动关闭。已发布标签等记录由测试初始化，未验证标签发布UI流程；scope/current grant/Agent资产validator/供应商ChatModel与网关账本仍受控，不外推真实PDP/供应商/浏览器网络链。纯标签4项沿上一轮证据，不叠加本轮数量。
+
+## 2026-10-25 自动候选挖掘的源码复核
+
+P2“自动候选样本挖掘”尚不能以已有候选动作完成替代：EvaluationCandidateActionAdapter.ready只在指定业务复核COMPLETED后放行，EvaluationCandidateActionService.create再核同一复核轮次；GoldSampleService.reviewedCandidate只接受iqc-reviewed-business-candidate-v1来源。它们已满足“人工确认误判→候选→独立Gold审核”的路径，不是对未复核结果自动发现候选。
+
+后续应扩原QualitySample候选池/冻结输入/Gold标注和原动作执行幂等，新增明确的待标注AI挖掘来源协议，保留原结果Hash、任务/执行/会话与组织范围、算法/配置版本和筛选原因；不得另建样本注册表，不能提前给出FALSE_POSITIVE/FALSE_NEGATIVE或自动批准Gold。现有已复核v1来源和历史反读必须保持。该项目前是实质功能缺口，仍待设计/实施与SQL/权限/重放验证，未据本轮文档视作交付。
+
+本文件前面的2026-10-22阶段状态不是全局最新功能缺口清单：之后已实现校准产物/来源授权/运行和身份绑定/留出门禁/成本级联/Benchmark调用费用与Token，固定提交与有限专项证据见根协作台账及相应正式文档。真实供应商、PDP、容量、自动挖掘及其余适用I1–I7仍未逐项完成。

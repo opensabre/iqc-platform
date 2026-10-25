@@ -514,3 +514,7 @@ PRD8.3/25成本优化路由沿原Condition/依赖/Trace增加CALIBRATED_CONFIDEN
 ### 来源执行Token汇总
 
 原RunUsage增加可省略的供应商输入/输出/总Token独立覆盖与已知小计，复用原来源范围、授权和账本；不推缺失字段、未知不补零，精确聚合转整数字符串。原Benchmark面板显示三项而不另建页/API/账本。旧两参RunUsage构造与无字段读取保持，真实SQL与完整容量/成本质量验收继续，I1–I7未完成。
+
+### 业务质量报告Token链路
+
+复用原可选模型调用统计与RunUsage.tokens，在BusinessQualityReportService.ModelUsageSummary及原卡片接入三项Token覆盖/已知小计；旧六参构造和缺字段JSON保留，不加SQL/API/授权/公式。原执行来源、组织权限和精确字符串口径保持；当前构建不代表真实SQL/PDP/业务浏览器验收。完整I1–I7继续。

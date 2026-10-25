@@ -60,7 +60,15 @@ public class BusinessQualityReportService {
             int selectedVersionNo,String selectedReleaseHash) { }
     public record ModelUsageSummary(String schemaVersion,int selectedResults,int boundResults,int unboundResults,
             io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CostSummary costs,
-            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CallLatencySummary latency) { }
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CallLatencySummary latency,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CallTokenSummary tokens) {
+        public ModelUsageSummary(String schemaVersion,int selectedResults,int boundResults,int unboundResults,
+                io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CostSummary costs,
+                io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CallLatencySummary latency){
+            this(schemaVersion,selectedResults,boundResults,unboundResults,costs,latency,null);
+        }
+    }
     public record ManualScoreSummary(int appliedCount,int staleCount,BigDecimal averageOverrideScore,
                                      int effectiveNumericCount,BigDecimal averageEffectiveScore) { }
     public record ScoreSummary(int resultCount, int finalCount, int pendingCount, int notApplicableCount,
@@ -249,7 +257,7 @@ public class BusinessQualityReportService {
                                 candidate.selection().task().getId(),result.getExecutionId(),candidate.conversationId()));
                 }
                 var summary=modelCalls.taskRunUsage(references);int bound=(int)references.stream().distinct().count();
-                usage=new ModelUsageSummary("iqc-business-model-usage-v1",expected,bound,expected-bound,summary.costs(),summary.latency());
+                usage=new ModelUsageSummary("iqc-business-model-usage-v1",expected,bound,expected-bound,summary.costs(),summary.latency(),summary.tokens());
             }
             reportGroups.add(group.view(usage));
         }
