@@ -17,7 +17,10 @@ public final class CalibrationBridgeFixture {
     private CalibrationBridgeFixture() { }
     public static InspectionTask freeze(ObjectMapper json,PipelineDefinition.Node node) {
         long[] counts=new long[10],correct=new long[10];counts[7]=20;correct[7]=10;
-        var artifact=EmpiricalConfidenceCalibration.fit(new EmpiricalConfidenceCalibration.Source("source","source-run","a".repeat(64),"b".repeat(64),"c".repeat(64),node.nodeId(),SelectorAssetService.hash(json.valueToTree(node).toString()),node.config().path("findingDefinition").path("code").asText()),20,20,counts,correct);
+        var model=node.config().path("modelSnapshot");
+        String key=model.isObject()?new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.ModelIdentity(model.path("provider").asText(),model.path("endpoint").asText(),model.path("modelName").asText()).key():"a".repeat(64);
+        String deployment=model.isObject()?model.path("deploymentRef").asText():"deployment-v1";
+        var artifact=EmpiricalConfidenceCalibration.fit(new EmpiricalConfidenceCalibration.Source("source","source-run","a".repeat(64),"b".repeat(64),"c".repeat(64),node.nodeId(),SelectorAssetService.hash(json.valueToTree(node).toString()),node.config().path("findingDefinition").path("code").asText(),key,deployment),20,20,counts,correct);
         var reference=new EmpiricalConfidenceCalibration.Reference("source","source-run",node.nodeId(),artifact.contentHash());
         var graph=new PipelineDefinition(PipelineDefinition.SCHEMA,List.of(node));
         var fusion=new FusionPolicy("fusion",1,FusionPolicy.Method.CONFIDENCE,Map.of(),Map.of(),"calibration",Set.of(node.nodeId()),null,null,List.of(reference));
