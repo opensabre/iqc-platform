@@ -99,4 +99,52 @@ class BenchmarkDraftHttpPrivacyTest {
         for(var request:requests)mvc.perform(request).andExpect(jsonPath("$.code").value("IQC-1005")).andExpect(jsonPath("$.data").doesNotExist());
         verifyNoInteractions(benchmarks,datasets);
     }
+    @Test void optionalUsageSurvivesProjectionAndHttpWithoutChangingDefaultReport() throws Exception {
+        allow(false,false,false);
+        var pair=new BenchmarkService.Pair("schema","experiment","name","d",1,"hash",null,null,side("b"),side("c"));
+        var recorded=new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.RunUsage(
+                new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CostSummary("3","1","2",List.of()),
+                new io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.CallLatencySummary("3","2","1","12.5"));
+        var usage=new BenchmarkService.ModelUsage("iqc-benchmark-model-usage-v1","RECORDED_CALLS_OF_VALIDATED_SAMPLE_SOURCE_RUNS",
+                new BenchmarkService.UsageSide(2,1,1,recorded),new BenchmarkService.UsageSide(2,2,0,recorded));
+        when(benchmarks.report("b","be","ce",true)).thenReturn(new BenchmarkService.Report("report",pair,null,null,false,Map.of(),usage));
+        when(benchmarks.report("b","be","ce")).thenReturn(new BenchmarkService.Report("report",pair,null,null,false,Map.of()));
+        var mvc=mvc();
+        mvc.perform(get("/api/iqc/evaluation/benchmarks/b/report?baselineExecutionId=be&candidateExecutionId=ce&includeModelUsage=true"))
+                .andExpect(jsonPath("$.code").value("000000"))
+                .andExpect(header().string("Cache-Control","private, no-store"))
+                .andExpect(jsonPath("$.data.modelUsage.baseline.unboundSamples").value(1))
+                .andExpect(jsonPath("$.data.modelUsage.baseline.recorded.costs.unknownCount").value("2"))
+                .andExpect(jsonPath("$.data.modelUsage.candidate.boundSamples").value(2));
+        mvc.perform(get("/api/iqc/evaluation/benchmarks/b/report?baselineExecutionId=be&candidateExecutionId=ce"))
+                .andExpect(jsonPath("$.code").value("000000"))
+                .andExpect(jsonPath("$.data.modelUsage").doesNotExist());
+        verify(benchmarks).report("b","be","ce",true);
+        verify(benchmarks).report("b","be","ce");
+    }
+
+    @Test void realServiceRejectsMissingUsageGrantBeforeAnyReportOrLedgerReadOverHttp() throws Exception {
+        var actors=mock(io.github.opensabre.iqc.schedule.ScheduledActorAccessService.class);
+        var bound=new io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound("schema","user","owner",false,"group");
+        when(actors.capture()).thenReturn(bound);
+        when(actors.resolveCurrent(eq(bound),anySet())).thenAnswer(invocation->{
+            Set<String> resources=invocation.getArgument(1);
+            if(resources.contains("iqc:task:model-calls:view"))throw io.github.opensabre.iqc.governance.IqcException.accessDenied("usage revoked");
+            return new io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved("user","owner",false,"group",Set.of(),resources,Instant.now());
+        });
+        var sensitive=new SensitiveReadAccessService(actors);
+        var evaluations=mock(PipelineEvaluationService.class);
+        var ledger=mock(io.github.opensabre.iqc.result.llm.gateway.GatewayCallService.class);
+        var service=new BenchmarkService(evaluations,null,null,null,json,ledger,sensitive);
+        var mvc=MockMvcBuilders.standaloneSetup(new BenchmarkController(service,sensitive,projection))
+                .setControllerAdvice(new RestResponseBodyAdvice(),new io.github.opensabre.iqc.governance.IqcExceptionHandlerAdvice(),
+                        new io.github.opensabre.webmvc.exception.DefaultWebMvcExceptionHandlerAdvice()).build();
+        mvc.perform(get("/api/iqc/evaluation/benchmarks/b/report?baselineExecutionId=be&candidateExecutionId=ce&includeModelUsage=true"))
+                .andExpect(jsonPath("$.code").value("IQC-1005"))
+                .andExpect(jsonPath("$.data").doesNotExist());
+        verify(actors).resolveCurrent(bound,Set.of("iqc:benchmark:report:view"));
+        verify(actors).resolveCurrent(bound,Set.of("iqc:benchmark:report:view","iqc:task:model-calls:view"));
+        verifyNoInteractions(evaluations,ledger);
+    }
+
 }
