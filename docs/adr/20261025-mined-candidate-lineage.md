@@ -1,0 +1,13 @@
+# 自动挖掘候选沿用原样本池
+
+状态：来源协议/Gold读取阶段，自动生产尚未接通。
+
+PRD P2要求自动候选挖掘。源码复用检索：QualitySample/GoldSampleService已有候选、标注和独立审核；BusinessReviewSampleService已有冻结segments及精确候选输入v3；EvaluationCandidateActionAdapter/Service目前只支持完成业务复核的v1；ActionAdapterRegistry已有精确type/version选择。因此沿原样本池和动作版本扩展，不新增候选表、样本注册服务或并行审核流程。
+
+现新增iqc-ai-mined-candidate-v1来源，记录15项：schemaVersion、sourceResultId、taskId、executionId、conversationId、owner、ownerGroupId、sourceHash、inputHash、executionInputHash、miningPolicyHash、miningStrategy、miningVersion、reasonCodes、requestFingerprint。ownerGroupId显式null或字符串；其余身份/摘要/策略字段为文本，miningVersion为1–1000整数，reasonCodes为1–20个不同受限代码。严格拒绝重复键/尾随/未知字段、数字转文本、额外expected或审核结论。算法/版本/原因仅是挖掘依据，不是已确认误判分类。
+
+新候选sampleType固定UNCLASSIFIED、messageId为空，Gold读取核对原结果/会话/创建者、组不扩大及输入Hash，且只接受原EXACT_INPUT_SCHEMA v3冻结segments。旧已复核候选仍走原协议/字段列表，不为旧来源新增挖掘上下文。两个来源复用原消息字段/顺序/坐标/置信度解码；新来源不查询当前会话、不重新转写或复算模型，不拷贝AI输出为Gold。GoldDraft仍由用户标注，原独立审核及数据集已审核版本条件保持。
+
+本阶段只验证可信存储中的来源协议/输入一致性，不替代原生产结果验证。后续动作v2/创建服务必须在原任务锁下重新验证原生产输入与结果、当前授权和组织范围、真实策略及筛选原因，首次捕获不可变/幂等恢复；不能允许客户端提交任意此协议就作为真实来源。尚未接通任何自动创建API或后台发现，不能据本阶段宣称自动挖掘完成。
+
+后续需补：原动作执行链筛选与幂等创建、原池展示/标注入口、当前授权撤销与跨组、来源变动与恢复、不重复挖掘、真实SQL并发及独立审核；禁止自动批准或预判FALSE_POSITIVE/FALSE_NEGATIVE。无Framework/共享SQL/部署或默认v2变更。

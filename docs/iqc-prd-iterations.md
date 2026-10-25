@@ -518,3 +518,7 @@ PRD8.3/25成本优化路由沿原Condition/依赖/Trace增加CALIBRATED_CONFIDEN
 ### 业务质量报告Token链路
 
 复用原可选模型调用统计与RunUsage.tokens，在BusinessQualityReportService.ModelUsageSummary及原卡片接入三项Token覆盖/已知小计；旧六参构造和缺字段JSON保留，不加SQL/API/授权/公式。原执行来源、组织权限和精确字符串口径保持；当前构建不代表真实SQL/PDP/业务浏览器验收。完整I1–I7继续。
+
+### 自动候选挖掘：来源协议和Gold读取
+
+复用原QualitySample池、精确候选输入v3及标注/独立审核，新增待标注AI挖掘lineage，绑定结果/执行/输入、归属、策略版本/原因，禁止夹带expected或审核结论。Gold原候选路径可校验后读取新来源，不重捕获归档，旧已复核来源表示保持。当前无自动生产者，动作v2/筛选/幂等创建/界面和SQL权限验收仍待，未把协议阶段当自动挖掘完成；设计见ADR20261025。
