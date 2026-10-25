@@ -38,12 +38,20 @@ public class BusinessQualityReportService {
     private final io.github.opensabre.iqc.pipelineasset.PipelineRolloutExecutionGuard rolloutGuard;
     private final io.github.opensabre.iqc.result.llm.gateway.GatewayCallService modelCalls;
     private final io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive;
+    private final io.github.opensabre.iqc.action.ActionExecutionMapper actionExecutions;
     @org.springframework.beans.factory.annotation.Autowired
     public BusinessQualityReportService(InspectionTaskMapper tasks,ConversationInspectionResultMapper results,
             BusinessItemReviewService reviews,IqcDataScope scope,ObjectMapper mapper,TaskExecutionMapper executions,
             io.github.opensabre.iqc.pipelineasset.PipelineRolloutExecutionGuard rolloutGuard,
+            io.github.opensabre.iqc.result.llm.gateway.GatewayCallService modelCalls,io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive,
+            io.github.opensabre.iqc.action.ActionExecutionMapper actionExecutions){
+        this.actionExecutions=actionExecutions;this.tasks=tasks;this.results=results;this.reviews=reviews;this.scope=scope;this.mapper=mapper;this.executions=executions;this.rolloutGuard=rolloutGuard;this.modelCalls=modelCalls;this.sensitive=sensitive;
+    }
+    public BusinessQualityReportService(InspectionTaskMapper tasks,ConversationInspectionResultMapper results,
+            BusinessItemReviewService reviews,IqcDataScope scope,ObjectMapper mapper,TaskExecutionMapper executions,
+            io.github.opensabre.iqc.pipelineasset.PipelineRolloutExecutionGuard rolloutGuard,
             io.github.opensabre.iqc.result.llm.gateway.GatewayCallService modelCalls,io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive){
-        this.tasks=tasks;this.results=results;this.reviews=reviews;this.scope=scope;this.mapper=mapper;this.executions=executions;this.rolloutGuard=rolloutGuard;this.modelCalls=modelCalls;this.sensitive=sensitive;
+        this(tasks,results,reviews,scope,mapper,executions,rolloutGuard,modelCalls,sensitive,null);
     }
     public BusinessQualityReportService(InspectionTaskMapper tasks,ConversationInspectionResultMapper results,
             BusinessItemReviewService reviews,IqcDataScope scope,ObjectMapper mapper,TaskExecutionMapper executions,
@@ -123,7 +131,18 @@ public class BusinessQualityReportService {
                     missingResultCount,missingReviewCount,pendingReviewCount,machine,reviewed,items,null,null);
         }
     }
-    public record Report(String scope, String runPolicy, int taskCount, int conversationCount, List<PolicyGroup> groups) { }
+    public record ActionStateCount(String status,String outcome,String actionCount) { }
+    /** Current ledger snapshot, not an attempt failure rate or proof of external fulfillment. */
+    public record ActionMetrics(String schemaVersion,int selectedResults,int boundResults,int unboundResults,
+            String actionCount,String confirmedSuccessCount,String confirmedFailureCount,String unresolvedCount,
+            BigDecimal confirmedFailureRate,List<ActionStateCount> states) { }
+    public record Report(String scope, String runPolicy, int taskCount, int conversationCount, List<PolicyGroup> groups,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            ActionMetrics actionMetrics) {
+        public Report(String scope,String runPolicy,int taskCount,int conversationCount,List<PolicyGroup> groups){
+            this(scope,runPolicy,taskCount,conversationCount,groups,null);
+        }
+    }
     public enum RunPolicy { SELECTED_RUNS, FIRST_PER_CONVERSATION, LATEST_PER_CONVERSATION }
 
     /** Explicit task selection only; authorize and bound all scopes before reading any result data. */
@@ -139,6 +158,14 @@ public class BusinessQualityReportService {
     }
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Report report(List<String> taskIds,String executionSelectionJson,String requestedRunPolicy,boolean includeModelUsage){
+        return report(taskIds,executionSelectionJson,requestedRunPolicy,includeModelUsage,false);
+    }
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public Report report(List<String> taskIds,String executionSelectionJson,String requestedRunPolicy,boolean includeModelUsage,boolean includeActionMetrics){
+        if(includeActionMetrics){
+            if(sensitive==null||actionExecutions==null)throw IqcException.invalidState("动作统计授权/汇总依赖不可用");
+            sensitive.current(java.util.Set.of("iqc:report:view","iqc:action:history:view"));
+        }
         if(includeModelUsage){
             if(sensitive==null||modelCalls==null)throw IqcException.invalidState("调用统计授权/汇总依赖不可用");
             sensitive.current(java.util.Set.of("iqc:report:view","iqc:task:model-calls:view"));
@@ -261,7 +288,30 @@ public class BusinessQualityReportService {
             }
             reportGroups.add(group.view(usage));
         }
-        return new Report("SELECTED_TASK_RUNS", runPolicy.name(), selected.size(), candidates.size(),List.copyOf(reportGroups));
+        return new Report("SELECTED_TASK_RUNS", runPolicy.name(), selected.size(), candidates.size(),List.copyOf(reportGroups),includeActionMetrics?actionMetrics(candidates):null);
+    }
+
+    private ActionMetrics actionMetrics(List<RunCandidate> candidates){
+        var sources=new ArrayList<io.github.opensabre.iqc.action.ActionExecutionMapper.ResultReference>();
+        for(var candidate:candidates){
+            var result=candidate.result();
+            if(result!=null&&result.getId()!=null&&result.getExecutionId()!=null&&!result.getExecutionId().isBlank())
+                sources.add(new io.github.opensabre.iqc.action.ActionExecutionMapper.ResultReference(candidate.selection().task().getId(),
+                        result.getExecutionId(),candidate.conversationId(),result.getId(),candidate.selection().task().getCreatedBy()));
+        }
+        var distinct=sources.stream().distinct().toList();
+        var states=new ArrayList<ActionStateCount>();long total=0,success=0,failure=0;
+        if(!distinct.isEmpty())for(var row:actionExecutions.countSelectedResultStates(distinct)){
+            if(row.actionCount()<0)throw IqcException.invalidState("动作统计计数无效");
+            total=Math.addExact(total,row.actionCount());
+            if("COMPLETE".equals(row.status())&&"CONFIRMED_SUCCESS".equals(row.outcome()))success=Math.addExact(success,row.actionCount());
+            else if("FAILED".equals(row.status())&&java.util.Set.of("CONFIRMED_FINAL_FAILURE","CONFIRMED_RETRYABLE_FAILURE").contains(java.util.Objects.toString(row.outcome(),"")))failure=Math.addExact(failure,row.actionCount());
+            states.add(new ActionStateCount(row.status(),row.outcome(),Long.toString(row.actionCount())));
+        }
+        long resolved=Math.addExact(success,failure);
+        BigDecimal rate=resolved==0?null:BigDecimal.valueOf(failure).multiply(BigDecimal.valueOf(100)).divide(BigDecimal.valueOf(resolved),2,RoundingMode.HALF_UP);
+        return new ActionMetrics("iqc-business-action-metrics-v1",candidates.size(),distinct.size(),candidates.size()-distinct.size(),
+                Long.toString(total),Long.toString(success),Long.toString(failure),Long.toString(total-resolved),rate,List.copyOf(states));
     }
 
     private Map<String, String> readExecutionSelections(String json, List<String> taskIds) {
