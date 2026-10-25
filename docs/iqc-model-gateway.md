@@ -208,3 +208,13 @@ UI原任务模型调用组件提供会话ID筛选，显示实际生效会话/执
 ## 业务报告精确执行集合汇总（2026-10-23）
 
 原GatewayCallMapper/Service增加内部taskRunUsage精确任务/EID/会话集合，调用方为原业务统计显式includeModelUsage选项。costGroups原SQL与费用汇总器共用；新集合参数不能成为全表查询，空集合返回无记录汇总。追加同集合CONFIRMED合法接收/结算平均耗时及未测量计数，字符串保留数值精度，任务与执行来源复用原get/mapper核对。HTTP当前report:view+task:model-calls:view检查及默认不查询原则、指标边界见iqc-pipeline-rollout-tasks.md。无新增持久化/API/权限；本批编译构建，实际SQL与授权专项待独立验证。
+
+### HTTP回退Provider部署调用证据
+
+HTTP Provider可选配置iqc.llm.deployment-ref（环境变量IQC_LLM_DEPLOYMENT_REF），采用原DeploymentDeclaration受限128字符格式。它是运维维护的模型版本/部署参考，不是凭据，不会作为额外字段或Header发送给供应商；不设置则保持部署未测量。必须在实际模型权重、版本或路由语义变化时更换引用并重新拟合，不得把可变别名当不可变版本保证。
+
+成功请求保留原ModelGateway.invokeTracked的Handle，用Handle.modelKey与此次规范化请求身份匹配后生成原InvocationFingerprint，输入摘要覆盖HTTP请求正文、path、模型key和部署引用；不包含Authorization。原Gateway调用记录保存部署声明，usage/重试/可选诊断仍沿同一入口。无Gateway、无Handle或身份不匹配不伪造指纹；无部署声明的三字段指纹只能提供部分诊断，不能满足校准执行的完整身份要求。网关旧modelKey和容量/预算桶不变。
+
+这使HTTP路径具备校准来源所需的身份测量入口，不等于网络/供应商/SQL/发布验证完成；服务端仍须原拟合身份一致、留出集隔离和发布测量门禁。运营方需保证deployment-ref实际对应版本，系统不能从一个自报标签证明供应商权重不可变。
+
+HTTP客户端记录的端点与构造该RestClient时的baseUrl一致；每次尝试在调用前捕获model/path/deploymentRef，正文、准入身份与成功后的指纹复用同一份值，不在网络返回后重读可变配置。重试仍按各次实际尝试记录，不将先前失败尝试身份冒充最终成功身份。修改端点需重建客户端，不能仅改属性对象就声称HTTP目标已经切换。

@@ -21,6 +21,8 @@ public class LlmQualityProperties {
     private String path = "/v1/chat/completions";
     private String apiKey;
     private String model;
+    /** Operator-maintained immutable model deployment reference; absent means unmeasured. */
+    private String deploymentRef;
     private int connectTimeoutMillis = 3000;
     private int readTimeoutMillis = 15000;
     private int maxAttempts = 2;

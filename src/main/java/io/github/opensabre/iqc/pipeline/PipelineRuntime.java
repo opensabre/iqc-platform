@@ -60,6 +60,9 @@ public final class PipelineRuntime implements AutoCloseable {
             node.inputMapping().values().forEach(PipelineRuntime::validatePointer);
             if(node.condition()!=null) {
                 validatePointer(node.condition().pointer()); Objects.requireNonNull(node.condition().operator());
+                if(node.condition().operator()==PipelineDefinition.Operator.CALIBRATED_CONFIDENCE_BELOW
+                        &&!node.dependsOn().contains(com.fasterxml.jackson.core.JsonPointer.compile(node.condition().pointer()).tail().getMatchingProperty()))
+                    throw new IllegalArgumentException("Calibrated cascade requires an explicit source dependency");
                 if(node.condition().operator()!=PipelineDefinition.Operator.EXISTS && node.condition().value()==null)
                     throw new IllegalArgumentException("Comparison condition requires value");
                 if((node.condition().operator()==PipelineDefinition.Operator.GREATER_OR_EQUAL || node.condition().operator()==PipelineDefinition.Operator.LESS_OR_EQUAL
@@ -527,6 +530,7 @@ public final class PipelineRuntime implements AutoCloseable {
         if(condition==null) return true;
         JsonNode actual=context.at(condition.pointer()); JsonNode expected=condition.value();
         return switch(condition.operator()) {
+            case CALIBRATED_CONFIDENCE_BELOW -> escalateCalibrated(actual,expected);
             case EXISTS -> !actual.isMissingNode() && !actual.isNull();
             case EQUALS -> !actual.isMissingNode() && equalValue(actual,expected);
             case NOT_EQUALS -> !actual.isMissingNode() && !actual.isNull() && expected!=null && !equalValue(actual,expected);
@@ -535,6 +539,25 @@ public final class PipelineRuntime implements AutoCloseable {
             case LESS_THAN -> actual.isNumber() && expected!=null && expected.isNumber() && actual.decimalValue().compareTo(expected.decimalValue())<0;
             case LESS_OR_EQUAL -> actual.isNumber() && expected!=null && expected.isNumber() && actual.decimalValue().compareTo(expected.decimalValue())<=0;
         };
+    }
+    /** Missing support escalates; a probability is never inferred from a label or a raw self-report. */
+    private static boolean escalateCalibrated(JsonNode node,JsonNode threshold){
+        var facts=node.path("findings");
+        if(!"SUCCESS".equals(node.path("status").asText())||!facts.isArray()||facts.size()!=1)return true;
+        var fact=facts.get(0);var confidence=fact.path("confidence");var proof=node.path("metrics").path("iqcConfidenceCalibration");
+        if(!"KNOWN".equals(fact.path("state").asText())
+                ||!Set.of("LLM","SMALL_MODEL").contains(fact.path("source").path("engineType").asText())
+                ||!confidence.isNumber()||!Double.isFinite(confidence.doubleValue())||confidence.decimalValue().signum()<0
+                ||confidence.decimalValue().compareTo(java.math.BigDecimal.ONE)>0||!proof.isObject()||proof.size()!=6
+                ||!io.github.opensabre.iqc.quality.evaluation.CalibrationRuntime.SCHEMA.equals(proof.path("schemaVersion").asText())
+                ||!proof.path("artifactHash").isTextual()||!proof.path("artifactHash").textValue().matches("[a-f0-9]{64}")
+                ||!proof.path("findingId").isTextual()||!proof.path("findingId").equals(fact.path("id"))
+                ||!proof.path("supported").isBoolean()||!proof.path("supported").booleanValue()
+                ||!proof.path("rawConfidence").isNumber()||!Double.isFinite(proof.path("rawConfidence").doubleValue())
+                ||proof.path("rawConfidence").decimalValue().signum()<0||proof.path("rawConfidence").decimalValue().compareTo(java.math.BigDecimal.ONE)>0
+                ||!proof.path("calibratedConfidence").isNumber()||!Double.isFinite(proof.path("calibratedConfidence").doubleValue())
+                ||proof.path("calibratedConfidence").decimalValue().compareTo(confidence.decimalValue())!=0)return true;
+        return confidence.decimalValue().compareTo(threshold.decimalValue())<0;
     }
     /** Scalar numeric equality follows the existing action-condition decimal comparison contract. */
     private static boolean equalValue(JsonNode actual,JsonNode expected) {
