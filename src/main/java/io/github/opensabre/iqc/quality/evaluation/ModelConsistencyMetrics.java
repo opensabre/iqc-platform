@@ -24,7 +24,7 @@ public final class ModelConsistencyMetrics {
             comparable++;
             if(meaning(pair.selected().result(),json).equals(meaning(pair.reference().result(),json)))agreeing++;
         }
-        return new Report("iqc-model-consistency-v1","INDEPENDENT_SAME_MODEL_INPUT_NODE_FINDING_VALUE_STATE_SEVERITY",pairs.size(),
+        return new Report("iqc-model-consistency-v2","INDEPENDENT_SAME_DECLARED_MODEL_DEPLOYMENT_INPUT_NODE_FINDING_VALUE_STATE_SEVERITY",pairs.size(),
                 comparable,agreeing,ratio(comparable,pairs.size()),ratio(agreeing,comparable),Collections.unmodifiableMap(reasons));
     }
     private static String excluded(Pair pair){
@@ -37,9 +37,10 @@ public final class ModelConsistencyMetrics {
                 .anyMatch(f->f.state()!=Finding.State.KNOWN))return "UNRESOLVED_OUTPUT";
         var a=fingerprints(left);var b=fingerprints(right);
         if(a==null||b==null)return "UNMEASURED_INVOCATION";
-        return a.equals(b)?null:"DIFFERENT_MODEL_OR_INPUT";
+        if(java.util.stream.Stream.concat(a.stream(),b.stream()).anyMatch(value->value.deploymentRef()==null))return "UNMEASURED_DEPLOYMENT";
+        return a.equals(b)?null:"DIFFERENT_MODEL_DEPLOYMENT_OR_INPUT";
     }
-    private static List<String> fingerprints(NodeResult result){
+    private static List<io.github.opensabre.iqc.result.llm.SnapshotChatModelRouter.InvocationFingerprint> fingerprints(NodeResult result){
         var metrics=result.metrics().get("llmStructuredOutput");
         if(metrics==null||!"iqc-llm-structured-metrics-v1".equals(metrics.path("schemaVersion").asText()))return null;
         var calls=metrics.path("logicalInvocations");var valid=metrics.path("validOutputs");var failed=metrics.path("invalidOrFailedOutputs");
@@ -48,11 +49,15 @@ public final class ModelConsistencyMetrics {
                 ||!valid.isIntegralNumber()||!valid.canConvertToInt()||valid.intValue()!=calls.intValue()
                 ||!failed.isIntegralNumber()||!failed.canConvertToInt()||failed.intValue()!=0
                 ||!values.isArray()||values.size()!=calls.intValue())return null;
-        var fingerprints=new ArrayList<String>();
+        var fingerprints=new ArrayList<io.github.opensabre.iqc.result.llm.SnapshotChatModelRouter.InvocationFingerprint>();
         for(var value:values){
-            if(!"iqc-llm-invocation-fingerprint-v1".equals(value.path("schemaVersion").asText())
-                    ||!value.path("modelKey").asText().matches("[a-f0-9]{64}")||!value.path("inputHash").asText().matches("[a-f0-9]{64}"))return null;
-            fingerprints.add(value.path("modelKey").asText()+":"+value.path("inputHash").asText());
+            if(!value.isObject()||!value.path("schemaVersion").isTextual()||!value.path("modelKey").isTextual()||!value.path("inputHash").isTextual()
+                    ||value.hasNonNull("deploymentRef")&&!value.path("deploymentRef").isTextual())return null;
+            try{
+                fingerprints.add(new io.github.opensabre.iqc.result.llm.SnapshotChatModelRouter.InvocationFingerprint(
+                        value.path("schemaVersion").textValue(),value.path("modelKey").textValue(),value.path("inputHash").textValue(),
+                        value.path("deploymentRef").textValue()));
+            }catch(IllegalArgumentException invalid){return null;}
         }
         return fingerprints;
     }

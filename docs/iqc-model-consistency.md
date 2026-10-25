@@ -8,7 +8,7 @@
 
 ## 统计定义
 
-协议iqc-model-consistency-v1。分母为冻结数据集样本数乘声明LLM节点数；每个样本/节点只取轨迹最终节点结果。仅比较独立来源Task/EID/sample、SUCCESS节点、非空且全KNOWN的输出，以及完整有效的有序invocationFingerprints（有效输出数=调用数、无失败、指纹数=调用数）。实际modelKey与框架输入摘要有序序列必须相同。
+当前按需报告协议 iqc-model-consistency-v2（部署身份收口前为 v1）。分母为冻结数据集样本数乘声明LLM节点数；每个样本/节点只取轨迹最终节点结果。仅比较独立来源Task/EID/sample、SUCCESS节点、非空且全KNOWN的输出，以及完整有效的有序invocationFingerprints（有效输出数=调用数、无失败、指纹数=调用数）。实际 modelKey、声明 deploymentRef 与框架输入摘要的有序序列必须相同；任一调用缺少部署引用计 UNMEASURED_DEPLOYMENT，不进入可比分母。
 
 语义比较为节点Finding的code/type/state/精确value/severity多重集合，复用Selector精确规范摘要；忽略Finding ID、来源执行ID、解释、置信度与证据措辞。该指标不是准确率、证据正确率或供应商逐字输出一致率；这些仍沿原独立质量指标。
 
@@ -72,3 +72,16 @@ B快进至固定A59ce621（包含标签SQL提交b5ae66f），扩展原Evaluation
 在4057c3d的既有真实SQL模型重试夹具，比较请求切换为GET /report参考参数，并增加同一路径普通报告：HTTP data与各自领域报告序列化JSON一致，普通报告标签comparableLabels=2、首样本sourceExecutionIds仍prior；缺reference EID返回IQC-1003无data，当前授权故障IQC-1006无data；四次当前report:view校验，读取不新增模型或网关调用（仍各4次）。
 
 原99047 terminal1：新缺参数场景暴露SQL夹具未装标准BaseException处理器；加入生产DefaultWebMvcExceptionHandlerAdvice后原21866 terminal0，`/tmp/iqc-b-shared-report-sql-final.log`。fresh XML SQL2+一致性计算5+领域报告23=30项无失败/错误/跳过，testCompile+surerfire及diff检查通过。脚本自动关闭专用34307。真实SQL/worker/provider-router/报告/MVC组合，scope/current grants/ChatModel/网关账本及Agent validator仍受控；不是实际socket/PDP或浏览器连接此后端。此前旧路由证据不代替本轮结果。
+
+
+## 部署身份收口（2026-10-25）
+
+旧 v1 比较只核对 modelKey/inputHash，未使用后来新增的 deploymentRef，存在同模型配置和输入但声明部署不同仍可比的缺口。当前 v2 复用原 SnapshotChatModelRouter.InvocationFingerprint 构造校验每个有序调用，要求 schema/modelKey/inputHash 是文本、部署引用缺失可识别但不可比较、声明值须满足原身份协议；不创建另一个身份模型或更改已有指纹/产物摘要。
+
+任一调用部署引用缺失/null时，整对计 UNMEASURED_DEPLOYMENT；非法部署或坏指纹计 UNMEASURED_INVOCATION。完整指纹序列任一模型键/部署/输入不同计 DIFFERENT_MODEL_DEPLOYMENT_OR_INPUT。缺测仍计 expectedPairs，comparisonCoverage 显示实际覆盖，空可比分母 agreementRate=null。多调用必须逐个有完整身份并按原顺序相等，不挑选同模型的一部分调用。
+
+本协议只核对系统实际采集的声明部署引用，不证明供应商实际权重不可变。旧产物不回填部署、不重写哈希；按需报告重新计算时明确显示缺测。UI兼容已有 v1 响应并警告旧口径不能证明部署相同，新 v2 才采用声明部署口径；读取权限/输入变化同步清除报告并废弃旧响应，撤权时不显示历史报告。
+
+Root 仅编译/构建，终态见根协作记录。B需更新旧有效夹具为明确完整部署来源，并独立验证相同/不同/缺失/null/非法部署、每个逻辑调用及顺序、数字身份拒绝、原始来源不变、服务/MVC/真实SQL报告与UI撤权；不能放宽新口径以迁就旧测试。此前历史专项计数保持原基线范围，不外推v2已通过或PRD完成。
+
+Root 原84582 test-compile 终态0且 /tmp/iqc-consistency-deployment-compile.exit=0；合并固定矿化SQL测试后主/测试编译通过，Root未执行测试。v2独立计算/服务/SQL专项仍待B。

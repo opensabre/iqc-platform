@@ -44,3 +44,8 @@ SnapshotChatModelRouter 在实际选定主/备用模型、进入原 Gateway 前�
 原71399终态1：17项中16通过，备用夹具重新when设桩触发旧Supplier回调；改用doAnswer，无生产修复。原57001终态0，`/tmp/iqc-b-invocation-tool-cycle-second.log`，testCompile/surefire，新指纹10+Router3+Provider4共17项零失败错误跳过。未证明真实供应商、真实Gateway预算/结算或端到端持久化。
 
 接入核对：FrozenDetectorEngine保留完整llmStructuredOutput节点metrics，故指纹进入原冻结trace；当前StructuredCounter只汇总结构成功率。一致性需要原来源校验后的多个独立Task/EID实际产物，不能只扩充这个单产物计数器或拿Benchmark不同变量结果直接冒充同输入一致性。
+
+
+## 当前阶段更新（2026-10-25）
+
+以上“只有采集/报告未实现”属于早期阶段，已有实际报告/服务/SQL/HTTP/UI证据见 iqc-model-consistency.md。调用指纹后来增加可选 deploymentRef；当前一致性按需报告 v2 核对有序模型键、声明部署与输入摘要，缺部署为不可比较，不回填旧产物。该声明仍不能证明远端供应商权重不可变，当前完整验收范围以根协作记录为准。
