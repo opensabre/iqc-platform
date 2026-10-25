@@ -506,3 +506,7 @@ HTTP Provider保留原tracked Gateway返回身份，并支持可选iqc.llm.deplo
 PRD8.3/25成本优化路由沿原Condition/依赖/Trace增加CALIBRATED_CONFIDENCE_BELOW，指向完整/upstream/节点，显式依赖该源、0–1阈值。只有SUCCESS、唯一KNOWN模型事实、合法校准证明且置信度达到阈值才不执行升级节点；低值、未支持、未知、缺失或坏证明均需升级。不把原始自报值或仅有calibrated标签当可靠概率；数值业务比较白名单保持原六操作，不引入升级语义。
 
 上游ERROR/TIMEOUT仍受原依赖及Fallback策略约束，新条件不绕过依赖成功规则。顺序/并行/保存/发布沿原能力；原Trace记录Condition not met跳过，原网关只计实际调用，不估算或伪造节省费用。界面原条件选择/路径/JSON阈值编辑，保留原操作含义。实际调用减少、质量不退化、SQL及容量验收待专项，完整适用I1–I7继续，未部署。
+
+### Benchmark调用费用证据
+
+原报告可选聚合两侧验证样本来源执行的实际已记录调用/币种成本/耗时，sourceEID沿原验证产物，不猜当前轮次。原模型调用权限+Benchmark报告权限先检查，内部汇总复用Gateway RunUsage，原Dataset1000上限对齐。UI原对照面板显示来源覆盖和未知量，不以无记录/缺价当免费、不跨币种或自动推断节省。默认报告兼容，真实账本/质量与容量效果继续验收，完整I1–I7未完成。

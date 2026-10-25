@@ -185,7 +185,7 @@ public class GatewayCallService {
     /** Exact result-run scope, including every recorded retry/tool call; never widen an absent execution ID. */
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public RunUsage taskRunUsage(List<GatewayCallMapper.RunReference> references){
-        if(references==null || references.size()>500)throw IqcException.invalidArgument("调用统计范围超限");
+        if(references==null || references.size()>1000)throw IqcException.invalidArgument("调用统计范围超限");
         var runs=references.stream().distinct().toList();var taskIds=new HashSet<String>();var executionIds=new HashSet<String>();
         for(var run:runs){
             if(run==null || java.util.stream.Stream.of(run.taskId(),run.executionId(),run.conversationId())

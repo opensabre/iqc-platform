@@ -46,8 +46,12 @@ public class BenchmarkController {
     @ResourcePermission(code="iqc:benchmark:report:view",name="查看对照报告",type="iqc",description="固定双侧执行轮次和完整金标分母")
     @Audit(operationType=OperationType.QUERY,description="读取对照实验报告",module="IQC_PRIVACY",request=false,response=false,key="#baselineTaskId")
     public BenchmarkService.Report report(@PathVariable String baselineTaskId,@RequestParam String baselineExecutionId,
-                                         @RequestParam String candidateExecutionId){
+                                         @RequestParam String candidateExecutionId,@RequestParam(defaultValue="false") boolean includeModelUsage){
         var access=access("iqc:benchmark:report:view");
-        return projection.benchmarkReport(service.report(baselineTaskId,baselineExecutionId,candidateExecutionId),access);
+        return projection.benchmarkReport(includeModelUsage?service.report(baselineTaskId,baselineExecutionId,candidateExecutionId,true):service.report(baselineTaskId,baselineExecutionId,candidateExecutionId),access);
     }
+    public BenchmarkService.Report report(String baselineTaskId,String baselineExecutionId,String candidateExecutionId){
+        return report(baselineTaskId,baselineExecutionId,candidateExecutionId,false);
+    }
+
 }
