@@ -35,3 +35,9 @@ BusinessQualityReportServiceTest adds five action-metrics scenarios. Original 30
 Verified fixed report/history grants before task/result/ledger IO; default report skips metrics authorization and ledger and omits the JSON property; legacy Report constructor remains valid. Missing result sources skip ledger queries and retain null failure-rate denominator. All 36 combinations of nine statuses and four outcomes count only COMPLETE/CONFIRMED_SUCCESS and FAILED/confirmed failure as resolved; five source binding fields match exactly. Counts above JavaScript safe integer remain decimal strings and unresolved-only rates remain null.
 
 Mocks control mapper and access responses. This does not prove real SQL source filtering, HTTP/cache headers, PDP or browser behavior. No production code changed in this validation.
+
+## Isolated MySQL source-filter verification
+
+Two `IsolatedMysqlActionExecutionIT#selectedMetrics*` scenarios exercise the real mapper/MySQL SQL: exact five-field source binding; task, execution, conversation, result and owner mismatches each return no rows; duplicate authorized references do not multiply counts; empty/null source lists return no rows. Current ledger statuses and nullable outcome map without inferred success, including an explicit confirmed failure.
+
+Original 24744 exited 1: the binding test passed, but the state fixture violated the existing version-increment trigger. Corrected the fixture to increment ledger version on state change, leaving triggers enabled. Original 87915 exited 0, `/tmp/iqc-b-action-metrics-sql-final.log.exit=0`, fresh XML two tests with no failures/errors/skips, 9.936s. Recompiled tests against unchanged compiled main. Local isolated port 34307 reused the dedicated temporary datadir; socket absent after cleanup. No shared SQL or production edits. Only these two new SQL tests ran, not the whole ledger suite; HTTP/PDP/UI integration remains separate.
