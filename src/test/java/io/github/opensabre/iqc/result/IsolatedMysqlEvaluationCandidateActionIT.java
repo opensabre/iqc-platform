@@ -40,11 +40,16 @@ class IsolatedMysqlEvaluationCandidateActionIT {
     static class Config {
         @Bean BusinessReviewSampleService samples(SqlSessionTemplate session,BusinessItemReviewService reviews,IqcDataScope scope,ObjectMapper json){
             var factory=session.getSqlSessionFactory();
-            for(var type:List.of(QualitySampleMapper.class,ConversationMapper.class))
+            for(var type:List.of(QualitySampleMapper.class,QualitySampleVersionMapper.class,ConversationMapper.class))
                 if(!factory.getConfiguration().hasMapper(type))factory.getConfiguration().addMapper(type);
             return new BusinessReviewSampleService(session.getMapper(QualitySampleMapper.class),session.getMapper(ResultReviewMapper.class),
                     session.getMapper(ConversationInspectionResultMapper.class),session.getMapper(InspectionTaskMapper.class),session.getMapper(ConversationMapper.class),
                     session.getMapper(ConversationMessageMapper.class),reviews,scope,json);
+        }
+        @Bean io.github.opensabre.iqc.quality.evaluation.GoldSampleService gold(SqlSessionTemplate session,IqcDataScope scope,ObjectMapper json){
+            return new io.github.opensabre.iqc.quality.evaluation.GoldSampleService(session.getMapper(QualitySampleMapper.class),
+                    session.getMapper(QualitySampleVersionMapper.class),session.getMapper(ConversationMapper.class),
+                    session.getMapper(ConversationMessageMapper.class),scope,json);
         }
         @Bean EvaluationCandidateActionService candidateService(ActionProductionSourceValidator sources,BusinessReviewSampleService samples,
                 SqlSessionTemplate session,IqcDataScope scope,ObjectMapper json){
@@ -62,7 +67,7 @@ class IsolatedMysqlEvaluationCandidateActionIT {
         assertTrue(org.springframework.aop.support.AopUtils.isAopProxy(context.getBean(BusinessReviewSampleService.class)));
     }
     @AfterAll static void close(){
-        if(jdbc!=null)jdbc.execute("DROP TRIGGER IF EXISTS reject_candidate_action_write");
+        if(jdbc!=null){jdbc.execute("DROP TRIGGER IF EXISTS reject_candidate_action_write");jdbc.execute("DROP TRIGGER IF EXISTS reject_mined_gold_write");}
         if(context!=null)context.close();IsolatedMysqlActionSourceIT.close();
     }
     private <T> T as(String owner,Set<String> grants,Supplier<T> callback){
@@ -71,8 +76,10 @@ class IsolatedMysqlEvaluationCandidateActionIT {
     }
     @BeforeEach void prepare() throws Exception {
         jdbc.execute("DROP TRIGGER IF EXISTS reject_candidate_action_write");
-        jdbc.update("DELETE FROM iqc_quality_sample");jdbc.update("DELETE FROM iqc_result_review");
+        jdbc.execute("DROP TRIGGER IF EXISTS reject_mined_gold_write");
+        jdbc.update("DELETE FROM iqc_quality_sample_version");jdbc.update("DELETE FROM iqc_quality_sample");jdbc.update("DELETE FROM iqc_result_review");
         jdbc.update("DELETE FROM iqc_conversation_message");jdbc.update("DELETE FROM iqc_conversation");
+        jdbc.update("DELETE FROM iqc_inspection_rule_result");
         fixture.fixture("ADD_TO_EVALUATION_CANDIDATE",java.time.LocalTime.MIDNIGHT);
         jdbc.update("UPDATE iqc_inspection_task SET status='SUCCEEDED' WHERE id='task'");jdbc.update("UPDATE iqc_task_execution SET status='SUCCEEDED' WHERE id='execution'");
         jdbc.update("INSERT INTO iqc_conversation_message(id,conversation_id,sequence_no,speaker_role,content,relative_time,raw_line,line_number,created_by) VALUES ('message','conversation',1,'agent','frozen text','00:00:00','archive raw text',1,'importer')");
@@ -137,6 +144,63 @@ class IsolatedMysqlEvaluationCandidateActionIT {
     }
     @Test void recoveryWithoutArtifactNeverCreatesCandidate() {
         completeReview();assertNull(as("alice",Set.of(),()->adapter.reconcile(request)));assertEquals(0,count());
+    }
+
+    /** Synthetic trusted storage fixture, deliberately not a test of the unfinished automatic producer. */
+    private String storedMinedCandidate() throws Exception {
+        completeReview();var receipt=execute();assertEquals(ActionExecutionContract.Outcome.CONFIRMED_SUCCESS,receipt.outcome());
+        String id=receipt.resultReference();
+        var input=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(jdbc.queryForObject(
+                "SELECT content_snapshot FROM iqc_quality_sample WHERE id=?",String.class,id));
+        input.put("schemaVersion",BusinessReviewSampleService.EXACT_INPUT_SCHEMA);
+        var previous=json.readTree(jdbc.queryForObject("SELECT expected_json FROM iqc_quality_sample WHERE id=?",String.class,id));
+        var lineage=new io.github.opensabre.iqc.quality.evaluation.MinedCandidateLineage(
+                io.github.opensabre.iqc.quality.evaluation.MinedCandidateLineage.SCHEMA,"result","task","execution","conversation",
+                "alice","group",previous.path("sourceHash").asText(),BusinessReviewSampleService.candidateInputHash(input),
+                previous.path("executionInputHash").asText(),"c".repeat(64),"LOW_CONFIDENCE",1,List.of("LOW_CONFIDENCE"),"d".repeat(64));
+        jdbc.update("UPDATE iqc_quality_sample SET sample_type='UNCLASSIFIED',content_snapshot=?,expected_json=? WHERE id=?",
+                input.toString(),json.writeValueAsString(lineage),id);
+        return id;
+    }
+    private void annotateMined(String id) {
+        var gold=context.getBean(io.github.opensabre.iqc.quality.evaluation.GoldSampleService.class);
+        assertTrue(org.springframework.aop.support.AopUtils.isAopProxy(gold));
+        as("alice",Set.of(),()->gold.annotate(id,new io.github.opensabre.iqc.quality.evaluation.GoldSampleService.Annotation(0,
+                List.of(new io.github.opensabre.iqc.quality.evaluation.GoldFinding("FACT",io.github.opensabre.iqc.finding.Finding.ValueType.BOOLEAN,
+                        io.github.opensabre.iqc.finding.Finding.State.KNOWN,json.valueToTree(true),List.of("message"))),
+                null,List.of(),io.github.opensabre.iqc.quality.evaluation.GoldConversation.Difficulty.BASIC,null)));
+    }
+    @Test void storedMinedInputSurvivesLiveArchiveChangesAndRequiresIndependentSqlApproval() throws Exception {
+        String id=storedMinedCandidate();
+        String original=jdbc.queryForObject("SELECT content_snapshot FROM iqc_quality_sample WHERE id=?",String.class,id);
+        jdbc.update("UPDATE iqc_conversation_message SET content='later archive' WHERE id='message'");
+        annotateMined(id);
+        assertEquals("PENDING_REVIEW",jdbc.queryForObject("SELECT gold_status FROM iqc_quality_sample WHERE id=?",String.class,id));
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM iqc_quality_sample_version",Integer.class));
+        var gold=context.getBean(io.github.opensabre.iqc.quality.evaluation.GoldSampleService.class);
+        assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->as("alice",Set.of(),()->gold.review(id,1,true,"self review")));
+        var version=as("inspector",Set.of(),()->gold.review(id,1,true,"independently checked"));
+        assertEquals("APPROVED",jdbc.queryForObject("SELECT gold_status FROM iqc_quality_sample WHERE id=?",String.class,id));
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM iqc_quality_sample_version",Integer.class));
+        var reloaded=as("inspector",Set.of(),()->gold.version(id,1));
+        assertEquals(version.getContentHash(),reloaded.getContentHash());
+        var frozen=gold.read(reloaded.getSnapshotJson(),io.github.opensabre.iqc.quality.evaluation.GoldConversation.class);
+        assertEquals("frozen text",frozen.messages().getFirst().content());
+        assertEquals("LOW_CONFIDENCE",frozen.businessContext().at("/candidateLineage/miningStrategy").asText());
+        assertEquals(original,jdbc.queryForObject("SELECT content_snapshot FROM iqc_quality_sample WHERE id=?",String.class,id));
+        assertEquals(version.getId(),as("inspector",Set.of(),()->gold.review(id,1,true,"independently checked")).getId());
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM iqc_quality_sample_version",Integer.class));
+    }
+    @Test void failedGoldStatusWriteRollsBackInsertedReviewVersion() throws Exception {
+        String id=storedMinedCandidate();annotateMined(id);
+        jdbc.execute("CREATE TRIGGER reject_mined_gold_write BEFORE UPDATE ON iqc_quality_sample FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='isolated gold rejection'");
+        var gold=context.getBean(io.github.opensabre.iqc.quality.evaluation.GoldSampleService.class);
+        assertThrows(RuntimeException.class,()->as("inspector",Set.of(),()->gold.review(id,1,true,"independently checked")));
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM iqc_quality_sample_version",Integer.class));
+        assertEquals("PENDING_REVIEW",jdbc.queryForObject("SELECT gold_status FROM iqc_quality_sample WHERE id=?",String.class,id));
+        jdbc.execute("DROP TRIGGER reject_mined_gold_write");
+        assertEquals("APPROVED",as("inspector",Set.of(),()->gold.review(id,1,true,"independently checked")).getDecision());
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM iqc_quality_sample_version",Integer.class));
     }
 
 }
