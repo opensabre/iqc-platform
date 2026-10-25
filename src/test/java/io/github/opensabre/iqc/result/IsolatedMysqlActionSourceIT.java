@@ -49,6 +49,9 @@ class IsolatedMysqlActionSourceIT {
         fixture(type,relativeTime,PipelineRelease.SCHEMA);
     }
     void fixture(String type,java.time.LocalTime relativeTime,String schema) throws Exception {
+        fixture(type,relativeTime,schema,false);
+    }
+    void fixture(String type,java.time.LocalTime relativeTime,String schema,boolean mined) throws Exception {
         jdbc.update("DELETE FROM iqc_inspection_conversation_result");jdbc.update("DELETE FROM iqc_task_execution");jdbc.update("DELETE FROM iqc_inspection_task");
         var release=json.readerFor(PipelineRelease.class)
                 .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).<PipelineRelease>readValue("""
@@ -62,6 +65,7 @@ class IsolatedMysqlActionSourceIT {
           "idempotency":"PRODUCTION_SOURCE_V1","failureHandling":"RECORD_ONLY","configuration":{}}]}}
           """.replace("\"type\":\"SAVE_RESULT\"", "\"type\":\""+type+"\"")
           .replace("\"configuration\":{}", "CREATE_REVIEW".equals(type)?"\"configuration\":{\"reason\":\"automated review\"}":
+                  mined?"\"adapterVersion\":2,\"configuration\":{\"findingCodes\":[\"RISK\"],\"threshold\":\"0.5\"}":
                   "ADD_TO_EVALUATION_CANDIDATE".equals(type)?"\"configuration\":{\"sampleType\":\"FALSE_POSITIVE\",\"reviewRevision\":1}":"\"configuration\":{}")
           .replace(PipelineRelease.SCHEMA,schema));
         var business=json.createObjectNode().put("businessType","frozen");
