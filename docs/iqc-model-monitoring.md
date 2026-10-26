@@ -69,3 +69,11 @@ PRD18.2模型并发复用原ModelGateway实际调用边界，新增iqc.model.gat
 Root仅test-compile/前端build，终态见根协作记录。B需验证挂起Supplier并发/嵌套、成功/抛错/Error归还、准入拒绝/归档和usage/结算等待不充在途、账本与重试/工具副作用不变、坏注册器隔离、固定sum与旧/扩展系列、页面无字段/非有限/撤权及实际采集。没有GPU或供应商实际权重/性能证据，完整I1–I7仍未完成。
 
 Root原78963 test-compile终态0且/tmp/iqc-model-active-compile.exit=0，主/测试编译及diff通过，Root未执行测试。三仓固定后的在途/结算副作用/采集专项仍待B，不将编译当运行验收。
+
+## B 2026-10-26 监控门面独立验证
+
+固定同步83d2349（含持久指标b894d36），ModelMonitoringServiceTest 24项与PipelineMonitoringTest 8项共32项通过。原43060 test-compile surefire:test terminal0，/tmp/iqc-b-monitoring-facade.log.exit=0，fresh XML零失败错误跳过。
+
+覆盖每次当前管理员校验先于控制面IO、9/10/18/19/23/24六组合与返回map独立不可变、各必需/可选组缺键和未知键拒绝、持久组依赖节点组、六range白名单/非法range不IO、错range/空倒序时间/非法step/空map与matrix/1MiB边界、上游不可用错误消敏、available=false不返回targets。矩阵原文由界面解析，这里不冒充Prometheus矩阵求值。
+
+权限scope和控制面均受控，不证明真实PDP/Feign/PromQL/抓取、完成时间迁移或持久SQL语义，也不证明模型在途新Gauge生命周期。生产源码未改，后续独立验收仍需推进。
