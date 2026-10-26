@@ -168,8 +168,10 @@ public class InspectionExecutionService {
         return queue(taskId,enforceDataScope,null,null);
     }
     private InspectionTask queue(String taskId,boolean enforceDataScope,String expectedExecutionId,Integer expectedAttemptCount) {
+        String parentId=lockBulkParentForChild(taskId,true);
         InspectionTask task = taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,taskId).last("FOR UPDATE"));
         if (task == null) {if(expectedExecutionId!=null)return null;throw IqcException.notFound("质检任务不存在: " + taskId);}
+        if(!java.util.Objects.equals(parentId,task.getBulkParentTaskId()))throw IqcException.invalidState("分片归属已变化，请重试原请求");
         if (enforceDataScope && !dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权执行该质检任务");
         if(expectedExecutionId!=null){
             if(!Set.of("FAILED","PARTIAL_FAILED").contains(task.getStatus()) || !expectedExecutionId.equals(task.getCurrentExecutionId())
@@ -282,6 +284,19 @@ public class InspectionExecutionService {
         }
     }
 
+    /** All enqueue/resume paths share parent -> child locking with bulk cleanup and coordination. */
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public String lockBulkParentForChild(String taskId,boolean requireRunnable) {
+        String parentId=taskMapper.bulkParentTaskId(taskId);
+        if(parentId==null)return null;
+        var parent=taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,parentId)
+                .select(InspectionTask::getId,InspectionTask::getTaskType,InspectionTask::getStatus).last("FOR UPDATE"));
+        if(parent==null || !"PIPELINE_BULK".equals(parent.getTaskType()) || "DELETED".equals(parent.getStatus())
+                || requireRunnable && Set.of("CANCEL_REQUESTED","CANCELLED","PAUSE_REQUESTED","PAUSED").contains(parent.getStatus()))
+            throw IqcException.invalidState("批次已停止或删除，不能独立启动分片");
+        return parentId;
+    }
+
     /** Validate route vote configuration before claiming a lease or creating execution progress. */
     private void requireSupportedRouteRunCount(InspectionTask task, JsonNode snapshot) {
         if("PIPELINE_BULK".equals(task.getTaskType()))
@@ -357,8 +372,10 @@ public class InspectionExecutionService {
 
     @Transactional
     public InspectionTask resume(String taskId) {
+        String parentId=lockBulkParentForChild(taskId,true);
         InspectionTask task = taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,taskId).last("FOR UPDATE"));
         if (task == null) throw IqcException.notFound("质检任务不存在: " + taskId);
+        if(!java.util.Objects.equals(parentId,task.getBulkParentTaskId()))throw IqcException.invalidState("分片归属已变化，请重试原恢复请求");
         if (!dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权恢复该质检任务");
         if (task.getCurrentExecutionId() == null) throw IqcException.invalidState("任务没有可恢复的执行实例");
         JsonNode snapshot = readSnapshot(task.getRuleSnapshotJson());

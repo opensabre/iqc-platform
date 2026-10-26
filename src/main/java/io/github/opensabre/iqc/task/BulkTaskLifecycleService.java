@@ -54,11 +54,13 @@ public class BulkTaskLifecycleService {
             row.setProcessedMessages(0);row.setFailedMessages(0);row.setStatus("QUEUED");
             requireChanged(executions.insert(row));parent.setCurrentExecutionId(row.getId());parent.setAttemptCount(row.getAttemptNo());
         }
-        // Resume only this parent's original frozen children, never create a replacement task.
-        for(var child:pending(id))if("PAUSED".equals(child.getStatus()))execution.resume(child.getId());
         parent.setStatus("QUEUED");parent.setPauseRequested(false);parent.setCancelRequested(false);parent.setUpdatedTime(new Date());
         row.setStatus("QUEUED");row.setErrorMessage(null);
-        requireChanged(tasks.updateById(parent));requireChanged(executions.updateById(row));return parent;
+        requireChanged(tasks.updateById(parent));requireChanged(executions.updateById(row));
+        // The child resume guard sees the parent's new state in this same transaction.
+        // Failure rolls back parent and children together; no replacement task or input is created.
+        for(var child:pending(id))if("PAUSED".equals(child.getStatus()))execution.resume(child.getId());
+        return parent;
     }
 
     @Transactional

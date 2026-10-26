@@ -1342,10 +1342,26 @@ public class InspectionTaskService {
         InspectionTask task = taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery()
                 .eq(InspectionTask::getId, id).last("FOR UPDATE"));
         if (task == null) throw IqcException.notFound("任务不存在");
-        if(BulkTaskMaterializationService.TYPE.equals(task.getTaskType()) || task.getBulkParentTaskId()!=null)
-            throw IqcException.invalidState("批次父子任务需要统一保留，不能独立删除分片或父任务");
+        if(task.getBulkParentTaskId()!=null)
+            throw IqcException.invalidState("分片须通过父批次统一清理，不能独立删除");
         if (!List.of("SUCCEEDED", "PARTIAL_FAILED", "FAILED", "NO_DATA", "CANCELLED", "TRIGGER_EXPIRED", "TRIGGER_CONFLICT").contains(task.getStatus())) {
             throw IqcException.invalidState("只有终态任务可以删除");
+        }
+        if(BulkTaskMaterializationService.TYPE.equals(task.getTaskType())) {
+            // The parent lock fences every child queue/resume and further materialization.
+            // Probe IDs only; never load all frozen shard transcripts just to clean the directory.
+            var active=taskMapper.selectList(Wrappers.<InspectionTask>lambdaQuery()
+                    .select(InspectionTask::getId).eq(InspectionTask::getBulkParentTaskId,id)
+                    .notIn(InspectionTask::getStatus,List.of("SUCCEEDED","PARTIAL_FAILED","FAILED","NO_DATA","CANCELLED","DELETED"))
+                    .last("LIMIT 1"));
+            if(active==null || !active.isEmpty())throw IqcException.invalidState("仍有未终态分片，请先取消并等待回收");
+            taskMapper.update(null,Wrappers.<InspectionTask>lambdaUpdate().eq(InspectionTask::getBulkParentTaskId,id)
+                    .in(InspectionTask::getStatus,List.of("SUCCEEDED","PARTIAL_FAILED","FAILED","NO_DATA","CANCELLED"))
+                    .set(InspectionTask::getStatus,"DELETED").set(InspectionTask::getAutomaticRetryEnabled,false)
+                    .set(InspectionTask::getRetryNotBeforeUtc,null));
+            var retained=taskMapper.selectList(Wrappers.<InspectionTask>lambdaQuery().select(InspectionTask::getId)
+                    .eq(InspectionTask::getBulkParentTaskId,id).ne(InspectionTask::getStatus,"DELETED").last("LIMIT 1"));
+            if(retained==null || !retained.isEmpty())throw IqcException.invalidState("分片清理未完整保存，已回滚");
         }
         int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
                 .set(InspectionTask::getStatus, "DELETED")

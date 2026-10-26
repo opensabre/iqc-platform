@@ -52,8 +52,17 @@ public class AutomaticRetryService {
             return value;
         }catch(IqcException error){throw error;}catch(Exception error){throw IqcException.invalidState("重试策略来源无法解析");}
     }
-    private InspectionTask lock(String id){var task=tasks.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,id).last("FOR UPDATE"));
-        if(task==null)throw IqcException.notFound("任务不存在");return task;}
+    private InspectionTask lock(String id){
+        String parentId=tasks.bulkParentTaskId(id);
+        if(parentId!=null) {
+            if(executionService==null || !Objects.equals(parentId,executionService.getObject().lockBulkParentForChild(id,false)))
+                throw IqcException.invalidState("分片重试的父任务归属无效");
+        }
+        var task=tasks.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,id).last("FOR UPDATE"));
+        if(task==null)throw IqcException.notFound("任务不存在");
+        if(!Objects.equals(parentId,task.getBulkParentTaskId()))throw IqcException.invalidState("分片重试归属已变化，请重试");
+        return task;
+    }
     @Transactional(propagation=Propagation.MANDATORY)
     public void freeze(String taskId,AutomaticRetryPolicy policy,ScheduledActorAccessService.CreationBound bound,Set<String> serverRequiredGrants){
         if(policy==null)return;
