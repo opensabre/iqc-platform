@@ -257,6 +257,36 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertTrue(feedbackGate.criteria().stream().anyMatch(c->"REGRESSION_PASS".equals(c.code())&&c.status()==PipelinePublicationGateService.Status.FAILED));
         var preserved=sql.getMapper(QualitySampleMapper.class).selectById(captured.getId());
         assertEquals(candidateBody,preserved.getContentSnapshot());assertEquals(candidateLineage,preserved.getExpectedJson());
+        // Review facts through the owning request/context/decide path, after the original feedback lineage was frozen.
+        var reportService=context.getBean(io.github.opensabre.iqc.quality.BusinessQualityReportService.class);
+        actor.set("annotator");
+        var findingContext=reviews.findingContext(result.getId());assertTrue(findingContext.available());
+        var entry=findingContext.findings().getFirst();
+        var factReview=reviews.request(result.getId(),completed.getReviewRevision(),"fact-review-"+suffix,"Verify processed conversation fact");
+        var whilePending=reportService.report(List.of(production.getId()),null,"SELECTED_RUNS",false,false,true).findingDistributions().values().iterator().next();
+        assertEquals(1,whilePending.reviewed().facts().getFirst().knownSeverityCounts().get("HIGH"));
+        var correction=new io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.Decision(result.getId(),entry.code(),entry.expectedFindingHash(),Finding.State.KNOWN,json.valueToTree(0),Finding.Severity.NONE,"Correct measured fact after manual verification",entry.evidence().stream().map(BusinessItemReviewService.FindingEvidence::id).toList(),List.of());
+        actor.set("reviewer");
+        var corrected=reviews.decide(factReview.getId(),factReview.getReviewRevision(),false,List.of(),List.of(correction),"Verified fact correction");
+        assertEquals(corrected.getReviewedResultJson(),reviews.decide(factReview.getId(),factReview.getReviewRevision(),false,List.of(),List.of(correction),"Verified fact correction").getReviewedResultJson());
+        var correctedReport=reportService.report(List.of(production.getId()),null,"SELECTED_RUNS",false,false,true);
+        var correctedDistribution=correctedReport.findingDistributions().values().iterator().next();
+        assertEquals(1,correctedDistribution.machine().facts().getFirst().knownSeverityCounts().get("HIGH"));
+        assertEquals(1,correctedDistribution.reviewed().facts().getFirst().knownSeverityCounts().get("NONE"));
+        assertEquals(0,correctedDistribution.reviewed().facts().getFirst().knownSeverityCounts().get("HIGH"));
+        assertEquals(1,correctedReport.groups().getFirst().reviewChanges().findingChangedResults());
+        actor.set("annotator");
+        var unknownReview=reviews.request(result.getId(),corrected.getReviewRevision(),"unknown-review-"+suffix,"Preserve uncertainty instead of false");
+        var unknown=new io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.Decision(result.getId(),entry.code(),entry.expectedFindingHash(),Finding.State.UNKNOWN,null,Finding.Severity.LOW,"Insufficient evidence for canonical value",entry.evidence().stream().map(BusinessItemReviewService.FindingEvidence::id).toList(),List.of());
+        actor.set("reviewer");reviews.decide(unknownReview.getId(),unknownReview.getReviewRevision(),false,List.of(),List.of(unknown),"Uncertainty confirmed");
+        var unknownDistribution=reportService.report(List.of(production.getId()),null,"SELECTED_RUNS",false,false,true).findingDistributions().values().iterator().next();
+        var unknownFact=unknownDistribution.reviewed().facts().getFirst();assertEquals(1,unknownFact.states().get("UNKNOWN"));assertEquals(0,unknownFact.states().get("KNOWN"));
+        assertEquals(0,unknownFact.knownSeverityCounts().values().stream().mapToInt(Integer::intValue).sum());assertEquals(0,unknownFact.trueCount()+unknownFact.falseCount());
+        var originalAfterFactReview=sql.getMapper(ConversationInspectionResultMapper.class).selectById(result.getId());
+        assertEquals(result.getExecutionTraceJson(),originalAfterFactReview.getExecutionTraceJson());assertEquals(result.getScoringResultJson(),originalAfterFactReview.getScoringResultJson());
+        var frozenCandidateAfterReview=sql.getMapper(QualitySampleMapper.class).selectById(captured.getId());
+        assertEquals(candidateBody,frozenCandidateAfterReview.getContentSnapshot());assertEquals(candidateLineage,frozenCandidateAfterReview.getExpectedJson());
+
     }
     @Test void controlledModelBridgePersistsIndependentComparableArtifacts() throws Exception {
         actor.set("annotator");
