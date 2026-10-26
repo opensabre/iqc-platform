@@ -51,6 +51,10 @@ public class TaskExecutionStateService {
                 .eq(TaskExecution::getTaskId,task.getId()).last("FOR UPDATE"));
         return row;
     }
+    private static void recordCompletion(TaskExecution row){
+        if(row.getCompletedAtUtc()==null&&Set.of("SUCCEEDED","PARTIAL_FAILED","FAILED","CANCELLED").contains(row.getStatus()))
+            row.setCompletedAtUtc(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
+    }
     private static void requireUpdated(int changed) {
         if(changed!=1)throw new IllegalStateException("Persistent task/execution state update lost its locked row");
     }
@@ -78,7 +82,7 @@ public class TaskExecutionStateService {
         };
         task.setProcessedMessages(processed);task.setFailedMessages(failed);task.setStatus(status);
         requireUpdated(tasks.updateById(task));
-        row.setProcessedMessages(processed);row.setFailedMessages(failed);row.setStatus(status);requireUpdated(executions.updateById(row));
+        row.setProcessedMessages(processed);row.setFailedMessages(failed);row.setStatus(status);recordCompletion(row);requireUpdated(executions.updateById(row));
         return task;
     }
     @Transactional
@@ -90,7 +94,7 @@ public class TaskExecutionStateService {
         if("FAILED".equals(status))task.setFailedMessages(Math.max(0,(task.getTotalMessages()==null?0:task.getTotalMessages())
                 -(task.getProcessedMessages()==null?0:task.getProcessedMessages())));
         task.setStatus(status);requireUpdated(tasks.updateById(task));
-        row.setStatus(status);row.setErrorMessage(error);requireUpdated(executions.updateById(row));
+        row.setStatus(status);row.setErrorMessage(error);recordCompletion(row);requireUpdated(executions.updateById(row));
         return true;
     }
 }
