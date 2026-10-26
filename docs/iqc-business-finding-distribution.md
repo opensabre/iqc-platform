@@ -43,3 +43,11 @@ Root原65065 test-compile终态0且/tmp/iqc-finding-distribution-compile.exit=0�
 新增11项使用真实报告聚合、真实冻结Pipeline发布解析与受控validatedMachineData/当前权限：三grant在任何任务/结果读取前拒绝；默认老调用无敏感授权/数据回调且NULL字段省略；重复声明按code去重；五状态及KNOWN严重度/BOOL真假守恒；缺结果/有来源但缺事实分开；无完整复核不填，已完成无Finding改判沿用机器事实；重复/未声明/错类型/非法BOOL拒绝；原值/证据/正文/解释/来源选中ID不出JSON。
 
 机器来源验证在新类中受控，本轮原复核23项仅既有回归，不足以证明新增回调与真实SQL来源完整组合；Finding改判有效投影、HTTP、实际PDP与浏览器整链继续待验。未改生产代码或默认开关，不将61项外推完整PRD完成。
+
+## B 正式worker/真实SQL/复核/HTTP组合（2026-10-26）
+
+复用IsolatedMysqlMeasuredPublicationIT主集成方法：真实目录/数据集/门禁发布、已处理会话冻结、正式worker落库、动作创建复核及业务裁决、Gold独立审核/回流保持。新增真实Spring代理报告与原BusinessItemReviewService/mapper，无mock机器来源解析或报告聚合。在复核前后验机器NUMBER事实/KNOWN严重度、无复核不填、已完成项目改判但无Finding改判时沿用机器事实；分布无任意数值/证据/正文。SQL临时篡改business_item_results_json后原机器校验拒绝返回报告，finally复原。原结果trace/评分/项目JSON保持，默认报告不出Finding字段。相同SQL结果经真实MVC控制器返回一致JSON，Cache-Control private,no-store。
+
+首轮28983终态1为新增断言把内存DecimalNode与HTTP DoubleNode直接比较（80与80.0）；仅将预期也经JSON序列化/解析，未修改生产语义。原40519重跑terminal0，/tmp/iqc-b-finding-source-sql-final.log.exit=0，fresh XML主集成1项零失败错误跳过52.935s，专用34307/datadir身份核验，结束socket不存在。
+
+本轮只执行主集成方法，不声称该类另一模型方法已重跑；scope/当前grant/资产validator仍受控。这里只验项目改判后有效事实沿用，尚不能证明Finding值改判组合或真实PDP/browser。完整I1–I7继续，未部署。

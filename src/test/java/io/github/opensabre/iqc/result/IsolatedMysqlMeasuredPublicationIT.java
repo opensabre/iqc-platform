@@ -152,6 +152,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertTrue(result.getExecutionTraceJson().contains("1000"));
         assertEquals(2,db.queryForObject("SELECT COUNT(*) FROM iqc_task_item WHERE execution_id=? AND status='SUCCEEDED'",Integer.class,production.getCurrentExecutionId()));
         assertEquals("later text",db.queryForObject("SELECT content FROM iqc_conversation_message WHERE id=?",String.class,second));
+        assertFindingDistributionFromSql(production,result,false);
         // Dispatch owning operations from the actual published task, not a synthetic action source.
         var reference=new ActionProductionSourceValidator.Reference(production.getId(),production.getCurrentExecutionId(),conversation,result.getId(),"annotator");
         var enqueue=context.getBean(ActionEnqueueService.class);
@@ -202,6 +203,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals(result.getExecutionTraceJson(),unchanged.getExecutionTraceJson());
         assertEquals(result.getScoringResultJson(),unchanged.getScoringResultJson());
         assertEquals(result.getBusinessItemResultsJson(),unchanged.getBusinessItemResultsJson());
+        assertFindingDistributionFromSql(production,unchanged,true);
         actor.set("annotator");var candidates=context.getBean(BusinessReviewSampleService.class);
         String candidateRequest="candidate_"+suffix;
         assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->candidates.create(result.getId(),completed.getId(),candidateRequest,"Reviewed candidate","FALSE_POSITIVE","[]"));
@@ -703,6 +705,40 @@ class IsolatedMysqlMeasuredPublicationIT {
         try{return json.writeValueAsString(value);}catch(Exception error){throw new IllegalStateException(error);}
     }
 
+    private void assertFindingDistributionFromSql(InspectionTask task,io.github.opensabre.iqc.result.model.ConversationInspectionResult result,boolean reviewed) throws Exception {
+        var json=context.getBean(ObjectMapper.class);var sql=context.getBean(SqlSessionTemplate.class);
+        var reports=context.getBean(io.github.opensabre.iqc.quality.BusinessQualityReportService.class);
+        assertTrue(org.springframework.aop.support.AopUtils.isAopProxy(reports));
+        var report=reports.report(List.of(task.getId()),null,"SELECTED_RUNS",false,false,true);
+        var distribution=report.findingDistributions().values().iterator().next();
+        assertEquals(1,distribution.machine().expectedResults());assertEquals(1,distribution.machine().sourceResults());
+        assertEquals(0,distribution.machine().unavailableResults());
+        var fact=distribution.machine().facts().getFirst();assertEquals("NUMBER",fact.valueType());assertEquals(1,fact.presentCount());
+        assertEquals(1,fact.states().get("KNOWN"));assertEquals(1,fact.knownSeverityCounts().get("HIGH"));
+        assertEquals(0,fact.trueCount()+fact.falseCount());
+        assertEquals(reviewed?1:0,distribution.reviewed().sourceResults());assertEquals(reviewed?0:1,distribution.reviewed().unavailableResults());
+        if(reviewed)assertEquals(distribution.machine().facts(),distribution.reviewed().facts());
+        String publicDistribution=json.writeValueAsString(distribution);
+        assertFalse(publicDistribution.contains("1000"));assertFalse(publicDistribution.contains("processed"));
+        assertFalse(publicDistribution.contains("evidence"));assertFalse(publicDistribution.contains("explanation"));
+        // The new callback may expose facts only after the original stored-item/score validator succeeds.
+        var db=new JdbcTemplate(context.getBean(DataSource.class));
+        db.update("UPDATE iqc_inspection_conversation_result SET business_item_results_json='[]' WHERE id=?",result.getId());
+        try {assertThrows(io.github.opensabre.iqc.governance.IqcException.class,()->reports.report(List.of(task.getId()),null,"SELECTED_RUNS",false,false,true));}
+        finally {db.update("UPDATE iqc_inspection_conversation_result SET business_item_results_json=? WHERE id=?",result.getBusinessItemResultsJson(),result.getId());}
+        var grants=mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
+        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(new io.github.opensabre.iqc.rest.QualityOperationsController(null,context.getBean(BusinessItemReviewService.class),reports,null,null,grants,new io.github.opensabre.iqc.privacy.ResultReadProjection(json)))
+            .setControllerAdvice(new io.github.opensabre.webmvc.rest.RestResponseBodyAdvice(),new io.github.opensabre.iqc.governance.IqcExceptionHandlerAdvice(),new io.github.opensabre.webmvc.exception.DefaultWebMvcExceptionHandlerAdvice()).build();
+        var response=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/iqc/quality-operations/report")
+            .param("view","BUSINESS").param("taskIds",task.getId()).param("includeFindingDistribution","true"))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cache-Control","private, no-store"))
+            .andReturn().getResponse().getContentAsString();
+        var envelope=json.readTree(response);assertEquals("000000",envelope.path("code").asText());assertEquals(json.readTree(json.writeValueAsString(report)),envelope.path("data"));
+        var stored=sql.getMapper(ConversationInspectionResultMapper.class).selectById(result.getId());
+        assertEquals(result.getExecutionTraceJson(),stored.getExecutionTraceJson());assertEquals(result.getScoringResultJson(),stored.getScoringResultJson());assertEquals(result.getBusinessItemResultsJson(),stored.getBusinessItemResultsJson());
+        assertFalse(json.valueToTree(reports.report(List.of(task.getId()))).has("findingDistributions"));
+    }
     private void assertArchiveReceiptExecutesPublishedPipeline(PipelineAssetService.Prepared prepared,String conversation,String suffix) throws Exception {
         var json=context.getBean(ObjectMapper.class);var db=new JdbcTemplate(context.getBean(DataSource.class));
         String fingerprint=PipelineAssetService.hash(json.writeValueAsString(conversation));
@@ -785,6 +821,11 @@ class IsolatedMysqlMeasuredPublicationIT {
             return new SqlSessionTemplate(f);
         }
         @Bean ScheduledActorAccessService actionActors(){var service=mock(ScheduledActorAccessService.class);when(service.capture()).thenReturn(new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","user-annotator","annotator",false,"group"));return service;}
+        @Bean io.github.opensabre.iqc.quality.BusinessQualityReportService businessReports(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,BusinessItemReviewService reviews){
+            var grants=mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
+            when(grants.current(Set.of("iqc:report:view"))).thenReturn(new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("controlled",true,true,false,Instant.now()));
+            return new io.github.opensabre.iqc.quality.BusinessQualityReportService(s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationInspectionResultMapper.class),reviews,scope,j,s.getMapper(TaskExecutionMapper.class),null,null,grants);
+        }
         @Bean BusinessItemReviewService reviews(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope){return new BusinessItemReviewService(s.getMapper(ResultReviewMapper.class),s.getMapper(ConversationInspectionResultMapper.class),s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationMessageMapper.class),scope,j);}
         @Bean BusinessReviewSampleService candidates(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,BusinessItemReviewService reviews){return new BusinessReviewSampleService(s.getMapper(QualitySampleMapper.class),s.getMapper(ResultReviewMapper.class),s.getMapper(ConversationInspectionResultMapper.class),s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationMapper.class),s.getMapper(ConversationMessageMapper.class),reviews,scope,j);}
         @Bean ActionProductionSourceValidator sources(SqlSessionTemplate s,PipelineAssetService assets,ProductionInputSnapshotService inputs,ObjectMapper j){return new ActionProductionSourceValidator(s.getMapper(InspectionTaskMapper.class),s.getMapper(TaskExecutionMapper.class),s.getMapper(ConversationInspectionResultMapper.class),assets,inputs,j);}
