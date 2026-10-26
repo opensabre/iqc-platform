@@ -56,4 +56,4 @@ Root原19473 test-compile终态0且/tmp/iqc-task-operational-compile.exit=0，�
 
 真实Flyway/MyBatis/Spring事务验证完整新装/validate/重复零迁移，独立75升级76仅一变更且历史终态NULL不回填、DATETIME(3) nullable及三列索引顺序；首次成功完成UTC、重复finish/fail与旧EID不重写；失败/取消写时间而暂停不写，恢复后再完成；执行写入trigger拒绝使task与execution/time同事务回滚；实际operationalCounts区分PRODUCTION/EVALUATION、预算等待、历史NULL、最近一分钟与六分钟前/未来完成行。每例只清自己新建schema内的task/execution行，未关闭外键或删除schema。
 
-窗口下沿精确五分钟边界、陈旧回收/直接取消路径、预算服务自动恢复、历史版本更多升级点、旧JSON/Hash与大数据EXPLAIN/超时/容量、真实PDP/Prometheus仍需独立证据。本轮不声称整个持久任务或全PRD验收完成。
+窗口下沿精确五分钟边界、陈旧回收/直接取消路径、原resume同EID恢复与依赖权限、历史版本更多升级点、旧JSON/Hash与大数据EXPLAIN/超时/容量、真实PDP/Prometheus仍需独立证据。本轮不声称整个持久任务或全PRD验收完成。

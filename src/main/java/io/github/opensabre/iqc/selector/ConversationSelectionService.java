@@ -91,6 +91,37 @@ public class ConversationSelectionService {
             throw IqcException.invalidArgument("事件选数必须提供明确的有效目标会话");
         return select(definition,plannedAt,targets.stream().distinct().toList());
     }
+    /** Internal exhaustive scan primitive. Cursor refers to scanned candidates, never only matched rows. */
+    public record ScanPage(String schemaVersion,String definitionHash,Instant anchor,SelectionScope sourceScope,
+            String afterId,String nextAfterId,int scannedCount,boolean hasMore,Selection selection) { }
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public ScanPage scanAllPageAt(SelectorDefinition definition,Instant plannedAt,String afterId,int scanSize){
+        validate(definition);
+        if(plannedAt==null||scanSize<1||scanSize>1000||scanSize>definition.maximumCount()
+                ||afterId!=null&&!afterId.matches("[A-Za-z0-9:_-]{1,64}"))throw IqcException.invalidArgument("分片扫描锚点、游标或大小无效");
+        if(definition.sampling().mode()!=SelectorDefinition.SamplingMode.ALL)throw IqcException.invalidArgument("全量分片扫描仅支持ALL，不能逐页冒充全池抽样");
+        Instant anchor=plannedAt.truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        boolean all=scope.canViewAll();String owner=scope.owner(),group=all?null:scope.groupId();
+        var bound=new SelectionScope(all,owner,group);
+        var window=resolve(definition.timeWindow(),anchor);
+        // Do not silently drop eligible legacy rows whose creation time cannot prove the anchor fence.
+        var undated=conversations.selectList(authorizedQuery(definition,window,null,bound).select(Conversation::getId)
+                .gt(afterId!=null,Conversation::getId,afterId).isNull(Conversation::getCreatedTime).last("LIMIT 1"));
+        if(undated==null||!undated.isEmpty())throw IqcException.invalidState("授权候选缺少创建时间，不能证明全量扫描锚点");
+        var query=authorizedQuery(definition,window,null,bound)
+                .select(Conversation::getId).le(Conversation::getCreatedTime,Date.from(anchor))
+                .gt(afterId!=null,Conversation::getId,afterId).orderByAsc(Conversation::getId).last("LIMIT "+(scanSize+1));
+        var page=conversations.selectList(query);
+        if(page==null||page.size()>scanSize+1)throw IqcException.invalidState("分片扫描候选返回超出边界");
+        var scanned=page.stream().limit(scanSize).map(Conversation::getId).toList();
+        if(scanned.stream().anyMatch(id->id==null||!id.matches("[A-Za-z0-9:_-]{1,64}"))||scanned.stream().distinct().count()!=scanned.size())
+            throw IqcException.invalidState("分片扫描候选标识无效或重复");
+        String hash=PipelineAssetService.hash(json.valueToTree(definition).toString());
+        if(scanned.isEmpty())return new ScanPage("iqc-selector-scan-page-v1",hash,anchor,bound,afterId,afterId,0,false,null);
+        var selection=select(definition,anchor,scanned);
+        if(selection.limited()||selection.candidateCount()!=scanned.size())throw IqcException.invalidState("分片候选读取与原目标选数不一致");
+        return new ScanPage("iqc-selector-scan-page-v1",hash,anchor,selection.sourceScope(),afterId,scanned.getLast(),scanned.size(),page.size()>scanSize,selection);
+    }
     public void validate(SelectorDefinition definition) {
         if(definition==null) throw IqcException.invalidArgument("缺少Selector定义");
         if(json.valueToTree(definition).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length>128*1024) throw IqcException.invalidArgument("Selector超过128KiB");
@@ -104,16 +135,8 @@ public class ConversationSelectionService {
         validate(definition);
         Instant anchor=plannedAt.truncatedTo(java.time.temporal.ChronoUnit.MILLIS);var window=resolve(definition.timeWindow(),anchor);
         boolean all=scope.canViewAll();String owner=scope.owner(),group=all?null:scope.groupId();
-        var query=Wrappers.<Conversation>lambdaQuery().in(Conversation::getStatus,List.of("IMPORTED","IMPORTED_WITH_ERRORS")).gt(Conversation::getMessageCount,0);
-        if(!all) query.and(q->q.eq(Conversation::getCreatedBy,owner).or(group!=null,n->n.eq(Conversation::getOwnerGroupId,group)));
-        if(targets!=null)query.in(Conversation::getId,targets);
-        if(!definition.includeIds().isEmpty()) query.in(Conversation::getId,definition.includeIds());
-        if(!definition.excludeIds().isEmpty()) query.notIn(Conversation::getId,definition.excludeIds());
-        if(window!=null) {
-            if(window.field()==SelectorDefinition.TimeField.CREATED) query.ge(Conversation::getCreatedTime,Date.from(window.from().atZone(ZoneId.of("Asia/Shanghai")).toInstant()))
-                    .lt(Conversation::getCreatedTime,Date.from(window.to().atZone(ZoneId.of("Asia/Shanghai")).toInstant()));
-            else query.ge(Conversation::getStartedTime,window.from()).lt(Conversation::getStartedTime,window.to());
-        }
+        var bound=new SelectionScope(all,owner,group);
+        var query=authorizedQuery(definition,window,targets,bound);
         long candidateCount=conversations.selectCount(query);
         if(candidateCount>MAX_CANDIDATES) throw IqcException.invalidArgument("授权候选池超过20000，请缩小Selector时间窗或include范围；未截断抽样");
         if(conversations.selectSelectorPayloadBytes(query)>64L*1024*1024) throw IqcException.invalidArgument("Selector候选元数据超过64MiB，请缩小范围");
@@ -170,9 +193,25 @@ public class ConversationSelectionService {
                     || sources.values().stream().anyMatch(r->!expectedGroup.equals(r.getSourceOwnerGroupId()))) commonGroup=null;
         }
         return new Selection("iqc-selector-selection-v1",definition,PipelineAssetService.hash(json.valueToTree(definition).toString()),anchor,
-                new SelectionScope(all,owner,group),commonGroup,window,
+                bound,commonGroup,window,
                 corpus.size(),matched.size(),sampled.size(),limited,distribution(matched),distribution(selected),
                 selected.stream().map(c->c.conversation().getId()).toList(),evidence);
+    }
+    /** Shared with ordinary selection: one organization, status and time-window predicate. */
+    private com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Conversation> authorizedQuery(
+            SelectorDefinition definition,ResolvedWindow window,List<String> targets,SelectionScope bound){
+        boolean all=bound.all();String owner=bound.owner(),group=bound.groupId();
+        var query=Wrappers.<Conversation>lambdaQuery().in(Conversation::getStatus,List.of("IMPORTED","IMPORTED_WITH_ERRORS")).gt(Conversation::getMessageCount,0);
+        if(!all) query.and(q->q.eq(Conversation::getCreatedBy,owner).or(group!=null,n->n.eq(Conversation::getOwnerGroupId,group)));
+        if(targets!=null)query.in(Conversation::getId,targets);
+        if(!definition.includeIds().isEmpty()) query.in(Conversation::getId,definition.includeIds());
+        if(!definition.excludeIds().isEmpty()) query.notIn(Conversation::getId,definition.excludeIds());
+        if(window!=null) {
+            if(window.field()==SelectorDefinition.TimeField.CREATED) query.ge(Conversation::getCreatedTime,Date.from(window.from().atZone(ZoneId.of("Asia/Shanghai")).toInstant()))
+                    .lt(Conversation::getCreatedTime,Date.from(window.to().atZone(ZoneId.of("Asia/Shanghai")).toInstant()));
+            else query.ge(Conversation::getStartedTime,window.from()).lt(Conversation::getStartedTime,window.to());
+        }
+        return query;
     }
     private ResolvedWindow resolve(SelectorDefinition.TimeWindow input,Instant anchor) {
         if(input==null) return null;
