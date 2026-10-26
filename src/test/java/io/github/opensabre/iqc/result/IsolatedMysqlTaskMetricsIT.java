@@ -113,6 +113,29 @@ class IsolatedMysqlTaskMetricsIT {
         assertThat(completed(unknown)).isNull();
         assertThat(counts.stream().filter(r->r.measure().equals("COMPLETED_5M")&&r.status().equals("SUCCEEDED")).mapToLong(InspectionTaskMapper.OperationalCount::countValue).sum()).isEqualTo(1);
     }
+    @Test void completionWindowIncludesBothExactBoundsAndExcludesOneMillisecondOutsideInNonUtcSession(){
+        var transaction=new org.springframework.transaction.support.TransactionTemplate(context.getBean(DataSourceTransactionManager.class));
+        transaction.executeWithoutResult(ignored->{
+            jdbc.execute("SET time_zone='+08:00'");
+            jdbc.execute("SET timestamp=1767225600");
+            try{
+                var now=LocalDateTime.of(2026,1,1,0,0);
+                assertThat(jdbc.queryForObject("SELECT UTC_TIMESTAMP(3)",LocalDateTime.class)).isEqualTo(now);
+                assertThat(jdbc.queryForObject("SELECT NOW(3)",LocalDateTime.class)).isEqualTo(now.plusHours(8));
+                for(String mode:List.of("PRODUCTION","EVALUATION")){
+                    for(var time:List.of(now.minusMinutes(5),now.minusMinutes(5).minusNanos(1000000),now,now.plusNanos(1000000))){
+                        String id=seed("SUCCEEDED","SUCCEEDED");
+                        if(mode.equals("EVALUATION"))jdbc.update("UPDATE iqc_inspection_task SET task_type='PIPELINE_EVALUATION' WHERE id=?",id);
+                        jdbc.update("UPDATE iqc_task_execution SET completed_at_utc=? WHERE id=?",time,id);
+                    }
+                }
+                var counts=tasks.operationalCounts();
+                for(String mode:List.of("PRODUCTION","EVALUATION"))
+                    assertThat(counts).contains(new InspectionTaskMapper.OperationalCount(mode,"COMPLETED_5M","SUCCEEDED",2));
+                assertThat(counts.stream().filter(row->row.measure().equals("COMPLETED_5M")).mapToLong(InspectionTaskMapper.OperationalCount::countValue).sum()).isEqualTo(4);
+            }finally{jdbc.execute("SET timestamp=0");jdbc.execute("SET time_zone='+00:00'");}
+        });
+    }
     @Test void staleRecoveryPreservesFirstCompletionAndLeavesPausedAndExcludedQueuedUnmeasured(){
         var service=context.getBean(InspectionTaskService.class);
         String failed=seed("RUNNING","RUNNING");
