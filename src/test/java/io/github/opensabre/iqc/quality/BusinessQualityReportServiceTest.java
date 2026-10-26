@@ -456,4 +456,52 @@ class BusinessQualityReportServiceTest {
         verifyNoInteractions(tasks,results,reviews,calls);
     }
 
+    private final io.github.opensabre.iqc.action.ActionExecutionMapper actionRows=mock(io.github.opensabre.iqc.action.ActionExecutionMapper.class);
+    private final io.github.opensabre.iqc.privacy.SensitiveReadAccessService actionAccess=mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
+    private BusinessQualityReportService actionService(){
+        return new BusinessQualityReportService(tasks,results,reviews,scope,new ObjectMapper(),executions,null,null,actionAccess,actionRows);
+    }
+    private void actionSource(){
+        task("a",90,"[\"c1\"]").setCreatedBy("alice");
+        when(scope.canView("alice",null)).thenReturn(true);
+        var result=new ConversationInspectionResult();result.setId("result");result.setExecutionId("execution");
+        when(results.selectLatestForTaskConversation("a","c1")).thenReturn(result);
+        when(reviews.validatedMachineEvaluation(any(),any())).thenReturn(evaluation(InspectionScoring.ItemStatus.PASS));
+    }
+    @Test void actionMetricAuthorizationPrecedesEveryDataRead(){
+        when(actionAccess.current(anySet())).thenThrow(new IllegalStateException("denied"));
+        assertThatThrownBy(()->actionService().report(List.of("a"),null,"SELECTED_RUNS",false,true)).hasMessage("denied");
+        verify(actionAccess).current(java.util.Set.of("iqc:report:view","iqc:action:history:view"));
+        verifyNoInteractions(tasks,results,reviews,executions,actionRows);
+    }
+    @Test void defaultReportOmitsMetricsAndDoesNotReadAuthorizationOrLedger() throws Exception {
+        task("a",90,"[\"c1\"]");var report=actionService().report(List.of("a"));
+        assertThat(report.actionMetrics()).isNull();assertThat(new ObjectMapper().writeValueAsString(report)).doesNotContain("actionMetrics");
+        verifyNoInteractions(actionAccess,actionRows);
+        assertThat(new BusinessQualityReportService.Report("legacy","SELECTED_RUNS",0,0,List.of()).actionMetrics()).isNull();
+    }
+    @Test void missingResultsHaveNoLedgerQueryAndNoInventedSuccess(){
+        task("a",90,"[\"c1\"]");var metrics=actionService().report(List.of("a"),null,"SELECTED_RUNS",false,true).actionMetrics();
+        assertThat(metrics.selectedResults()).isEqualTo(1);assertThat(metrics.boundResults()).isZero();assertThat(metrics.unboundResults()).isEqualTo(1);
+        assertThat(metrics.actionCount()).isEqualTo("0");assertThat(metrics.confirmedFailureRate()).isNull();verifyNoInteractions(actionRows);
+    }
+    @Test void onlyFinalConfirmedPairsEnterFailureRateAndBindingsUseAllFiveFields(){
+        actionSource();var counts=new java.util.ArrayList<io.github.opensabre.iqc.action.ActionExecutionMapper.StatusCount>();
+        for(String status:List.of("PENDING","RUNNING","WAITING_RETRY","WAITING_RECONCILIATION","BLOCKED_AUTHORIZATION","BLOCKED_ADAPTER","EXPIRED","COMPLETE","FAILED"))
+            for(String outcome:List.of("UNKNOWN","CONFIRMED_SUCCESS","CONFIRMED_FINAL_FAILURE","CONFIRMED_RETRYABLE_FAILURE"))
+                counts.add(new io.github.opensabre.iqc.action.ActionExecutionMapper.StatusCount(status,outcome,1));
+        when(actionRows.countSelectedResultStates(anyList())).thenReturn(counts);
+        var metrics=actionService().report(List.of("a"),null,"SELECTED_RUNS",false,true).actionMetrics();
+        assertThat(metrics.actionCount()).isEqualTo("36");assertThat(metrics.confirmedSuccessCount()).isEqualTo("1");
+        assertThat(metrics.confirmedFailureCount()).isEqualTo("2");assertThat(metrics.unresolvedCount()).isEqualTo("33");
+        assertThat(metrics.confirmedFailureRate()).isEqualByComparingTo("66.67");assertThat(metrics.states()).hasSize(36);
+        verify(actionRows).countSelectedResultStates(List.of(new io.github.opensabre.iqc.action.ActionExecutionMapper.ResultReference("a","execution","c1","result","alice")));
+    }
+    @Test void largeActionCountsStayDecimalStringsAndUnresolvedHasNullDenominator(){
+        actionSource();when(actionRows.countSelectedResultStates(anyList())).thenReturn(List.of(
+                new io.github.opensabre.iqc.action.ActionExecutionMapper.StatusCount("RUNNING",null,9007199254740993L)));
+        var metrics=actionService().report(List.of("a"),null,"SELECTED_RUNS",false,true).actionMetrics();
+        assertThat(metrics.actionCount()).isEqualTo("9007199254740993");assertThat(metrics.unresolvedCount()).isEqualTo(metrics.actionCount());assertThat(metrics.confirmedFailureRate()).isNull();
+    }
+
 }

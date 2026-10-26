@@ -85,3 +85,9 @@ B快进至固定A59ce621（包含标签SQL提交b5ae66f），扩展原Evaluation
 Root 仅编译/构建，终态见根协作记录。B需更新旧有效夹具为明确完整部署来源，并独立验证相同/不同/缺失/null/非法部署、每个逻辑调用及顺序、数字身份拒绝、原始来源不变、服务/MVC/真实SQL报告与UI撤权；不能放宽新口径以迁就旧测试。此前历史专项计数保持原基线范围，不外推v2已通过或PRD完成。
 
 Root 原84582 test-compile 终态0且 /tmp/iqc-consistency-deployment-compile.exit=0；合并固定矿化SQL测试后主/测试编译通过，Root未执行测试。v2独立计算/服务/SQL专项仍待B。
+
+## Deployment-binding metric verification
+
+ModelConsistencyMetricsTest now supplies an explicit deployment declaration for legitimate comparisons and preserves exact decimal equivalence, distinct artifacts, missing evidence and input immutability coverage. Three added scenarios reject absent/null/different/invalid deployment references, require all logical invocation identities in order, reject incomplete call lists and numeric identity coercion.
+
+Original 89789 exited 1: five tests passed and three new mutation fixtures failed because NodeResult.metrics() returns defensive snapshots. Corrected the tests to construct independent NodeResult artifacts from edited snapshots; production protection was retained. Original 34765 exited 0 (`/tmp/iqc-b-consistency-v2-final.log.exit=0`), fresh XML eight tests without failures/errors/skips, 0.638s. Main source compiled in the first run; final run recompiled tests against unchanged main classes. Pure metric fixtures prove declared identity comparison, not actual provider weights, service SQL, PDP or browser behavior.

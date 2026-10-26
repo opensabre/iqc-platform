@@ -364,4 +364,28 @@ class IsolatedMysqlActionExecutionIT {
         assertThat(events.page("action","result",null).getFirst().getReconciliationReason()).isNull();
     }
 
+    @Test void selectedMetricsBindEverySourceFieldAndDoNotMultiplyDuplicateReferences(){
+        var source=new ActionExecutionMapper.ResultReference("task","eid","conversation","result","alice");
+        assertThat(actions.countSelectedResultStates(List.of(source))).containsExactly(new ActionExecutionMapper.StatusCount("PENDING",null,1));
+        assertThat(actions.countSelectedResultStates(List.of(source,source))).containsExactly(new ActionExecutionMapper.StatusCount("PENDING",null,1));
+        for(var mismatch:List.of(
+                new ActionExecutionMapper.ResultReference("other","eid","conversation","result","alice"),
+                new ActionExecutionMapper.ResultReference("task","other","conversation","result","alice"),
+                new ActionExecutionMapper.ResultReference("task","eid","other","result","alice"),
+                new ActionExecutionMapper.ResultReference("task","eid","conversation","other","alice"),
+                new ActionExecutionMapper.ResultReference("task","eid","conversation","result","other")))
+            assertThat(actions.countSelectedResultStates(List.of(mismatch))).isEmpty();
+        assertThat(actions.countSelectedResultStates(List.of())).isEmpty();
+        assertThat(actions.countSelectedResultStates(null)).isEmpty();
+    }
+    @Test void selectedMetricsMapCurrentStatusAndNullableOutcomeWithoutGuessing(){
+        var source=new ActionExecutionMapper.ResultReference("task","eid","conversation","result","alice");
+        for(String status:List.of("PENDING","RUNNING","COMPLETE","FAILED","EXPIRED")){
+            jdbc.update("UPDATE iqc_action_execution SET status=?,outcome=NULL,version=version+1 WHERE id='action'",status);
+            assertThat(actions.countSelectedResultStates(List.of(source))).containsExactly(new ActionExecutionMapper.StatusCount(status,null,1));
+        }
+        jdbc.update("UPDATE iqc_action_execution SET status='FAILED',outcome='CONFIRMED_FINAL_FAILURE',version=version+1 WHERE id='action'");
+        assertThat(actions.countSelectedResultStates(List.of(source))).containsExactly(new ActionExecutionMapper.StatusCount("FAILED","CONFIRMED_FINAL_FAILURE",1));
+    }
+
 }
