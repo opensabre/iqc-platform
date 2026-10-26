@@ -31,3 +31,13 @@ Root只执行test-compile和前端vue-tsc/Vite；原句柄和终态见根协作�
 尚未部署。准备发布时先更新可同时接受原9/新18系列的IQC后端，再更新返回18系列的控制面，页面可在后续更新；旧IQC后端严格只接受9系列，不能先更新控制面。回滚时先恢复控制面，再回滚IQC后端。新页面读取原9系列只显示节点指标不可确认，不要求伪造采样。监控请求增加固定查询量，实际控制面/Prometheus查询耗时及浏览器大窗口还需验收，不以编译证明性能。
 
 Root 原97282 test-compile 终态0，/tmp/iqc-pipeline-monitoring-compile.exit=0，主/测试编译与diff通过；控制面原87731 test-compile同为0，固定2060de0。Root未执行测试，真实回调/注册器故障/PromQL/采集与UI专项仍待B，不能据编译认定运行验收完成。
+
+## B 独立节点监控验证（2026-10-26）
+
+新增 PipelineMonitoringTest 使用真实 PipelineRuntime 和受控 adapter/心跳 mapper，覆盖串行与并行每次重试/备用/条件跳过的 Counter、Timer 与心跳次数，未开始跳过无耗时，取消和异常图 active 归还、未知引擎固定 OTHER 标签、注册器故障隔离、旧构造输入摘要和业务投影兼容，以及生产和评测图共享物理池。
+
+首轮 /tmp/iqc-b-pipeline-monitoring.log.exit=1 为测试注册器不实现 AutoCloseable 的编译问题；修复测试资源封装后，/tmp/iqc-b-pipeline-monitoring-final.log.exit=1 原回归15通过、新5项 FindingDefinition 夹具缺证据类型导致 error。补合法证据类型并扩至8项后，/tmp/iqc-b-pipeline-monitoring-fixed.log.exit=1 共23项22通过，排队例错误假定一个图会超过 worker 数投递；原执行器按图限制 ready 批次，因此改用生产/评测两个并发图制造真实共享物理队列。生产代码未修改，最终复跑结果另记。
+
+这些证据不覆盖持久任务迁移/SQL、真实 provider、PDP、Prometheus 抓取与实际 PromQL 求值，也不证明容量 SLO。
+
+最终原7018 terminal0，/tmp/iqc-b-pipeline-monitoring-verified.log.exit=0；fresh XML PipelineMonitoringTest 8、ProcessedConversationPipelineTest 11、ParallelPipelineRuntimeTest 4，合计23项零失败错误跳过。双图夹具验证共享队列，未改执行器限流策略；仅测试与文档，主源码沿用22ba02f已编译快照。先前失败记录保留。
