@@ -39,3 +39,11 @@ V1.1.76仅编码，未在共享库执行。发布前先迁移76，再更新接�
 Root仅test-compile及vue-tsc/Vite，原句柄/终态见根协作记录。B需验证首次终态/重复finish/fail/暂停与预算恢复/陈旧回收/取消/事务失败回滚/旧JSON和Hash、真实迁移/SQL UTC边界/模式与预算状态/缺测、空结果真0与坏结果/异常/超龄NaN/无注册器不IO、抓取不访问DB、固定查询不跨实例求和、旧或完整可选系列与UI撤权/迟到。真实容量、百万任务/跨重启恢复、GPU与供应商性能仍未因此完成；全适用I1–I7继续。
 
 Root原19473 test-compile终态0且/tmp/iqc-task-operational-compile.exit=0，主/测试编译及diff通过；Root未执行测试。迁移76尚未在共享库执行，旧schema不得直接启动此后端，真实迁移/终态事务/SQL采样专项仍待B。
+
+## B 2026-10-26 缓存采样专项
+
+新增DurableTaskMetricsTest 14项，连同原DurableInspectionWorkerTest 6项共20项通过。原89376 terminal1为测试Tag导入重名，终态后明确Micrometer Tag；原84642 compiler:testCompile surefire:test terminal0，/tmp/iqc-b-task-metrics-cache-final.log.exit=0，fresh XML零失败错误跳过。主源码未改，沿用原43060编译快照。
+
+验证34个固定计数Gauge初始NaN/健康0、空SQL结果真0、mode/measure/status绑定与预算等待/取消/历史未测量、非法/重复/null/负数行整样本失效、数据库异常与恢复、90秒超龄变断点、抓取只读缓存不IO、旧无注册器不采样、采样配置边界。超龄测试仅在测试内部注入私有快照的单调tick和最后成功tick，未增加生产时钟接口，不等待实际90秒。mapper受控，不证明真实SQL/数据库时钟或调度器容量。
+
+原38948调用base-k8s/scripts/validate-flyway-migrations.sh检查此worktree，terminal1且/tmp/iqc-b-completion-migration-layout.log.exit=1。唯一报告为旧ddl/V1.1.64__ddl_add_action_execution_events.sql，逐行检查确认INSERT位于CREATE TRIGGER BEGIN/END内，原行正则无法区分触发器定义与顶层DML。未改历史迁移/校验器，不能记为目录门禁通过；新76仅ALTER列/索引。后续需改进拥有仓库的校验器并重验，另需新库/升级真实SQL、首次完成时间与事务回滚验收。
