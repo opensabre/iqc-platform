@@ -47,3 +47,13 @@ Root原19473 test-compile终态0且/tmp/iqc-task-operational-compile.exit=0，�
 验证34个固定计数Gauge初始NaN/健康0、空SQL结果真0、mode/measure/status绑定与预算等待/取消/历史未测量、非法/重复/null/负数行整样本失效、数据库异常与恢复、90秒超龄变断点、抓取只读缓存不IO、旧无注册器不采样、采样配置边界。超龄测试仅在测试内部注入私有快照的单调tick和最后成功tick，未增加生产时钟接口，不等待实际90秒。mapper受控，不证明真实SQL/数据库时钟或调度器容量。
 
 原38948调用base-k8s/scripts/validate-flyway-migrations.sh检查此worktree，terminal1且/tmp/iqc-b-completion-migration-layout.log.exit=1。唯一报告为旧ddl/V1.1.64__ddl_add_action_execution_events.sql，逐行检查确认INSERT位于CREATE TRIGGER BEGIN/END内，原行正则无法区分触发器定义与顶层DML。未改历史迁移/校验器，不能记为目录门禁通过；新76仅ALTER列/索引。后续需改进拥有仓库的校验器并重验，另需新库/升级真实SQL、首次完成时间与事务回滚验收。
+
+## B 2026-10-26 迁移门禁复核与真实SQL
+
+前述layout失败来自误用根base-k8s旧86d3c7a脚本；既有独立验证器f0be5e0已修复trigger识别。本轮复用该固定脚本，原78485 terminal0，/tmp/iqc-b-completion-layout-fixed.log.exit=0，当前IQC全部迁移layout通过。新增SIGNAL自动回归固定base-k8s 3a56e3e，原10657 terminal0，/tmp/iqc-b-completion-layout-regression.log.exit=0，六组通过，仍拒绝顶层DML/缺终止/非法单语句体。历史迁移与根base-k8s他人dirty未改。
+
+新增IsolatedMysqlTaskMetricsIT：原1615离线编译terminal0，/tmp/iqc-b-task-metrics-sql-compile.log.exit=0。第一次启动因自动审批额度故障未执行；确认已过提示重试时间后，同一require_escalated流程获批执行原2541，terminal0且/tmp/iqc-b-task-metrics-sql.log.exit=0，fresh XML五项零失败错误跳过29.430s。专用本机34307/datadir身份校验，两个随机新schema，没有使用共享业务库/凭据。脚本trap关闭实例，终态socket不存在。
+
+真实Flyway/MyBatis/Spring事务验证完整新装/validate/重复零迁移，独立75升级76仅一变更且历史终态NULL不回填、DATETIME(3) nullable及三列索引顺序；首次成功完成UTC、重复finish/fail与旧EID不重写；失败/取消写时间而暂停不写，恢复后再完成；执行写入trigger拒绝使task与execution/time同事务回滚；实际operationalCounts区分PRODUCTION/EVALUATION、预算等待、历史NULL、最近一分钟与六分钟前/未来完成行。每例只清自己新建schema内的task/execution行，未关闭外键或删除schema。
+
+窗口下沿精确五分钟边界、陈旧回收/直接取消路径、预算服务自动恢复、历史版本更多升级点、旧JSON/Hash与大数据EXPLAIN/超时/容量、真实PDP/Prometheus仍需独立证据。本轮不声称整个持久任务或全PRD验收完成。
