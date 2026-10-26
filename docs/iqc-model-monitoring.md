@@ -69,3 +69,19 @@ PRD18.2模型并发复用原ModelGateway实际调用边界，新增iqc.model.gat
 Root仅test-compile/前端build，终态见根协作记录。B需验证挂起Supplier并发/嵌套、成功/抛错/Error归还、准入拒绝/归档和usage/结算等待不充在途、账本与重试/工具副作用不变、坏注册器隔离、固定sum与旧/扩展系列、页面无字段/非有限/撤权及实际采集。没有GPU或供应商实际权重/性能证据，完整I1–I7仍未完成。
 
 Root原78963 test-compile终态0且/tmp/iqc-model-active-compile.exit=0，主/测试编译及diff通过，Root未执行测试。三仓固定后的在途/结算副作用/采集专项仍待B，不将编译当运行验收。
+
+## B 2026-10-26 监控门面独立验证
+
+固定同步83d2349（含持久指标b894d36），ModelMonitoringServiceTest 24项与PipelineMonitoringTest 8项共32项通过。原43060 test-compile surefire:test terminal0，/tmp/iqc-b-monitoring-facade.log.exit=0，fresh XML零失败错误跳过。
+
+覆盖每次当前管理员校验先于控制面IO、9/10/18/19/23/24六组合与返回map独立不可变、各必需/可选组缺键和未知键拒绝、持久组依赖节点组、六range白名单/非法range不IO、错range/空倒序时间/非法step/空map与matrix/1MiB边界、上游不可用错误消敏、available=false不返回targets。矩阵原文由界面解析，这里不冒充Prometheus矩阵求值。
+
+权限scope和控制面均受控，不证明真实PDP/Feign/PromQL/抓取、完成时间迁移或持久SQL语义，也不证明模型在途新Gauge生命周期。生产源码未改，后续独立验收仍需推进。
+
+## B 2026-10-26 显式模型在途生命周期
+
+新增ModelGatewayActiveInvocationTest 11项，连同原ModelGatewayCallDataIsolationTest 7项共18项通过。原27791 terminal1为新测试var复合声明语法，终态后拆开声明；原23785 compiler:testCompile surefire:test terminal0，/tmp/iqc-b-model-active-final.log.exit=0，fresh XML零失败错误跳过。生产源码未修改，沿用原43060已编译且未改快照。
+
+真实ModelGateway+受控supplier/限流/ledger验证两个并发调用为2并归0、嵌套2→1→0、Gauge无ID标签、限流/容量准入与请求响应序列化/归档/usage/结算均在调用边界外、配置/速率/容量拒绝不调supplier且无调用Timer、RuntimeException先归还后unknown、Error依原语义不补账但Gauge仍归还、结算失败不保留在途且不重调、坏注册器不改变供应商调用/confirmed次数、原三参构造无注册器兼容。原7项归档失败/序列化失败/结算事实不重放回归通过。
+
+以上不是实际provider并发或GPU/预算占用，也不证明真实ledger SQL/PDP/Prometheus抓取/固定查询及容量SLO；Error保留原有业务处理边界，本次仅验证观测finally归还。
