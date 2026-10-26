@@ -38,7 +38,7 @@
 | 17 所有对象版本与发布 / I3/I7 | 原各资产版本、Snapshot、Pipeline/灰度修订 | 多数对象已有版本；Pipeline存储/摘要高精度数值及旧hash兼容须独立验证，HTTP桥接不替代该证据；独立Prompt/Knowledge Base版本如何复用原资产仍需明确核对，不能只凭Pipeline整体hash视为每项全部完成。 |
 | 17 GRAY/FULL与P2 A/B / I7 | RolloutPolicy/Service/TaskService/ExecutionGuard、Benchmark | 显式IDs灰度新请求/原请求重放已编码；0/10000/回退为同一政策语义。调度/Selector灰度、生产AB归因及真实激活回退验收按实际需求继续，不能只做预览。 |
 | 18 Trace/监控/审计 / I1/I7 | executionTrace、ModelMonitoring、BusinessQualityReport、DurableInspectionWorker、公共审计starter | 已编码模型/节点轨迹、人工修改率、Action确认失败率、节点尝试/图耗时/池状态及持久任务/已测轮次监控；完成时间迁移76未共享执行。Finding分布亦已编码并沿原双敏感读取门禁；真实采集/角色/审计切面与容量验收仍需补齐，不能据局部指标宣布PRD18完成。 |
-| 19 功能/数据/敏感权限 / I7 | IqcDataScope、SensitiveReadAccessService、ResultReadProjection及组织迁移 | 配置/会话/任务/样本/评测/复核等已分批收口，具体源码和独立范围见iqc-sensitive-read-projection.md；全部副本、真实四角色/网关/跨组/撤权仍待统一证明，不据组件按钮或受控scope算完整授权验收。 |
+| 19 功能/数据/敏感权限 / I7 | IqcDataScope、SensitiveReadAccessService、ResultReadProjection及组织迁移 | 配置/会话/任务/样本/评测/复核等已分批收口，具体源码和独立范围见iqc-sensitive-read-projection.md；全部副本、PRD五类职责角色/网关/跨组/撤权仍待统一证明，不据组件按钮或受控scope算完整授权验收。 |
 | 20–21 逻辑表/API / 全部 | 沿现有领域表/明确新职责表与原Controller扩展 | PRD是逻辑建议，不复制已有表/API；逐项行为由对应功能验收，不要求照抄示意路径覆盖旧语义。 |
 | 22 异步/背压/优先级/恢复 / I4 | 原持久化worker、任务/EID租约、预算等待与自动重试 | 已编码机制；真实重启/重复投递/跨实例恢复、外部MQ传输与压力结果待验。外部MQ不是文本完成事件/API的唯一实现方式。 |
 | 23 性能/可用性 / I4/I7 | 原TaskItem/worker/分页索引及预算机制 | 显式批次上限1000；百万规模分片/恢复与容量基线尚无充分证据，不能声明指标达成。 |
@@ -216,3 +216,8 @@ LLM/SMALL_MODEL节点在结果进入upstream和融合前按原任务冻结产物
 逐字核对PRD23/26/27：百万是“批量任务可分片和恢复”，不是把每日吞吐或多次手工请求当同一功能；A需要低置信度升级/融合评分/高风险复核整链，B需要完成事件/Selector/红线短路/CRITICAL/告警复核，C需要单次模型输出复用到分数和标签，D需要同Gold Dataset升级模型并经风险Recall/F1/P95门禁，E需要人工误判修正到候选/独立审核/Regression和下一版本强制回归。当前逐场景联合证据仍未充分，不根据目录里存在同名类判完成。
 
 普通Selector20000完整池与单Task1000界限仍合理保留，新增ALL有界游标基础只是持久分片协调的前置（ADR20261026），尚无对外百万编排功能。下一批必须继续父子任务/进度/幂等冻结与恢复和大数据证明。WEIGHTED/CUSTOM/校准/灰度/自动候选、Finding与运行指标已有后续源码和独立专项，按实际协议补组合验证，不重复早期“缺实现”任务，也不删减原全部适用I1–I7。
+
+
+### PRD角色集合纠正（2026-10-26）
+
+正式V1.0第3节是五类职责：质检管理员、业务管理员、质检员、模型/算法工程师、系统管理员。历史脚本/专项“四角色”仍只代表其原覆盖集合，不能升格为完整验收。后续需先盘点现有组织角色与resource/grant/data-scope映射，证明五类职责的正反授权与敏感字段/组织边界；概念职责不要求强行复制同名角色，也不能把原只读角色当模型工程师管理权限。沿用原组织模型，不另建平行RBAC或tenant模型。
