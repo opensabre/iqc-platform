@@ -210,20 +210,25 @@ public class QualityOperationsController {
                          @RequestParam(required=false) String executionSelections,
                          @RequestParam(defaultValue="SELECTED_RUNS") String runPolicy,
                          @RequestParam(defaultValue="false") boolean includeModelUsage,
-                         @RequestParam(defaultValue="false") boolean includeActionMetrics) {
+                         @RequestParam(defaultValue="false") boolean includeActionMetrics,
+                         @RequestParam(defaultValue="false") boolean includeFindingDistribution) {
         if ("BUSINESS".equals(view)) {
-            if(!includeModelUsage&&!includeActionMetrics)return businessReports.report(taskIds,executionSelections,runPolicy);
+            if(!includeModelUsage&&!includeActionMetrics&&!includeFindingDistribution)return businessReports.report(taskIds,executionSelections,runPolicy);
             if(org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()
                     instanceof org.springframework.web.context.request.ServletRequestAttributes servlet && servlet.getResponse()!=null)
                 servlet.getResponse().setHeader("Cache-Control","private, no-store");
+            if(includeFindingDistribution)return businessReports.report(taskIds,executionSelections,runPolicy,includeModelUsage,includeActionMetrics,true);
             return includeActionMetrics?businessReports.report(taskIds,executionSelections,runPolicy,includeModelUsage,true)
                     :businessReports.report(taskIds,executionSelections,runPolicy,true);
         }
-        if (!"MESSAGE".equals(view) || includeModelUsage || includeActionMetrics || taskIds != null || executionSelections != null
+        if (!"MESSAGE".equals(view) || includeModelUsage || includeActionMetrics || includeFindingDistribution || taskIds != null || executionSelections != null
                 || !"SELECTED_RUNS".equals(runPolicy)) throw IqcException.invalidArgument("不支持的统计视图或筛选");
         return service.report();
     }
 
+    public Object report(String view,List<String> taskIds,String executionSelections,String runPolicy,boolean includeModelUsage,boolean includeActionMetrics){
+        return report(view,taskIds,executionSelections,runPolicy,includeModelUsage,includeActionMetrics,false);
+    }
     public Object report(String view,List<String> taskIds,String executionSelections,String runPolicy,boolean includeModelUsage){
         return report(view,taskIds,executionSelections,runPolicy,includeModelUsage,false);
     }

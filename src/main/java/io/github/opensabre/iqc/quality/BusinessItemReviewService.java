@@ -464,12 +464,24 @@ public class BusinessItemReviewService {
 
     /** Returns the same validated items and score together; reports must not parse unchecked item JSON separately. */
     SchemeResultEvaluator.Evaluation validatedMachineEvaluation(ConversationInspectionResult result, InspectionTask task) {
+        return validatedMachineEvaluation(result,task,null);
+    }
+    record MachineData(SchemeResultEvaluator.Evaluation evaluation,List<io.github.opensabre.iqc.fusion.FindingFusion.Result> findings){
+        MachineData { findings=findings==null?null:List.copyOf(findings); }
+    }
+    MachineData validatedMachineData(ConversationInspectionResult result,InspectionTask task){
+        var facts=new java.util.concurrent.atomic.AtomicReference<List<io.github.opensabre.iqc.fusion.FindingFusion.Result>>();
+        var evaluation=validatedMachineEvaluation(result,task,trace->facts.set(trace.fusion()));
+        return new MachineData(evaluation,facts.get());
+    }
+    private SchemeResultEvaluator.Evaluation validatedMachineEvaluation(ConversationInspectionResult result,InspectionTask task,
+            java.util.function.Consumer<io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation> machineTrace){
         try {
             var original = mapper.readValue(result.getBusinessItemResultsJson(), new TypeReference<List<SchemeResultEvaluator.ItemResult>>() { });
             var allowed = messages.selectList(Wrappers.<ConversationMessage>lambdaQuery()
                     .select(ConversationMessage::getId).eq(ConversationMessage::getConversationId, result.getConversationId()))
                     .stream().map(ConversationMessage::getId).collect(Collectors.toSet());
-            var evaluation = projection(task, result, original, List.of(), allowed).original();
+            var evaluation = projection(task, result, original, List.of(),List.of(), allowed,machineTrace).original();
             var score = evaluation.scoring();
             var stored = read(result.getScoringResultJson(), io.github.opensabre.iqc.scoring.InspectionScoring.Result.class);
             if (!mapper.valueToTree(score).equals(mapper.valueToTree(stored)) || !score.scoreStatus().name().equals(result.getScoreStatus())
@@ -628,6 +640,12 @@ public class BusinessItemReviewService {
     private BusinessItemReviewEvaluator.Projection projection(InspectionTask task,ConversationInspectionResult result,
             List<SchemeResultEvaluator.ItemResult> original,List<BusinessItemReviewEvaluator.Decision> decisions,
             List<HumanFindingReviewEvaluator.Decision> findingDecisions,Set<String> allowed) throws com.fasterxml.jackson.core.JsonProcessingException {
+        return projection(task,result,original,decisions,findingDecisions,allowed,null);
+    }
+    private BusinessItemReviewEvaluator.Projection projection(InspectionTask task,ConversationInspectionResult result,
+            List<SchemeResultEvaluator.ItemResult> original,List<BusinessItemReviewEvaluator.Decision> decisions,
+            List<HumanFindingReviewEvaluator.Decision> findingDecisions,Set<String> allowed,
+            java.util.function.Consumer<io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation> machineTrace) throws com.fasterxml.jackson.core.JsonProcessingException {
         var snapshot = io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenTree(mapper,task.getRuleSnapshotJson());
         if (snapshot.has("pipelineSnapshot")) {
             var release = pipelineRelease(snapshot);
@@ -661,8 +679,10 @@ public class BusinessItemReviewService {
                 return new BusinessItemReviewEvaluator.Projection(result.getId(),checked.original(),
                         new SchemeResultEvaluator.Evaluation(items,human.scoring()),checked.decisions(),human);
             }
-            return BusinessItemReviewEvaluator.evaluatePipeline(result.getId(), release, trace, original, decisions, allowed,
+            var checked=BusinessItemReviewEvaluator.evaluatePipeline(result.getId(), release, trace, original, decisions, allowed,
                     io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.validatedBusinessContext(task,snapshot,trace,result.getConversationId(),mapper));
+            if(machineTrace!=null)machineTrace.accept(trace);
+            return checked;
         }
         if(!findingDecisions.isEmpty())throw IqcException.invalidArgument("Finding人工修正必须来自冻结流水线结果");
         return BusinessItemReviewEvaluator.evaluate(result.getId(), SchemeResultEvaluator.definition(snapshot, mapper), original, decisions, allowed);

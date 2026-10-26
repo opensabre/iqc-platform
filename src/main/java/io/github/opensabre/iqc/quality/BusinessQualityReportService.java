@@ -3,6 +3,7 @@ package io.github.opensabre.iqc.quality;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.opensabre.iqc.governance.IqcException;
+import io.github.opensabre.iqc.finding.Finding;
 import io.github.opensabre.iqc.result.BatchResultQueryService;
 import io.github.opensabre.iqc.result.dao.ConversationInspectionResultMapper;
 import io.github.opensabre.iqc.result.model.ConversationInspectionResult;
@@ -136,9 +137,18 @@ public class BusinessQualityReportService {
     public record ActionMetrics(String schemaVersion,int selectedResults,int boundResults,int unboundResults,
             String actionCount,String confirmedSuccessCount,String confirmedFailureCount,String unresolvedCount,
             BigDecimal confirmedFailureRate,List<ActionStateCount> states) { }
+    public record FactDistribution(String code,String valueType,int presentCount,int missingFindingCount,
+            Map<String,Integer> states,Map<String,Integer> knownSeverityCounts,int trueCount,int falseCount) { }
+    public record FindingSummary(int expectedResults,int sourceResults,int unavailableResults,List<FactDistribution> facts) { }
+    public record FindingDistribution(String schemaVersion,FindingSummary machine,FindingSummary reviewed) { }
     public record Report(String scope, String runPolicy, int taskCount, int conversationCount, List<PolicyGroup> groups,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-            ActionMetrics actionMetrics) {
+            ActionMetrics actionMetrics,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            Map<String,FindingDistribution> findingDistributions) {
+        public Report(String scope,String runPolicy,int taskCount,int conversationCount,List<PolicyGroup> groups,ActionMetrics actionMetrics){
+            this(scope,runPolicy,taskCount,conversationCount,groups,actionMetrics,null);
+        }
         public Report(String scope,String runPolicy,int taskCount,int conversationCount,List<PolicyGroup> groups){
             this(scope,runPolicy,taskCount,conversationCount,groups,null);
         }
@@ -162,6 +172,14 @@ public class BusinessQualityReportService {
     }
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Report report(List<String> taskIds,String executionSelectionJson,String requestedRunPolicy,boolean includeModelUsage,boolean includeActionMetrics){
+        return report(taskIds,executionSelectionJson,requestedRunPolicy,includeModelUsage,includeActionMetrics,false);
+    }
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public Report report(List<String> taskIds,String executionSelectionJson,String requestedRunPolicy,boolean includeModelUsage,boolean includeActionMetrics,boolean includeFindingDistribution){
+        if(includeFindingDistribution){
+            if(sensitive==null)throw IqcException.invalidState("Finding统计当前授权依赖不可用");
+            var access=sensitive.current(java.util.Set.of("iqc:report:view"));access.requireFullConversation();access.requirePii();
+        }
         if(includeActionMetrics){
             if(sensitive==null||actionExecutions==null)throw IqcException.invalidState("动作统计授权/汇总依赖不可用");
             sensitive.current(java.util.Set.of("iqc:report:view","iqc:action:history:view"));
@@ -193,9 +211,18 @@ public class BusinessQualityReportService {
             try {
                 var snapshot = mapper.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readTree(task.getRuleSnapshotJson());
                 io.github.opensabre.iqc.scoring.InspectionScoring.Policy scoring;
-                List<ReportItem> items;JsonNode marker;String key;RolloutAttribution rollout=null;
+                List<ReportItem> items;List<ReportFinding> findingDefinitions=List.of();JsonNode marker;String key;RolloutAttribution rollout=null;
                 if(snapshot.has("pipelineSnapshot")){
                     var release=reviews.pipelineRelease(snapshot);scoring=release.scoring();
+                    if(includeFindingDistribution){
+                        var definitions=new java.util.TreeMap<String,Finding.ValueType>();
+                        for(var node:release.pipeline().nodes()){
+                            var definition=mapper.treeToValue(node.config().path("findingDefinition"),io.github.opensabre.iqc.finding.FindingDefinition.class);
+                            var prior=definitions.putIfAbsent(definition.code(),definition.valueType());
+                            if(prior!=null&&prior!=definition.valueType())throw IqcException.invalidState("冻结事实类型不一致");
+                        }
+                        findingDefinitions=definitions.entrySet().stream().map(entry->new ReportFinding(entry.getKey(),entry.getValue())).toList();
+                    }
                     items=release.items().stream().map(item->new ReportItem(item.itemCode(),item.itemCode())).toList();marker=snapshot.path("pipelineSnapshot");
                     key=io.github.opensabre.iqc.selector.SelectorAssetService.hash(mapper.writeValueAsString(List.of("PIPELINE",marker.path("pipelineId"),
                             marker.path("versionNo"),marker.path("draftRevision"),marker.path("trial"),marker.path("release"))));
@@ -223,7 +250,7 @@ public class BusinessQualityReportService {
                 var conversations=BatchResultQueryService.exportConversationIds(task,mapper);
                 count+=conversations.size();itemCount+=(long)conversations.size()*items.size();
                 if(count>500||itemCount>50_000)throw IqcException.invalidArgument("业务统计最多 500 个任务会话、50000 个质检项");
-                selected.add(new Selection(task,conversations,scoring,items,marker,key,executionId,rollout));
+                selected.add(new Selection(task,conversations,scoring,items,marker,key,executionId,rollout,findingDefinitions));
             } catch (com.fasterxml.jackson.core.JsonProcessingException exception) { throw IqcException.invalidState("任务方案快照损坏"); }
         }
         var candidates = new ArrayList<RunCandidate>();
@@ -252,13 +279,15 @@ public class BusinessQualityReportService {
         var groups = new LinkedHashMap<String, Group>();
         for (var candidate : candidates) {
             var selection = candidate.selection();
-            var group = groups.computeIfAbsent(selection.key(), ignored -> new Group(selection,mapper));
+            var group = groups.computeIfAbsent(selection.key(), ignored -> new Group(selection,mapper,includeFindingDistribution));
             group.taskIds.add(selection.task().getId());
             group.conversations++;
             var result = candidate.result();
             if (result == null) { group.missingResult++; group.missingReview++; continue; }
             if (result.getExecutionId() != null) group.executionIds.add(result.getExecutionId());
-            var machine = reviews.validatedMachineEvaluation(result, selection.task());
+            var machineData=group.machineFacts==null?null:reviews.validatedMachineData(result,selection.task());
+            var machine = machineData==null?reviews.validatedMachineEvaluation(result, selection.task()):machineData.evaluation();
+            if(group.machineFacts!=null)group.machineFacts.add(machineData.findings());
             group.machine.add(machine.scoring());
             group.addItems(machine, false);
             var completed = reviews.latest(result.getId(), true);
@@ -270,9 +299,10 @@ public class BusinessQualityReportService {
                 var reviewed=projection.reviewed();group.addManualScores(projection);group.addReviewChanges(projection);
                 group.reviewed.add(reviewed.scoring());
                 group.addItems(reviewed, true);
+                if(group.reviewedFacts!=null)group.reviewedFacts.add(projection.findingReview()==null?machineData.findings():projection.findingReview().findings().reviewed());
             }
         }
-        var reportGroups=new ArrayList<PolicyGroup>();
+        var reportGroups=new ArrayList<PolicyGroup>();var findingDistributions=new LinkedHashMap<String,FindingDistribution>();
         for(var group:groups.values()){
             ModelUsageSummary usage=null;
             if(includeModelUsage){
@@ -287,8 +317,10 @@ public class BusinessQualityReportService {
                 usage=new ModelUsageSummary("iqc-business-model-usage-v1",expected,bound,expected-bound,summary.costs(),summary.latency(),summary.tokens());
             }
             reportGroups.add(group.view(usage));
+            if(group.machineFacts!=null)findingDistributions.put(group.selection.key(),new FindingDistribution("iqc-business-finding-distribution-v1",
+                    group.machineFacts.view(group.conversations),group.reviewedFacts.view(group.conversations)));
         }
-        return new Report("SELECTED_TASK_RUNS", runPolicy.name(), selected.size(), candidates.size(),List.copyOf(reportGroups),includeActionMetrics?actionMetrics(candidates):null);
+        return new Report("SELECTED_TASK_RUNS", runPolicy.name(), selected.size(), candidates.size(),List.copyOf(reportGroups),includeActionMetrics?actionMetrics(candidates):null,includeFindingDistribution?java.util.Collections.unmodifiableMap(findingDistributions):null);
     }
 
     private ActionMetrics actionMetrics(List<RunCandidate> candidates){
@@ -369,14 +401,16 @@ public class BusinessQualityReportService {
     }
 
     private record ReportItem(String itemCode,String name) { }
+    private record ReportFinding(String code,Finding.ValueType type) { }
     private record Selection(InspectionTask task,List<String> conversations,InspectionScoring.Policy scoring,List<ReportItem> items,
-                             JsonNode marker,String key,String executionId,RolloutAttribution rollout) { }
+                             JsonNode marker,String key,String executionId,RolloutAttribution rollout,List<ReportFinding> findingDefinitions) { }
     private record RunCandidate(Selection selection, String conversationId, ConversationInspectionResult result,
                                 java.util.Date effectiveTime) { }
     private static final class Group {
         final ObjectMapper json; final Selection selection; final List<String> taskIds = new ArrayList<>();
         final java.util.Set<String> executionIds = new java.util.LinkedHashSet<>();
         final Scores machine = new Scores(), reviewed = new Scores();
+        final FactCounts machineFacts,reviewedFacts;
         final java.util.Map<String, ItemCounts> machineItems = new LinkedHashMap<>(), reviewedItems = new LinkedHashMap<>();
         int conversations, missingResult, missingReview, pendingReview;
         int manualApplied,manualStale,effectiveNumericCount;BigDecimal manualSum=BigDecimal.ZERO,effectiveSum=BigDecimal.ZERO;
@@ -425,8 +459,11 @@ public class BusinessQualityReportService {
             return new ScoreSummary(calculated.resultCount(),calculated.finalCount(),calculated.pendingCount(),calculated.notApplicableCount(),calculated.qualifiedCount(),
                     calculated.averageScore(),calculated.qualifiedRate(),manual);
         }
-        Group(Selection selection,ObjectMapper json) {
+        Group(Selection selection,ObjectMapper json,boolean includeFindings) {
             this.json=json;this.selection = selection;
+            boolean supported=includeFindings&&selection.marker().has("pipelineId");
+            machineFacts=supported?new FactCounts(selection.findingDefinitions()):null;
+            reviewedFacts=supported?new FactCounts(selection.findingDefinitions()):null;
             selection.items().forEach(item -> {
                 machineItems.put(item.itemCode(), new ItemCounts());
                 reviewedItems.put(item.itemCode(), new ItemCounts());
@@ -449,6 +486,43 @@ public class BusinessQualityReportService {
                                 scoring == null ? null : scoring.points(), scoring != null && scoring.veto(),
                                 machineItems.get(item.itemCode()).view(), reviewedItems.get(item.itemCode()).view());
                     }).toList(),marker.has("pipelineId")?marker.path("pipelineId").asText():null,reviewChanges(),selection.rollout(),usage);
+        }
+    }
+    /** Counts only metadata and BOOLEAN frequency; arbitrary finding values never enter the report. */
+    private static final class FactCounts {
+        final LinkedHashMap<String,FactCounter> facts=new LinkedHashMap<>();int rows;
+        FactCounts(List<ReportFinding> definitions){definitions.forEach(value->facts.put(value.code(),new FactCounter(value)));}
+        void add(List<io.github.opensabre.iqc.fusion.FindingFusion.Result> values){
+            if(values==null)throw IqcException.invalidState("Finding分布缺少受验证的流水线事实来源");
+            var seen=new java.util.HashSet<String>();
+            for(var value:values){
+                var counter=value==null?null:facts.get(value.code());
+                if(counter==null||!seen.add(value.code())||counter.definition.type()!=value.valueType()||value.state()==null)
+                    throw IqcException.invalidState("Finding分布来源与冻结声明不一致");
+                counter.present++;counter.states.merge(value.state(),1,Integer::sum);
+                if(value.state()==Finding.State.KNOWN){
+                    if(value.severity()==null)throw IqcException.invalidState("已知事实缺少严重度");
+                    counter.severities.merge(value.severity(),1,Integer::sum);
+                    if(value.valueType()==Finding.ValueType.BOOLEAN){
+                        var booleanValue=value.value();if(booleanValue==null||!booleanValue.isBoolean())throw IqcException.invalidState("已知布尔事实值无效");
+                        if(booleanValue.booleanValue())counter.trueCount++;else counter.falseCount++;
+                    }
+                }
+            }
+            rows++;
+        }
+        FindingSummary view(int expected){return new FindingSummary(expected,rows,expected-rows,facts.values().stream().map(counter->counter.view(rows)).toList());}
+    }
+    private static final class FactCounter {
+        final ReportFinding definition;int present,trueCount,falseCount;
+        final java.util.EnumMap<Finding.State,Integer> states=new java.util.EnumMap<>(Finding.State.class);
+        final java.util.EnumMap<Finding.Severity,Integer> severities=new java.util.EnumMap<>(Finding.Severity.class);
+        FactCounter(ReportFinding definition){this.definition=definition;for(var state:Finding.State.values())states.put(state,0);for(var severity:Finding.Severity.values())severities.put(severity,0);}
+        FactDistribution view(int sourceRows){
+            var statusCounts=new LinkedHashMap<String,Integer>();states.forEach((state,count)->statusCounts.put(state.name(),count));
+            var severityCounts=new LinkedHashMap<String,Integer>();severities.forEach((severity,count)->severityCounts.put(severity.name(),count));
+            return new FactDistribution(definition.code(),definition.type().name(),present,sourceRows-present,
+                    java.util.Collections.unmodifiableMap(statusCounts),java.util.Collections.unmodifiableMap(severityCounts),trueCount,falseCount);
         }
     }
     private static final class ItemCounts {
