@@ -158,10 +158,20 @@ public class BulkTaskMaterializationService {
             throw IqcException.invalidState("批次冻结定义无法读取");
         }
     }
-    Progress progress(String body) {
+    Progress progress(String body) {return readProgress(json,body);}
+    /** Shared bounded aggregate decoder. It never returns source snapshots or owner identities. */
+    public static Progress readProgress(ObjectMapper json,String body) {
         try {
             if(body==null || body.length()>4096)throw IqcException.invalidState("批次检查点缺失或过大");
-            var value=json.readValue(body,Progress.class);
+            var tree=json.readTree(body);
+            if(tree==null || !tree.isObject() || !tree.path("schemaVersion").isTextual()
+                    || !tree.path("nextShardNo").isIntegralNumber() || !tree.path("nextShardNo").canConvertToInt()
+                    || !tree.path("scannedConversations").isIntegralNumber() || !tree.path("scannedConversations").canConvertToLong()
+                    || !tree.path("selectedConversations").isIntegralNumber() || !tree.path("selectedConversations").canConvertToLong()
+                    || !tree.path("scanComplete").isBoolean()
+                    || tree.hasNonNull("afterId")&&!tree.path("afterId").isTextual())
+                throw IqcException.invalidState("批次检查点字段缺失或类型无效");
+            var value=json.treeToValue(tree,Progress.class);
             if(!"iqc-bulk-progress-v1".equals(value.schemaVersion()) || value.nextShardNo()<0 || value.scannedConversations()<0
                     || value.selectedConversations()<0 || value.selectedConversations()>value.scannedConversations()
                     || value.afterId()!=null && !value.afterId().matches("[A-Za-z0-9:_-]{1,64}")

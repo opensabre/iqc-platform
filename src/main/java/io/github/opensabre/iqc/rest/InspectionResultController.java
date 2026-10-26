@@ -33,6 +33,7 @@ public class InspectionResultController {
     @org.springframework.beans.factory.annotation.Value("${iqc.task.worker-enabled:true}")
     private boolean workerEnabled=true;
     private final InspectionExecutionService executionService;
+    private final io.github.opensabre.iqc.task.BulkTaskAccessService bulk;
     private final UsageCounterRecorder usageCounterRecorder;
     private final BatchResultQueryService batchResultQueryService;
     private final HierarchicalResultService hierarchicalResultService;
@@ -60,13 +61,25 @@ public class InspectionResultController {
                                       LabelInsightExportService labelInsightExportService,
                                       io.github.opensabre.iqc.quality.BusinessItemReviewService businessReviews,
                                       io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive,
-                                      io.github.opensabre.iqc.privacy.ResultReadProjection resultProjection) {
+                                      io.github.opensabre.iqc.privacy.ResultReadProjection resultProjection,
+                                      io.github.opensabre.iqc.task.BulkTaskAccessService bulk) {
+        this.bulk=bulk;
         this.executionService = executionService; this.usageCounterRecorder = usageCounterRecorder;
         this.batchResultQueryService = batchResultQueryService; this.hierarchicalResultService = hierarchicalResultService;
         this.labelResultQueryService = labelResultQueryService;
         this.labelInsightExportService = labelInsightExportService;
         this.businessReviews = businessReviews;
         this.sensitive = sensitive; this.resultProjection = resultProjection;
+    }
+
+    public InspectionResultController(InspectionExecutionService executionService,UsageCounterRecorder usageCounterRecorder,
+            BatchResultQueryService batchResultQueryService,HierarchicalResultService hierarchicalResultService,
+            LabelResultQueryService labelResultQueryService,LabelInsightExportService labelInsightExportService,
+            io.github.opensabre.iqc.quality.BusinessItemReviewService businessReviews,
+            io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive,
+            io.github.opensabre.iqc.privacy.ResultReadProjection resultProjection) {
+        this(executionService,usageCounterRecorder,batchResultQueryService,hierarchicalResultService,labelResultQueryService,
+                labelInsightExportService,businessReviews,sensitive,resultProjection,null);
     }
 
     private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access resultReadAccess() {
@@ -103,6 +116,11 @@ public class InspectionResultController {
     @RateLimit(sceneCode = "iqc-task-run", maxCount = 10, period = 60)
     public InspectionTask run(@PathVariable String id) {
         var access = resultReadAccess(java.util.Set.of("iqc:task:execute"));
+        var coordinated=bulk==null?java.util.Optional.<InspectionTask>empty():bulk.queueIfBulk(id);
+        if(coordinated.isPresent()) {
+            usageCounterRecorder.record(new UsageRecord("inspection-task:run:"+id,null,"iqc-platform","INSPECTION_TASK",id,"RUN",UsageOutcome.SUCCESS));
+            return resultProjection.taskReceipt(coordinated.get(),access);
+        }
         InspectionTask task = executionService.queue(id);
         try{executionService.executeAsync(id,task.getCurrentExecutionId());}
         catch(org.springframework.core.task.TaskRejectedException busy){if(!workerEnabled)throw busy;log.info("event=iqc_api_backpressure taskId={} status=QUEUED",id);}
@@ -115,6 +133,8 @@ public class InspectionResultController {
     @Audit(operationType = OperationType.UPDATE, description = "恢复 IQC 质检任务", module = "IQC_TASK", request = false, response = false, key = "#id")
     public InspectionTask resume(@PathVariable String id) {
         var access = resultReadAccess(java.util.Set.of("iqc:task:execute"));
+        var coordinated=bulk==null?java.util.Optional.<InspectionTask>empty():bulk.queueIfBulk(id);
+        if(coordinated.isPresent())return resultProjection.taskReceipt(coordinated.get(),access);
         InspectionTask task = executionService.resume(id);
         try{executionService.executeAsync(id,task.getCurrentExecutionId());}
         catch(org.springframework.core.task.TaskRejectedException busy){if(!workerEnabled)throw busy;log.info("event=iqc_api_backpressure taskId={} status=QUEUED",id);}

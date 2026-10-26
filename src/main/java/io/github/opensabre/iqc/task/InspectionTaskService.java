@@ -1170,6 +1170,13 @@ public class InspectionTaskService {
 
     /** Pages visible tasks and applies the task-list business filters. */
     public IqcPage<InspectionTask> page(long current, long size, String keyword, String status, String taskType) {
+        return page(current,size,keyword,status,taskType,null);
+    }
+    public IqcPage<InspectionTask> page(long current,long size,String keyword,String status,String taskType,String parentTaskId) {
+        if(parentTaskId!=null) {
+            if(!parentTaskId.matches("[A-Za-z0-9:_-]{1,64}") || !BulkTaskMaterializationService.TYPE.equals(getDispatchIdentity(parentTaskId).getTaskType()))
+                throw IqcException.invalidArgument("无效批次父任务");
+        }
         Page<InspectionTask> page = new Page<>(safeCurrent(current), safeSize(size));
         var query = Wrappers.<InspectionTask>lambdaQuery().ne(InspectionTask::getStatus, "DELETED").orderByDesc(InspectionTask::getCreatedTime);
         if (!dataScope.canViewAll()) {
@@ -1183,6 +1190,7 @@ public class InspectionTaskService {
         }
         if (status != null && !status.isBlank()) query.eq(InspectionTask::getStatus, status.trim());
         if (taskType != null && !taskType.isBlank()) query.eq(InspectionTask::getTaskType, taskType.trim());
+        if(parentTaskId!=null)query.eq(InspectionTask::getBulkParentTaskId,parentTaskId);
         // Large frozen transcripts belong to authorized task detail, not every list row.
         query.select(InspectionTask.class,field->!java.util.Set.of("ruleSnapshotJson","triggerRequestJson","retryPolicyJson","bulkProgressJson").contains(field.getProperty()));
         return IqcPage.from(taskMapper.selectPage(page, query));
@@ -1231,6 +1239,15 @@ public class InspectionTaskService {
             }
         }
         return recovered;
+    }
+
+    /** Metadata only: type routing must not load frozen transcripts for an ordinary run request. */
+    public InspectionTask getDispatchIdentity(String id) {
+        var task=taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,id)
+                .select(InspectionTask::getId,InspectionTask::getTaskType,InspectionTask::getCreatedBy,InspectionTask::getOwnerGroupId));
+        if(task==null)throw IqcException.notFound("质检任务不存在");
+        if(!dataScope.canView(task.getCreatedBy(),task.getOwnerGroupId()))throw IqcException.accessDenied("无权执行该任务");
+        return task;
     }
 
     public InspectionTask get(String id) {

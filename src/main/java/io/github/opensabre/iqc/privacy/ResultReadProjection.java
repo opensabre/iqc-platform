@@ -202,6 +202,7 @@ public final class ResultReadProjection {
     /** Public display facts only; no prompt, rule text, identifiers or arbitrary snapshot fields. */
     public record TaskPresentation(String schemaVersion, String kind, Boolean labelOnly) { }
     private TaskPresentation taskPresentation(InspectionTask task) {
+        if(task!=null && "PIPELINE_BULK".equals(task.getTaskType()))return new TaskPresentation("iqc-task-presentation-v1","PIPELINE_BULK",false);
         String kind = "UNKNOWN"; Boolean labelOnly = null;
         if (task != null && task.getRuleSnapshotJson() != null) {
             try {
@@ -463,6 +464,19 @@ public final class ResultReadProjection {
             }catch(java.io.IOException | RuntimeException invalid){ /* Unknown count remains explicit. */ }
         }else if(source.getConversationId()!=null)conversationCount=1;
         result.put("conversationCount",conversationCount);
+        if(source.getBulkParentTaskId()!=null && source.getBulkParentTaskId().matches("[A-Za-z0-9:_-]{1,64}")
+                && source.getBulkShardNo()!=null && source.getBulkShardNo()>=0)
+            result.put("bulkShard",Map.of("parentTaskId",source.getBulkParentTaskId(),"shardNo",source.getBulkShardNo()));
+        if("PIPELINE_BULK".equals(source.getTaskType())) {
+            result.put("conversationCount",null);
+            try {
+                var progress=io.github.opensabre.iqc.task.BulkTaskMaterializationService.readProgress(json,source.getBulkProgressJson());
+                result.put("bulk",Map.of("schemaVersion","iqc-bulk-presentation-v1",
+                        "scannedConversations",Long.toString(progress.scannedConversations()),
+                        "selectedConversations",Long.toString(progress.selectedConversations()),
+                        "scannedPages",progress.nextShardNo(),"scanComplete",progress.scanComplete()));
+            }catch(RuntimeException unavailable){ /* Invalid or absent progress is unknown, never a fabricated zero. */ }
+        }
         if("SCHEME".equals(basic.kind())) {
             try {
                 var snapshot=json.readTree(source.getRuleSnapshotJson()).path("schemeSnapshot");
