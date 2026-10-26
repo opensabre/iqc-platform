@@ -444,6 +444,30 @@ public class InspectionTaskService {
             io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset) {
         return createUsingPipelineSnapshot(prepared,name,conversationIds,concurrency,requestId,selection,selectorRequestHash,selectorAsset,null);
     }
+    /** Internal bulk coordinator boundary: called inside its locked parent/checkpoint transaction. */
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask createBulkShardUsingPipelineSnapshot(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name, Integer concurrency, String requestId,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection, String selectionRequestHash, com.fasterxml.jackson.databind.JsonNode scanEvidence) {
+        if(selection==null || selection.selectedConversationIds().isEmpty() || selection.limited()
+                || selectionRequestHash==null || !selectionRequestHash.matches("[a-f0-9]{64}"))
+            throw IqcException.invalidState("分片需要完整的原始选数证据");
+        if(scanEvidence==null || !"iqc-bulk-shard-scan-v1".equals(scanEvidence.path("schemaVersion").asText())
+                || scanEvidence.toString().length()>4096)throw IqcException.invalidState("分片扫描来源无效");
+        var child=createUsingPipelineSnapshot(prepared,name,selection.selectedConversationIds(),concurrency,requestId,selection,selectionRequestHash,null);
+        com.fasterxml.jackson.databind.node.ObjectNode root;
+        try {
+            var exact=objectMapper.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                    .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));
+            root=(com.fasterxml.jackson.databind.node.ObjectNode)exact.readTree(child.getRuleSnapshotJson());
+        } catch(com.fasterxml.jackson.core.JsonProcessingException | ClassCastException bad) {
+            throw IqcException.invalidState("分片任务冻结快照无法读取");
+        }
+        if(root.has("bulkShardSnapshot"))throw IqcException.invalidState("分片扫描来源已存在但检查点未推进");
+        root.set("bulkShardSnapshot",scanEvidence.deepCopy());child.setRuleSnapshotJson(root.toString());
+        if(taskMapper.updateById(child)!=1)throw IqcException.invalidState("分片扫描来源保存失败");
+        return child;
+    }
     public record PeriodicIdentity(String scheduleId,String revisionId,java.time.Instant plannedAt,com.fasterxml.jackson.databind.JsonNode evidence) { }
     @Transactional
     public InspectionTask createPeriodicPipelineTask(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared pipeline,String name,
