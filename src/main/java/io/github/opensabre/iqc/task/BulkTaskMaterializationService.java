@@ -137,7 +137,7 @@ public class BulkTaskMaterializationService {
         return new Step(parentId,childId,next);
     }
 
-    private Definition definition(InspectionTask task) {
+    Definition definition(InspectionTask task) {
         if(task==null || !TYPE.equals(task.getTaskType()) || task.getBulkParentTaskId()!=null)
             throw IqcException.invalidState("批次父任务不存在或类型无效");
         try {
@@ -158,7 +158,7 @@ public class BulkTaskMaterializationService {
             throw IqcException.invalidState("批次冻结定义无法读取");
         }
     }
-    private Progress progress(String body) {
+    Progress progress(String body) {
         try {
             if(body==null || body.length()>4096)throw IqcException.invalidState("批次检查点缺失或过大");
             var value=json.readValue(body,Progress.class);

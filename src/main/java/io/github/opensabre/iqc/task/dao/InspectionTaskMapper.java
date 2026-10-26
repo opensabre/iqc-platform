@@ -6,6 +6,9 @@ import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
 public interface InspectionTaskMapper extends BaseMapper<InspectionTask> {
+    record BulkChildCount(String status,long countValue) { }
+    @org.apache.ibatis.annotations.Select("SELECT status,COUNT(*) AS count_value FROM iqc_inspection_task WHERE bulk_parent_task_id=#{parentId} GROUP BY status")
+    java.util.List<BulkChildCount> bulkChildCounts(@org.apache.ibatis.annotations.Param("parentId") String parentId);
     record OperationalCount(String mode,String measure,String status,long countValue) { }
     /** One read view; fixed status families, no transcript/owner/identity projection. */
     @org.apache.ibatis.annotations.Options(timeout=2)

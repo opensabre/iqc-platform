@@ -23,6 +23,7 @@ public class DurableInspectionWorker {
     private final InspectionTaskMapper tasks;
     private final InspectionTaskService taskService;
     private final InspectionExecutionService execution;
+    private final org.springframework.beans.factory.ObjectProvider<BulkTaskCoordinator> bulk;
     private final ThreadPoolTaskExecutor executor;
     private record Lease(String taskId,String executionId) { }
     private final Set<Lease> inFlight=ConcurrentHashMap.newKeySet();
@@ -39,10 +40,16 @@ public class DurableInspectionWorker {
     private final java.util.concurrent.atomic.AtomicLong lastOperationalSuccess=new java.util.concurrent.atomic.AtomicLong(Long.MIN_VALUE);
     @Value("${iqc.task.metrics-delay-ms:30000}") private long sampleDelayMs=30000;
     @Value("${iqc.task.metrics-max-age-ms:90000}") private long maximumSampleAgeMs=90000;
+    public DurableInspectionWorker(InspectionTaskMapper tasks,InspectionTaskService taskService,InspectionExecutionService execution,
+            ThreadPoolTaskExecutor executor,org.springframework.beans.factory.ObjectProvider<io.micrometer.core.instrument.MeterRegistry> meters){
+        this(tasks,taskService,execution,executor,meters,null);
+    }
     @org.springframework.beans.factory.annotation.Autowired
     public DurableInspectionWorker(InspectionTaskMapper tasks,InspectionTaskService taskService,InspectionExecutionService execution,
             @Qualifier("iqcTaskExecutor") ThreadPoolTaskExecutor executor,
-            org.springframework.beans.factory.ObjectProvider<io.micrometer.core.instrument.MeterRegistry> meters){
+            org.springframework.beans.factory.ObjectProvider<io.micrometer.core.instrument.MeterRegistry> meters,
+            org.springframework.beans.factory.ObjectProvider<BulkTaskCoordinator> bulk){
+        this.bulk=bulk;
         this.tasks=tasks;this.taskService=taskService;this.execution=execution;this.executor=executor;this.meters=meters==null?null:meters.getIfAvailable();
         if(this.meters!=null)try{
             for(String mode:Set.of("PRODUCTION","EVALUATION"))for(var measure:METRIC_STATES.entrySet())for(String status:measure.getValue()){
@@ -95,7 +102,9 @@ public class DurableInspectionWorker {
         int recovered=taskService.recoverStaleExecutions(Duration.ofMinutes(timeoutMinutes),false);
         if(recovered>0)log.warn("event=iqc_worker_stale_recovery recovered={}",recovered);
         if(inFlight.size()>=maximumInFlight || executor.getThreadPoolExecutor().getQueue().remainingCapacity()==0)return;
-        var queued=tasks.selectList(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getStatus,"QUEUED")
+        var queued=tasks.selectList(Wrappers.<InspectionTask>lambdaQuery()
+                .and(q->q.eq(InspectionTask::getStatus,"QUEUED").or(n->n.eq(InspectionTask::getTaskType,BulkTaskMaterializationService.TYPE)
+                        .in(InspectionTask::getStatus,"PAUSE_REQUESTED","CANCEL_REQUESTED")))
                 .isNotNull(InspectionTask::getCurrentExecutionId).orderByDesc(InspectionTask::getQueuePriority)
                 .orderByAsc(InspectionTask::getCreatedTime).orderByAsc(InspectionTask::getId).last("LIMIT 100"));
         for(var task:queued) {
@@ -104,7 +113,12 @@ public class DurableInspectionWorker {
             if(!inFlight.add(lease))continue;
             try {
                 executor.execute(()->{
-                    try{execution.executePersisted(lease.taskId(),lease.executionId());}
+                    try{
+                        if(BulkTaskMaterializationService.TYPE.equals(task.getTaskType())) {
+                            if(bulk==null)throw new IllegalStateException("Bulk coordinator unavailable");
+                            bulk.getObject().executePersisted(lease.taskId(),lease.executionId());
+                        } else execution.executePersisted(lease.taskId(),lease.executionId());
+                    }
                     catch(RuntimeException failure){log.error("event=iqc_worker_dispatch taskId={} executionId={} errorType={}",
                             lease.taskId(),lease.executionId(),failure.getClass().getSimpleName(),failure);}
                     finally{inFlight.remove(lease);}
