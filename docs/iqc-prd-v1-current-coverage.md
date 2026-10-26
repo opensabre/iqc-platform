@@ -37,7 +37,7 @@
 | 16 Registry/Gateway / I6/I7 | 模型资产、Gateway、预算/费用/限流/对账与调用诊断 | 已编码多项；实际供应商超时/Fallback、Token/成本和调用归属/并发预算待统一证明。 |
 | 17 所有对象版本与发布 / I3/I7 | 原各资产版本、Snapshot、Pipeline/灰度修订 | 多数对象已有版本；Pipeline存储/摘要高精度数值及旧hash兼容须独立验证，HTTP桥接不替代该证据；独立Prompt/Knowledge Base版本如何复用原资产仍需明确核对，不能只凭Pipeline整体hash视为每项全部完成。 |
 | 17 GRAY/FULL与P2 A/B / I7 | RolloutPolicy/Service/TaskService/ExecutionGuard、Benchmark | 显式IDs灰度新请求/原请求重放已编码；0/10000/回退为同一政策语义。调度/Selector灰度、生产AB归因及真实激活回退验收按实际需求继续，不能只做预览。 |
-| 18 Trace/监控/审计 / I1/I7 | executionTrace、ModelMonitoring、公共审计starter | 节点/模型轨迹与部分监控已编码；Finding分布/人工修改率/Action失败率等运营指标与真实审计切面未整体证明。 |
+| 18 Trace/监控/审计 / I1/I7 | executionTrace、ModelMonitoring、BusinessQualityReport、DurableInspectionWorker、公共审计starter | 已编码模型/节点轨迹、人工修改率、Action确认失败率、节点尝试/图耗时/池状态及持久任务/已测轮次监控；完成时间迁移76未共享执行。Finding分布、真实采集/角色/审计切面与容量验收仍需补齐，不能据局部指标宣布PRD18完成。 |
 | 19 功能/数据/敏感权限 / I7 | IqcDataScope、SensitiveReadAccessService、ResultReadProjection及组织迁移 | 多项会话/任务/样本/评测/Selector等投影已有；Pipeline/Scheme/Agent/Rule/Skill/Model配置与人工复核等剩余敏感副本仍须收口，真实四角色/网关验收待做。 |
 | 19 功能/数据/敏感权限 / I7 | IqcDataScope、SensitiveReadAccessService、ResultReadProjection及组织迁移 | 多项会话/任务/样本/评测/Selector等投影已有；Pipeline草稿/历史/目录/命令回执及Skill指令/Schema/历史/回执已接原敏感投影，独立验证待；Agent配置/历史/比较/回执与独立能力元数据已编码，效果统计补可见任务范围；Rule表达式/历史/测试与DLS导入诊断已编码投影（独立验收待）；Scheme/RuleSet/Model配置与人工复核等剩余敏感副本仍须收口，真实四角色/网关验收待做。 |
 | 20–21 逻辑表/API / 全部 | 沿现有领域表/明确新职责表与原Controller扩展 | PRD是逻辑建议，不复制已有表/API；逐项行为由对应功能验收，不要求照抄示意路径覆盖旧语义。 |
@@ -203,3 +203,10 @@ LLM/SMALL_MODEL节点在结果进入upstream和融合前按原任务冻结产物
 - Root 整合后原43000编译终态0，原64159 UI构建终态0；没有 Root 执行测试。新的候选池撤权清理/原因说明仍以本轮后续固定提交及构建终态为准。所有专项范围详见根 IQC_PRD_COLLABORATION.md，不能用原基线通过代替后续变更验证。
 
 处理后会话输入、排除语音处理、单租户组织数据权限继续；未启用默认 v2/动作开关，未执行共享 SQL 或部署。全部适用 I1–I7 尚未完成。
+
+
+### 2026-10-26 运行与动作指标当前进展
+
+原Action账本的已确认失败率后端71a2203/UI35f3892已有服务27、真实SQL2、HTTP4及组件22固定专项，范围与失败轮见各文档和根协作记录，非真实PDP或完整浏览器整链。节点监控22ba02f/2060de0/UI5cd4190已编码；持久任务b894d36/99d80ca/UIb98c997沿原表新增首次完成时间和缓存观测，必须先迁移76，历史不回填。Root编译/构建通过，不等于采样、迁移或容量通过。
+
+模型一致性ea33545/UI63ee2b0的v2核对有序模型键/声明部署/输入，缺部署保留分母并排除比较；服务报告28+指标8及UI8已有B受控专项，实际供应商部署权重真实性仍未证明。显式模型调用在途采集已沿原Gateway边界编码并通过Root编译/构建，独立副作用与真实采集专项仍待；不把预算限制或节点线程数当作实际供应商/GPU占用。全部适用I1–I7继续；Finding分布、真实角色/采集/容量及场景A–E仍按原要求验收，不缩减范围。

@@ -57,3 +57,15 @@ Micrometer计数采用浮点、随实例重启，不能作为精确账单/预算
 ## 数据来源和IQC采集状态
 浏览器GET `/api/iqc/model-gateway/monitoring/status`，独立IQC_ADMIN资源`iqc:model:monitoring:status:view`。沿同一内部Feign转发控制面/monitoring/iqc/models/status；复用MonitoringDataSourceStatus，仅固定`up{job="opensabre-applications",application="iqc-platform"}`。控制面查询不可用返回availablefalse，IQC内部调用失败为明确查询错误，成功但空vector不等于Targets已健康。IQC不透传底层错误信息，targets最多1MiB。
 前端与历史查询并行读取并保留同一请求代次围栏：严格success/vector/sample，展示Prometheus报告的UP/DOWN/未知个数，查询失败/解析失败/成功无IQC目标分别显示。UP只代表Prometheus采集状态，不证明模型业务成功或预算核销正确；不展示其他应用目标或凭据。实际状态、抓取授权和浏览器仍未验证。
+
+## 显式模型调用在途（2026-10-26）
+
+PRD18.2模型并发复用原ModelGateway实际调用边界，新增iqc.model.gateway.active Gauge；不新增预算/并发控制或调用账本。原容量/预算准入后、请求诊断采集后，进入invoke.get前递增，Supplier返回/RuntimeException/Error离开时在原finally首先归还，再记录原调用Timer；随后归档/usage/结算不计在途。未准入不递增，结算失败保留账本占用的原语义不变；计量不能触发重发或修复副作用。
+
+该值是本应用正在显式调用边界内的数量，内部SDK/工具循环、异步供应商行为和服务器资源并非同一口径；嵌套显式调用各自计数，不宣称GPU占用或远端物理并发。单实例固定一个无ID标签Gauge，跨实例sum，不使用共享数据库快照的max规则。注册器不可用不影响业务；旧无注册器构造保持。实例重启/采集缺失不能补0或当作远端没有调用。
+
+原控制面增加固定application=iqc-platform的activeModelCalls单系列，页面可选显示。兼容原9/18/23系列以及各自增加该单系列（10/19/24）；部分节点/任务组、未知系列、空值仍拒绝。旧控制面没有该字段时明确无法确认在途；实际注册了Gauge的0才是已测0。仍需先更新能接受可选系列的IQC，再控制面/页面；迁移76发布前置仍适用于当前IQC版本。未部署。
+
+Root仅test-compile/前端build，终态见根协作记录。B需验证挂起Supplier并发/嵌套、成功/抛错/Error归还、准入拒绝/归档和usage/结算等待不充在途、账本与重试/工具副作用不变、坏注册器隔离、固定sum与旧/扩展系列、页面无字段/非有限/撤权及实际采集。没有GPU或供应商实际权重/性能证据，完整I1–I7仍未完成。
+
+Root原78963 test-compile终态0且/tmp/iqc-model-active-compile.exit=0，主/测试编译及diff通过，Root未执行测试。三仓固定后的在途/结算副作用/采集专项仍待B，不将编译当运行验收。

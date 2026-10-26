@@ -19,6 +19,10 @@ public class ModelMonitoringService {
     private static final Set<String> ALL_SERIES=java.util.stream.Stream.concat(SERIES.stream(),PIPELINE_SERIES.stream()).collect(java.util.stream.Collectors.toUnmodifiableSet());
     private static final Set<String> TASK_SERIES=Set.of("taskStates","taskCompletionTps","unmeasuredExecutions","taskMetricsHealth","taskMetricsAge");
     private static final Set<String> WITH_TASK_SERIES=java.util.stream.Stream.concat(ALL_SERIES.stream(),TASK_SERIES.stream()).collect(java.util.stream.Collectors.toUnmodifiableSet());
+    private static boolean supportedSeries(Set<String> keys){
+        var base=new java.util.HashSet<>(keys);base.remove("activeModelCalls");
+        return base.equals(SERIES)||base.equals(ALL_SERIES)||base.equals(WITH_TASK_SERIES);
+    }
     public IqcModelMonitoringClient.SourceStatus status(){
         if(!scope.isIqcAdministrator())throw IqcException.accessDenied("仅质检管理员可查看模型采集状态");
         IqcModelMonitoringClient.SourceStatus data;
@@ -36,7 +40,7 @@ public class ModelMonitoringService {
             data=response.getData();
         }catch(RuntimeException unavailable){throw IqcException.invalidState("模型监控查询不可用，请检查控制面与采集服务");}
         if(!range.equals(data.range()) || data.start()==null || data.end()==null || !data.start().isBefore(data.end())
-                || data.stepSeconds()<1 || data.series()==null || (!data.series().keySet().equals(SERIES)&&!data.series().keySet().equals(ALL_SERIES)&&!data.series().keySet().equals(WITH_TASK_SERIES))
+                || data.stepSeconds()<1 || data.series()==null || !supportedSeries(data.series().keySet())
                 || data.series().values().stream().anyMatch(value->value==null || value.length()>1048576))
             throw IqcException.invalidState("模型监控返回格式无效");
         return new IqcModelMonitoringClient.History(data.range(),data.start(),data.end(),data.stepSeconds(),Map.copyOf(data.series()));

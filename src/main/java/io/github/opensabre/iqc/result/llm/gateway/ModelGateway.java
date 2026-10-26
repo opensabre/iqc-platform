@@ -19,10 +19,16 @@ public class ModelGateway {
     private final GovernanceRateLimiter rateLimiter;
     private final LlmQualityProperties properties;
     private final io.micrometer.core.instrument.MeterRegistry meters;
+    private final java.util.concurrent.atomic.AtomicInteger activeInvocations=new java.util.concurrent.atomic.AtomicInteger();
     @org.springframework.beans.factory.annotation.Autowired
     public ModelGateway(GatewayCallService calls,GovernanceRateLimiter rateLimiter,LlmQualityProperties properties,
             org.springframework.beans.factory.ObjectProvider<io.micrometer.core.instrument.MeterRegistry> meters,GatewayCallDataService callData){
         this.callData=callData;this.calls=calls;this.rateLimiter=rateLimiter;this.properties=properties;this.meters=meters.getIfAvailable();
+        if(this.meters!=null)try{
+            io.micrometer.core.instrument.Gauge.builder("iqc.model.gateway.active",activeInvocations,java.util.concurrent.atomic.AtomicInteger::get)
+                    .description("Local explicit supplier invocations currently inside the invocation boundary; excludes admission and settlement")
+                    .register(this.meters);
+        }catch(RuntimeException unavailable){log.debug("Model active gauge unavailable type={}",unavailable.getClass().getSimpleName());}
     }
     public ModelGateway(GatewayCallService calls,GovernanceRateLimiter rateLimiter,LlmQualityProperties properties,
             org.springframework.beans.factory.ObjectProvider<io.micrometer.core.instrument.MeterRegistry> meters){this(calls,rateLimiter,properties,meters,null);}
@@ -93,7 +99,9 @@ public class ModelGateway {
         if(callData!=null && callData.enabled() && requestData!=null)try{archivedRequest=requestData.get();}
         catch(RuntimeException invalid){log.warn("Model diagnostic request unavailable type={}",invalid.getClass().getSimpleName());}
         final T response;long invocationStarted=System.nanoTime();String invocationOutcome="UNKNOWN";
-        try{try{response=invoke.get();invocationOutcome="RESPONDED";}finally{recordInvocation(invocationStarted,invocationOutcome);}}
+        try{activeInvocations.incrementAndGet();
+            try{response=invoke.get();invocationOutcome="RESPONDED";}
+            finally{activeInvocations.decrementAndGet();recordInvocation(invocationStarted,invocationOutcome);}}
         catch(RuntimeException failure){archive(handle,archivedRequest,null);try{calls.unknown(handle,failure);metric("iqc.model.gateway.settlement",1,"outcome","UNKNOWN_RECORDED");}catch(RuntimeException appendFailure){
                 metric("iqc.model.gateway.settlement",1,"outcome","UNKNOWN_UNCONFIRMED");
                 log.warn("Model call remains unconfirmed call={} type={}",handle.callId(),appendFailure.getClass().getSimpleName());}
