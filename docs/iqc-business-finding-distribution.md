@@ -35,3 +35,11 @@ Report.findingDistributions按原groupKey关联各冻结标准，协议iqc-busin
 Root仅test-compile及vue-tsc/Vite，原句柄/终态见根协作记录。B需验证三权限在IO前拒绝、默认无回调/字段省略/旧签名、同标准分组/轮次去重/缺结果缺事实、重复事实拒绝、五状态/BOOL真假/严重度守恒、有效复核改判与沿用原值/未完成不填、方案不适用、来源校准/评分失败不返回统计、任意值/证据/正文无泄漏、旧Hash/输入不变、HTTP/组件权限撤销恢复/迟到/坏协议和实际PDP/SQL/browser组合。完整适用I1–I7未完成，未部署。
 
 Root原65065 test-compile终态0且/tmp/iqc-finding-distribution-compile.exit=0，主/测试编译及diff通过；Root未执行测试。三权限、原验证回调/统计分母、复核沿用语义及SQL/PDP/界面组合仍待B专项。
+
+## B 独立报告专项（2026-10-26）
+
+固定同步bfaa7f7。原94663 test-compile surefire:test终态0，/tmp/iqc-b-finding-distribution.log.exit=0；fresh XML BusinessFindingDistributionTest11 + BusinessQualityReportServiceTest27 + BusinessItemReviewServiceTest23，共61项零失败错误跳过。
+
+新增11项使用真实报告聚合、真实冻结Pipeline发布解析与受控validatedMachineData/当前权限：三grant在任何任务/结果读取前拒绝；默认老调用无敏感授权/数据回调且NULL字段省略；重复声明按code去重；五状态及KNOWN严重度/BOOL真假守恒；缺结果/有来源但缺事实分开；无完整复核不填，已完成无Finding改判沿用机器事实；重复/未声明/错类型/非法BOOL拒绝；原值/证据/正文/解释/来源选中ID不出JSON。
+
+机器来源验证在新类中受控，本轮原复核23项仅既有回归，不足以证明新增回调与真实SQL来源完整组合；Finding改判有效投影、HTTP、实际PDP与浏览器整链继续待验。未改生产代码或默认开关，不将61项外推完整PRD完成。
