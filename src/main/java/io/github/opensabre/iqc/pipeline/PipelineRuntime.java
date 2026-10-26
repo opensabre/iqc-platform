@@ -568,5 +568,8 @@ public final class PipelineRuntime implements AutoCloseable {
         if(pointer==null || (!pointer.isEmpty() && !pointer.startsWith("/"))) throw new IllegalArgumentException("Expected JSON pointer");
         com.fasterxml.jackson.core.JsonPointer.compile(pointer);
     }
+    /** Physical shared pool state, including cancelled tasks that have not stopped yet. */
+    public int activeNodeWorkers() { return executor.getActiveCount(); }
+    public int queuedNodeAttempts() { return executor.getQueue().size(); }
     @Override public void close() { executor.shutdownNow(); }
 }
