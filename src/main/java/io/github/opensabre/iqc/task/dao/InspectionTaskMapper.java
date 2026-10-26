@@ -6,6 +6,9 @@ import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
 public interface InspectionTaskMapper extends BaseMapper<InspectionTask> {
+    /** Routing scalar only: lock the parent before loading/locking a child task snapshot. */
+    @org.apache.ibatis.annotations.Select("SELECT bulk_parent_task_id FROM iqc_inspection_task WHERE id=#{taskId}")
+    String bulkParentTaskId(@org.apache.ibatis.annotations.Param("taskId") String taskId);
     record BulkChildCount(String status,long countValue) { }
     @org.apache.ibatis.annotations.Select("SELECT status,COUNT(*) AS count_value FROM iqc_inspection_task WHERE bulk_parent_task_id=#{parentId} GROUP BY status")
     java.util.List<BulkChildCount> bulkChildCounts(@org.apache.ibatis.annotations.Param("parentId") String parentId);

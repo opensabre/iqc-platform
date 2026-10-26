@@ -14,14 +14,19 @@ import java.util.List;
 public class PipelineAssetController {
     private final PipelineAssetService assets;
     private final InspectionTaskService tasks;
+    private final io.github.opensabre.iqc.task.BulkTaskAccessService bulk;
     private final io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive;
     private final io.github.opensabre.iqc.privacy.ResultReadProjection projection;
     @org.springframework.beans.factory.annotation.Autowired
     public PipelineAssetController(PipelineAssetService assets,InspectionTaskService tasks,
             io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive,
-            io.github.opensabre.iqc.privacy.ResultReadProjection projection) {
-        this.assets=assets;this.tasks=tasks;this.sensitive=sensitive;this.projection=projection;
+            io.github.opensabre.iqc.privacy.ResultReadProjection projection,
+            io.github.opensabre.iqc.task.BulkTaskAccessService bulk) {
+        this.assets=assets;this.tasks=tasks;this.sensitive=sensitive;this.projection=projection;this.bulk=bulk;
     }
+    public PipelineAssetController(PipelineAssetService assets,InspectionTaskService tasks,
+            io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive,
+            io.github.opensabre.iqc.privacy.ResultReadProjection projection){this(assets,tasks,sensitive,projection,null);}
     public PipelineAssetController(PipelineAssetService assets,InspectionTaskService tasks){this(assets,tasks,null,null);}
     private io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access access(String resource){
         if(sensitive==null || projection==null)throw io.github.opensabre.iqc.governance.IqcException.invalidState("流水线响应授权组件不可用");
@@ -101,6 +106,13 @@ public class PipelineAssetController {
     @Audit(operationType=OperationType.CREATE,description="创建流水线任务",module="IQC_PIPELINE",request=false,response=false,key="#id")
     public InspectionTask task(@PathVariable String id,@RequestBody Run body) {
         var access=access("iqc:pipeline:task:create");
+        if(body.bulk()!=null) {
+            if(bulk==null)throw io.github.opensabre.iqc.governance.IqcException.invalidState("批次工作流不可用");
+            if(body.selector()==null || body.selectorAsset()!=null || body.conversationIds()!=null&&!body.conversationIds().isEmpty())
+                throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("分片批次需使用内联ALL选择器，不能混用会话IDs或选择器资产");
+            return projection.taskReceipt(bulk.create(id,body.versionNo(),body.selector(),body.name(),body.bulk().scanSize(),
+                    body.concurrency()==null?1:body.concurrency(),body.requestId()),access);
+        }
         var release=assets.publishedRelease(id,body.versionNo());
         if(body.selectorAsset()!=null) {
             if(body.selector()!=null || (body.conversationIds()!=null && !body.conversationIds().isEmpty()))
@@ -140,9 +152,15 @@ public class PipelineAssetController {
             this(expectedRevision,trialTaskId,resultsReviewed,null,null,null);
         }
     }
+    public record Bulk(int scanSize) { }
     public record Run(int versionNo,String name,List<String> conversationIds,Integer concurrency,String requestId,
             io.github.opensabre.iqc.selector.SelectorDefinition selector,
-            io.github.opensabre.iqc.selector.SelectorAssetService.Reference selectorAsset) {
+            io.github.opensabre.iqc.selector.SelectorAssetService.Reference selectorAsset, Bulk bulk) {
+        public Run(int versionNo,String name,List<String> conversationIds,Integer concurrency,String requestId,
+                io.github.opensabre.iqc.selector.SelectorDefinition selector,
+                io.github.opensabre.iqc.selector.SelectorAssetService.Reference selectorAsset) {
+            this(versionNo,name,conversationIds,concurrency,requestId,selector,selectorAsset,null);
+        }
         public Run(int versionNo,String name,List<String> conversationIds,Integer concurrency,String requestId,
                 io.github.opensabre.iqc.selector.SelectorDefinition selector) {
             this(versionNo,name,conversationIds,concurrency,requestId,selector,null);

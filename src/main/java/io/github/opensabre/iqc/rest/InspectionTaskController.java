@@ -58,10 +58,15 @@ public class InspectionTaskController {
                                        @RequestParam(defaultValue = "20") long size,
                                        @RequestParam(required = false) String keyword,
                                        @RequestParam(required = false) String status,
-                                       @RequestParam(required = false) String taskType) {
+                                       @RequestParam(required = false) String taskType,
+                                       @RequestParam(required = false) String parentTaskId) {
         var access=access("iqc:task:view");
-        var page=taskService.page(current,size,keyword,status,taskType);
+        var page=taskService.page(current,size,keyword,status,taskType,parentTaskId);
         return new IqcPage<>(page.records().stream().map(row -> projection.taskRead(row,access,false)).toList(),page.current(),page.size(),page.total());
+    }
+
+    public IqcPage<InspectionTask> list(long current,long size,String keyword,String status,String taskType) {
+        return list(current,size,keyword,status,taskType,null);
     }
 
     @GetMapping("/{id}")
