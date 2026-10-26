@@ -62,7 +62,7 @@ class IsolatedMysqlTaskMetricsIT {
         var db=new JdbcTemplate(new DriverManagerDataSource(upgradeUrl,"root",""));
         db.update("INSERT INTO iqc_inspection_task(id,name,status,current_execution_id) VALUES ('history','old','SUCCEEDED','history')");
         db.update("INSERT INTO iqc_task_execution(id,task_id,attempt_no,status) VALUES ('history','history',1,'SUCCEEDED')");
-        var latest=flyway(upgradeUrl,null);assertThat(latest.migrate().migrationsExecuted).isEqualTo(1);latest.validate();
+        var latest=flyway(upgradeUrl,"1.1.76");assertThat(latest.migrate().migrationsExecuted).isEqualTo(1);latest.validate();
         assertThat(latest.migrate().migrationsExecuted).isZero();
         assertThat(db.queryForObject("SELECT completed_at_utc IS NULL FROM iqc_task_execution WHERE id='history'",Boolean.class)).isTrue();
         assertThat(db.queryForMap("SELECT DATA_TYPE,IS_NULLABLE,DATETIME_PRECISION FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='iqc_task_execution' AND column_name='completed_at_utc'"))
