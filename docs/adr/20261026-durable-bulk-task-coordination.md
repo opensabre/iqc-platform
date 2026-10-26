@@ -1,0 +1,23 @@
+# 百万会话批次的持久任务协调
+
+## 复用与缺口
+
+已检查InspectionTask/TaskExecution/TaskItem、DurableInspectionWorker、InspectionExecutionService、周期调度与ScheduledActorAccessService。原任务已有持久队列、心跳/陈旧恢复、暂停取消、首次生产输入冻结和幂等创建；原Selector新增ALL游标扫描。单任务1000和输入16MiB限额继续保留。TaskItem以消息为单位，messageId不能冒充子任务ID；周期实例的时间槽不能冒充分片序号。现有模型缺少可索引的父子关系和与不可变快照分离的协调检查点。
+
+不新建队列、执行表或租户/RBAC模型。最小扩展iqc_inspection_task：bulk_parent_task_id、bulk_shard_no，以及仅父任务使用的bulk_progress_json。父子二元唯一索引使恢复/多实例竞争不能产生同一片的两个子任务；普通任务三列NULL，不改变历史语义。字段不含用户令牌。进度不进入默认序列化/列表SQL。迁移只在本地代码登记，禁止直接应用共享数据库。
+
+## 协调契约（待完整实现后开放）
+
+父任务类型PIPELINE_BULK。原ruleSnapshot保存发布版Prepared、Selector定义、毫秒锚点和原负责人CreationBound，创建时冻结Hash。进度版本iqc-bulk-progress-v1单独保存lastScannedId、nextShardNo、scannedConversations、selectedConversations、scanComplete，计数不能借用totalMessages（消息单位）。父任务的TaskExecution继续管理租约与状态，不创建伪消息TaskItem。普通worker必须先分派父任务到协调逻辑，禁止将其空消息误判成功。
+
+每片在短事务内锁父任务及当前execution，检查RUNNING/暂停取消和当前负责人授权，复用scanAllPageAt；最多1000候选，零匹配仍提交前进游标。选中会话通过原createUsingPipelineSnapshot冻结，不重复执行模型。子任务父ID与序号同事务落库；该片子任务、首次输入、游标与统计必须一起提交，失败一起回滚。以父ID+片序号派生幂等请求，重入先检查已冻结子任务；不得为已提交片重新读取可变会话。每轮只物化有界片并让出执行资源，不能在持有父锁时等待子模型调用。
+
+子任务走原队列/执行器。父协调结束扫描后仍须等待子任务终态，才汇总成功/失败；扫描完成不等于质检完成。计数明确分片、会话、消息三个单位，不构造全池估算。失败子任务继续由原重试/恢复入口维护，其同一冻结输入不重选。父暂停停止新片与新调度并传播已在途子任务的暂停请求；取消停止新片并传播取消，待在途回收后终态。父恢复保留原execution/游标/子任务关系，不重建已提交片。删除父任务前必须处理子任务引用，禁止孤立或隐藏运行子任务。
+
+当前组织权限每轮重新解析，固定要求由服务端选取，复用ScheduledActorAccessService.resolve(bound, grants)及IqcDataScope.asScheduledActor。原owner/group/all上界和当前授权求交集；不得用system身份扩大范围。父任务的来源可见组必须取流水线、选数证据和各子任务范围交集，不能只保留创建人的组。业务读取和恢复仍核验原功能授权。
+
+每页RR与创建水位不等于百万数据跨页全局快照；发布版本固定、每片首次输入固定、已提交片不可变是明确语义。ALL之外全局抽样暂不走此协调入口，不能逐片随机近似。
+
+## 发布和验证边界
+
+V1.1.77先迁移再部署使用字段的应用；回退保留可空列和索引，不删除已运行协调证据。当前只实现持久字段基础，不开放父任务创建或声称百万功能完成。后续须完成事务物化、worker分派/心跳、父子状态传播、原API/UI与报告范围，以及跨重启/并发/撤权/重复恢复和百万容量证明。Root仅编译，测试由B独立负责。
