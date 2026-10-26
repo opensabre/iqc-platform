@@ -141,6 +141,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         var prepared=pipelines.publishedReleaseForTask(asset.getId(),1);
         assertEquals("0.900000000000000001",prepared.release().items().getFirst().numericPredicate().threshold());
         assertArchiveReceiptExecutesPublishedPipeline(prepared,conversation,suffix);
+        assertBulkMaterializationRollsBackAndRetainsFrozenInput(prepared,conversation,suffix);
         var production=context.getBean(InspectionTaskService.class).createUsingPipelineSnapshot(prepared,"production",List.of(conversation),1,"production_"+suffix);
         // Mutate live data only after the owning materializer has frozen the complete processed conversation.
         db.update("UPDATE iqc_conversation_message SET content='later text',start_ms=10000,end_ms=11000 WHERE id=?",second);
@@ -821,6 +822,37 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_task_execution WHERE task_id=?",Integer.class,finished.getId()));
         assertEquals(0,subscriptions.fire(subscriptionFrame,actor));
     }
+    /** Real parent/child/production input share one transaction; injected checkpoint failure must undo all. */
+    private void assertBulkMaterializationRollsBackAndRetainsFrozenInput(PipelineAssetService.Prepared prepared,String conversation,String suffix) throws Exception {
+        var bulk=context.getBean(BulkTaskMaterializationService.class);assertTrue(org.springframework.aop.support.AopUtils.isAopProxy(bulk));
+        var json=context.getBean(ObjectMapper.class);var db=new JdbcTemplate(context.getBean(DataSource.class));var sql=context.getBean(SqlSessionTemplate.class);
+        var selector=new io.github.opensabre.iqc.selector.SelectorDefinition(io.github.opensabre.iqc.selector.SelectorDefinition.SCHEMA,null,null,List.of(conversation),List.of(),null,null,1000);
+        var bound=new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","user-annotator","annotator",false,"group");
+        var parent=bulk.create(prepared.pipelineId(),prepared.versionNo(),selector,bound,"bulk validation",1000,1,"bulk_"+suffix);
+        assertEquals(parent.getId(),bulk.create(prepared.pipelineId(),prepared.versionNo(),selector,bound,"bulk validation",1000,1,"bulk_"+suffix).getId());
+        String eid="bulk-e"+suffix;
+        db.update("INSERT INTO iqc_task_execution(id,task_id,attempt_no,status) VALUES (?,?,1,'RUNNING')",eid,parent.getId());
+        db.update("UPDATE iqc_inspection_task SET status='RUNNING',current_execution_id=? WHERE id=?",eid,parent.getId());
+        String before=db.queryForObject("SELECT bulk_progress_json FROM iqc_inspection_task WHERE id=?",String.class,parent.getId());
+        int tasksBefore=db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task",Integer.class);
+        db.execute("CREATE TRIGGER reject_bulk_checkpoint BEFORE UPDATE ON iqc_inspection_task FOR EACH ROW BEGIN IF NEW.id='"+parent.getId()+"' AND NOT (NEW.bulk_progress_json <=> OLD.bulk_progress_json) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='injected checkpoint failure'; END IF; END");
+        try {assertThrows(org.springframework.dao.DataAccessException.class,()->bulk.materializeNext(parent.getId(),eid));}
+        finally {db.execute("DROP TRIGGER reject_bulk_checkpoint");}
+        assertEquals(before,db.queryForObject("SELECT bulk_progress_json FROM iqc_inspection_task WHERE id=?",String.class,parent.getId()));
+        assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE bulk_parent_task_id=?",Integer.class,parent.getId()));
+        assertEquals(tasksBefore,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task",Integer.class));
+        var step=bulk.materializeNext(parent.getId(),eid);assertNotNull(step.childTaskId());assertTrue(step.progress().scanComplete());
+        assertEquals(1,step.progress().scannedConversations());assertEquals(1,step.progress().selectedConversations());assertEquals(1,step.progress().nextShardNo());
+        var child=sql.getMapper(InspectionTaskMapper.class).selectById(step.childTaskId());assertEquals("CREATED",child.getStatus());assertEquals(parent.getId(),child.getBulkParentTaskId());assertEquals(0,child.getBulkShardNo());
+        var frozen=PipelineAssetService.readFrozenTree(json,child.getRuleSnapshotJson());assertEquals("iqc-bulk-shard-scan-v1",frozen.path("bulkShardSnapshot").path("schemaVersion").asText());
+        assertEquals(parent.getId(),frozen.path("bulkShardSnapshot").path("parentTaskId").asText());assertTrue(frozen.path("bulkShardSnapshot").path("scanPageHash").asText().matches("[a-f0-9]{64}"));
+        String childSnapshot=child.getRuleSnapshotJson();String progress=db.queryForObject("SELECT bulk_progress_json FROM iqc_inspection_task WHERE id=?",String.class,parent.getId());
+        var again=bulk.materializeNext(parent.getId(),eid);assertNull(again.childTaskId());assertEquals(step.progress(),again.progress());
+        assertEquals(childSnapshot,sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getRuleSnapshotJson());
+        assertThrows(RuntimeException.class,()->bulk.materializeNext(parent.getId(),"obsolete-execution"));
+        assertEquals(progress,db.queryForObject("SELECT bulk_progress_json FROM iqc_inspection_task WHERE id=?",String.class,parent.getId()));
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE bulk_parent_task_id=?",Integer.class,parent.getId()));
+    }
     private ScheduledActorAccessService.Resolved authorizedActor() {
         return new ScheduledActorAccessService.Resolved("user-annotator","annotator",false,"group",Set.of(),
                 Set.of("iqc:pipeline:task:create","iqc:task:execute","iqc:action:enqueue","iqc:review:create"),Instant.now());
@@ -888,6 +920,8 @@ class IsolatedMysqlMeasuredPublicationIT {
                     s.getMapper(io.github.opensabre.iqc.label.dao.LabelCollectionMapper.class),
                     s.getMapper(io.github.opensabre.iqc.label.dao.LabelCollectionMemberMapper.class),scope),j);
         }
+        @Bean io.github.opensabre.iqc.selector.ConversationSelectionService selections(SqlSessionTemplate s,IqcDataScope scope,ObjectMapper j){return new io.github.opensabre.iqc.selector.ConversationSelectionService(s.getMapper(ConversationMapper.class),s.getMapper(ConversationInspectionResultMapper.class),s.getMapper(io.github.opensabre.iqc.label.dao.InspectionLabelResultMapper.class),scope,j);}
+        @Bean BulkTaskMaterializationService bulk(SqlSessionTemplate s,InspectionTaskService tasks,PipelineAssetService pipelines,io.github.opensabre.iqc.selector.ConversationSelectionService selections,IqcDataScope scope,ObjectMapper j){return new BulkTaskMaterializationService(s.getMapper(InspectionTaskMapper.class),s.getMapper(TaskExecutionMapper.class),tasks,pipelines,selections,scope,j);}
         @Bean @Primary InspectionTaskService tasks(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,ProductionInputSnapshotService inputs,ObjectProvider<PipelineAssetService> pipelines,ObjectProvider<ScheduledActorAccessService> actors){return new InspectionTaskService(s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationMapper.class),null,null,null,j,s.getMapper(TaskExecutionMapper.class),scope,null,null,inputs,pipelines,actors);}
         @Bean GoldSampleService gold(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope){return new GoldSampleService(s.getMapper(QualitySampleMapper.class),s.getMapper(QualitySampleVersionMapper.class),s.getMapper(ConversationMapper.class),s.getMapper(ConversationMessageMapper.class),scope,j);}
         @Bean EvaluationDatasetService datasets(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,GoldSampleService gold){return new EvaluationDatasetService(s.getMapper(EvaluationDatasetMapper.class),s.getMapper(EvaluationDatasetVersionMapper.class),gold,scope,j);}
