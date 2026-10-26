@@ -92,7 +92,7 @@ public class ConversationSelectionService {
         return select(definition,plannedAt,targets.stream().distinct().toList());
     }
     /** Internal exhaustive scan primitive. Cursor refers to scanned candidates, never only matched rows. */
-    public record ScanPage(String schemaVersion,String definitionHash,Instant anchor,SelectionScope sourceScope,
+    public record ScanPage(String schemaVersion,String definitionHash,Instant anchor,Instant createdBeforeExclusive,SelectionScope sourceScope,
             String afterId,String nextAfterId,int scannedCount,boolean hasMore,Selection selection) { }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public ScanPage scanAllPageAt(SelectorDefinition definition,Instant plannedAt,String afterId,int scanSize){
@@ -101,6 +101,9 @@ public class ConversationSelectionService {
                 ||afterId!=null&&!afterId.matches("[A-Za-z0-9:_-]{1,64}"))throw IqcException.invalidArgument("分片扫描锚点、游标或大小无效");
         if(definition.sampling().mode()!=SelectorDefinition.SamplingMode.ALL)throw IqcException.invalidArgument("全量分片扫描仅支持ALL，不能逐页冒充全池抽样");
         Instant anchor=plannedAt.truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        // Baseline created_time is DATETIME(0). Exclude the entire open storage second;
+        // <= a millisecond anchor would admit later inserts rounded into that same second.
+        Instant createdBefore=anchor.truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
         boolean all=scope.canViewAll();String owner=scope.owner(),group=all?null:scope.groupId();
         var bound=new SelectionScope(all,owner,group);
         var window=resolve(definition.timeWindow(),anchor);
@@ -109,7 +112,7 @@ public class ConversationSelectionService {
                 .gt(afterId!=null,Conversation::getId,afterId).isNull(Conversation::getCreatedTime).last("LIMIT 1"));
         if(undated==null||!undated.isEmpty())throw IqcException.invalidState("授权候选缺少创建时间，不能证明全量扫描锚点");
         var query=authorizedQuery(definition,window,null,bound)
-                .select(Conversation::getId).le(Conversation::getCreatedTime,Date.from(anchor))
+                .select(Conversation::getId).lt(Conversation::getCreatedTime,Date.from(createdBefore))
                 .gt(afterId!=null,Conversation::getId,afterId).orderByAsc(Conversation::getId).last("LIMIT "+(scanSize+1));
         var page=conversations.selectList(query);
         if(page==null||page.size()>scanSize+1)throw IqcException.invalidState("分片扫描候选返回超出边界");
@@ -117,10 +120,10 @@ public class ConversationSelectionService {
         if(scanned.stream().anyMatch(id->id==null||!id.matches("[A-Za-z0-9:_-]{1,64}"))||scanned.stream().distinct().count()!=scanned.size())
             throw IqcException.invalidState("分片扫描候选标识无效或重复");
         String hash=PipelineAssetService.hash(json.valueToTree(definition).toString());
-        if(scanned.isEmpty())return new ScanPage("iqc-selector-scan-page-v1",hash,anchor,bound,afterId,afterId,0,false,null);
+        if(scanned.isEmpty())return new ScanPage("iqc-selector-scan-page-v2",hash,anchor,createdBefore,bound,afterId,afterId,0,false,null);
         var selection=select(definition,anchor,scanned);
         if(selection.limited()||selection.candidateCount()!=scanned.size())throw IqcException.invalidState("分片候选读取与原目标选数不一致");
-        return new ScanPage("iqc-selector-scan-page-v1",hash,anchor,selection.sourceScope(),afterId,scanned.getLast(),scanned.size(),page.size()>scanSize,selection);
+        return new ScanPage("iqc-selector-scan-page-v2",hash,anchor,createdBefore,selection.sourceScope(),afterId,scanned.getLast(),scanned.size(),page.size()>scanSize,selection);
     }
     public void validate(SelectorDefinition definition) {
         if(definition==null) throw IqcException.invalidArgument("缺少Selector定义");

@@ -284,6 +284,8 @@ public class InspectionExecutionService {
 
     /** Validate route vote configuration before claiming a lease or creating execution progress. */
     private void requireSupportedRouteRunCount(InspectionTask task, JsonNode snapshot) {
+        if("PIPELINE_BULK".equals(task.getTaskType()))
+            throw IqcException.invalidState("批次父任务必须由持久协调器分派，不能按普通会话执行");
         if (snapshot == null || !SchemeDefinition.ROUTED_TASK_SCHEMA.equals(
                 snapshot.at("/schemeSnapshot/release/definition/schemaVersion").asText())) return;
         int runCount = task.getRunCount() == null ? 1 : task.getRunCount();

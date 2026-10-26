@@ -444,6 +444,30 @@ public class InspectionTaskService {
             io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset) {
         return createUsingPipelineSnapshot(prepared,name,conversationIds,concurrency,requestId,selection,selectorRequestHash,selectorAsset,null);
     }
+    /** Internal bulk coordinator boundary: called inside its locked parent/checkpoint transaction. */
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask createBulkShardUsingPipelineSnapshot(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name, Integer concurrency, String requestId,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection, String selectionRequestHash, com.fasterxml.jackson.databind.JsonNode scanEvidence) {
+        if(selection==null || selection.selectedConversationIds().isEmpty() || selection.limited()
+                || selectionRequestHash==null || !selectionRequestHash.matches("[a-f0-9]{64}"))
+            throw IqcException.invalidState("分片需要完整的原始选数证据");
+        if(scanEvidence==null || !"iqc-bulk-shard-scan-v1".equals(scanEvidence.path("schemaVersion").asText())
+                || scanEvidence.toString().length()>4096)throw IqcException.invalidState("分片扫描来源无效");
+        var child=createUsingPipelineSnapshot(prepared,name,selection.selectedConversationIds(),concurrency,requestId,selection,selectionRequestHash,null);
+        com.fasterxml.jackson.databind.node.ObjectNode root;
+        try {
+            var exact=objectMapper.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                    .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));
+            root=(com.fasterxml.jackson.databind.node.ObjectNode)exact.readTree(child.getRuleSnapshotJson());
+        } catch(com.fasterxml.jackson.core.JsonProcessingException | ClassCastException bad) {
+            throw IqcException.invalidState("分片任务冻结快照无法读取");
+        }
+        if(root.has("bulkShardSnapshot"))throw IqcException.invalidState("分片扫描来源已存在但检查点未推进");
+        root.set("bulkShardSnapshot",scanEvidence.deepCopy());child.setRuleSnapshotJson(root.toString());
+        if(taskMapper.updateById(child)!=1)throw IqcException.invalidState("分片扫描来源保存失败");
+        return child;
+    }
     public record PeriodicIdentity(String scheduleId,String revisionId,java.time.Instant plannedAt,com.fasterxml.jackson.databind.JsonNode evidence) { }
     @Transactional
     public InspectionTask createPeriodicPipelineTask(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared pipeline,String name,
@@ -1184,9 +1208,12 @@ public class InspectionTaskService {
                 .lt(InspectionTask::getUpdatedTime, cutoff).last("LIMIT 100"));
         int recovered = 0;
         for (InspectionTask task : stale) {
-            String targetStatus=switch(task.getStatus()){case "PAUSE_REQUESTED"->"PAUSED";case "CANCEL_REQUESTED"->"CANCELLED";default->"FAILED";};
+            boolean bulk=BulkTaskMaterializationService.TYPE.equals(task.getTaskType());
+            String targetStatus=bulk?("RUNNING".equals(task.getStatus())?"QUEUED":task.getStatus())
+                    :switch(task.getStatus()){case "PAUSE_REQUESTED"->"PAUSED";case "CANCEL_REQUESTED"->"CANCELLED";default->"FAILED";};
             int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
                     .set(InspectionTask::getStatus, targetStatus)
+                    .set(bulk,InspectionTask::getUpdatedTime,new java.util.Date())
                     .eq(InspectionTask::getId, task.getId())
                     .eq(InspectionTask::getStatus, task.getStatus())
                     .eq(InspectionTask::getCurrentExecutionId,task.getCurrentExecutionId())
@@ -1195,8 +1222,8 @@ public class InspectionTaskService {
             recovered++;
             if (task.getCurrentExecutionId() != null) {
                 executionMapper.update(null, Wrappers.<TaskExecution>lambdaUpdate()
-                        .set(TaskExecution::getStatus, targetStatus)
-                        .setSql(!"PAUSED".equals(targetStatus),"completed_at_utc=COALESCE(completed_at_utc,UTC_TIMESTAMP(3))")
+                        .set(TaskExecution::getStatus, bulk?"QUEUED":targetStatus)
+                        .setSql(!bulk&&!"PAUSED".equals(targetStatus),"completed_at_utc=COALESCE(completed_at_utc,UTC_TIMESTAMP(3))")
                         .set(TaskExecution::getErrorMessage, "执行心跳超时，已按当前运行/暂停/取消状态回收")
                         .eq(TaskExecution::getId, task.getCurrentExecutionId())
                         .eq(TaskExecution::getTaskId,task.getId())
@@ -1233,8 +1260,9 @@ public class InspectionTaskService {
                 .eq(InspectionTask::getId,id).last("FOR UPDATE"));
         if (task == null) throw IqcException.notFound("质检任务不存在: " + id);
         if (!dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权取消该质检任务");
+        boolean bulk=BulkTaskMaterializationService.TYPE.equals(task.getTaskType()) && task.getCurrentExecutionId()!=null;
         boolean running = "RUNNING".equals(task.getStatus()) || "PAUSE_REQUESTED".equals(task.getStatus());
-        String targetStatus = running ? "CANCEL_REQUESTED" : "CANCELLED";
+        String targetStatus = running || bulk ? "CANCEL_REQUESTED" : "CANCELLED";
         int cancelled = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
                 .set(InspectionTask::getStatus, targetStatus)
                 .set(InspectionTask::getCancelRequested, true)
@@ -1242,7 +1270,13 @@ public class InspectionTaskService {
                 .set(InspectionTask::getRetryNotBeforeUtc, null)
                 .eq(InspectionTask::getId, id)
                 .in(InspectionTask::getStatus, "SCHEDULED", "MATERIALIZING", "CREATED", "QUEUED", "RUNNING", "PAUSE_REQUESTED", "PAUSED", "WAITING_INPUT", "FAILED", "PARTIAL_FAILED"));
-        if (cancelled == 1 && !running && task.getCurrentExecutionId() != null) {
+        if(cancelled==1 && bulk && !running) {
+            var row=executionMapper.selectOne(Wrappers.<TaskExecution>lambdaQuery().eq(TaskExecution::getId,task.getCurrentExecutionId())
+                    .eq(TaskExecution::getTaskId,id).last("FOR UPDATE"));
+            if(row==null)throw IqcException.invalidState("批次取消轮次缺失");
+            row.setStatus("QUEUED");if(executionMapper.updateById(row)!=1)throw IqcException.invalidState("批次取消调度失败");
+        }
+        if (cancelled == 1 && !running && !bulk && task.getCurrentExecutionId() != null) {
             TaskExecution execution = executionMapper.selectById(task.getCurrentExecutionId());
             if (execution != null && List.of("QUEUED", "PAUSED").contains(execution.getStatus())) {
                 execution.setStatus("CANCELLED");
@@ -1255,14 +1289,22 @@ public class InspectionTaskService {
 
     @Transactional
     public InspectionTask requestPause(String id) {
-        InspectionTask task = get(id);
-        int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
-                .set(InspectionTask::getStatus, "PAUSE_REQUESTED")
-                .set(InspectionTask::getPauseRequested, true)
-                .eq(InspectionTask::getId, id)
-                .eq(InspectionTask::getCurrentExecutionId,task.getCurrentExecutionId())
-                .eq(InspectionTask::getStatus, "RUNNING"));
-        if (changed != 1) throw IqcException.invalidState("只有执行中的任务可以暂停");
+        InspectionTask task=taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,id).last("FOR UPDATE"));
+        if(task==null)throw IqcException.notFound("质检任务不存在");
+        if(!dataScope.canView(task.getCreatedBy(),task.getOwnerGroupId()))throw IqcException.accessDenied("无权暂停该质检任务");
+        if(!List.of("RUNNING","QUEUED").contains(task.getStatus()))throw IqcException.invalidState("只有排队或执行中的任务可以暂停");
+        boolean queued="QUEUED".equals(task.getStatus());
+        boolean bulk=BulkTaskMaterializationService.TYPE.equals(task.getTaskType());
+        String target=queued&&!bulk?"PAUSED":"PAUSE_REQUESTED";
+        int changed=taskMapper.update(null,Wrappers.<InspectionTask>lambdaUpdate().eq(InspectionTask::getId,id)
+                .eq(InspectionTask::getStatus,task.getStatus()).eq(InspectionTask::getCurrentExecutionId,task.getCurrentExecutionId())
+                .set(InspectionTask::getPauseRequested,true).set(InspectionTask::getStatus,target));
+        if(changed!=1)throw IqcException.invalidState("任务暂停状态已变化");
+        if(queued&&!bulk) {
+            int paused=executionMapper.update(null,Wrappers.<TaskExecution>lambdaUpdate().eq(TaskExecution::getId,task.getCurrentExecutionId())
+                    .eq(TaskExecution::getTaskId,id).eq(TaskExecution::getStatus,"QUEUED").set(TaskExecution::getStatus,"PAUSED"));
+            if(paused!=1)throw IqcException.invalidState("排队任务暂停轮次已变化");
+        }
         return taskMapper.selectById(id);
     }
 
@@ -1283,6 +1325,8 @@ public class InspectionTaskService {
         InspectionTask task = taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery()
                 .eq(InspectionTask::getId, id).last("FOR UPDATE"));
         if (task == null) throw IqcException.notFound("任务不存在");
+        if(BulkTaskMaterializationService.TYPE.equals(task.getTaskType()) || task.getBulkParentTaskId()!=null)
+            throw IqcException.invalidState("批次父子任务需要统一保留，不能独立删除分片或父任务");
         if (!List.of("SUCCEEDED", "PARTIAL_FAILED", "FAILED", "NO_DATA", "CANCELLED", "TRIGGER_EXPIRED", "TRIGGER_CONFLICT").contains(task.getStatus())) {
             throw IqcException.invalidState("只有终态任务可以删除");
         }
