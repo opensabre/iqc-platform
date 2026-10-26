@@ -3,6 +3,9 @@ package io.github.opensabre.iqc.result;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.spring.MybatisSqlSessionFactoryBean;
 import io.github.opensabre.iqc.task.TaskExecutionStateService;
+import io.github.opensabre.iqc.task.InspectionTaskService;
+import io.github.opensabre.iqc.shared.IqcDataScope;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.opensabre.iqc.task.dao.*;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.flywaydb.core.Flyway;
@@ -110,6 +113,44 @@ class IsolatedMysqlTaskMetricsIT {
         assertThat(completed(unknown)).isNull();
         assertThat(counts.stream().filter(r->r.measure().equals("COMPLETED_5M")&&r.status().equals("SUCCEEDED")).mapToLong(InspectionTaskMapper.OperationalCount::countValue).sum()).isEqualTo(1);
     }
+    @Test void staleRecoveryPreservesFirstCompletionAndLeavesPausedAndExcludedQueuedUnmeasured(){
+        var service=context.getBean(InspectionTaskService.class);
+        String failed=seed("RUNNING","RUNNING");
+        String cancelled=seed("CANCEL_REQUESTED","RUNNING");
+        String paused=seed("PAUSE_REQUESTED","RUNNING");
+        String queued=seed("QUEUED","QUEUED");
+        var first=LocalDateTime.of(2025,1,2,3,4,5,123000000);
+        jdbc.update("UPDATE iqc_task_execution SET completed_at_utc=? WHERE id=?",first,failed);
+        jdbc.update("UPDATE iqc_inspection_task SET updated_time=UTC_TIMESTAMP()-INTERVAL 1 DAY");
+        assertThat(service.recoverStaleExecutions(Duration.ofHours(1),false)).isEqualTo(3);
+        assertThat(completed(failed)).isEqualTo(first);
+        assertThat(completed(cancelled)).isNotNull();
+        assertThat(completed(paused)).isNull();assertThat(completed(queued)).isNull();
+        assertThat(jdbc.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,paused)).isEqualTo("PAUSED");
+        assertThat(service.recoverStaleExecutions(Duration.ofHours(1),false)).isZero();
+        assertThat(service.recoverStaleExecutions(Duration.ofHours(1),true)).isEqualTo(1);
+        assertThat(completed(queued)).isNotNull();assertThat(completed(failed)).isEqualTo(first);
+    }
+    @Test void directCancelRecordsCompletionOnceButRunningCancellationWaitsForWorker(){
+        var service=context.getBean(InspectionTaskService.class);
+        for(String status:List.of("QUEUED","PAUSED")){
+            String id=seed(status,status);service.cancel(id);var first=completed(id);
+            assertThat(first).isNotNull();service.cancel(id);assertThat(completed(id)).isEqualTo(first);
+            assertThat(jdbc.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,id)).isEqualTo("CANCELLED");
+        }
+        String running=seed("RUNNING","RUNNING");service.cancel(running);assertThat(completed(running)).isNull();
+        assertThat(jdbc.queryForObject("SELECT status FROM iqc_inspection_task WHERE id=?",String.class,running)).isEqualTo("CANCEL_REQUESTED");
+        states.finish(running,running,0,0);assertThat(completed(running)).isNotNull();
+    }
+    @Test void directCancelExecutionFailureRollsBackTaskAndTimestamp(){
+        String id=seed("QUEUED","QUEUED");
+        jdbc.execute("CREATE TRIGGER reject_direct_cancel BEFORE UPDATE ON iqc_task_execution FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='test cancellation rejection'");
+        try{assertThatThrownBy(()->context.getBean(InspectionTaskService.class).cancel(id)).isInstanceOf(RuntimeException.class);}
+        finally{jdbc.execute("DROP TRIGGER reject_direct_cancel");}
+        assertThat(jdbc.queryForObject("SELECT status FROM iqc_inspection_task WHERE id=?",String.class,id)).isEqualTo("QUEUED");
+        assertThat(jdbc.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,id)).isEqualTo("QUEUED");
+        assertThat(completed(id)).isNull();
+    }
     @Configuration(proxyBeanMethods=false) @EnableTransactionManagement static class Database {
         @Bean DataSource source(){return new DriverManagerDataSource(url,"root","");}
         @Bean DataSourceTransactionManager transactionManager(DataSource source){return new DataSourceTransactionManager(source);}
@@ -117,6 +158,11 @@ class IsolatedMysqlTaskMetricsIT {
             var configuration=new MybatisConfiguration();configuration.setMapUnderscoreToCamelCase(true);
             configuration.addMapper(InspectionTaskMapper.class);configuration.addMapper(TaskExecutionMapper.class);
             var factory=new MybatisSqlSessionFactoryBean();factory.setDataSource(source);factory.setConfiguration(configuration);return factory.getObject();
+        }
+        @Bean InspectionTaskService taskService(SqlSessionFactory sessions){
+            var session=new SqlSessionTemplate(sessions);var scope=org.mockito.Mockito.mock(IqcDataScope.class);
+            org.mockito.Mockito.when(scope.canView(org.mockito.ArgumentMatchers.nullable(String.class),org.mockito.ArgumentMatchers.nullable(String.class))).thenReturn(true);
+            return new InspectionTaskService(session.getMapper(InspectionTaskMapper.class),null,null,null,null,new ObjectMapper(),session.getMapper(TaskExecutionMapper.class),scope,null);
         }
         @Bean TaskExecutionStateService states(SqlSessionFactory sessions){var session=new SqlSessionTemplate(sessions);return new TaskExecutionStateService(session.getMapper(InspectionTaskMapper.class),session.getMapper(TaskExecutionMapper.class));}
     }
