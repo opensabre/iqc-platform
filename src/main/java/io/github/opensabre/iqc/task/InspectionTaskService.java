@@ -1160,7 +1160,7 @@ public class InspectionTaskService {
         if (status != null && !status.isBlank()) query.eq(InspectionTask::getStatus, status.trim());
         if (taskType != null && !taskType.isBlank()) query.eq(InspectionTask::getTaskType, taskType.trim());
         // Large frozen transcripts belong to authorized task detail, not every list row.
-        query.select(InspectionTask.class,field->!java.util.Set.of("ruleSnapshotJson","triggerRequestJson","retryPolicyJson").contains(field.getProperty()));
+        query.select(InspectionTask.class,field->!java.util.Set.of("ruleSnapshotJson","triggerRequestJson","retryPolicyJson","bulkProgressJson").contains(field.getProperty()));
         return IqcPage.from(taskMapper.selectPage(page, query));
     }
 

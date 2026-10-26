@@ -9,6 +9,13 @@ import lombok.EqualsAndHashCode;
 @TableName("iqc_inspection_task")
 @EqualsAndHashCode(callSuper = true)
 public class InspectionTask extends BasePo {
+    // Internal bulk coordination state; exposed only through a future authorized bounded projection.
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String bulkParentTaskId;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private Integer bulkShardNo;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String bulkProgressJson;
     @com.fasterxml.jackson.annotation.JsonIgnore
     private String retryPolicyJson;
     private String retryPolicyHash;
