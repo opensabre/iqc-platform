@@ -44,7 +44,7 @@ class IsolatedMysqlSelectorShardIT {
         String after=null;int scanned=0,pages=0;var selected=new LinkedHashSet<String>();
         while(true){
             var page=service.scanAllPageAt(definition,ANCHOR,after,1000);pages++;assertThat(pages).isLessThan(30);
-            assertThat(page.afterId()).isEqualTo(after);assertThat(page.anchor()).isEqualTo(ANCHOR);assertThat(page.scannedCount()).isBetween(1,1000);
+            assertThat(page.createdBeforeExclusive()).isEqualTo(ANCHOR.truncatedTo(java.time.temporal.ChronoUnit.SECONDS));assertThat(page.schemaVersion()).isEqualTo("iqc-selector-scan-page-v2");assertThat(page.afterId()).isEqualTo(after);assertThat(page.anchor()).isEqualTo(ANCHOR);assertThat(page.scannedCount()).isBetween(1,1000);
             assertThat(page.selection().candidateCount()).isEqualTo(page.scannedCount());assertThat(page.selection().limited()).isFalse();
             if(pages<=20)assertThat(page.selection().selectedConversationIds()).isEmpty();
             scanned+=page.scannedCount();for(String id:page.selection().selectedConversationIds())assertThat(selected.add(id)).isTrue();
@@ -55,21 +55,28 @@ class IsolatedMysqlSelectorShardIT {
         var targeted=service.materializeTargetsAt(definition,ANCHOR,List.copyOf(selected));assertThat(targeted.selectedConversationIds()).containsExactlyElementsOf(selected);
     }
     @Test void scopeAndAnchorRetainOwnerOrGroupAndAllowExplicitGlobalScope(){
-        seed("a","owner","other",ANCHOR,"MATCH");seed("b","other","group",ANCHOR,"MATCH");seed("c","other","other",ANCHOR,"MATCH");seed("d","owner","group",ANCHOR.plusSeconds(1),"MATCH");
+        seed("a","owner","other",ANCHOR.minusSeconds(1),"MATCH");seed("b","other","group",ANCHOR.minusSeconds(1),"MATCH");seed("c","other","other",ANCHOR.minusSeconds(1),"MATCH");seed("d","owner","group",ANCHOR.plusSeconds(1),"MATCH");
         var d=definition(null);assertThat(service.scanAllPageAt(d,ANCHOR.plusNanos(999999),null,1000).selection().selectedConversationIds()).containsExactly("a","b");
         when(scope.groupId()).thenReturn(null);assertThat(service.scanAllPageAt(d,ANCHOR,null,1000).selection().selectedConversationIds()).containsExactly("a");
         when(scope.canViewAll()).thenReturn(true);assertThat(service.scanAllPageAt(d,ANCHOR,null,1000).selection().selectedConversationIds()).containsExactly("a","b","c");
     }
-    /** Existing source timestamps have second precision: this records the unresolved same-second fence. */
-    @Test void sourceTimestampPrecisionCannotProveSameSecondExclusion(){
+    /** DATETIME(0) requires excluding the whole open second, including pre-anchor rows in it. */
+    @Test void strictStorageWatermarkExcludesEntireOpenSecondAndStaysFixedAcrossPages(){
         assertThat(jdbc.queryForObject("SELECT DATETIME_PRECISION FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='iqc_conversation' AND COLUMN_NAME='created_time'",Integer.class)).isZero();
-        seed("same-second-future","owner","group",ANCHOR.plusMillis(1),"MATCH");
-        // The database cannot distinguish this row from a pre-anchor row within the same second.
-        assertThat(service.scanAllPageAt(definition(null),ANCHOR,null,1000).selection().selectedConversationIds()).containsExactly("same-second-future");
+        Instant cutoff=ANCHOR.truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        seed("a","owner","group",cutoff.minusSeconds(1),"MATCH");seed("b","owner","group",cutoff.minusSeconds(1),"MATCH");
+        seed("open-before","owner","group",cutoff,"MATCH");seed("open-after","owner","group",ANCHOR.plusMillis(1),"MATCH");
+        var first=service.scanAllPageAt(definition(null),ANCHOR,null,1);
+        assertThat(first.selection().selectedConversationIds()).containsExactly("a");assertThat(first.hasMore()).isTrue();assertThat(first.createdBeforeExclusive()).isEqualTo(cutoff);
+        seed("late-open","owner","group",ANCHOR.plusMillis(2),"MATCH");
+        var second=service.scanAllPageAt(definition(null),ANCHOR,first.nextAfterId(),1);
+        assertThat(second.createdBeforeExclusive()).isEqualTo(cutoff);assertThat(second.selection().selectedConversationIds()).containsExactly("b");assertThat(second.hasMore()).isFalse();
+        var later=service.scanAllPageAt(definition(null),cutoff.plusSeconds(2),null,1000);
+        assertThat(later.selection().selectedConversationIds()).containsExactly("a","b","late-open","open-after","open-before");
     }
     @Test void undatedEligibleSourceRejectsButUnauthorizedUndatedRowDoesNotBlock(){
         seed("a","owner","group",null,"MATCH");assertThatThrownBy(()->service.scanAllPageAt(definition(null),ANCHOR,null,1000)).hasMessageContaining("创建时间");
-        jdbc.update("UPDATE iqc_conversation SET created_by='other',owner_group_id='other' WHERE id='a'");seed("b","owner","group",ANCHOR,"MATCH");
+        jdbc.update("UPDATE iqc_conversation SET created_by='other',owner_group_id='other' WHERE id='a'");seed("b","owner","group",ANCHOR.minusSeconds(1),"MATCH");
         assertThat(service.scanAllPageAt(definition(null),ANCHOR,null,1000).selection().selectedConversationIds()).containsExactly("b");
     }
     @Test void rejectsOtherSamplingModesAndInvalidCursorAnchorOrSize(){
