@@ -49,6 +49,7 @@ class PipelineEvaluationReportTest {
         when(prepared.dataset()).thenReturn(dataset(DatasetDraft.Type.REGRESSION));
         when(prepared.datasetHash()).thenReturn("frozen-dataset");
         var release = mock(PipelineRelease.class);
+        when(release.fusion()).thenReturn(new io.github.opensabre.iqc.fusion.FusionPolicy("fusion",1,io.github.opensabre.iqc.fusion.FusionPolicy.Method.PRIORITY,Map.of(),Map.of(),null,java.util.Set.of()));
         when(release.pipeline()).thenReturn(new PipelineDefinition(PipelineDefinition.SCHEMA,
                 List.of(new PipelineDefinition.Node("llm", "LLM", "model", "v1", List.of(), Map.of(), json.createObjectNode().set("findingDefinition", json.createObjectNode().put("code","REDLINE")),
                         null, 1000, 0, PipelineDefinition.OnError.FAIL_PIPELINE, null, null, true))));
@@ -354,7 +355,9 @@ class PipelineEvaluationReportTest {
         if (metrics == null) target.remove("llmStructuredOutput");
         else target.set("llmStructuredOutput", metrics);
         row.setActualJson(actual.toString());
-        row.setActualHash(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(row.getActualJson()));
+        row.setActualHash(exactProtocol || metrics!=null && metrics.hasNonNull("reportedConfidence")
+                ? io.github.opensabre.iqc.selector.SelectorAssetService.hash(row.getActualJson())
+                : io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(row.getActualJson()));
     }
     private com.fasterxml.jackson.databind.node.ObjectNode counters(int calls, int valid, int failed) {
         return json.createObjectNode().put("schemaVersion", "iqc-llm-structured-metrics-v1")
@@ -535,11 +538,18 @@ class PipelineEvaluationReportTest {
         verify(tasks,never()).selectOne(any());
     }
 
+    private com.fasterxml.jackson.databind.node.ObjectNode boundCalibrationMetrics(){
+        var metrics=counters(1,1,0).put("reportedConfidence",new BigDecimal("0.75"));
+        metrics.putArray("invocationFingerprints").addObject()
+                .put("schemaVersion","iqc-llm-invocation-fingerprint-v1").put("modelKey","c".repeat(64))
+                .put("inputHash","d".repeat(64)).put("deploymentRef","fixture-deployment:1");
+        return metrics;
+    }
     @Test void calibrationUsesLockedOwnerGroupAndExactOriginalCandidate() throws Exception {
         artifactSnapshot();
         var first=artifact("first","execution",10); var second=artifact("second","execution",20);
-        structuredMetrics(first,counters(1,1,0).put("reportedConfidence",new BigDecimal("0.75")));
-        structuredMetrics(second,counters(1,1,0).put("reportedConfidence",new BigDecimal("0.75")));
+        structuredMetrics(first,boundCalibrationMetrics());
+        structuredMetrics(second,boundCalibrationMetrics());
         String datasetHash="a".repeat(64);
         when(prepared.datasetHash()).thenReturn(datasetHash);
         first.setDatasetHash(datasetHash);second.setDatasetHash(datasetHash);
