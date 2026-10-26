@@ -1,0 +1,194 @@
+{
+  "evaluation_interval": "1m",
+  "tests": [
+    {
+      "name": "fixed queries aggregate shared snapshots without duplication and isolate application and production",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "iqc_task_persisted_state{application=\"iqc-platform\",instance=\"one\",mode=\"PRODUCTION\",status=\"QUEUED\"}",
+          "values": "7+0x5"
+        },
+        {
+          "series": "iqc_task_execution_completed_window{application=\"iqc-platform\",instance=\"one\",mode=\"PRODUCTION\",status=\"SUCCEEDED\"}",
+          "values": "600+0x5"
+        },
+        {
+          "series": "iqc_task_execution_unmeasured{application=\"iqc-platform\",instance=\"one\",mode=\"PRODUCTION\",status=\"FAILED\"}",
+          "values": "4+0x5"
+        },
+        {
+          "series": "iqc_task_persisted_state{application=\"iqc-platform\",instance=\"two\",mode=\"PRODUCTION\",status=\"QUEUED\"}",
+          "values": "7+0x5"
+        },
+        {
+          "series": "iqc_task_execution_completed_window{application=\"iqc-platform\",instance=\"two\",mode=\"PRODUCTION\",status=\"SUCCEEDED\"}",
+          "values": "600+0x5"
+        },
+        {
+          "series": "iqc_task_execution_unmeasured{application=\"iqc-platform\",instance=\"two\",mode=\"PRODUCTION\",status=\"FAILED\"}",
+          "values": "4+0x5"
+        },
+        {
+          "series": "iqc_model_gateway_active{application=\"iqc-platform\",instance=\"one\"}",
+          "values": "2+0x5"
+        },
+        {
+          "series": "iqc_model_gateway_active{application=\"iqc-platform\",instance=\"two\"}",
+          "values": "3+0x5"
+        },
+        {
+          "series": "iqc_task_metrics_sample_success{application=\"iqc-platform\",instance=\"one\"}",
+          "values": "1+0x5"
+        },
+        {
+          "series": "iqc_task_metrics_sample_success{application=\"iqc-platform\",instance=\"two\"}",
+          "values": "0+0x5"
+        },
+        {
+          "series": "iqc_task_metrics_sample_age_seconds{application=\"iqc-platform\",instance=\"one\"}",
+          "values": "10+0x5"
+        },
+        {
+          "series": "iqc_task_metrics_sample_age_seconds{application=\"iqc-platform\",instance=\"two\"}",
+          "values": "30+0x5"
+        },
+        {
+          "series": "iqc_task_persisted_state{application=\"iqc-platform\",instance=\"evaluation\",mode=\"EVALUATION\",status=\"QUEUED\"}",
+          "values": "999+0x5"
+        },
+        {
+          "series": "iqc_task_persisted_state{application=\"other-app\",instance=\"foreign\",mode=\"PRODUCTION\",status=\"QUEUED\"}",
+          "values": "999+0x5"
+        },
+        {
+          "series": "iqc_task_execution_completed_window{application=\"iqc-platform\",instance=\"evaluation\",mode=\"EVALUATION\",status=\"SUCCEEDED\"}",
+          "values": "999+0x5"
+        },
+        {
+          "series": "iqc_task_execution_completed_window{application=\"other-app\",instance=\"foreign\",mode=\"PRODUCTION\",status=\"SUCCEEDED\"}",
+          "values": "999+0x5"
+        },
+        {
+          "series": "iqc_task_execution_unmeasured{application=\"iqc-platform\",instance=\"evaluation\",mode=\"EVALUATION\",status=\"FAILED\"}",
+          "values": "999+0x5"
+        },
+        {
+          "series": "iqc_task_execution_unmeasured{application=\"other-app\",instance=\"foreign\",mode=\"PRODUCTION\",status=\"FAILED\"}",
+          "values": "999+0x5"
+        },
+        {
+          "series": "iqc_model_gateway_active{application=\"other-app\",instance=\"foreign\"}",
+          "values": "999+0x5"
+        },
+        {
+          "series": "iqc_task_metrics_sample_success{application=\"other-app\",instance=\"foreign\"}",
+          "values": "-99+0x5"
+        },
+        {
+          "series": "iqc_task_metrics_sample_age_seconds{application=\"other-app\",instance=\"foreign\"}",
+          "values": "999+0x5"
+        }
+      ],
+      "promql_expr_test": [
+        {
+          "expr": "sum(iqc_model_gateway_active{application=\"iqc-platform\"})",
+          "eval_time": "5m",
+          "exp_samples": [
+            {
+              "labels": "{}",
+              "value": 5
+            }
+          ]
+        },
+        {
+          "expr": "max by (status) (iqc_task_persisted_state{application=\"iqc-platform\",mode=\"PRODUCTION\"})",
+          "eval_time": "5m",
+          "exp_samples": [
+            {
+              "labels": "{status=\"QUEUED\"}",
+              "value": 7
+            }
+          ]
+        },
+        {
+          "expr": "max by (status) (iqc_task_execution_completed_window{application=\"iqc-platform\",mode=\"PRODUCTION\"}) / 300",
+          "eval_time": "5m",
+          "exp_samples": [
+            {
+              "labels": "{status=\"SUCCEEDED\"}",
+              "value": 2
+            }
+          ]
+        },
+        {
+          "expr": "max by (status) (iqc_task_execution_unmeasured{application=\"iqc-platform\",mode=\"PRODUCTION\"})",
+          "eval_time": "5m",
+          "exp_samples": [
+            {
+              "labels": "{status=\"FAILED\"}",
+              "value": 4
+            }
+          ]
+        },
+        {
+          "expr": "min(iqc_task_metrics_sample_success{application=\"iqc-platform\"})",
+          "eval_time": "5m",
+          "exp_samples": [
+            {
+              "labels": "{}",
+              "value": 0
+            }
+          ]
+        },
+        {
+          "expr": "max(iqc_task_metrics_sample_age_seconds{application=\"iqc-platform\"})",
+          "eval_time": "5m",
+          "exp_samples": [
+            {
+              "labels": "{}",
+              "value": 30
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "missing telemetry stays absent instead of synthesized zero",
+      "interval": "1m",
+      "input_series": [],
+      "promql_expr_test": [
+        {
+          "expr": "sum(iqc_model_gateway_active{application=\"iqc-platform\"})",
+          "eval_time": "5m",
+          "exp_samples": []
+        },
+        {
+          "expr": "max by (status) (iqc_task_persisted_state{application=\"iqc-platform\",mode=\"PRODUCTION\"})",
+          "eval_time": "5m",
+          "exp_samples": []
+        },
+        {
+          "expr": "max by (status) (iqc_task_execution_completed_window{application=\"iqc-platform\",mode=\"PRODUCTION\"}) / 300",
+          "eval_time": "5m",
+          "exp_samples": []
+        },
+        {
+          "expr": "max by (status) (iqc_task_execution_unmeasured{application=\"iqc-platform\",mode=\"PRODUCTION\"})",
+          "eval_time": "5m",
+          "exp_samples": []
+        },
+        {
+          "expr": "min(iqc_task_metrics_sample_success{application=\"iqc-platform\"})",
+          "eval_time": "5m",
+          "exp_samples": []
+        },
+        {
+          "expr": "max(iqc_task_metrics_sample_age_seconds{application=\"iqc-platform\"})",
+          "eval_time": "5m",
+          "exp_samples": []
+        }
+      ]
+    }
+  ]
+}
