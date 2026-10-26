@@ -851,7 +851,35 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals(childSnapshot,sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getRuleSnapshotJson());
         assertThrows(RuntimeException.class,()->bulk.materializeNext(parent.getId(),"obsolete-execution"));
         assertEquals(progress,db.queryForObject("SELECT bulk_progress_json FROM iqc_inspection_task WHERE id=?",String.class,parent.getId()));
-        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE bulk_parent_task_id=?",Integer.class,parent.getId()));
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE bulk_parent_task_id=?",Integer.class,parent.getId()));        var lifecycle=context.getBean(BulkTaskLifecycleService.class);assertTrue(org.springframework.aop.support.AopUtils.isAopProxy(lifecycle));
+        db.update("UPDATE iqc_inspection_task SET status='QUEUED' WHERE id=?",parent.getId());db.update("UPDATE iqc_task_execution SET status='QUEUED' WHERE id=?",eid);
+        var ready=new java.util.concurrent.CountDownLatch(2);var start=new java.util.concurrent.CountDownLatch(1);var pool=java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            java.util.concurrent.Callable<Boolean> claim=()->{ready.countDown();assertTrue(start.await(10,java.util.concurrent.TimeUnit.SECONDS));return lifecycle.claim(parent.getId(),eid);};
+            var left=pool.submit(claim);var right=pool.submit(claim);assertTrue(ready.await(10,java.util.concurrent.TimeUnit.SECONDS));start.countDown();
+            assertNotEquals(left.get(20,java.util.concurrent.TimeUnit.SECONDS),right.get(20,java.util.concurrent.TimeUnit.SECONDS));
+        } finally {start.countDown();pool.shutdownNow();}
+        lifecycle.tick(parent.getId(),eid);
+        var queuedChild=sql.getMapper(InspectionTaskMapper.class).selectById(child.getId());assertEquals("QUEUED",queuedChild.getStatus());String childEid=queuedChild.getCurrentExecutionId();assertNotNull(childEid);
+        var tasks=context.getBean(InspectionTaskService.class);tasks.requestPause(parent.getId());
+        io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of());
+        try {assertTrue(lifecycle.controlIfRequested(parent.getId(),eid));}
+        finally {io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of("user_name","annotator","user_id","user-annotator"));}
+        assertEquals("PAUSED",sql.getMapper(InspectionTaskMapper.class).selectById(parent.getId()).getStatus());assertEquals("PAUSED",sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getStatus());
+        assertEquals("PAUSED",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,childEid));
+        lifecycle.queue(parent.getId());
+        assertEquals(eid,sql.getMapper(InspectionTaskMapper.class).selectById(parent.getId()).getCurrentExecutionId());
+        String resumedChildEid=sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getCurrentExecutionId();assertNotEquals(childEid,resumedChildEid);
+        assertEquals("PAUSED",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,childEid));
+        assertEquals(2,db.queryForObject("SELECT COUNT(*) FROM iqc_task_execution WHERE task_id=?",Integer.class,child.getId()));
+        assertEquals("QUEUED",sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getStatus());
+        tasks.cancel(parent.getId());
+        io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of());
+        try {assertTrue(lifecycle.controlIfRequested(parent.getId(),eid));}
+        finally {io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of("user_name","annotator","user_id","user-annotator"));}
+        assertEquals("CANCELLED",sql.getMapper(InspectionTaskMapper.class).selectById(parent.getId()).getStatus());assertEquals("CANCELLED",sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getStatus());
+        assertEquals("CANCELLED",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,resumedChildEid));
+        assertEquals(childSnapshot,sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getRuleSnapshotJson());assertEquals(progress,db.queryForObject("SELECT bulk_progress_json FROM iqc_inspection_task WHERE id=?",String.class,parent.getId()));
     }
     private ScheduledActorAccessService.Resolved authorizedActor() {
         return new ScheduledActorAccessService.Resolved("user-annotator","annotator",false,"group",Set.of(),
@@ -921,6 +949,7 @@ class IsolatedMysqlMeasuredPublicationIT {
                     s.getMapper(io.github.opensabre.iqc.label.dao.LabelCollectionMemberMapper.class),scope),j);
         }
         @Bean io.github.opensabre.iqc.selector.ConversationSelectionService selections(SqlSessionTemplate s,IqcDataScope scope,ObjectMapper j){return new io.github.opensabre.iqc.selector.ConversationSelectionService(s.getMapper(ConversationMapper.class),s.getMapper(ConversationInspectionResultMapper.class),s.getMapper(io.github.opensabre.iqc.label.dao.InspectionLabelResultMapper.class),scope,j);}
+        @Bean BulkTaskLifecycleService bulkLifecycle(SqlSessionTemplate s,BulkTaskMaterializationService bulk,InspectionTaskService tasks,InspectionExecutionService execution,IqcDataScope scope){return new BulkTaskLifecycleService(s.getMapper(InspectionTaskMapper.class),s.getMapper(TaskExecutionMapper.class),bulk,tasks,execution,scope);}
         @Bean BulkTaskMaterializationService bulk(SqlSessionTemplate s,InspectionTaskService tasks,PipelineAssetService pipelines,io.github.opensabre.iqc.selector.ConversationSelectionService selections,IqcDataScope scope,ObjectMapper j){return new BulkTaskMaterializationService(s.getMapper(InspectionTaskMapper.class),s.getMapper(TaskExecutionMapper.class),tasks,pipelines,selections,scope,j);}
         @Bean @Primary InspectionTaskService tasks(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,ProductionInputSnapshotService inputs,ObjectProvider<PipelineAssetService> pipelines,ObjectProvider<ScheduledActorAccessService> actors){return new InspectionTaskService(s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationMapper.class),null,null,null,j,s.getMapper(TaskExecutionMapper.class),scope,null,null,inputs,pipelines,actors);}
         @Bean GoldSampleService gold(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope){return new GoldSampleService(s.getMapper(QualitySampleMapper.class),s.getMapper(QualitySampleVersionMapper.class),s.getMapper(ConversationMapper.class),s.getMapper(ConversationMessageMapper.class),scope,j);}
