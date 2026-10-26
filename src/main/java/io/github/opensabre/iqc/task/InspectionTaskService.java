@@ -1196,6 +1196,7 @@ public class InspectionTaskService {
             if (task.getCurrentExecutionId() != null) {
                 executionMapper.update(null, Wrappers.<TaskExecution>lambdaUpdate()
                         .set(TaskExecution::getStatus, targetStatus)
+                        .setSql(!"PAUSED".equals(targetStatus),"completed_at_utc=COALESCE(completed_at_utc,UTC_TIMESTAMP(3))")
                         .set(TaskExecution::getErrorMessage, "执行心跳超时，已按当前运行/暂停/取消状态回收")
                         .eq(TaskExecution::getId, task.getCurrentExecutionId())
                         .eq(TaskExecution::getTaskId,task.getId())
@@ -1245,6 +1246,7 @@ public class InspectionTaskService {
             TaskExecution execution = executionMapper.selectById(task.getCurrentExecutionId());
             if (execution != null && List.of("QUEUED", "PAUSED").contains(execution.getStatus())) {
                 execution.setStatus("CANCELLED");
+                if(execution.getCompletedAtUtc()==null)execution.setCompletedAtUtc(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
                 if (executionMapper.updateById(execution) != 1) throw IqcException.invalidState("取消执行轮次失败");
             }
         }
