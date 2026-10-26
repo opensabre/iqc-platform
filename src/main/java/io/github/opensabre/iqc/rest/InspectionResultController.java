@@ -179,9 +179,14 @@ public class InspectionResultController {
             @RequestParam(defaultValue = "1") long current, @RequestParam(defaultValue = "20") long size,
             @RequestParam(required = false) String taskId, @RequestParam(required = false) String scoreStatus,
             @RequestParam(required = false) String riskLevel, @RequestParam(required = false) java.math.BigDecimal minScore,
-            @RequestParam(required = false) java.math.BigDecimal maxScore) {
+            @RequestParam(required = false) java.math.BigDecimal maxScore,
+            @RequestParam(required = false) String parentTaskId) {
         var access = resultReadAccess(java.util.Set.of("iqc:result:business:view"));
-        return resultProjection.businessPage(batchResultQueryService.businessPage(current, size, taskId, scoreStatus, riskLevel, minScore, maxScore), access);
+        return resultProjection.businessPage(batchResultQueryService.businessPage(current,size,taskId,scoreStatus,riskLevel,minScore,maxScore,parentTaskId),access);
+    }
+    public IqcPage<BatchResultQueryService.BusinessConversationRow> businessResults(long current,long size,String taskId,
+            String scoreStatus,String riskLevel,java.math.BigDecimal minScore,java.math.BigDecimal maxScore) {
+        return businessResults(current,size,taskId,scoreStatus,riskLevel,minScore,maxScore,null);
     }
 
     @GetMapping("/tasks/{id}/result-summary")

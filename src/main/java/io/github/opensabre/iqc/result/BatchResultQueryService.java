@@ -264,28 +264,33 @@ public class BatchResultQueryService {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public IqcPage<BusinessConversationRow> businessPage(long current, long size, String taskId, String scoreStatus,
                                                        String riskLevel, BigDecimal minScore, BigDecimal maxScore) {
+        return businessPage(current,size,taskId,scoreStatus,riskLevel,minScore,maxScore,null);
+    }
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public IqcPage<BusinessConversationRow> businessPage(long current,long size,String taskId,String scoreStatus,
+            String riskLevel,BigDecimal minScore,BigDecimal maxScore,String parentTaskId) {
         long pageNo = Math.max(1, current), pageSize = Math.min(Math.max(1, size), 100);
         if (scoreStatus != null && !List.of("FINAL", "PENDING", "NOT_APPLICABLE").contains(scoreStatus)
                 || riskLevel != null && !List.of("NONE", "LOW", "MEDIUM", "HIGH", "CRITICAL", "UNKNOWN").contains(riskLevel)
                 || minScore != null && minScore.signum() < 0 || maxScore != null && maxScore.signum() < 0
                 || minScore != null && maxScore != null && minScore.compareTo(maxScore) > 0)
             throw IqcException.invalidArgument("业务结果筛选条件无效");
-        var query = Wrappers.<InspectionTask>lambdaQuery().select(InspectionTask::getId, InspectionTask::getName)
-                .ne(InspectionTask::getTaskType,"PIPELINE_EVALUATION");
-        if (!dataScope.canViewAll()) {
-            String group = dataScope.groupId();
-            query.and(value -> value.eq(InspectionTask::getCreatedBy, dataScope.owner())
-                    .or(group != null, nested -> nested.eq(InspectionTask::getOwnerGroupId, group)));
+        if(parentTaskId!=null) {
+            if(!parentTaskId.matches("[A-Za-z0-9:_-]{1,64}") || taskId!=null&&!taskId.isBlank())
+                throw IqcException.invalidArgument("批次与单任务筛选不能混用");
+            var parent=taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,parentTaskId)
+                    .select(InspectionTask::getId,InspectionTask::getTaskType,InspectionTask::getCreatedBy,InspectionTask::getOwnerGroupId));
+            if(parent==null || !dataScope.canView(parent.getCreatedBy(),parent.getOwnerGroupId()))throw IqcException.accessDenied("无权查看批次结果");
+            if(!"PIPELINE_BULK".equals(parent.getTaskType()))throw IqcException.invalidArgument("结果筛选需要有效批次父任务");
         }
-        if (taskId != null && !taskId.isBlank()) query.eq(InspectionTask::getId, taskId);
-        List<InspectionTask> visibleTasks = taskMapper.selectList(query);
-        List<String> taskIds = visibleTasks.stream().map(InspectionTask::getId).toList();
-        if (taskIds.isEmpty()) return new IqcPage<>(List.of(), pageNo, pageSize, 0);
-        var page = canonicalResults.selectBusinessPage(new Page<>(pageNo, pageSize), taskIds,
-                scoreStatus, riskLevel, minScore, maxScore);
-        Map<String, String> names = new java.util.HashMap<>();
-        Map<String, String> taskNames = new java.util.HashMap<>();
-        visibleTasks.forEach(value -> taskNames.put(value.getId(), value.getName()));
+        boolean all=dataScope.canViewAll();String owner=dataScope.owner(),group=all?null:dataScope.groupId();
+        var page=canonicalResults.selectScopedBusinessPage(new Page<>(pageNo,pageSize),null,
+                taskId==null||taskId.isBlank()?null:taskId,parentTaskId,all,owner,group,scoreStatus,riskLevel,minScore,maxScore);
+        Map<String,String> names=new java.util.HashMap<>(),taskNames=new java.util.HashMap<>();
+        var pageTasks=page.getRecords().stream().map(ConversationInspectionResult::getTaskId).distinct().toList();
+        if(!pageTasks.isEmpty())taskMapper.selectList(Wrappers.<InspectionTask>lambdaQuery()
+                .select(InspectionTask::getId,InspectionTask::getName).in(InspectionTask::getId,pageTasks))
+                .forEach(value->taskNames.put(value.getId(),value.getName()));
         List<String> conversationIds = page.getRecords().stream().map(ConversationInspectionResult::getConversationId).distinct().toList();
         if (!conversationIds.isEmpty()) conversationMapper.selectBatchIds(conversationIds)
                 .forEach(value -> names.put(value.getId(), value.getSourceFileName()));
