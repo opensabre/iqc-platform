@@ -54,3 +54,8 @@
 ## 任务端点同码复查（2026-10-28）
 
 同一注册约束也影响 task:view 的列表/详情/执行记录和 task:execute 的运行/恢复/暂停/优先级。按原组织资源模型拆分，保留 view 给 GET /api/iqc/tasks、execute 给 POST /api/iqc/tasks/{id}/run；其余用 task:detail:view、task:executions:view、task:resume、task:pause、task:priority。敏感读取前置使用对应端点码；configuration 保留原 task:view+敏感内容复合要求，批次恢复仍保留原 BulkTaskAccessService 的当前负责人及 GRANTS 校验。配套组织 V20261028_02 只继承旧有效授权，原资源ID/状态保留；仍待独立SQL/HTTP及当前撤权验证。静态清单另发现结果、会话、标签、规则、MCP等旧接口重复，尚未完成全量修正，不能从本批推导全部端点已授权。
+
+
+## 结果端点同码复查（2026-10-28）
+
+继续沿原资源模型修复 result:view 在结果列表/单条详情/任务汇总/标签列表/标签分布/批次会话/层级结果/会话全历史/反馈列表间的冲突，保留原 view 给 GET /api/iqc/results。其余分别为 result:detail:view、summary:view、labels:view、label-insights:view、conversation:view、hierarchy:view、conversation-history:view、feedback:view；export 保留普通结果导出，标签导出使用 result:labels:export。每个读取和导出沿原敏感前置检查对应新码，导出仍要求完整会话和PII，组织范围与业务结果独立端点不变。配套组织 V20261028_03 继承旧有效授权并保留原ID/状态；真实SQL/HTTP及源副本敏感字段验证仍待。没有为修复注册新增查询服务/存储模型。

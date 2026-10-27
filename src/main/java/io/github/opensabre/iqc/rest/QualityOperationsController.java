@@ -108,10 +108,10 @@ public class QualityOperationsController {
         return resultProjection.feedback(service.feedback(resultId, request.feedbackType(), request.comment(), request.evidenceJson()), access);
     }
     @GetMapping("/feedback")
-    @ResourcePermission(code="iqc:result:view", name="查看质检反馈", type="iqc", description="查询误判漏判反馈")
+    @ResourcePermission(code="iqc:result:feedback:view", name="查看质检反馈", type="iqc", description="查询误判漏判反馈")
     @Audit(operationType=OperationType.QUERY, description="查询 IQC 质检反馈", module="IQC_RESULT", request=false, response=false)
     public List<ResultFeedback> feedbacks(@RequestParam(required=false) String resultId, @RequestParam(required=false) String type) {
-        var access = responseAccess("iqc:result:view");
+        var access = responseAccess("iqc:result:feedback:view");
         return service.feedbacks(resultId, type).stream().map(row -> resultProjection.feedback(row, access)).toList();
     }
 
