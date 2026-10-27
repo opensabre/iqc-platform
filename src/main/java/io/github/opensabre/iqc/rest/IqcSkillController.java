@@ -44,29 +44,29 @@ public class IqcSkillController {
     public IqcSkill create(@RequestBody SkillRequest request) { var access=access("iqc:skill:manage");return projection.skill(service.create(request.name(), request.code(), request.description(), request.instructions(), request.inputSchemaJson(), request.outputSchemaJson()),access,false); }
 
     @PutMapping("/{id}")
-    @ResourcePermission(code = "iqc:skill:manage", name = "管理 Skill", type = "iqc", description = "修改 Agent Skill 资产")
+    @ResourcePermission(code = "iqc:skill:update", name = "管理 Skill", type = "iqc", description = "修改 Agent Skill 资产")
     @Audit(operationType = OperationType.UPDATE, description = "修改 IQC Skill", module = "IQC_SKILL", request=false, response=false, key="#id")
-    public IqcSkill update(@PathVariable String id, @RequestBody SkillRequest request) { var access=access("iqc:skill:manage");return projection.skill(service.update(id, request.name(), request.description(), request.instructions(), request.inputSchemaJson(), request.outputSchemaJson()),access,false); }
+    public IqcSkill update(@PathVariable String id, @RequestBody SkillRequest request) { var access=access("iqc:skill:update");return projection.skill(service.update(id, request.name(), request.description(), request.instructions(), request.inputSchemaJson(), request.outputSchemaJson()),access,false); }
 
     @PostMapping("/{id}/enable")
-    @ResourcePermission(code = "iqc:skill:manage", name = "管理 Skill", type = "iqc", description = "启用 Agent Skill 资产")
+    @ResourcePermission(code = "iqc:skill:enable", name = "管理 Skill", type = "iqc", description = "启用 Agent Skill 资产")
     @Audit(operationType = OperationType.UPDATE, description = "启用 IQC Skill", module = "IQC_SKILL", request=false,response=false,key="#id")
-    public IqcSkill enable(@PathVariable String id) { var access=access("iqc:skill:manage");return projection.skill(service.setEnabled(id,true),access,false); }
+    public IqcSkill enable(@PathVariable String id) { var access=access("iqc:skill:enable");return projection.skill(service.setEnabled(id,true),access,false); }
 
     @PostMapping("/{id}/disable")
-    @ResourcePermission(code = "iqc:skill:manage", name = "管理 Skill", type = "iqc", description = "停用 Agent Skill 资产")
+    @ResourcePermission(code = "iqc:skill:disable", name = "管理 Skill", type = "iqc", description = "停用 Agent Skill 资产")
     @Audit(operationType = OperationType.UPDATE, description = "停用 IQC Skill", module = "IQC_SKILL", request=false,response=false,key="#id")
-    public IqcSkill disable(@PathVariable String id) { var access=access("iqc:skill:manage");return projection.skill(service.setEnabled(id,false),access,false); }
+    public IqcSkill disable(@PathVariable String id) { var access=access("iqc:skill:disable");return projection.skill(service.setEnabled(id,false),access,false); }
 
     @GetMapping("/{id}/versions")
-    @ResourcePermission(code = "iqc:skill:view", name = "查看 Skill 版本", type = "iqc", description = "查询 Skill 历史版本")
+    @ResourcePermission(code = "iqc:skill:versions:view", name = "查看 Skill 版本", type = "iqc", description = "查询 Skill 历史版本")
     @Audit(operationType=OperationType.QUERY,description="读取Skill版本",module="IQC_PRIVACY",request=false,response=false,key="#id")
-    public List<IqcSkillVersion> versions(@PathVariable String id) { var access=access("iqc:skill:view");return service.versions(id).stream().map(row->projection.skillVersion(row,access)).toList(); }
+    public List<IqcSkillVersion> versions(@PathVariable String id) { var access=access("iqc:skill:versions:view");return service.versions(id).stream().map(row->projection.skillVersion(row,access)).toList(); }
 
     @PostMapping("/{id}/versions/{versionNo}/rollback")
-    @ResourcePermission(code = "iqc:skill:manage", name = "管理 Skill", type = "iqc", description = "回滚 Skill 历史版本")
+    @ResourcePermission(code = "iqc:skill:rollback", name = "管理 Skill", type = "iqc", description = "回滚 Skill 历史版本")
     @Audit(operationType = OperationType.UPDATE, description = "回滚 IQC Skill", module = "IQC_SKILL", request=false,response=false,key="#id")
-    public IqcSkill rollback(@PathVariable String id, @PathVariable int versionNo) { var access=access("iqc:skill:manage");return projection.skill(service.rollback(id,versionNo),access,false); }
+    public IqcSkill rollback(@PathVariable String id, @PathVariable int versionNo) { var access=access("iqc:skill:rollback");return projection.skill(service.rollback(id,versionNo),access,false); }
 
     public record SkillRequest(String name, String code, String description, String instructions,
                                String inputSchemaJson, String outputSchemaJson) { }
