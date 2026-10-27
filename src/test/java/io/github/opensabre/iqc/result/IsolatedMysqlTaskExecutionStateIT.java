@@ -43,7 +43,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Real InnoDB rows and Spring transactions; no worker, model, or shared application database. */
 class IsolatedMysqlTaskExecutionStateIT {
-    private static final String URL = "jdbc:mysql://127.0.0.1:34307/iqc_worker_state_validation"
+    static final String SCHEMA = validationSchema();
+    private static String validationSchema() {
+        String value=System.getProperty("iqc.test.worker-schema","iqc_worker_state_validation");
+        if(!value.matches("iqc_[a-z0-9_]{1,59}"))throw new IllegalArgumentException("Invalid isolated worker schema");
+        return value;
+    }
+    private static final String URL = "jdbc:mysql://127.0.0.1:34307/"+SCHEMA
             + "?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8";
     private static AnnotationConfigApplicationContext context;
     private static JdbcTemplate jdbc;
@@ -58,7 +64,7 @@ class IsolatedMysqlTaskExecutionStateIT {
         try (var connection = DriverManager.getConnection(
                 "jdbc:mysql://127.0.0.1:34307/?useSSL=false&allowPublicKeyRetrieval=true", "root", "");
              var statement = connection.createStatement()) {
-            statement.execute("CREATE DATABASE IF NOT EXISTS iqc_worker_state_validation CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+            statement.execute("CREATE DATABASE IF NOT EXISTS "+SCHEMA+" CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
         }
         Flyway.configure().dataSource(URL, "root", "").locations("classpath:db/migration/mysql")
                 .baselineOnMigrate(false).cleanDisabled(true).load().migrate();
@@ -459,7 +465,7 @@ class IsolatedMysqlTaskExecutionStateIT {
         WorkerProcess(String command) throws Exception {
             String classpath = System.getProperty("surefire.test.class.path", System.getProperty("java.class.path"));
             process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                    "-cp", classpath, ProcessMain.class.getName(), command).redirectErrorStream(true).start();
+                    "-Diqc.test.worker-schema="+SCHEMA, "-cp", classpath, ProcessMain.class.getName(), command).redirectErrorStream(true).start();
             output = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
         }
 

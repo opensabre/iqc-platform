@@ -142,6 +142,9 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals("0.900000000000000001",prepared.release().items().getFirst().numericPredicate().threshold());
         assertArchiveReceiptExecutesPublishedPipeline(prepared,conversation,suffix);
         assertBulkMaterializationRollsBackAndRetainsFrozenInput(prepared,conversation,suffix);
+        assertBulkTerminalAggregation(prepared,conversation,suffix);
+        assertBulkChildWriteFailureAndRetry(prepared,conversation,suffix,false);
+        assertBulkChildWriteFailureAndRetry(prepared,conversation,suffix,true);
         var production=context.getBean(InspectionTaskService.class).createUsingPipelineSnapshot(prepared,"production",List.of(conversation),1,"production_"+suffix);
         // Mutate live data only after the owning materializer has frozen the complete processed conversation.
         db.update("UPDATE iqc_conversation_message SET content='later text',start_ms=10000,end_ms=11000 WHERE id=?",second);
@@ -941,6 +944,107 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertThrows(RuntimeException.class,()->context.getBean(InspectionExecutionService.class).resume(child.getId()));
     }
     /** A real full executor cannot prevent SQL-only stop propagation or cause new model/organization work. */
+    /** Reject one result write, then retry through the existing child execution path with frozen inputs. */
+    private void assertBulkChildWriteFailureAndRetry(PipelineAssetService.Prepared prepared,String conversation,String suffix,boolean automatic) throws Exception {
+        suffix=(automatic?"auto":"manual")+suffix;
+        var bulk=context.getBean(BulkTaskMaterializationService.class);var lifecycle=context.getBean(BulkTaskLifecycleService.class);
+        var runner=context.getBean(InspectionExecutionService.class);var db=new JdbcTemplate(context.getBean(DataSource.class));
+        var mapper=context.getBean(SqlSessionTemplate.class).getMapper(InspectionTaskMapper.class);
+        var selector=new io.github.opensabre.iqc.selector.SelectorDefinition(io.github.opensabre.iqc.selector.SelectorDefinition.SCHEMA,null,null,List.of(conversation),List.of(),null,null,1000);
+        var bound=new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","user-annotator","annotator",false,"group");
+        var parent=bulk.create(prepared.pipelineId(),prepared.versionNo(),selector,bound,"write failure retry",1000,1,"write_retry_"+suffix);
+        var queuedParent=lifecycle.queue(parent.getId());String firstParentEid=queuedParent.getCurrentExecutionId();
+        assertTrue(lifecycle.claim(parent.getId(),firstParentEid));
+        var step=bulk.materializeNext(parent.getId(),firstParentEid);assertNotNull(step.childTaskId());assertTrue(step.progress().scanComplete());
+        String childId=step.childTaskId();String frozen=mapper.selectById(childId).getRuleSnapshotJson();
+        String progress=mapper.selectById(parent.getId()).getBulkProgressJson();
+        if(automatic)context.getBean(io.github.opensabre.iqc.task.retry.AutomaticRetryService.class).configure(childId,
+                new io.github.opensabre.iqc.task.retry.AutomaticRetryPolicy("iqc-automatic-retry-v1",2,1,1,1,null));
+        var first=runner.queueSystem(childId);String firstChildEid=first.getCurrentExecutionId();
+        db.execute("CREATE TRIGGER reject_bulk_child_result BEFORE INSERT ON iqc_inspection_conversation_result FOR EACH ROW BEGIN IF NEW.task_id='"+childId+"' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='injected bulk child result failure'; END IF; END");
+        try {runner.executePersisted(childId,firstChildEid);}
+        finally {db.execute("DROP TRIGGER reject_bulk_child_result");}
+        assertEquals("FAILED",mapper.selectById(childId).getStatus());
+        assertEquals("FAILED",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,firstChildEid));
+        assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_conversation_result WHERE task_id=?",Integer.class,childId));
+        lifecycle.tick(parent.getId(),firstParentEid);assertEquals("FAILED",mapper.selectById(parent.getId()).getStatus());
+        String retryParentEid=lifecycle.queue(parent.getId()).getCurrentExecutionId();assertNotEquals(firstParentEid,retryParentEid);
+        // Explicit child retry reuses the ordinary execution service; parent queue does not rerun terminal shards.
+        InspectionTask retry;
+        if(automatic) {
+            var retries=context.getBean(io.github.opensabre.iqc.task.retry.AutomaticRetryService.class);
+            var actors=context.getBean(ScheduledActorAccessService.class);var scope=context.getBean(IqcDataScope.class);
+            when(actors.resolve(any(),anySet())).thenAnswer(call -> new ScheduledActorAccessService.Resolved(
+                    bound.userId(),bound.owner(),bound.all(),bound.groupId(),Set.of(),call.getArgument(1),Instant.now()));
+            when(scope.asScheduledActor(any(),any())).thenAnswer(call -> ((java.util.function.Supplier<?>)call.getArgument(1)).get());
+            io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of());
+            try {
+                Thread.sleep(1100); // Real one-second policy backoff, without rewriting failure timestamps.
+                new io.github.opensabre.iqc.task.retry.AutomaticRetryDispatcher(retries,actors,scope,
+                        context.getBean(io.github.opensabre.iqc.schedule.TriggerAttemptService.class)).tick();
+                retry=mapper.selectById(childId);assertEquals("QUEUED",retry.getStatus(),retry.getRetryError());
+                assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_trigger_attempt_event WHERE parent_id=? AND phase='FINISHED' AND outcome='DOMAIN_COMMITTED'",Integer.class,childId));
+            } finally {
+                io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of("user_name","annotator","user_id","user-annotator"));
+                doReturn(null).when(scope).asScheduledActor(any(),any());
+            }
+        } else retry=runner.queueSystem(childId);
+        String retryChildEid=retry.getCurrentExecutionId();assertNotEquals(firstChildEid,retryChildEid);
+        runner.executePersisted(childId,retryChildEid);assertEquals("SUCCEEDED",mapper.selectById(childId).getStatus());
+        assertTrue(lifecycle.claim(parent.getId(),retryParentEid));lifecycle.tick(parent.getId(),retryParentEid);
+        assertEquals("SUCCEEDED",mapper.selectById(parent.getId()).getStatus());
+        assertEquals("FAILED",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,firstParentEid));
+        assertEquals("FAILED",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,firstChildEid));
+        assertEquals("SUCCEEDED",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,retryParentEid));
+        assertEquals(2,db.queryForObject("SELECT COUNT(*) FROM iqc_task_execution WHERE task_id=?",Integer.class,childId));
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE bulk_parent_task_id=?",Integer.class,parent.getId()));
+        assertEquals(frozen,mapper.selectById(childId).getRuleSnapshotJson());assertEquals(progress,mapper.selectById(parent.getId()).getBulkProgressJson());
+    }
+
+    /** Seed only terminal child outcomes; exercise real parent aggregation and persistence, not model failures. */
+    private void assertBulkTerminalAggregation(PipelineAssetService.Prepared prepared,String conversation,String suffix) {
+        var bulk=context.getBean(BulkTaskMaterializationService.class);
+        var lifecycle=context.getBean(BulkTaskLifecycleService.class);
+        var db=new JdbcTemplate(context.getBean(DataSource.class));
+        var selector=new io.github.opensabre.iqc.selector.SelectorDefinition(io.github.opensabre.iqc.selector.SelectorDefinition.SCHEMA,null,null,List.of(conversation),List.of(),null,null,1000);
+        var bound=new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","user-annotator","annotator",false,"group");
+        String[][] cases={{"SUCCEEDED","SUCCEEDED"},{"FAILED","FAILED"},{"CANCELLED","FAILED"},
+                {"PARTIAL_FAILED","PARTIAL_FAILED"},{"SUCCEEDED","FAILED","PARTIAL_FAILED"},
+                {"SUCCEEDED","CANCELLED","PARTIAL_FAILED"}};
+        for(int i=0;i<cases.length;i++) {
+            String[] outcomes=cases[i];String expected=outcomes[outcomes.length-1];
+            var parent=bulk.create(prepared.pipelineId(),prepared.versionNo(),selector,bound,"aggregate "+i,1000,1,"aggregate_"+i+"_"+suffix);
+            String eid="aggregate-e"+i+suffix;
+            db.update("INSERT INTO iqc_task_execution(id,task_id,attempt_no,status) VALUES (?,?,1,'QUEUED')",eid,parent.getId());
+            db.update("UPDATE iqc_inspection_task SET status='QUEUED',current_execution_id=? WHERE id=?",eid,parent.getId());
+            assertTrue(lifecycle.claim(parent.getId(),eid));
+            var step=bulk.materializeNext(parent.getId(),eid);
+            assertNotNull(step.childTaskId());assertTrue(step.progress().scanComplete());
+            String progress=db.queryForObject("SELECT bulk_progress_json FROM iqc_inspection_task WHERE id=?",String.class,parent.getId());
+            String snapshot=db.queryForObject("SELECT rule_snapshot_json FROM iqc_inspection_task WHERE id=?",String.class,step.childTaskId());
+            db.update("UPDATE iqc_inspection_task SET status=? WHERE id=?",outcomes[0],step.childTaskId());
+            if(outcomes.length==3) {
+                // A second terminal shard fixture isolates the mixed-result SQL reduction.
+                db.update("INSERT INTO iqc_inspection_task(id,name,task_type,status,bulk_parent_task_id,bulk_shard_no) VALUES (?,?,'BATCH',?,?,1)",
+                        "aggregate-child"+i+suffix,"terminal fixture",outcomes[1],parent.getId());
+            }
+            lifecycle.tick(parent.getId(),eid);
+            assertEquals(expected,db.queryForObject("SELECT status FROM iqc_inspection_task WHERE id=?",String.class,parent.getId()),"case "+i);
+            assertEquals(expected,db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,eid));
+            var completed=db.queryForObject("SELECT completed_at_utc FROM iqc_task_execution WHERE id=?",java.sql.Timestamp.class,eid);
+            assertNotNull(completed);
+            lifecycle.tick(parent.getId(),eid);lifecycle.tick(parent.getId(),"obsolete-execution");
+            assertFalse(lifecycle.claim(parent.getId(),eid));
+            assertEquals(completed,db.queryForObject("SELECT completed_at_utc FROM iqc_task_execution WHERE id=?",java.sql.Timestamp.class,eid));
+            assertEquals(expected,db.queryForObject("SELECT status FROM iqc_inspection_task WHERE id=?",String.class,parent.getId()));
+            assertEquals(eid,db.queryForObject("SELECT current_execution_id FROM iqc_inspection_task WHERE id=?",String.class,parent.getId()));
+            assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_task_execution WHERE task_id=?",Integer.class,parent.getId()));
+            assertEquals(outcomes.length-1,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE bulk_parent_task_id=?",Integer.class,parent.getId()));
+            assertEquals(progress,db.queryForObject("SELECT bulk_progress_json FROM iqc_inspection_task WHERE id=?",String.class,parent.getId()));
+            assertEquals(snapshot,db.queryForObject("SELECT rule_snapshot_json FROM iqc_inspection_task WHERE id=?",String.class,step.childTaskId()));
+        }
+    }
+
     private void propagateWithSaturatedWorker(String parentId,String executionId) throws Exception {
         var executor=new org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor();
         executor.setCorePoolSize(1);executor.setMaxPoolSize(1);executor.setQueueCapacity(1);executor.initialize();
@@ -991,6 +1095,15 @@ class IsolatedMysqlMeasuredPublicationIT {
             pagination.addInnerInterceptor(new com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor(com.baomidou.mybatisplus.annotation.DbType.MYSQL));
             f.getConfiguration().addInterceptor(pagination);
             return new SqlSessionTemplate(f);
+        }
+        @Bean io.github.opensabre.iqc.schedule.TriggerAttemptService retryAttempts(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,ScheduledActorAccessService actors,InspectionTaskService tasks) {
+            return new io.github.opensabre.iqc.schedule.TriggerAttemptService(s.getMapper(io.github.opensabre.iqc.schedule.dao.TriggerAttemptEventMapper.class),j,scope,actors,null,null,tasks);
+        }
+        @Bean io.github.opensabre.iqc.task.retry.AutomaticRetryService automaticRetries(SqlSessionTemplate s,ScheduledActorAccessService actors,IqcDataScope scope,ObjectMapper j,
+                io.github.opensabre.iqc.result.llm.gateway.GatewayCallService calls,ObjectProvider<InspectionTaskService> tasks,
+                ObjectProvider<InspectionExecutionService> runner,ObjectProvider<io.github.opensabre.iqc.schedule.TriggerAttemptService> attempts) {
+            return new io.github.opensabre.iqc.task.retry.AutomaticRetryService(s.getMapper(InspectionTaskMapper.class),s.getMapper(TaskExecutionMapper.class),
+                    s.getMapper(ConversationMapper.class),actors,scope,j,calls,tasks,runner,attempts);
         }
         @Bean ScheduledActorAccessService actionActors(){var service=mock(ScheduledActorAccessService.class);when(service.capture()).thenReturn(new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","user-annotator","annotator",false,"group"));return service;}
         @Bean io.github.opensabre.iqc.quality.BusinessQualityReportService businessReports(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,BusinessItemReviewService reviews){
