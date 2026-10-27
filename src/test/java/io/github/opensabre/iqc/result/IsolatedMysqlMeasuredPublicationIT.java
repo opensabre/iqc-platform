@@ -143,6 +143,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertArchiveReceiptExecutesPublishedPipeline(prepared,conversation,suffix);
         assertBulkMaterializationRollsBackAndRetainsFrozenInput(prepared,conversation,suffix);
         assertBulkTerminalAggregation(prepared,conversation,suffix);
+        assertBulkChildWriteFailureAndRetry(prepared,conversation,suffix);
         var production=context.getBean(InspectionTaskService.class).createUsingPipelineSnapshot(prepared,"production",List.of(conversation),1,"production_"+suffix);
         // Mutate live data only after the owning materializer has frozen the complete processed conversation.
         db.update("UPDATE iqc_conversation_message SET content='later text',start_ms=10000,end_ms=11000 WHERE id=?",second);
@@ -942,6 +943,41 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertThrows(RuntimeException.class,()->context.getBean(InspectionExecutionService.class).resume(child.getId()));
     }
     /** A real full executor cannot prevent SQL-only stop propagation or cause new model/organization work. */
+    /** Reject one result write, then retry through the existing child execution path with frozen inputs. */
+    private void assertBulkChildWriteFailureAndRetry(PipelineAssetService.Prepared prepared,String conversation,String suffix) {
+        var bulk=context.getBean(BulkTaskMaterializationService.class);var lifecycle=context.getBean(BulkTaskLifecycleService.class);
+        var runner=context.getBean(InspectionExecutionService.class);var db=new JdbcTemplate(context.getBean(DataSource.class));
+        var mapper=context.getBean(SqlSessionTemplate.class).getMapper(InspectionTaskMapper.class);
+        var selector=new io.github.opensabre.iqc.selector.SelectorDefinition(io.github.opensabre.iqc.selector.SelectorDefinition.SCHEMA,null,null,List.of(conversation),List.of(),null,null,1000);
+        var bound=new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","user-annotator","annotator",false,"group");
+        var parent=bulk.create(prepared.pipelineId(),prepared.versionNo(),selector,bound,"write failure retry",1000,1,"write_retry_"+suffix);
+        var queuedParent=lifecycle.queue(parent.getId());String firstParentEid=queuedParent.getCurrentExecutionId();
+        assertTrue(lifecycle.claim(parent.getId(),firstParentEid));
+        var step=bulk.materializeNext(parent.getId(),firstParentEid);assertNotNull(step.childTaskId());assertTrue(step.progress().scanComplete());
+        String childId=step.childTaskId();String frozen=mapper.selectById(childId).getRuleSnapshotJson();
+        String progress=mapper.selectById(parent.getId()).getBulkProgressJson();
+        var first=runner.queueSystem(childId);String firstChildEid=first.getCurrentExecutionId();
+        db.execute("CREATE TRIGGER reject_bulk_child_result BEFORE INSERT ON iqc_inspection_conversation_result FOR EACH ROW BEGIN IF NEW.task_id='"+childId+"' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='injected bulk child result failure'; END IF; END");
+        try {runner.executePersisted(childId,firstChildEid);}
+        finally {db.execute("DROP TRIGGER reject_bulk_child_result");}
+        assertEquals("FAILED",mapper.selectById(childId).getStatus());
+        assertEquals("FAILED",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,firstChildEid));
+        assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_conversation_result WHERE task_id=?",Integer.class,childId));
+        lifecycle.tick(parent.getId(),firstParentEid);assertEquals("FAILED",mapper.selectById(parent.getId()).getStatus());
+        String retryParentEid=lifecycle.queue(parent.getId()).getCurrentExecutionId();assertNotEquals(firstParentEid,retryParentEid);
+        // Explicit child retry reuses the ordinary execution service; parent queue does not rerun terminal shards.
+        var retry=runner.queueSystem(childId);String retryChildEid=retry.getCurrentExecutionId();assertNotEquals(firstChildEid,retryChildEid);
+        runner.executePersisted(childId,retryChildEid);assertEquals("SUCCEEDED",mapper.selectById(childId).getStatus());
+        assertTrue(lifecycle.claim(parent.getId(),retryParentEid));lifecycle.tick(parent.getId(),retryParentEid);
+        assertEquals("SUCCEEDED",mapper.selectById(parent.getId()).getStatus());
+        assertEquals("FAILED",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,firstParentEid));
+        assertEquals("FAILED",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,firstChildEid));
+        assertEquals("SUCCEEDED",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,retryParentEid));
+        assertEquals(2,db.queryForObject("SELECT COUNT(*) FROM iqc_task_execution WHERE task_id=?",Integer.class,childId));
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE bulk_parent_task_id=?",Integer.class,parent.getId()));
+        assertEquals(frozen,mapper.selectById(childId).getRuleSnapshotJson());assertEquals(progress,mapper.selectById(parent.getId()).getBulkProgressJson());
+    }
+
     /** Seed only terminal child outcomes; exercise real parent aggregation and persistence, not model failures. */
     private void assertBulkTerminalAggregation(PipelineAssetService.Prepared prepared,String conversation,String suffix) {
         var bulk=context.getBean(BulkTaskMaterializationService.class);
