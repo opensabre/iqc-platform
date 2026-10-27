@@ -312,6 +312,10 @@ public class BusinessItemReviewService {
                         List.copyOf(effective.values()),List.copyOf(effectiveFindings.values()),allowed);
                 projection=withManualScore(projection,scoreAdjustment==null?inheritedScore:scoreAdjustment,scoreAdjustment!=null);
                 projection=withWorkflow(projection,workflow);
+                if(projection.findingReview()!=null)try {
+                    io.github.opensabre.iqc.pipelineasset.RiskPolicy.requireLocatableEvidence(projection.findingReview().riskLevel(),
+                            projection.findingReview().findings().reviewed());
+                } catch(IllegalArgumentException invalid){throw IqcException.invalidArgument("高风险人工事实投影必须保留可定位证据");}
                 review.setReviewedResultJson(mapper.writeValueAsString(projection));
             } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
                 throw IqcException.invalidState("复核基准或结果快照损坏");

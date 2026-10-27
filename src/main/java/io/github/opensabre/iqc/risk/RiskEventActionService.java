@@ -22,7 +22,7 @@ public class RiskEventActionService {
     private final RiskEventMapper events;
     private final IqcDataScope scope;
     private final ObjectMapper json;
-    private record Prepared(ActionPolicy.Action action,RiskEventConfiguration.Metadata metadata,String risk) { }
+    private record Prepared(ActionPolicy.Action action,RiskEventConfiguration.Metadata metadata,String risk,boolean evidencePresent) { }
 
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
     public String create(ActionAdapter.Request request) {
@@ -30,6 +30,8 @@ public class RiskEventActionService {
         check(prepared.action(),request.attempt());
         var existing=find(request.executionId());
         if(existing!=null){requireArtifact(existing,request,prepared);check(prepared.action(),request.attempt());return existing.getId();}
+        if(Set.of("HIGH","CRITICAL").contains(prepared.risk())&&!prepared.evidencePresent())
+            throw IqcException.invalidState("高风险事件必须关联可定位的已验证事实证据");
         var row=new RiskEvent();row.setId(id(request));row.setSourceActionExecutionId(request.executionId());
         row.setSourceResultId(request.source().resultId());row.setSourceInputHash(request.inputSnapshotHash());
         row.setCategory(prepared.metadata().category());row.setTitle(prepared.metadata().title());
@@ -76,7 +78,8 @@ public class RiskEventActionService {
             String risk=validated.context().riskLevel();
             if(!Set.of("LOW","MEDIUM","HIGH","CRITICAL").contains(risk==null?"":risk))
                 throw IqcException.invalidState("风险事件需要实际已确认的非空风险等级");
-            return new Prepared(action,RiskEventConfiguration.parse(action.configuration()),risk);
+            return new Prepared(action,RiskEventConfiguration.parse(action.configuration()),risk,
+                    io.github.opensabre.iqc.pipelineasset.RiskPolicy.hasSelectedEvidence(validated.context().findings().values()));
         } catch(com.fasterxml.jackson.core.JsonProcessingException | java.util.NoSuchElementException invalid) {
             throw IqcException.invalidState("风险动作冻结政策损坏");
         }

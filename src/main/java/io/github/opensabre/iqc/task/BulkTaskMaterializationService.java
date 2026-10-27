@@ -65,6 +65,7 @@ public class BulkTaskMaterializationService {
             return existing; // The original anchor and committed children must never be selected again here.
         }
         var prepared=pipelines.publishedReleaseForTask(pipelineId,versionNo);
+        PipelineAssetService.validateNewRiskEvidence(prepared.release(),json);
         var frozen=new Definition("iqc-bulk-definition-v1",prepared,selector,Instant.now().truncatedTo(ChronoUnit.MILLIS),
                 ownerBound,scanSize,concurrency,name.trim());
         JsonNode body=json.valueToTree(frozen);

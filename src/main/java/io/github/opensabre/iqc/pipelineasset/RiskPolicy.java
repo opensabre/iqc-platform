@@ -43,6 +43,43 @@ public record RiskPolicy(String schemaVersion,Finding.Severity defaultLevel,List
             throw new IllegalArgumentException("Risk policy cannot read derived risk/result status");
         for(var child:condition.children())validateCondition(child,findings,items,count);
     }
+    /** New configuration/materialization gate only. Historical evaluate remains unchanged. */
+    public void validateHighRiskEvidence(Set<String> evidenceRequiredCodes) {
+        Objects.requireNonNull(evidenceRequiredCodes);
+        if(defaultLevel.compareTo(Finding.Severity.HIGH)>=0)
+            throw new IllegalArgumentException("High risk cannot be an unconditional default");
+        for(var rule:rules)if(rule.level().compareTo(Finding.Severity.HIGH)>=0
+                && !guaranteesEvidence(rule.condition(),evidenceRequiredCodes))
+            throw new IllegalArgumentException("High-risk rule requires a known evidence-backed finding on every matching path");
+    }
+    private static boolean guaranteesEvidence(ActionPolicy.Condition condition,Set<String> codes) {
+        return switch(condition.kind()) {
+            case FINDING_EQUALS -> codes.contains(condition.code());
+            case FINDING_STATE -> codes.contains(condition.code()) && "KNOWN".equals(condition.value().asText());
+            case NOT -> condition.children().getFirst().kind()==ActionPolicy.Kind.FINDING_EQUALS
+                    && codes.contains(condition.children().getFirst().code());
+            case ALL -> condition.children().stream().anyMatch(child->guaranteesEvidence(child,codes));
+            case ANY -> !condition.children().isEmpty() && condition.children().stream().allMatch(child->guaranteesEvidence(child,codes));
+            default -> false;
+        };
+    }
+    public static boolean hasLocatableEvidence(Collection<io.github.opensabre.iqc.fusion.FindingFusion.Result> facts) {
+        return facts!=null && facts.stream().anyMatch(fact->fact.state()==Finding.State.KNOWN&&!fact.evidence().isEmpty());
+    }
+    /** Machine projections cannot use only a rejected alternative's evidence as their selected claim's proof. */
+    public static boolean hasSelectedEvidence(Collection<io.github.opensabre.iqc.fusion.FindingFusion.Result> facts) {
+        return facts!=null && facts.stream().anyMatch(fact->fact.state()==Finding.State.KNOWN
+                && fact.rawFindings().stream().anyMatch(raw->fact.selectedIds().contains(raw.id())&&raw.state()==Finding.State.KNOWN
+                    && raw.evidence().stream().anyMatch(fact.evidence()::contains)));
+    }
+    public static void requireSelectedEvidence(String risk,Collection<io.github.opensabre.iqc.fusion.FindingFusion.Result> facts) {
+        if(Set.of("HIGH","CRITICAL").contains(risk==null?"":risk)&&!hasSelectedEvidence(facts))
+            throw new IllegalArgumentException("High-risk machine projection requires selected source evidence");
+    }
+    public static void requireLocatableEvidence(String risk,Collection<io.github.opensabre.iqc.fusion.FindingFusion.Result> facts) {
+        if(Set.of("HIGH","CRITICAL").contains(risk==null?"":risk)&&!hasLocatableEvidence(facts))
+            throw new IllegalArgumentException("High-risk projection requires locatable validated evidence");
+    }
     public Decision evaluate(ActionPolicy.Context context) {
         var confirmed=defaultLevel;var possible=defaultLevel;var matches=new ArrayList<RuleMatch>();
         for(var rule:rules) {

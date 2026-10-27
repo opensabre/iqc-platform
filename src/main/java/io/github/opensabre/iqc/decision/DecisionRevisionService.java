@@ -124,6 +124,7 @@ public class DecisionRevisionService {
             var originalReview=PipelineDecisionEvaluator.reviewDecision(release,originalFusion,originalScore,originalRisk,resultStatus,trace.inputHash(),businessContext,samplingInputHash,json);
             if(!json.valueToTree(originalReview).equals(json.valueToTree(trace.reviewDecision())))throw IqcException.invalidState("源复核决定与冻结输入/政策不一致");
             var target = assets.publishedRelease(targetPipelineId,targetVersion);
+            PipelineAssetService.validateNewRiskEvidence(target.release(),json);
             List<Finding> policyInputs=raw;
             if(target.release().fusion().method()==io.github.opensabre.iqc.fusion.FusionPolicy.Method.WEIGHTED
                     ||target.release().fusion().method()==io.github.opensabre.iqc.fusion.FusionPolicy.Method.CUSTOM){
@@ -142,6 +143,8 @@ public class DecisionRevisionService {
             var fusion = FindingFusion.fuse(policyInputs,target.release().fusion());
             var decisions = PipelineDecisionEvaluator.decisions(target.release().items(),fusion);
             var score = PipelineDecisionEvaluator.evaluate(target.release(),fusion,businessContext);
+            io.github.opensabre.iqc.pipelineasset.RiskPolicy.requireSelectedEvidence(
+                    PipelineDecisionEvaluator.riskLevel(target.release(),fusion,score,businessContext),fusion);
             String sourceHash = hash(Arrays.asList(task.getRuleSnapshotJson(),result.getId(),
                     result.getExecutionTraceJson(),result.getBusinessItemResultsJson(),result.getScoringResultJson()));
             var projection = new Projection("iqc-decision-revision-v1",resultId,sourceHash,originalScore,fusion,decisions,score,

@@ -364,7 +364,29 @@ public class PipelineAssetService {
         release.scoring().validateReferences(codes,release.items().stream().map(PipelineRelease.ItemMapping::itemCode).collect(java.util.stream.Collectors.toSet()),labelPolicy);
         io.github.opensabre.iqc.label.FindingLabelActionConfiguration.validateDeclaredActions(release.actionPolicy(),labelPolicy);
         var frozen=new PipelineRelease(release.schemaVersion(),new PipelineDefinition(release.pipeline().schemaVersion(),nodes,release.pipeline().completionPolicy()),release.fusion(),release.scoring(),release.items(),release.publicationGate(),release.actionPolicy(),labelPolicy,release.riskPolicy(),release.reviewPolicy());
+        validateNewRiskEvidence(frozen,json);
         runtime.validate(frozen.pipeline()); return frozen;
+    }
+    /** All producers of a fused code must uphold the same evidence requirement for new risk policies. */
+    public static void validateNewRiskEvidence(PipelineRelease release,ObjectMapper mapper) {
+        if(release==null)throw IqcException.invalidArgument("流水线配置缺失，不能验证风险证据");
+        if(release.riskPolicy()==null)return;
+        if(release.riskPolicy().defaultLevel().compareTo(Finding.Severity.HIGH)<0
+                &&release.riskPolicy().rules().stream().noneMatch(rule->rule.level().compareTo(Finding.Severity.HIGH)>=0))return;
+        var required=new HashMap<String,Boolean>();
+        try {
+            for(var node:release.pipeline().nodes()) {
+                if(node.config()==null)throw new IllegalArgumentException("Missing node configuration");
+                var definition=mapper.treeToValue(node.config().path("findingDefinition"),FindingDefinition.class);
+                if(definition==null)throw new IllegalArgumentException("Missing finding definition");
+                required.merge(definition.code(),definition.evidenceRequired(),(left,right)->left&&right);
+            }
+            var codes=required.entrySet().stream().filter(Map.Entry::getValue).map(Map.Entry::getKey)
+                    .collect(java.util.stream.Collectors.toSet());
+            release.riskPolicy().validateHighRiskEvidence(codes);
+        } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException invalid) {
+            throw IqcException.invalidArgument("HIGH/CRITICAL风险必须由要求证据的已知事实支撑，不能使用无条件高风险默认或分支");
+        }
     }
     private static Map<String,Finding.ValueType> labelFindingTypes(PipelineDefinition pipeline) {
         var types=new HashMap<String,Finding.ValueType>();

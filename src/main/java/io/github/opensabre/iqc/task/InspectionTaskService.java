@@ -654,6 +654,7 @@ public class InspectionTaskService {
                 return existing;
             }
         }
+        io.github.opensabre.iqc.pipelineasset.PipelineAssetService.validateNewRiskEvidence(prepared.release(),objectMapper);
         if(productionInputs==null)throw IqcException.invalidState("当前物化器未启用生产输入冻结");
         var frozenInputs=productionInputs.capture(conversationIds==null?List.of():conversationIds.stream()
                 .filter(value->value!=null && !value.isBlank()).distinct().toList());
@@ -892,6 +893,11 @@ public class InspectionTaskService {
         String id = evaluationRequestTaskId(requestId);
         var existing = taskMapper.selectById(id);
         if (existing != null) return requireEvaluationRetry(existing, fingerprint);
+        var riskRelease=body.path("pipelineSnapshot").path("release");
+        if(riskRelease.hasNonNull("riskPolicy"))try {
+            var release=objectMapper.treeToValue(riskRelease,io.github.opensabre.iqc.pipelineasset.PipelineRelease.class);
+            io.github.opensabre.iqc.pipelineasset.PipelineAssetService.validateNewRiskEvidence(release,objectMapper);
+        } catch(JsonProcessingException invalid){throw IqcException.invalidArgument("评测流水线风险政策无效");}
         int messages = golds.stream().mapToInt(gold -> gold.messages().size()).sum();
         try {
             return saveSnapshotTask(name, "离线评测-" + ids.size() + "个会话", ids, concurrency, dataScope.groupId(), messages, task -> {
