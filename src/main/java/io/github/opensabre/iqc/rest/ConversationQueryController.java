@@ -47,9 +47,9 @@ public class ConversationQueryController {
     }
 
     @GetMapping("/{id}")
-    @ResourcePermission(code = "iqc:conversation:view", name = "查看会话详情", type = "iqc", description = "查看会话详情")
+    @ResourcePermission(code = "iqc:conversation:detail:view", name = "查看会话详情", type = "iqc", description = "查看会话详情")
     public Map<String, Object> detail(@PathVariable String id) {
-        var grant=access("iqc:conversation:view");return io.github.opensabre.iqc.privacy.ConversationReadProjection.detail(service.detail(id),grant,io.github.opensabre.iqc.privacy.ConversationReadProjection.Mode.PREVIEW);
+        var grant=access("iqc:conversation:detail:view");return io.github.opensabre.iqc.privacy.ConversationReadProjection.detail(service.detail(id),grant,io.github.opensabre.iqc.privacy.ConversationReadProjection.Mode.PREVIEW);
     }
     @GetMapping("/{id}/full-content")
     @ResourcePermission(code=io.github.opensabre.iqc.privacy.SensitiveReadAccessService.FULL_CONVERSATION,name="查看完整会话内容",type="iqc",description="在原数据范围内读取完整且PII脱敏的会话")
@@ -69,10 +69,11 @@ public class ConversationQueryController {
     }
 
     @GetMapping("/api-stats")
-    @ResourcePermission(code = "iqc:conversation:view", name = "查看接口会话统计", type = "iqc", description = "按时段统计 API 接入会话")
+    @ResourcePermission(code = "iqc:conversation:api-stats:view", name = "查看接口会话统计", type = "iqc", description = "按时段统计 API 接入会话")
     public Map<String, Object> apiStats(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end) {
+        access("iqc:conversation:api-stats:view");
         return service.apiStats(start, end);
     }
 }
