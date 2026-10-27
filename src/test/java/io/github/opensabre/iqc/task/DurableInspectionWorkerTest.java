@@ -30,6 +30,8 @@ class DurableInspectionWorkerTest {
     }
     @BeforeEach
     void executorBoundary() {
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(new com.baomidou.mybatisplus.core.MybatisConfiguration(), "worker-query"), InspectionTask.class);
         when(executor.getThreadPoolExecutor()).thenReturn(pool);
         doAnswer(call -> { submitted.add(call.getArgument(0)); return null; }).when(executor).execute(any(Runnable.class));
         when(tasks.selectList(any())).thenReturn(List.of(task("task", "execution")));
