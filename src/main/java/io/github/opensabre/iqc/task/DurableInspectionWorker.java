@@ -27,6 +27,7 @@ public class DurableInspectionWorker {
     private final ThreadPoolTaskExecutor executor;
     private record Lease(String taskId,String executionId) { }
     private final Set<Lease> inFlight=ConcurrentHashMap.newKeySet();
+    private boolean preferBulk; // guarded by synchronized discovery, including the one-slot case
     @Value("${iqc.task.worker-max-in-flight:8}") private int maximumInFlight=8;
     @Value("${iqc.task.execution-timeout-minutes:30}") private long timeoutMinutes=30;
     private final io.micrometer.core.instrument.MeterRegistry meters;
@@ -97,20 +98,57 @@ public class DurableInspectionWorker {
         if(maximumInFlight<1 || maximumInFlight>64 || timeoutMinutes<1)
             throw new IllegalArgumentException("worker-max-in-flight must be 1..64; timeout must be positive");
     }
+    /** Short bounded control transactions use the existing discovery tick, not the model executor. */
+    private void propagateBulkStops() {
+        var stops=tasks.selectList(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getTaskType,BulkTaskMaterializationService.TYPE)
+                .in(InspectionTask::getStatus,"PAUSE_REQUESTED","CANCEL_REQUESTED").isNotNull(InspectionTask::getCurrentExecutionId)
+                .select(InspectionTask::getId,InspectionTask::getTaskType,InspectionTask::getStatus,InspectionTask::getCurrentExecutionId)
+                // A still-running remote call may delay quiescence: rotate served parents behind unserved requests.
+                .orderByAsc(InspectionTask::getUpdatedTime).orderByDesc(InspectionTask::getQueuePriority)
+                .orderByAsc(InspectionTask::getId).last("LIMIT 100"));
+        for(var task:stops) {
+            if(!BulkTaskMaterializationService.TYPE.equals(task.getTaskType())
+                    || !Set.of("PAUSE_REQUESTED","CANCEL_REQUESTED").contains(task.getStatus()))continue;
+            try{bulk.getObject().controlRequested(task.getId(),task.getCurrentExecutionId());}
+            catch(RuntimeException failure){log.error("event=iqc_bulk_control_failed taskId={} executionId={} errorType={}",
+                    task.getId(),task.getCurrentExecutionId(),failure.getClass().getSimpleName(),failure);}
+        }
+    }
     @Scheduled(fixedDelayString="${iqc.task.worker-delay-ms:2000}")
     public synchronized void discoverQueuedTasks() {
         int recovered=taskService.recoverStaleExecutions(Duration.ofMinutes(timeoutMinutes),false);
         if(recovered>0)log.warn("event=iqc_worker_stale_recovery recovered={}",recovered);
+        if(bulk!=null)propagateBulkStops(); // Model work may occupy every executor slot; withdrawal must still advance.
         if(inFlight.size()>=maximumInFlight || executor.getThreadPoolExecutor().getQueue().remainingCapacity()==0)return;
-        var queued=tasks.selectList(Wrappers.<InspectionTask>lambdaQuery()
-                .and(q->q.eq(InspectionTask::getStatus,"QUEUED").or(n->n.eq(InspectionTask::getTaskType,BulkTaskMaterializationService.TYPE)
-                        .in(InspectionTask::getStatus,"PAUSE_REQUESTED","CANCEL_REQUESTED")))
-                .isNotNull(InspectionTask::getCurrentExecutionId).orderByDesc(InspectionTask::getQueuePriority)
-                .orderByAsc(InspectionTask::getCreatedTime).orderByAsc(InspectionTask::getId).last("LIMIT 100"));
+        var ordinary=tasks.selectList(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getStatus,"QUEUED")
+                .and(q->q.ne(InspectionTask::getTaskType,BulkTaskMaterializationService.TYPE).or().isNull(InspectionTask::getTaskType))
+                .isNotNull(InspectionTask::getCurrentExecutionId)
+                .select(InspectionTask::getId,InspectionTask::getTaskType,InspectionTask::getCurrentExecutionId,
+                        InspectionTask::getQueuePriority,InspectionTask::getCreatedTime)
+                .orderByDesc(InspectionTask::getQueuePriority).orderByAsc(InspectionTask::getCreatedTime)
+                .orderByAsc(InspectionTask::getId).last("LIMIT 100"));
+        var parents=bulk==null?java.util.List.<InspectionTask>of():tasks.selectList(Wrappers.<InspectionTask>lambdaQuery()
+                .eq(InspectionTask::getTaskType,BulkTaskMaterializationService.TYPE).eq(InspectionTask::getStatus,"QUEUED")
+                .isNotNull(InspectionTask::getCurrentExecutionId)
+                .select(InspectionTask::getId,InspectionTask::getTaskType,InspectionTask::getCurrentExecutionId,
+                        InspectionTask::getQueuePriority,InspectionTask::getCreatedTime)
+                .orderByDesc(InspectionTask::getQueuePriority).orderByAsc(InspectionTask::getCreatedTime)
+                .orderByAsc(InspectionTask::getId).last("LIMIT 100"));
+        var leaves=ordinary.stream().filter(task->!BulkTaskMaterializationService.TYPE.equals(task.getTaskType())).toList();
+        var coordinators=parents.stream().filter(task->BulkTaskMaterializationService.TYPE.equals(task.getTaskType())).toList();
+        var queued=new java.util.ArrayList<InspectionTask>(leaves.size()+coordinators.size());
+        boolean firstBulk=preferBulk;
+        if(!leaves.isEmpty()&&!coordinators.isEmpty())preferBulk=!preferBulk;
+        for(int index=0;index<Math.max(leaves.size(),coordinators.size());index++) {
+            if(firstBulk && index<coordinators.size())queued.add(coordinators.get(index));
+            if(index<leaves.size())queued.add(leaves.get(index));
+            if(!firstBulk && index<coordinators.size())queued.add(coordinators.get(index));
+        }
+        var offered=new java.util.HashSet<Lease>();
         for(var task:queued) {
             if(inFlight.size()>=maximumInFlight)break;
             var lease=new Lease(task.getId(),task.getCurrentExecutionId());
-            if(!inFlight.add(lease))continue;
+            if(!offered.add(lease)||!inFlight.add(lease))continue;
             try {
                 executor.execute(()->{
                     try{

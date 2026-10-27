@@ -79,3 +79,11 @@ BulkTaskLifecycleService复用原TaskExecution，为父任务创建或恢复执�
 原BulkAccess.queueIfBulk对当前capture/resolveCurrent后直接asCurrentActor，lifecycle的原bound检查会拒绝后来变宽的all/group。新增IqcDataScope.asCurrentActorBound，复用原asCurrentActor对当前账户、请求范围、fresh组织证据与上下文的严格入口校验，只在其callback内将现有ThreadLocal投影为original.all AND current.all、original.group==current.group才保留group。稳定userId/owner必须等于原负责人；资源grant仍使用当前组织证据，不借旧grant，不借后台身份、不清除认证、不新增权限模型。原严格asCurrentActor的其它调用行为不变，异常仍由其finally清理作用域。
 
 原负责人恢复读取已授权父任务的不可变owner证据（不对外返回配置），再取当前组织证据后于事务前进入交集范围；lifecycle在父锁内再次验证原bound。当前变宽不扩大扫描，当前变窄只允许原上界内仍可见的数据，失去功能grant/变更账户仍拒绝。B需验证all升/降、换组、空组、异账户、撤权、过期证据、异常清理与普通严格入口兼容；编译不代替这些证据。
+
+## 父协调与实际执行的发现公平性
+
+现worker单次全局LIMIT100按创建时间取QUEUED。超过100个较早父任务持续等待并重排时，会占满发现窗口，较新子任务无法被发现，形成父等子/子排不到的活性缺陷。复用同一数据库队列、worker、inFlight和executor，分别有界查询普通实际任务与父协调（各最多100，仅ID/type/EID/排序metadata），交替合并；两类都非空时轮换首类，即maximumInFlight=1仍各有机会。各类内部保留priority/created/id顺序，父取消暂停优先普通父tick；同一Lease在一轮仅尝试一次，原满载和拒绝保留持久QUEUED的行为保持。无新队列表/调度器/线程池。
+
+原优先级能力最小延伸到批次：新分片继承父priority，修改父priority同事务同步CREATED/QUEUED/PAUSED分片，已运行片不中断。只变调度字段，不改冻结选数/输入/Hash。B需验证100+等待父与子均可发现、单槽首类轮换、普通内部顺序/容量/拒绝、停止请求优先、同Lease不重复提交和父优先级当前/未来片继承；旧worker测试单查询次数假设需适配双有界发现，不能取消实际资源上限断言。
+
+停止传播还须避免另一个容量闭环：若全部model executor/inFlight槽都在跑长分片，排进同一槽的父停止tick无法执行，子就收不到停止标记。因此同一discover循环在容量检查之前，先有界查询最多100个父停止请求并同步调用原controlIfRequested短事务，只撤回既有归属子任务，无组织网络查询/模型调用/新工作入队。按updated_time轮转让仍等待远端调用静止的父不长期挤掉未服务停止请求。普通父协调与实际执行再交替用原executor；没有新增线程、调度器、队列或持久模型。旧四/五参构造未接bulk provider时保留普通单查询发现及容量行为。B须加满executor/max-in-flight下仍传播父停止、停止路径零模型/零组织IO及两个发现家族公平性专项。

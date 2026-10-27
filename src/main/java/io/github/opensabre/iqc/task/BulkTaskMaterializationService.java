@@ -124,7 +124,8 @@ public class BulkTaskMaterializationService {
                 throw IqcException.invalidState("批次子任务幂等状态不一致");
             int linked=tasks.update(null,Wrappers.<InspectionTask>lambdaUpdate().eq(InspectionTask::getId,child.getId())
                     .isNull(InspectionTask::getBulkParentTaskId).isNull(InspectionTask::getBulkShardNo)
-                    .set(InspectionTask::getBulkParentTaskId,parentId).set(InspectionTask::getBulkShardNo,progress.nextShardNo()));
+                    .set(InspectionTask::getBulkParentTaskId,parentId).set(InspectionTask::getBulkShardNo,progress.nextShardNo())
+                    .set(InspectionTask::getQueuePriority,parent.getQueuePriority()==null?0L:parent.getQueuePriority()));
             if(linked!=1)throw IqcException.invalidState("批次子任务引用保存失败");
             childId=child.getId();
         }

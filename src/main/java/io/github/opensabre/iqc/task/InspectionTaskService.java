@@ -1327,12 +1327,15 @@ public class InspectionTaskService {
 
     @Transactional
     public InspectionTask changePriority(String id, long priority) {
-        get(id);
+        var task=get(id);
         int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
                 .set(InspectionTask::getQueuePriority, priority)
                 .eq(InspectionTask::getId, id)
                 .in(InspectionTask::getStatus, "CREATED", "SCHEDULED", "QUEUED", "PAUSED"));
         if (changed != 1) throw IqcException.invalidState("当前任务状态不允许调整优先级");
+        if(BulkTaskMaterializationService.TYPE.equals(task.getTaskType()))
+            taskMapper.update(null,Wrappers.<InspectionTask>lambdaUpdate().eq(InspectionTask::getBulkParentTaskId,id)
+                    .in(InspectionTask::getStatus,"CREATED","QUEUED","PAUSED").set(InspectionTask::getQueuePriority,priority));
         return taskMapper.selectById(id);
     }
 
