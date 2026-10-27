@@ -69,3 +69,13 @@ BulkTaskLifecycleService复用原TaskExecution，为父任务创建或恢复执�
 复核PRD23要求：百万任务可分片恢复，结果/风险列表可分页检索。原BatchResultQueryService.businessPage先加载全部可见任务ID/名称，再IN查询，任务量大时网络/内存/SQL参数随全库任务增加。复用原business results API/页面和ConversationInspectionResultMapper同一最新轮次排名SQL，增加可选parentTaskId；组织owner/group/all直接在task join中过滤，任务名称只读当前页涉及的ID/name，不加载全库任务或冻结原文。父筛选先验证父类型/可见性，再保留子任务原范围；不把父权限当子范围。
 
 排名中间层只保留ID/顺序/分数风险元数据，先按原attempt/time/id选择各task/conversation最新结果，再应用风险/评分过滤，最后取本页原结果。旧mapper显式taskIds调用保留并复用同一SQL，不另写平行结果查询/表/API/权限。分页仍原最多100；不声称LIMIT证明DB窗口排序或COUNT的百万成本已达标，实际索引计划与容量待B验证。此为跨分片结果/风险检索，不构造未经验证的百万同步业务均分/P95；原有报告保护和事实/复核验证保持。
+
+### 恢复轮次语义明确
+
+父协调器PAUSED恢复保留父EID与原游标；子任务继续复用原InspectionExecutionService.resume。原普通暂停恢复创建新的子attempt/EID并迁移冻结检查点，预算等待专门分支才保持子EID。两者都不重新选数或改写首次输入；不能将“所有父子恢复都同EID”当作正式要求，不能据此修改原生产恢复语义。来源：当前InspectionExecutionService.resume与BulkTaskLifecycleService.queue；B生命周期SQL首轮错误假设已纠正，最终证据仍以其固定记录为准。
+
+## 当前范围变宽后的原批次恢复
+
+原BulkAccess.queueIfBulk对当前capture/resolveCurrent后直接asCurrentActor，lifecycle的原bound检查会拒绝后来变宽的all/group。新增IqcDataScope.asCurrentActorBound，复用原asCurrentActor对当前账户、请求范围、fresh组织证据与上下文的严格入口校验，只在其callback内将现有ThreadLocal投影为original.all AND current.all、original.group==current.group才保留group。稳定userId/owner必须等于原负责人；资源grant仍使用当前组织证据，不借旧grant，不借后台身份、不清除认证、不新增权限模型。原严格asCurrentActor的其它调用行为不变，异常仍由其finally清理作用域。
+
+原负责人恢复读取已授权父任务的不可变owner证据（不对外返回配置），再取当前组织证据后于事务前进入交集范围；lifecycle在父锁内再次验证原bound。当前变宽不扩大扫描，当前变窄只允许原上界内仍可见的数据，失去功能grant/变更账户仍拒绝。B需验证all升/降、换组、空组、异账户、撤权、过期证据、异常清理与普通严格入口兼容；编译不代替这些证据。
