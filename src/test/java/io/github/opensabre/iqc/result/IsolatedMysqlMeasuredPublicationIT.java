@@ -863,6 +863,21 @@ class IsolatedMysqlMeasuredPublicationIT {
             var left=pool.submit(claim);var right=pool.submit(claim);assertTrue(ready.await(10,java.util.concurrent.TimeUnit.SECONDS));start.countDown();
             assertNotEquals(left.get(20,java.util.concurrent.TimeUnit.SECONDS),right.get(20,java.util.concurrent.TimeUnit.SECONDS));
         } finally {start.countDown();pool.shutdownNow();}
+        // Two independent Spring contexts/connections compete for the same persisted generation.
+        db.update("UPDATE iqc_inspection_task SET status='QUEUED' WHERE id=?",parent.getId());
+        db.update("UPDATE iqc_task_execution SET status='QUEUED' WHERE id=?",eid);
+        try(var left=new BulkRestartProcess("compete",parent.getId(),eid);
+                var right=new BulkRestartProcess("compete",parent.getId(),eid)) {
+            assertNotEquals(left.pid(),right.pid());
+            assertEquals("READY:"+left.pid(),left.signal("READY:"));assertEquals("READY:"+right.pid(),right.signal("READY:"));
+            left.release();right.release();
+            assertEquals(Set.of("WON:true","WON:false"),Set.of(left.signal("WON:"),right.signal("WON:")));
+            left.requireCleanExit();right.requireCleanExit();
+        }
+        assertEquals("RUNNING",db.queryForObject("SELECT status FROM iqc_inspection_task WHERE id=?",String.class,parent.getId()));
+        assertEquals("RUNNING",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,eid));
+        assertEquals(progress,db.queryForObject("SELECT bulk_progress_json FROM iqc_inspection_task WHERE id=?",String.class,parent.getId()));
+        assertEquals(childSnapshot,sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getRuleSnapshotJson());
         // Replace the process after a committed claim; SQL is the only handoff between JVMs.
         db.update("UPDATE iqc_inspection_task SET status='QUEUED' WHERE id=?",parent.getId());
         db.update("UPDATE iqc_task_execution SET status='QUEUED' WHERE id=?",eid);

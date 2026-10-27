@@ -41,6 +41,9 @@ final class BulkRestartProcess implements AutoCloseable {
         }).get(60, TimeUnit.SECONDS);
     }
 
+    void release() throws Exception {
+        process.getOutputStream().write(1);process.getOutputStream().flush();
+    }
     long pid() { return process.pid(); }
     void kill() throws Exception {
         process.destroyForcibly();
@@ -98,7 +101,11 @@ final class BulkRestartProcess implements AutoCloseable {
             IsolatedMysqlMigrationIT.verifyIsolatedServer();
             try (var child = new AnnotationConfigApplicationContext(IsolatedMysqlMeasuredPublicationIT.Config.class)) {
                 var lifecycle = child.getBean(BulkTaskLifecycleService.class);
-                if ("claim-hold".equals(args[0])) {
+                if ("compete".equals(args[0])) {
+                    System.out.println("READY:" + ProcessHandle.current().pid());System.out.flush();
+                    if(System.in.read()<0)throw new IllegalStateException("Claim barrier was closed");
+                    System.out.println("WON:" + lifecycle.claim(args[1],args[2]));System.out.flush();
+                } else if ("claim-hold".equals(args[0])) {
                     assertTrue(lifecycle.claim(args[1], args[2]));
                     System.out.println("CLAIMED:" + ProcessHandle.current().pid()); System.out.flush();
                     System.in.read(); // Parent kills this process after the claim transaction has committed.
