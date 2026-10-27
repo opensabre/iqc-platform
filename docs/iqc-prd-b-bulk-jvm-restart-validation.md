@@ -19,3 +19,21 @@
 ## 证据边界
 
 新 JVM 使用真实应用服务和 SQL，但测试 Config 的组织范围仍受控，直接调用服务，未启动完整 DurableInspectionWorker scheduler；不证明远程 PDP/Feign、活跃模型调用中断、两台真实 worker 并行或百万容量。现有普通 task 的进程测试工具模式被复用，未建立第二套生产编排设施。无生产源码、framework、共享数据库、push 或部署修改；完整适用 I1–I7 继续推进。
+
+## 真实 worker 接线增量
+
+基线 cc4f25b。原 76043 terminal 0，`/tmp/iqc-b-bulk-worker-restart-final.log.exit=0`，fresh 原主方法 1 项 52.100s，零失败、错误、跳过，专用 socket 不存在。
+
+第二 JVM 不再直接 recover/claim/tick：实例化真实 DurableInspectionWorker，使用实际 mapper、任务服务、ThreadPoolTaskExecutor、BulkTaskCoordinator 与生命周期事务代理。主动调用 discoverQueuedTasks 完成原超时回收、SQL 发现和异步分派；精确验证目标 parent/EID 协调器调用一次，再确认池已空闲和父等待，外层继续检查原 EID、唯一父执行/唯一子、游标、冻结全文及子 QUEUED。组织 resolve 和范围回调仍受控。
+
+首轮 64937 terminal 1，`/tmp/iqc-b-bulk-worker-restart.log.exit=1`：新测试错误假设整个保留历史夹具的隔离库只会触发一次 resolve，实际有四次。终态后改为目标 parent/EID 精确调用校验，并防止 worker 尚未开始时把回收后的 QUEUED 当作已完成；保留首轮失败日志，不以此修改生产源码。
+
+这是实际 worker 方法、SQL 和异步执行接线的验证，尚未验证 @Scheduled 时钟驱动、远程权限服务、活跃模型中断、双进程并行或百万容量。A 后续 worker 在途改动未取，本结果仅适用于本固定生产基线。
+
+## 两个独立 JVM 同时认领
+
+基线 d8d5dec，生产 b163836。原 65755 terminal 0，`/tmp/iqc-b-bulk-two-jvm-claim.log.exit=0`，fresh 主方法 1 项 114.100s，零失败、错误、跳过，专用 socket 不存在。
+
+新增两个不同 PID 各加载自己的 Spring 事务代理、MyBatis 与连接，均 READY 后由父进程同时释放屏障，针对同一父任务和 EID 调用真实 claim。结果恰为一个 true、一个 false；两进程正常退出，父与执行均 RUNNING，父进度和原子输入全文不变。之后仍执行第三 JVM 认领后强杀、第四 JVM 的真实 worker 回收/异步协调、满线程池停止传播、优先级继承及原发布/清理/Finding/MVC 主链，并全部通过。
+
+此增量证明父认领在跨 JVM 数据库竞争下互斥，不冒称两个完整 scheduler 同时执行全部子任务、活跃模型调用无重入或真实 PDP。组织范围仍受控，百万级容量仍需单列验证。PRD 第23章明确性能数值压测后基线化，本测试不新增任意 P95 阈值。无生产源码/共享库/framework/push/部署修改。
