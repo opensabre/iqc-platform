@@ -23,7 +23,7 @@ final class BulkRestartProcess implements AutoCloseable {
         String agent = Path.of(System.getProperty("user.home"), ".m2", "repository", "net", "bytebuddy",
                 "byte-buddy-agent", "1.18.10", "byte-buddy-agent-1.18.10.jar").toString();
         process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                "-javaagent:" + agent, "-cp", classpath, Main.class.getName(), command, parentId, executionId)
+                "-javaagent:" + agent, "-Diqc.test.worker-schema="+IsolatedMysqlTaskExecutionStateIT.SCHEMA, "-cp", classpath, Main.class.getName(), command, parentId, executionId)
                 .redirectErrorStream(true).start();
         output = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
     }
