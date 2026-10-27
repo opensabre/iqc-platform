@@ -63,3 +63,9 @@ BulkTaskLifecycleService复用原TaskExecution，为父任务创建或恢复执�
 原自动重试fire自身先锁子再调用queueRetrySystem，会破坏新锁顺序，因此原AutomaticRetryService.lock复用同一个MANDATORY父锁边界，包含configure/availability/peek/fire；配置路径可在暂停中管理策略，但删除父禁止编辑，真正排队仍须可运行父。没有第二套重试或租约。后台回收/worker原claim只锁子，不反向请求父，已排队/运行分片会让清理探测拒绝。
 
 独立验证必须覆盖父/片任一非终态拒绝且无修改、零片父、全体终态原子隐藏、清理中任一步失败回滚、两个清理者与手动/自动重试/恢复竞争、归属中途变化、父已删后不能借原分片ID启动、原历史结果Hash/输入/执行/审计保持、普通任务路径兼容。Root只编译，B负责测试。跨分片报告与真实百万/恢复/PDP等仍未完成。
+
+## 结果与风险跨分片分页复用（2026-10-27）
+
+复核PRD23要求：百万任务可分片恢复，结果/风险列表可分页检索。原BatchResultQueryService.businessPage先加载全部可见任务ID/名称，再IN查询，任务量大时网络/内存/SQL参数随全库任务增加。复用原business results API/页面和ConversationInspectionResultMapper同一最新轮次排名SQL，增加可选parentTaskId；组织owner/group/all直接在task join中过滤，任务名称只读当前页涉及的ID/name，不加载全库任务或冻结原文。父筛选先验证父类型/可见性，再保留子任务原范围；不把父权限当子范围。
+
+排名中间层只保留ID/顺序/分数风险元数据，先按原attempt/time/id选择各task/conversation最新结果，再应用风险/评分过滤，最后取本页原结果。旧mapper显式taskIds调用保留并复用同一SQL，不另写平行结果查询/表/API/权限。分页仍原最多100；不声称LIMIT证明DB窗口排序或COUNT的百万成本已达标，实际索引计划与容量待B验证。此为跨分片结果/风险检索，不构造未经验证的百万同步业务均分/P95；原有报告保护和事实/复核验证保持。
