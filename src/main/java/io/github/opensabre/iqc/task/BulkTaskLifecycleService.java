@@ -37,6 +37,14 @@ public class BulkTaskLifecycleService {
         return materialization.definition(parent).ownerBound();
     }
 
+    /** Authorized immutable owner evidence only; never exports the parent configuration to the caller. */
+    public ScheduledActorAccessService.CreationBound ownerForCurrent(String id) {
+        var parent=tasks.selectById(id);
+        if(parent==null || !scope.canView(parent.getCreatedBy(),parent.getOwnerGroupId()))
+            throw IqcException.accessDenied("无权恢复此批次");
+        return materialization.definition(parent).ownerBound();
+    }
+
     /** Current-user caller enters the already resolved owner scope; a failed round gets a new execution. */
     @Transactional
     public InspectionTask queue(String id) {

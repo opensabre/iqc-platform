@@ -44,6 +44,21 @@ public class IqcDataScope {
         scheduledActor.set(actor);
         try {return callback.get();} finally {scheduledActor.remove();}
     }
+    /** Current identity stays authenticated; only this callback's data scope narrows to its original bound. */
+    public <T> T asCurrentActorBound(io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved current,
+            io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound original,java.util.function.Supplier<T> callback) {
+        if(current==null || original==null || !"iqc-schedule-owner-scope-v1".equals(original.schemaVersion())
+                || !java.util.Objects.equals(current.userId(),original.userId())
+                || !java.util.Objects.equals(current.owner(),original.owner()))
+            throw io.github.opensabre.iqc.governance.IqcException.accessDenied("当前账户不是原任务负责人");
+        var narrowed=new io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved(current.userId(),current.owner(),
+                current.all()&&original.all(),java.util.Objects.equals(current.groupId(),original.groupId())?current.groupId():null,
+                current.roles(),current.resourceCodes(),current.checkedAt());
+        return asCurrentActor(current,()->{
+            scheduledActor.set(narrowed);
+            return callback.get(); // asCurrentActor's finally removes the scope even on failure.
+        });
+    }
     /** Local side-effect preflight using the existing scheduled actor, without network calls under locks. */
     public void requireScheduledResources(Set<String> resources) {
         var actor=scheduledActor.get();var now=java.time.Instant.now();

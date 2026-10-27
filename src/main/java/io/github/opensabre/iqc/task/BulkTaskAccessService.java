@@ -32,6 +32,9 @@ public class BulkTaskAccessService {
         if(!workerEnabled)throw io.github.opensabre.iqc.governance.IqcException.invalidState("分片批次需要启用持久任务worker");
         var bound=actors.capture();
         var actor=actors.resolveCurrent(bound,BulkTaskMaterializationService.GRANTS);
-        return Optional.of(scope.asCurrentActor(actor,()->lifecycle.queue(id)));
+        if(!java.util.Objects.equals(identity.getCreatedBy(),actor.owner()))
+            throw io.github.opensabre.iqc.governance.IqcException.accessDenied("当前账户不是原批次负责人");
+        var original=lifecycle.ownerForCurrent(id);
+        return Optional.of(scope.asCurrentActorBound(actor,original,()->lifecycle.queue(id)));
     }
 }
