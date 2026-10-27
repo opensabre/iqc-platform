@@ -14,3 +14,11 @@
 ## 证据边界
 
 SQL 测试直接调用 mapper，父任务归属由夹具设置，不能证明 service/controller 父可见性、真实 PDP/组织传输或浏览器联调。未做百万数据、查询计划或 SLO 验证，也未覆盖所有同时间 ID 排序组合。无生产源码、framework、共享库、push 或部署变更；完整适用 I1–I7 仍在进行。
+
+## 父授权与 HTTP 契约增量
+
+基线 d495123。原会话 59581 terminal 0，`/tmp/iqc-b-parent-result-contract.log.exit=0`。BatchResultQueryServiceTest 19 项（9.315s）、InspectionResultControllerTest 3 项（10.700s）均零失败、错误、跳过。
+
+新增四项服务场景：非法父 ID/父子混用在 metadata 查询前拒绝；父不存在或不可见在结果读取前拒绝；可见普通任务不能冒充批次父；可见父仍使用当前 owner/group 子范围并限制页大小至 100，空页不读取任务名或会话。HTTP 测试改用实际八参数路由，参数化普通 task 与 parentTaskId，确认父过滤不丢失、原业务查看 grant、private/no-store 与 nosniff、标准 total 与 canonical 零分。
+
+这是 standalone MockMvc、受控权限服务和 mapper 测试；不证明远程 PDP、真实角色传输或生产运行状态。SQL 与服务/MVC 证据分别保留，不相加冒称端到端验收。
