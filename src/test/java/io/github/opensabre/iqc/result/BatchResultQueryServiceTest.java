@@ -133,10 +133,13 @@ class BatchResultQueryServiceTest {
     }
 
     @Test
-    void businessPageDoesNotReadResultsWithoutAnyVisibleTask() {
-        when(tasks.selectList(any())).thenReturn(List.of());
-        assertThat(service.businessPage(0, 200, "hidden", null, null, null, null).total()).isZero();
-        verifyNoInteractions(canonical, results);
+    void businessPageAppliesScopeInSqlWithoutEnumeratingVisibleTaskIds() {
+        when(scope.owner()).thenReturn("owner");when(scope.groupId()).thenReturn("group");
+        when(canonical.selectScopedBusinessPage(any(),isNull(),eq("hidden"),isNull(),eq(false),eq("owner"),eq("group"),isNull(),isNull(),isNull(),isNull()))
+                .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<ConversationInspectionResult>(1,100));
+        assertThat(service.businessPage(0,200,"hidden",null,null,null,null).total()).isZero();
+        verify(tasks,never()).selectList(any());verifyNoInteractions(results);
+        verify(canonical).selectScopedBusinessPage(any(),isNull(),eq("hidden"),isNull(),eq(false),eq("owner"),eq("group"),isNull(),isNull(),isNull(),isNull());
     }
 
     @Test
