@@ -830,6 +830,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         var bound=new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","user-annotator","annotator",false,"group");
         var parent=bulk.create(prepared.pipelineId(),prepared.versionNo(),selector,bound,"bulk validation",1000,1,"bulk_"+suffix);
         assertEquals(parent.getId(),bulk.create(prepared.pipelineId(),prepared.versionNo(),selector,bound,"bulk validation",1000,1,"bulk_"+suffix).getId());
+        context.getBean(InspectionTaskService.class).changePriority(parent.getId(),42L);
         String eid="bulk-e"+suffix;
         db.update("INSERT INTO iqc_task_execution(id,task_id,attempt_no,status) VALUES (?,?,1,'RUNNING')",eid,parent.getId());
         db.update("UPDATE iqc_inspection_task SET status='RUNNING',current_execution_id=? WHERE id=?",eid,parent.getId());
@@ -844,6 +845,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         var step=bulk.materializeNext(parent.getId(),eid);assertNotNull(step.childTaskId());assertTrue(step.progress().scanComplete());
         assertEquals(1,step.progress().scannedConversations());assertEquals(1,step.progress().selectedConversations());assertEquals(1,step.progress().nextShardNo());
         var child=sql.getMapper(InspectionTaskMapper.class).selectById(step.childTaskId());assertEquals("CREATED",child.getStatus());assertEquals(parent.getId(),child.getBulkParentTaskId());assertEquals(0,child.getBulkShardNo());
+        assertEquals(42L,child.getQueuePriority());
         var frozen=PipelineAssetService.readFrozenTree(json,child.getRuleSnapshotJson());assertEquals("iqc-bulk-shard-scan-v1",frozen.path("bulkShardSnapshot").path("schemaVersion").asText());
         assertEquals(parent.getId(),frozen.path("bulkShardSnapshot").path("parentTaskId").asText());assertTrue(frozen.path("bulkShardSnapshot").path("scanPageHash").asText().matches("[a-f0-9]{64}"));
         String childSnapshot=child.getRuleSnapshotJson();String progress=db.queryForObject("SELECT bulk_progress_json FROM iqc_inspection_task WHERE id=?",String.class,parent.getId());
@@ -853,6 +855,8 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals(progress,db.queryForObject("SELECT bulk_progress_json FROM iqc_inspection_task WHERE id=?",String.class,parent.getId()));
         assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE bulk_parent_task_id=?",Integer.class,parent.getId()));        var lifecycle=context.getBean(BulkTaskLifecycleService.class);assertTrue(org.springframework.aop.support.AopUtils.isAopProxy(lifecycle));
         db.update("UPDATE iqc_inspection_task SET status='QUEUED' WHERE id=?",parent.getId());db.update("UPDATE iqc_task_execution SET status='QUEUED' WHERE id=?",eid);
+        context.getBean(InspectionTaskService.class).changePriority(parent.getId(),99L);
+        assertEquals(99L,sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getQueuePriority());
         var ready=new java.util.concurrent.CountDownLatch(2);var start=new java.util.concurrent.CountDownLatch(1);var pool=java.util.concurrent.Executors.newFixedThreadPool(2);
         try {
             java.util.concurrent.Callable<Boolean> claim=()->{ready.countDown();assertTrue(start.await(10,java.util.concurrent.TimeUnit.SECONDS));return lifecycle.claim(parent.getId(),eid);};
@@ -885,10 +889,12 @@ class IsolatedMysqlMeasuredPublicationIT {
         var queuedChild=sql.getMapper(InspectionTaskMapper.class).selectById(child.getId());assertEquals("QUEUED",queuedChild.getStatus());String childEid=queuedChild.getCurrentExecutionId();assertNotNull(childEid);
         var tasks=context.getBean(InspectionTaskService.class);tasks.requestPause(parent.getId());
         io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of());
-        try {assertTrue(lifecycle.controlIfRequested(parent.getId(),eid));}
+        try {propagateWithSaturatedWorker(parent.getId(),eid);}
         finally {io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of("user_name","annotator","user_id","user-annotator"));}
         assertEquals("PAUSED",sql.getMapper(InspectionTaskMapper.class).selectById(parent.getId()).getStatus());assertEquals("PAUSED",sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getStatus());
         assertEquals("PAUSED",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,childEid));
+        tasks.changePriority(parent.getId(),55L);
+        assertEquals(55L,sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getQueuePriority());
         lifecycle.queue(parent.getId());
         assertEquals(eid,sql.getMapper(InspectionTaskMapper.class).selectById(parent.getId()).getCurrentExecutionId());
         String resumedChildEid=sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getCurrentExecutionId();assertNotEquals(childEid,resumedChildEid);
@@ -897,7 +903,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals("QUEUED",sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getStatus());
         tasks.cancel(parent.getId());
         io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of());
-        try {assertTrue(lifecycle.controlIfRequested(parent.getId(),eid));}
+        try {propagateWithSaturatedWorker(parent.getId(),eid);}
         finally {io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of("user_name","annotator","user_id","user-annotator"));}
         assertEquals("CANCELLED",sql.getMapper(InspectionTaskMapper.class).selectById(parent.getId()).getStatus());assertEquals("CANCELLED",sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getStatus());
         assertEquals("CANCELLED",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,resumedChildEid));
@@ -918,6 +924,29 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals(2,db.queryForObject("SELECT COUNT(*) FROM iqc_task_execution WHERE task_id=?",Integer.class,child.getId()));
         assertThrows(RuntimeException.class,()->context.getBean(InspectionExecutionService.class).queueSystem(child.getId()));
         assertThrows(RuntimeException.class,()->context.getBean(InspectionExecutionService.class).resume(child.getId()));
+    }
+    /** A real full executor cannot prevent SQL-only stop propagation or cause new model/organization work. */
+    private void propagateWithSaturatedWorker(String parentId,String executionId) throws Exception {
+        var executor=new org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);executor.setMaxPoolSize(1);executor.setQueueCapacity(1);executor.initialize();
+        var entered=new java.util.concurrent.CountDownLatch(1);var release=new java.util.concurrent.CountDownLatch(1);
+        var actors=context.getBean(ScheduledActorAccessService.class);
+        var coordinator=spy(new BulkTaskCoordinator(context.getBean(BulkTaskLifecycleService.class),actors,context.getBean(IqcDataScope.class)));
+        var providers=new org.springframework.beans.factory.support.StaticListableBeanFactory();providers.addBean("bulk",coordinator);
+        clearInvocations(actors);
+        try {
+            executor.execute(()->{entered.countDown();try {release.await(30,java.util.concurrent.TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}});
+            assertTrue(entered.await(5,java.util.concurrent.TimeUnit.SECONDS));executor.execute(()->{});
+            assertEquals(0,executor.getThreadPoolExecutor().getQueue().remainingCapacity());
+            var worker=new DurableInspectionWorker(context.getBean(SqlSessionTemplate.class).getMapper(InspectionTaskMapper.class),
+                    context.getBean(InspectionTaskService.class),context.getBean(InspectionExecutionService.class),executor,null,
+                    providers.getBeanProvider(BulkTaskCoordinator.class));
+            worker.validate();worker.discoverQueuedTasks();
+            verify(coordinator).controlRequested(parentId,executionId);
+            verify(coordinator,never()).executePersisted(anyString(),anyString());verifyNoInteractions(actors);
+            assertEquals(2L,executor.getThreadPoolExecutor().getTaskCount());
+            assertEquals(0,executor.getThreadPoolExecutor().getQueue().remainingCapacity());
+        } finally {release.countDown();executor.shutdown();}
     }
     private ScheduledActorAccessService.Resolved authorizedActor() {
         return new ScheduledActorAccessService.Resolved("user-annotator","annotator",false,"group",Set.of(),
