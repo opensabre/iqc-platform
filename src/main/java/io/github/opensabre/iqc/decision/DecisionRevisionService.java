@@ -143,8 +143,7 @@ public class DecisionRevisionService {
             var fusion = FindingFusion.fuse(policyInputs,target.release().fusion());
             var decisions = PipelineDecisionEvaluator.decisions(target.release().items(),fusion);
             var score = PipelineDecisionEvaluator.evaluate(target.release(),fusion,businessContext);
-            io.github.opensabre.iqc.pipelineasset.RiskPolicy.requireSelectedEvidence(
-                    PipelineDecisionEvaluator.riskLevel(target.release(),fusion,score,businessContext),fusion);
+            PipelineDecisionEvaluator.requireRiskEvidence(target.release(),fusion,decisions,score,businessContext,true);
             String sourceHash = hash(Arrays.asList(task.getRuleSnapshotJson(),result.getId(),
                     result.getExecutionTraceJson(),result.getBusinessItemResultsJson(),result.getScoringResultJson()));
             var projection = new Projection("iqc-decision-revision-v1",resultId,sourceHash,originalScore,fusion,decisions,score,

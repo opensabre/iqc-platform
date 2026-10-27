@@ -312,10 +312,18 @@ public class BusinessItemReviewService {
                         List.copyOf(effective.values()),List.copyOf(effectiveFindings.values()),allowed);
                 projection=withManualScore(projection,scoreAdjustment==null?inheritedScore:scoreAdjustment,scoreAdjustment!=null);
                 projection=withWorkflow(projection,workflow);
-                if(projection.findingReview()!=null)try {
-                    io.github.opensabre.iqc.pipelineasset.RiskPolicy.requireLocatableEvidence(projection.findingReview().riskLevel(),
-                            projection.findingReview().findings().reviewed());
-                } catch(IllegalArgumentException invalid){throw IqcException.invalidArgument("高风险人工事实投影必须保留可定位证据");}
+                if(projection.findingReview()!=null&&Set.of("HIGH","CRITICAL").contains(projection.findingReview().riskLevel()))try {
+                    var snapshot=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenTree(mapper,context.task().getRuleSnapshotJson());
+                    var trace=mapper.readerFor(io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation.class)
+                            .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                            .<io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation>readValue(context.result().getExecutionTraceJson());
+                    var input=io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.validatedExecutionInput(
+                            context.task(),snapshot,trace,context.result().getConversationId(),mapper);
+                    var human=projection.findingReview();
+                    io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.requireReviewedRiskEvidence(pipelineRelease(snapshot),
+                            human.findings().reviewed(),human.items(),human.scoring(),input.path("businessContext"),
+                            human.findings().decisions().stream().map(decision->decision.findingCode()).collect(Collectors.toSet()));
+                } catch(IllegalArgumentException invalid){throw IqcException.invalidArgument("高风险人工事实投影的证据必须对应实际触发条件");}
                 review.setReviewedResultJson(mapper.writeValueAsString(projection));
             } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
                 throw IqcException.invalidState("复核基准或结果快照损坏");

@@ -75,6 +75,50 @@ public final class PipelineDecisionEvaluator {
         var inputs=inputContext(release,facts,items,businessContext);
         return release.riskPolicy().evaluate(new io.github.opensabre.iqc.action.ActionPolicy.Context(inputs.findings(),inputs.items(),score.scoreStatus(),score.finalScore(),null,null,inputs.labels(),businessContext));
     }
+    /** Evidence proof for new projections/artifacts; existing risk evaluation and historical replay stay unchanged. */
+    public static boolean hasRiskEvidence(PipelineRelease release,io.github.opensabre.iqc.action.ActionPolicy.Context context,
+            boolean selectedSource) {
+        return hasRiskEvidence(release,context,fact->selectedSource
+                ?io.github.opensabre.iqc.pipelineasset.RiskPolicy.hasSelectedEvidence(List.of(fact))
+                :io.github.opensabre.iqc.pipelineasset.RiskPolicy.hasLocatableEvidence(List.of(fact)));
+    }
+    private static boolean hasRiskEvidence(PipelineRelease release,io.github.opensabre.iqc.action.ActionPolicy.Context context,
+            java.util.function.Predicate<FindingFusion.Result> proof) {
+        String risk=context.riskLevel();
+        if(!Set.of("HIGH","CRITICAL").contains(risk==null?"":risk))return true;
+        if(release.riskPolicy()!=null)return release.riskPolicy().hasMatchedEvidence(context,proof);
+        return release.items().stream().anyMatch(mapping->{
+            var fact=context.findings().get(mapping.findingCode());
+            return context.items().get(mapping.itemCode())==InspectionScoring.ItemStatus.FAIL&&fact!=null
+                    &&fact.severity().name().equals(risk)&&proof.test(fact);
+        });
+    }
+    public static void requireRiskEvidence(PipelineRelease release,List<FindingFusion.Result> facts,
+            List<InspectionScoring.Decision> items,InspectionScoring.Result score,com.fasterxml.jackson.databind.JsonNode businessContext,
+            boolean selectedSource) {
+        requireRiskEvidence(release,facts,items,score,businessContext,fact->selectedSource
+                ?io.github.opensabre.iqc.pipelineasset.RiskPolicy.hasSelectedEvidence(List.of(fact))
+                :io.github.opensabre.iqc.pipelineasset.RiskPolicy.hasLocatableEvidence(List.of(fact)));
+    }
+    public static void requireReviewedRiskEvidence(PipelineRelease release,List<FindingFusion.Result> facts,
+            List<InspectionScoring.Decision> items,InspectionScoring.Result score,com.fasterxml.jackson.databind.JsonNode businessContext,
+            Set<String> reviewedCodes) {
+        var reviewed=Set.copyOf(reviewedCodes);
+        requireRiskEvidence(release,facts,items,score,businessContext,fact->reviewed.contains(fact.code())
+                ?io.github.opensabre.iqc.pipelineasset.RiskPolicy.hasLocatableEvidence(List.of(fact))
+                :io.github.opensabre.iqc.pipelineasset.RiskPolicy.hasSelectedEvidence(List.of(fact)));
+    }
+    private static void requireRiskEvidence(PipelineRelease release,List<FindingFusion.Result> facts,
+            List<InspectionScoring.Decision> items,InspectionScoring.Result score,com.fasterxml.jackson.databind.JsonNode businessContext,
+            java.util.function.Predicate<FindingFusion.Result> proof) {
+        var inputs=inputContext(release,facts,items,businessContext);
+        var decision=riskDecision(release,facts,items,score,businessContext);
+        String risk=decision==null?riskLevel(release.items(),facts,items,score):decision.level();
+        var context=new io.github.opensabre.iqc.action.ActionPolicy.Context(inputs.findings(),inputs.items(),score.scoreStatus(),score.finalScore(),
+                risk,null,inputs.labels(),businessContext);
+        if(!hasRiskEvidence(release,context,proof))
+            throw new IllegalArgumentException("High-risk evidence must support an actually matched highest-risk condition");
+    }
     public static String resultStatus(io.github.opensabre.iqc.pipeline.PipelineRuntime.Run run,
             List<io.github.opensabre.iqc.scheme.SchemeResultEvaluator.ItemResult> items,InspectionScoring.Result score) {
         boolean failed=run.status()==io.github.opensabre.iqc.pipeline.PipelineRuntime.Status.FAILED||run.status()==io.github.opensabre.iqc.pipeline.PipelineRuntime.Status.CANCELLED||items.stream().anyMatch(item->item.status()==InspectionScoring.ItemStatus.ERROR);

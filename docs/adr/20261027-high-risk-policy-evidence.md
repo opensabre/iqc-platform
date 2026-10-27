@@ -9,3 +9,11 @@ PRD27.9要求高风险可定位Evidence。已复核FindingDefinition.validate对
 旧不合规发布/历史结果仍按原快照可读/重放；新建任务应拒绝并要求创建合规新版本，不原地修历史。静态门不能证明业务规则语义正确、所有Legacy消费都已升级或高风险召回，实际发布/物化/改判/重算/Action及历史幂等边界由B独立验证，不能凭编译宣布27.9全面验收。
 
 Fusion保留被拒绝来源的证据供冲突检查，因此新机器重算/风险事件必须有选中原始KNOWN来源的证据与有效融合证据对应，不能只用被拒绝候选的quote充当选中结论的依据。人工新增/保留证据沿原消息归属与FindingDefinition复核，不要求它原先被AI选中。低风险政策及无riskPolicy评测不额外解析原本不需解析的配置，原层次职责保持。
+
+## 证据与实际风险条件关联
+
+复核发现全局any证据不足：触发高风险的code A无证据，另一个不相关code B有选中证据，仍可能通过。新写入改为沿真实MATCH的最高风险级规则找证据路径；ALL/ANY只接受实际MATCH子条件中的已知事实证据，直接NOT等值仍须known；不能用HIGH规则证据支撑CRITICAL默认/无证据分支。无独立RiskPolicy时，只使用实际FAIL项目映射且severity等于最终risk的事实。机器仍要求选中原始来源证据，人工沿经验证有效引用。
+
+原RiskPolicy.evaluate与已有JSON/Hash不改。风险动作从已经校验的冻结inputSnapshot重读release，复用原Context不新增IO或来源表；旧事件仍在新建检查之前优先幂等复用。人工新写入仅高risk事实投影从原冻结输入取businessContext重新核验，历史read不加此新门。B需覆盖无关code救场、匹配/未匹配分支、HIGH与CRITICAL、兼容FAIL映射、旧幂等/回放及原AI不变。
+
+人工路径按事实代码区分来源：effective human decisions明确复核过（含已验证继承）的code可使用人工有效证据；未复核沿用code仍须AI选中来源证据，不能把复核B视作确认A，也不能用A被拒绝候选的quote为未确认A兜底。此证据选择只用于新产物校验，不改变事实、决策或历史格式。
