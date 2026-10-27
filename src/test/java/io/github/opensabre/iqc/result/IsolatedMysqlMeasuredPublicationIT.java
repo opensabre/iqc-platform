@@ -140,6 +140,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals(PipelineAssetService.hash(published.getPublicationDecisionJson()),published.getPublicationDecisionHash());
         var prepared=pipelines.publishedReleaseForTask(asset.getId(),1);
         assertEquals("0.900000000000000001",prepared.release().items().getFirst().numericPredicate().threshold());
+        assertHighRiskMaterializationBoundaries(prepared,conversation,suffix);
         assertArchiveReceiptExecutesPublishedPipeline(prepared,conversation,suffix);
         assertBulkMaterializationRollsBackAndRetainsFrozenInput(prepared,conversation,suffix);
         assertBulkTerminalAggregation(prepared,conversation,suffix);
@@ -944,6 +945,65 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertThrows(RuntimeException.class,()->context.getBean(InspectionExecutionService.class).resume(child.getId()));
     }
     /** A real full executor cannot prevent SQL-only stop propagation or cause new model/organization work. */
+    /** Historical fixtures bypass only the new-configuration gate; all reads and creation checks use production services. */
+    private void assertHighRiskMaterializationBoundaries(PipelineAssetService.Prepared prepared,String conversation,String suffix) throws Exception {
+        var json=context.getBean(ObjectMapper.class);var db=new JdbcTemplate(context.getBean(DataSource.class));
+        var sql=context.getBean(SqlSessionTemplate.class);var pipelines=context.getBean(PipelineAssetService.class);
+        var tasks=context.getBean(InspectionTaskService.class);var bulk=context.getBean(BulkTaskMaterializationService.class);
+        var original=prepared.release();var always=new ActionPolicy.Condition(ActionPolicy.Kind.ALWAYS,null,null,List.of());
+        var unsafePolicy=new RiskPolicy(RiskPolicy.SCHEMA,Finding.Severity.HIGH,List.of(new RiskPolicy.Rule("unconditional",Finding.Severity.HIGH,always)));
+        var unsafe=new PipelineRelease(original.schemaVersion(),original.pipeline(),original.fusion(),original.scoring(),original.items(),
+                original.publicationGate(),original.actionPolicy(),original.labelPolicy(),unsafePolicy,original.reviewPolicy());
+        int assetsBefore=db.queryForObject("SELECT COUNT(*) FROM iqc_pipeline_asset",Integer.class);
+        var draftFailure=assertThrows(RuntimeException.class,()->pipelines.create("UNSAFE_"+suffix.toUpperCase(),"Unsafe new draft",unsafe));
+        assertTrue(draftFailure.getMessage().contains("HIGH"));assertEquals(assetsBefore,db.queryForObject("SELECT COUNT(*) FROM iqc_pipeline_asset",Integer.class));
+        // Seed a version from before the gate; its absent publication decision uses the explicit legacy read contract.
+        String body=json.writeValueAsString(unsafe),digest=PipelineAssetService.hash(body);
+        var asset=new io.github.opensabre.iqc.pipelineasset.model.PipelineAsset();asset.setCode("LEGACY_"+suffix.toUpperCase());asset.setName("Historical unsafe policy");
+        asset.setStatus("ACTIVE");asset.setDraftRevision(1);asset.setActivePublishedVersion(1);asset.setDraftConfigJson(body);
+        sql.getMapper(PipelineAssetMapper.class).insert(asset);
+        var version=new io.github.opensabre.iqc.pipelineasset.model.PipelineAssetVersion();version.setPipelineId(asset.getId());version.setVersionNo(1);
+        version.setSourceDraftRevision(1);version.setSnapshotJson(body);version.setContentHash(digest);sql.getMapper(PipelineAssetVersionMapper.class).insert(version);
+        var historical=pipelines.publishedRelease(asset.getId(),1);assertEquals(digest,historical.contentHash());
+        int tasksBefore=db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task",Integer.class);
+        int executionsBefore=db.queryForObject("SELECT COUNT(*) FROM iqc_task_execution",Integer.class);
+        var ordinaryFailure=assertThrows(RuntimeException.class,()->tasks.createUsingPipelineSnapshot(historical,"New unsafe task",List.of(conversation),1,"unsafe_"+suffix));
+        assertTrue(ordinaryFailure.getMessage().contains("HIGH"));
+        var selector=new io.github.opensabre.iqc.selector.SelectorDefinition(io.github.opensabre.iqc.selector.SelectorDefinition.SCHEMA,null,null,List.of(conversation),List.of(),null,null,1000);
+        var bound=new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","user-annotator","annotator",false,"group");
+        String request="legacy_bulk_"+suffix,name="Historical bulk";
+        var bulkFailure=assertThrows(RuntimeException.class,()->bulk.create(asset.getId(),1,selector,bound,name,1000,1,request));
+        assertTrue(bulkFailure.getMessage().contains("HIGH"));
+        assertEquals(tasksBefore,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task",Integer.class));
+        assertEquals(executionsBefore,db.queryForObject("SELECT COUNT(*) FROM iqc_task_execution",Integer.class));
+        var definition=new BulkTaskMaterializationService.Definition("iqc-bulk-definition-v1",historical,selector,Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS),bound,1000,1,name);
+        var definitionJson=json.valueToTree(definition);var envelope=json.createObjectNode().put("schemaVersion","iqc-bulk-task-v1").put("definitionHash",PipelineAssetService.hash(definitionJson.toString()));
+        envelope.set("definition",definitionJson);
+        var parent=new InspectionTask();parent.setId("b"+PipelineAssetService.hash(json.createArrayNode().add("annotator").add(asset.getId()).add(request).toString()).substring(0,63));
+        parent.setCreatedBy("annotator");parent.setName(name);parent.setTaskType("PIPELINE_BULK");parent.setStatus("CREATED");
+        parent.setRuleSnapshotJson(json.createObjectNode().set("bulkSnapshot",envelope).toString());
+        parent.setBulkProgressJson(json.writeValueAsString(new BulkTaskMaterializationService.Progress("iqc-bulk-progress-v1",null,0,0,0,false)));
+        sql.getMapper(InspectionTaskMapper.class).insert(parent);
+        assertEquals(parent.getId(),bulk.create(asset.getId(),1,selector,bound,name,1000,1,request).getId());
+        assertThrows(RuntimeException.class,()->bulk.create(asset.getId(),1,selector,bound,"Changed request",1000,1,request));
+        assertEquals(parent.getRuleSnapshotJson(),sql.getMapper(InspectionTaskMapper.class).selectById(parent.getId()).getRuleSnapshotJson());
+        assertEquals(parent.getBulkProgressJson(),sql.getMapper(InspectionTaskMapper.class).selectById(parent.getId()).getBulkProgressJson());
+        assertEquals(tasksBefore+1,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task",Integer.class));
+        assertEquals(executionsBefore,db.queryForObject("SELECT COUNT(*) FROM iqc_task_execution",Integer.class));
+        assertEquals(body,sql.getMapper(PipelineAssetVersionMapper.class).selectById(version.getId()).getSnapshotJson());
+        assertEquals(digest,pipelines.publishedRelease(asset.getId(),1).contentHash());
+        // A strong producer cannot authorize a weak alternative with the same fused code.
+        var policyTree=json.valueToTree(original);String code=original.pipeline().nodes().getFirst().config().path("findingDefinition").path("code").asText();
+        ((com.fasterxml.jackson.databind.node.ObjectNode)policyTree).set("riskPolicy",json.valueToTree(new RiskPolicy(RiskPolicy.SCHEMA,Finding.Severity.LOW,
+                List.of(new RiskPolicy.Rule("known",Finding.Severity.HIGH,new ActionPolicy.Condition(ActionPolicy.Kind.FINDING_STATE,code,json.valueToTree("KNOWN"),List.of()))))));
+        assertDoesNotThrow(()->PipelineAssetService.validateNewRiskEvidence(json.treeToValue(policyTree,PipelineRelease.class),json));
+        var weak=policyTree.path("pipeline").path("nodes").get(0).deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)weak).put("nodeId","weak");
+        ((com.fasterxml.jackson.databind.node.ObjectNode)weak.path("config").path("findingDefinition")).put("evidenceRequired",false);
+        ((com.fasterxml.jackson.databind.node.ArrayNode)policyTree.path("pipeline").path("nodes")).add(weak);
+        var mixed=json.treeToValue(policyTree,PipelineRelease.class);
+        assertThrows(RuntimeException.class,()->PipelineAssetService.validateNewRiskEvidence(mixed,json));
+    }
+
     /** Reject one result write, then retry through the existing child execution path with frozen inputs. */
     private void assertBulkChildWriteFailureAndRetry(PipelineAssetService.Prepared prepared,String conversation,String suffix,boolean automatic) throws Exception {
         suffix=(automatic?"auto":"manual")+suffix;
