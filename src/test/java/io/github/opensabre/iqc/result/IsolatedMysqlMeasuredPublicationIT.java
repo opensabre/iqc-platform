@@ -880,6 +880,22 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals("CANCELLED",sql.getMapper(InspectionTaskMapper.class).selectById(parent.getId()).getStatus());assertEquals("CANCELLED",sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getStatus());
         assertEquals("CANCELLED",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,resumedChildEid));
         assertEquals(childSnapshot,sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getRuleSnapshotJson());assertEquals(progress,db.queryForObject("SELECT bulk_progress_json FROM iqc_inspection_task WHERE id=?",String.class,parent.getId()));
+        assertThrows(RuntimeException.class,()->tasks.deleteTerminal(child.getId()));
+        db.update("UPDATE iqc_inspection_task SET status='QUEUED' WHERE id=?",child.getId());
+        assertThrows(RuntimeException.class,()->tasks.deleteTerminal(parent.getId()));
+        assertEquals("CANCELLED",sql.getMapper(InspectionTaskMapper.class).selectById(parent.getId()).getStatus());assertEquals("QUEUED",sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getStatus());
+        db.update("UPDATE iqc_inspection_task SET status='CANCELLED',automatic_retry_enabled=1 WHERE id=?",child.getId());
+        db.execute("CREATE TRIGGER reject_bulk_cleanup BEFORE UPDATE ON iqc_inspection_task FOR EACH ROW BEGIN IF NEW.id='"+parent.getId()+"' AND NEW.status='DELETED' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='injected cleanup failure'; END IF; END");
+        try {assertThrows(org.springframework.dao.DataAccessException.class,()->tasks.deleteTerminal(parent.getId()));}
+        finally {db.execute("DROP TRIGGER reject_bulk_cleanup");}
+        assertEquals("CANCELLED",sql.getMapper(InspectionTaskMapper.class).selectById(parent.getId()).getStatus());assertEquals("CANCELLED",sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getStatus());
+        assertTrue(sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getAutomaticRetryEnabled());
+        tasks.deleteTerminal(parent.getId());
+        assertEquals("DELETED",sql.getMapper(InspectionTaskMapper.class).selectById(parent.getId()).getStatus());assertEquals("DELETED",sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getStatus());assertFalse(sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getAutomaticRetryEnabled());
+        assertEquals(childSnapshot,sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getRuleSnapshotJson());assertEquals(progress,db.queryForObject("SELECT bulk_progress_json FROM iqc_inspection_task WHERE id=?",String.class,parent.getId()));
+        assertEquals(2,db.queryForObject("SELECT COUNT(*) FROM iqc_task_execution WHERE task_id=?",Integer.class,child.getId()));
+        assertThrows(RuntimeException.class,()->context.getBean(InspectionExecutionService.class).queueSystem(child.getId()));
+        assertThrows(RuntimeException.class,()->context.getBean(InspectionExecutionService.class).resume(child.getId()));
     }
     private ScheduledActorAccessService.Resolved authorizedActor() {
         return new ScheduledActorAccessService.Resolved("user-annotator","annotator",false,"group",Set.of(),
