@@ -13,9 +13,14 @@ public class BulkTaskCoordinator {
     private final ScheduledActorAccessService actors;
     private final IqcDataScope scope;
 
+    /** Withdrawal never requires a model worker slot or a current create grant. */
+    public boolean controlRequested(String taskId,String executionId) {
+        return lifecycle.controlIfRequested(taskId,executionId);
+    }
+
     public void executePersisted(String taskId,String executionId) {
         try {
-            if(lifecycle.controlIfRequested(taskId,executionId))return;
+            if(controlRequested(taskId,executionId))return;
             var bound=lifecycle.ownerForDispatch(taskId,executionId);
             var actor=actors.resolve(bound,BulkTaskMaterializationService.GRANTS);
             scope.asScheduledActor(actor,()->{
