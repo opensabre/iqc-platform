@@ -17,7 +17,7 @@ class InspectionTaskControllerTest {
     void exposesScopedExecutionAttemptsForTheBusinessRunSelector() throws Exception {
         var service = mock(InspectionTaskService.class);
         var grants=mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
-        when(grants.current(java.util.Set.of("iqc:task:view"))).thenReturn(new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test",false,false,false,java.time.Instant.now()));
+        when(grants.current(java.util.Set.of("iqc:task:executions:view"))).thenReturn(new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test",false,false,false,java.time.Instant.now()));
         var controller = new InspectionTaskController(service, mock(UsageCounterRecorder.class),grants,
                 new io.github.opensabre.iqc.privacy.ResultReadProjection(new ObjectMapper()));
         controller.executions("task-1");
@@ -25,7 +25,7 @@ class InspectionTaskControllerTest {
         verify(service).executions("task-1");
         var method = InspectionTaskController.class.getMethod("executions", String.class);
         assertThat(method.getAnnotation(io.github.opensabre.boot.annotations.ResourcePermission.class).code())
-                .isEqualTo("iqc:task:view");
+                .isEqualTo("iqc:task:executions:view");
     }
 
     @Test

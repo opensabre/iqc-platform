@@ -21,7 +21,7 @@ class InspectionResultSensitiveControllerTest {
     @Test
     void currentResultGrantIsCheckedBeforeConversationLookup() {
         var sensitive = mock(SensitiveReadAccessService.class);
-        when(sensitive.current(Set.of("iqc:result:view"))).thenThrow(IqcException.accessDenied("revoked"));
+        when(sensitive.current(Set.of("iqc:result:conversation-history:view"))).thenThrow(IqcException.accessDenied("revoked"));
         var batch = mock(BatchResultQueryService.class);
         var controller = new InspectionResultController(mock(InspectionExecutionService.class), mock(UsageCounterRecorder.class),
                 batch, mock(HierarchicalResultService.class), mock(LabelResultQueryService.class),
@@ -29,7 +29,7 @@ class InspectionResultSensitiveControllerTest {
                 new ResultReadProjection(new ObjectMapper()));
 
         assertThrows(IqcException.class, () -> controller.conversationResultDetail("conversation-1"));
-        verify(sensitive).current(Set.of("iqc:result:view"));
+        verify(sensitive).current(Set.of("iqc:result:conversation-history:view"));
         verifyNoInteractions(batch);
     }
 }

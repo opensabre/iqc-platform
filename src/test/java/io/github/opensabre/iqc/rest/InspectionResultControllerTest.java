@@ -64,7 +64,7 @@ class InspectionResultControllerTest {
     @Test
     void returnsJsonNullWhenHierarchyHasNotBeenGenerated() throws Exception {
         var sensitive = mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
-        when(sensitive.current(java.util.Set.of("iqc:result:view"))).thenReturn(
+        when(sensitive.current(java.util.Set.of("iqc:result:hierarchy:view"))).thenReturn(
                 new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test", false, false, false, java.time.Instant.now()));
         var batch = mock(BatchResultQueryService.class);
         InspectionResultController controller = new InspectionResultController(
