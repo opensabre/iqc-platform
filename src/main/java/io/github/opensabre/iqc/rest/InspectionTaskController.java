@@ -70,10 +70,10 @@ public class InspectionTaskController {
     }
 
     @GetMapping("/{id}")
-    @ResourcePermission(code = "iqc:task:view", name = "查看质检任务详情", type = "iqc", description = "查看质检任务详情")
+    @ResourcePermission(code = "iqc:task:detail:view", name = "查看质检任务详情", type = "iqc", description = "查看质检任务详情")
     @Audit(operationType=OperationType.QUERY, description="读取任务详情", module="IQC_PRIVACY", request=false, response=false, key="#id")
     public InspectionTask get(@PathVariable String id) {
-        var access=access("iqc:task:view");
+        var access=access("iqc:task:detail:view");
         return projection.taskRead(taskService.get(id),access,true);
     }
 
@@ -88,11 +88,11 @@ public class InspectionTaskController {
     }
 
     @GetMapping("/{id}/executions")
-    @ResourcePermission(code = "iqc:task:view", name = "查看任务执行记录", type = "iqc", description = "按任务可见范围查看执行轮次")
+    @ResourcePermission(code = "iqc:task:executions:view", name = "查看任务执行记录", type = "iqc", description = "按任务可见范围查看执行轮次")
     @RateLimit(sceneCode = "iqc-task-execution-query", maxCount = 60, period = 60)
     @Audit(operationType=OperationType.QUERY, description="读取任务执行轮次", module="IQC_PRIVACY", request=false, response=false, key="#id")
     public List<InspectionTaskService.TaskRunSummary> executions(@PathVariable String id) {
-        access("iqc:task:view");
+        access("iqc:task:executions:view");
         return taskService.executions(id);
     }
 
@@ -129,18 +129,18 @@ public class InspectionTaskController {
     }
 
     @PostMapping("/{id}/pause")
-    @ResourcePermission(code = "iqc:task:execute", name = "暂停质检任务", type = "iqc", description = "在安全边界暂停执行中的质检任务")
+    @ResourcePermission(code = "iqc:task:pause", name = "暂停质检任务", type = "iqc", description = "在安全边界暂停执行中的质检任务")
     @Audit(operationType = OperationType.UPDATE, description = "暂停 IQC 质检任务", module = "IQC_TASK", request = false, response = false, key = "#id")
     public InspectionTask pause(@PathVariable String id) {
-        var access=access("iqc:task:execute");
+        var access=access("iqc:task:pause");
         return projection.taskReceipt(taskService.requestPause(id),access);
     }
 
     @PutMapping("/{id}/priority")
-    @ResourcePermission(code = "iqc:task:execute", name = "调整任务优先级", type = "iqc", description = "调整未完成任务的队列优先级")
+    @ResourcePermission(code = "iqc:task:priority", name = "调整任务优先级", type = "iqc", description = "调整未完成任务的队列优先级")
     @Audit(operationType = OperationType.UPDATE, description = "调整 IQC 任务优先级", module = "IQC_TASK", request = false, response = false, key = "#id")
     public InspectionTask priority(@PathVariable String id, @RequestBody Map<String, Long> request) {
-        var access=access("iqc:task:execute");
+        var access=access("iqc:task:priority");
         return projection.taskReceipt(taskService.changePriority(id, request.getOrDefault("priority", 0L)),access);
     }
 

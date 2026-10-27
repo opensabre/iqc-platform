@@ -80,6 +80,30 @@ public record RiskPolicy(String schemaVersion,Finding.Severity defaultLevel,List
         if(Set.of("HIGH","CRITICAL").contains(risk==null?"":risk)&&!hasLocatableEvidence(facts))
             throw new IllegalArgumentException("High-risk projection requires locatable validated evidence");
     }
+    /** New artifact proof follows a matched rule at the actual highest risk level, never an unrelated fact. */
+    public boolean hasMatchedEvidence(ActionPolicy.Context context,
+            java.util.function.Predicate<io.github.opensabre.iqc.fusion.FindingFusion.Result> proof) {
+        String risk=context.riskLevel();
+        if(!Set.of("HIGH","CRITICAL").contains(risk==null?"":risk))return true;
+        return rules.stream().anyMatch(rule->rule.level().name().equals(risk)
+                && matchedEvidence(rule.condition(),context,proof));
+    }
+    private static boolean matchedEvidence(ActionPolicy.Condition condition,ActionPolicy.Context context,
+            java.util.function.Predicate<io.github.opensabre.iqc.fusion.FindingFusion.Result> proof) {
+        if(ActionPolicy.evaluate(condition,context)!=ActionPolicy.Match.MATCH)return false;
+        return switch(condition.kind()) {
+            case FINDING_EQUALS -> evidence(context.findings().get(condition.code()),proof);
+            case FINDING_STATE -> "KNOWN".equals(condition.value().asText())&&evidence(context.findings().get(condition.code()),proof);
+            case NOT -> condition.children().getFirst().kind()==ActionPolicy.Kind.FINDING_EQUALS
+                    &&evidence(context.findings().get(condition.children().getFirst().code()),proof);
+            case ALL,ANY -> condition.children().stream().anyMatch(child->matchedEvidence(child,context,proof));
+            default -> false;
+        };
+    }
+    private static boolean evidence(io.github.opensabre.iqc.fusion.FindingFusion.Result fact,
+            java.util.function.Predicate<io.github.opensabre.iqc.fusion.FindingFusion.Result> proof) {
+        return fact!=null&&proof.test(fact);
+    }
     public Decision evaluate(ActionPolicy.Context context) {
         var confirmed=defaultLevel;var possible=defaultLevel;var matches=new ArrayList<RuleMatch>();
         for(var rule:rules) {

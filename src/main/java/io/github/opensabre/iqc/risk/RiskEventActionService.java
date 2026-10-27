@@ -78,8 +78,15 @@ public class RiskEventActionService {
             String risk=validated.context().riskLevel();
             if(!Set.of("LOW","MEDIUM","HIGH","CRITICAL").contains(risk==null?"":risk))
                 throw IqcException.invalidState("风险事件需要实际已确认的非空风险等级");
-            return new Prepared(action,RiskEventConfiguration.parse(action.configuration()),risk,
-                    io.github.opensabre.iqc.pipelineasset.RiskPolicy.hasSelectedEvidence(validated.context().findings().values()));
+            boolean supported=true;
+            if(Set.of("HIGH","CRITICAL").contains(risk)) {
+                var input=json.readTree(validated.inputSnapshotJson());
+                var taskSnapshot=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenTree(json,input.path("taskSnapshotJson").asText());
+                var release=json.treeToValue(taskSnapshot.path("pipelineSnapshot").path("release"),io.github.opensabre.iqc.pipelineasset.PipelineRelease.class);
+                if(release==null)throw IqcException.invalidState("风险动作缺少冻结流水线政策");
+                supported=io.github.opensabre.iqc.pipelinebridge.PipelineDecisionEvaluator.hasRiskEvidence(release,validated.context(),true);
+            }
+            return new Prepared(action,RiskEventConfiguration.parse(action.configuration()),risk,supported);
         } catch(com.fasterxml.jackson.core.JsonProcessingException | java.util.NoSuchElementException invalid) {
             throw IqcException.invalidState("风险动作冻结政策损坏");
         }

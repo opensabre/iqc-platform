@@ -25,11 +25,11 @@ public class IqcModelProfileController {
     public List<ModelView> list() { return service.list().stream().map(ModelView::from).toList(); }
     @PostMapping @ResourcePermission(code="iqc:model:manage", name="管理模型配置", type="iqc", description="创建 Agent 模型配置") @Audit(operationType=OperationType.CREATE, description="创建 IQC 模型配置", module="IQC_MODEL",request=false,response=false)
     public ModelView create(@RequestBody ModelCommand command) { return ModelView.from(service.create(command)); }
-    @PutMapping("/{id}") @ResourcePermission(code="iqc:model:manage", name="管理模型配置", type="iqc", description="修改 Agent 模型配置") @Audit(operationType=OperationType.UPDATE, description="修改 IQC 模型配置", module="IQC_MODEL",request=false,response=false,key="#id")
+    @PutMapping("/{id}") @ResourcePermission(code="iqc:model:update", name="管理模型配置", type="iqc", description="修改 Agent 模型配置") @Audit(operationType=OperationType.UPDATE, description="修改 IQC 模型配置", module="IQC_MODEL",request=false,response=false,key="#id")
     public ModelView update(@PathVariable String id, @RequestBody ModelCommand command) { return ModelView.from(service.update(id, command)); }
-    @PostMapping("/{id}/enable") @ResourcePermission(code="iqc:model:manage", name="管理模型配置", type="iqc", description="启用 Agent 模型配置") @Audit(operationType=OperationType.UPDATE, description="启用 IQC 模型配置", module="IQC_MODEL",request=false,response=false,key="#id")
+    @PostMapping("/{id}/enable") @ResourcePermission(code="iqc:model:enable", name="管理模型配置", type="iqc", description="启用 Agent 模型配置") @Audit(operationType=OperationType.UPDATE, description="启用 IQC 模型配置", module="IQC_MODEL",request=false,response=false,key="#id")
     public ModelView enable(@PathVariable String id) { return ModelView.from(service.setEnabled(id, true)); }
-    @PostMapping("/{id}/disable") @ResourcePermission(code="iqc:model:manage", name="管理模型配置", type="iqc", description="停用 Agent 模型配置") @Audit(operationType=OperationType.UPDATE, description="停用 IQC 模型配置", module="IQC_MODEL",request=false,response=false,key="#id")
+    @PostMapping("/{id}/disable") @ResourcePermission(code="iqc:model:disable", name="管理模型配置", type="iqc", description="停用 Agent 模型配置") @Audit(operationType=OperationType.UPDATE, description="停用 IQC 模型配置", module="IQC_MODEL",request=false,response=false,key="#id")
     public ModelView disable(@PathVariable String id) { return ModelView.from(service.setEnabled(id, false)); }
     @PostMapping("/{id}/test") @ResourcePermission(code="iqc:model:test", name="测试模型连接", type="iqc", description="测试 Agent 模型配置连通性")
     public ConnectionTestResult test(@PathVariable String id) { return connectionTestService.test(id); }
