@@ -49,3 +49,8 @@
 - base-organization/src/main/resources/db/migration/mysql/history/V20260829_03__add_iqc_business_roles.sql。
 - 本仓库 src/main/java/io/github/opensabre/iqc/rest/{IqcModelProfileController,IqcSkillController,QualityOperationsController,PipelineAssetController,EvaluationDatasetController,PipelineEvaluationController,BenchmarkController}.java。
 - 本仓库 shared/IqcDataScope.java、privacy/SensitiveReadAccessService.java、result/llm/gateway/GatewayCallService.java（均在原 Java 包根目录下）。
+
+
+## 任务端点同码复查（2026-10-28）
+
+同一注册约束也影响 task:view 的列表/详情/执行记录和 task:execute 的运行/恢复/暂停/优先级。按原组织资源模型拆分，保留 view 给 GET /api/iqc/tasks、execute 给 POST /api/iqc/tasks/{id}/run；其余用 task:detail:view、task:executions:view、task:resume、task:pause、task:priority。敏感读取前置使用对应端点码；configuration 保留原 task:view+敏感内容复合要求，批次恢复仍保留原 BulkTaskAccessService 的当前负责人及 GRANTS 校验。配套组织 V20261028_02 只继承旧有效授权，原资源ID/状态保留；仍待独立SQL/HTTP及当前撤权验证。静态清单另发现结果、会话、标签、规则、MCP等旧接口重复，尚未完成全量修正，不能从本批推导全部端点已授权。

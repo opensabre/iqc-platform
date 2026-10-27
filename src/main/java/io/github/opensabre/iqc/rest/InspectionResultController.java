@@ -129,10 +129,10 @@ public class InspectionResultController {
     }
 
     @PostMapping("/tasks/{id}/resume")
-    @ResourcePermission(code = "iqc:task:execute", name = "恢复质检任务", type = "iqc", description = "恢复已暂停的质检任务")
+    @ResourcePermission(code = "iqc:task:resume", name = "恢复质检任务", type = "iqc", description = "恢复已暂停的质检任务")
     @Audit(operationType = OperationType.UPDATE, description = "恢复 IQC 质检任务", module = "IQC_TASK", request = false, response = false, key = "#id")
     public InspectionTask resume(@PathVariable String id) {
-        var access = resultReadAccess(java.util.Set.of("iqc:task:execute"));
+        var access = resultReadAccess(java.util.Set.of("iqc:task:resume"));
         var coordinated=bulk==null?java.util.Optional.<InspectionTask>empty():bulk.queueIfBulk(id);
         if(coordinated.isPresent())return resultProjection.taskReceipt(coordinated.get(),access);
         InspectionTask task = executionService.resume(id);
