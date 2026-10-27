@@ -859,7 +859,29 @@ class IsolatedMysqlMeasuredPublicationIT {
             var left=pool.submit(claim);var right=pool.submit(claim);assertTrue(ready.await(10,java.util.concurrent.TimeUnit.SECONDS));start.countDown();
             assertNotEquals(left.get(20,java.util.concurrent.TimeUnit.SECONDS),right.get(20,java.util.concurrent.TimeUnit.SECONDS));
         } finally {start.countDown();pool.shutdownNow();}
-        lifecycle.tick(parent.getId(),eid);
+        // Replace the process after a committed claim; SQL is the only handoff between JVMs.
+        db.update("UPDATE iqc_inspection_task SET status='QUEUED' WHERE id=?",parent.getId());
+        db.update("UPDATE iqc_task_execution SET status='QUEUED' WHERE id=?",eid);
+        long crashedPid;
+        try (var crashed = new BulkRestartProcess("claim-hold",parent.getId(),eid)) {
+            crashedPid=crashed.pid();assertEquals("CLAIMED:"+crashedPid,crashed.signal("CLAIMED:"));
+            assertEquals("RUNNING",db.queryForObject("SELECT status FROM iqc_inspection_task WHERE id=?",String.class,parent.getId()));
+            assertEquals("RUNNING",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,eid));
+            crashed.kill();
+        }
+        // Advance only the persisted heartbeat fixture, avoiding a minute-long wall-clock sleep.
+        db.update("UPDATE iqc_inspection_task SET updated_time=DATE_SUB(UTC_TIMESTAMP(), INTERVAL 10 MINUTE) WHERE id=?",parent.getId());
+        try (var restarted = new BulkRestartProcess("recover-tick",parent.getId(),eid)) {
+            assertNotEquals(crashedPid,restarted.pid());
+            assertEquals("RESUMED:"+restarted.pid(),restarted.signal("RESUMED:"));restarted.requireCleanExit();
+        }
+        assertEquals(eid,sql.getMapper(InspectionTaskMapper.class).selectById(parent.getId()).getCurrentExecutionId());
+        assertEquals("QUEUED",sql.getMapper(InspectionTaskMapper.class).selectById(parent.getId()).getStatus());
+        assertEquals("QUEUED",db.queryForObject("SELECT status FROM iqc_task_execution WHERE id=?",String.class,eid));
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_task_execution WHERE task_id=?",Integer.class,parent.getId()));
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE bulk_parent_task_id=?",Integer.class,parent.getId()));
+        assertEquals(progress,db.queryForObject("SELECT bulk_progress_json FROM iqc_inspection_task WHERE id=?",String.class,parent.getId()));
+        assertEquals(childSnapshot,sql.getMapper(InspectionTaskMapper.class).selectById(child.getId()).getRuleSnapshotJson());
         var queuedChild=sql.getMapper(InspectionTaskMapper.class).selectById(child.getId());assertEquals("QUEUED",queuedChild.getStatus());String childEid=queuedChild.getCurrentExecutionId();assertNotNull(childEid);
         var tasks=context.getBean(InspectionTaskService.class);tasks.requestPause(parent.getId());
         io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of());
