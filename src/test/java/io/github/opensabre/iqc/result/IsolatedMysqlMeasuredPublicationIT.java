@@ -158,6 +158,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals(2,db.queryForObject("SELECT COUNT(*) FROM iqc_task_item WHERE execution_id=? AND status='SUCCEEDED'",Integer.class,production.getCurrentExecutionId()));
         assertEquals("later text",db.queryForObject("SELECT content FROM iqc_conversation_message WHERE id=?",String.class,second));
         assertFindingDistributionFromSql(production,result,false);
+        assertDecisionRevisionPreservesMachineSource(production,result,prepared,suffix);
         // Dispatch owning operations from the actual published task, not a synthetic action source.
         var reference=new ActionProductionSourceValidator.Reference(production.getId(),production.getCurrentExecutionId(),conversation,result.getId(),"annotator");
         var enqueue=context.getBean(ActionEnqueueService.class);
@@ -1004,6 +1005,46 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertThrows(RuntimeException.class,()->PipelineAssetService.validateNewRiskEvidence(mixed,json));
     }
 
+    /** Recalculate a real published production trace without detectors/actions or rewriting its source. */
+    private void assertDecisionRevisionPreservesMachineSource(InspectionTask task,
+            io.github.opensabre.iqc.result.model.ConversationInspectionResult result,PipelineAssetService.Prepared prepared,String suffix) throws Exception {
+        var db=new JdbcTemplate(context.getBean(DataSource.class));var json=context.getBean(ObjectMapper.class);
+        var revisions=context.getBean(io.github.opensabre.iqc.decision.DecisionRevisionService.class);
+        var scope=context.getBean(IqcDataScope.class);
+        var source=db.queryForMap("SELECT * FROM iqc_inspection_conversation_result WHERE id=?",result.getId());
+        String taskSnapshot=db.queryForObject("SELECT rule_snapshot_json FROM iqc_inspection_task WHERE id=?",String.class,task.getId());
+        var actionRows=db.queryForList("SELECT * FROM iqc_action_execution ORDER BY id");
+        int modelCalls=db.queryForObject("SELECT COUNT(*) FROM iqc_model_gateway_call",Integer.class);
+        int before=db.queryForObject("SELECT COUNT(*) FROM iqc_decision_revision",Integer.class);
+        String request="revision_"+suffix,reason="Recheck frozen processed conversation policy";
+        var saved=revisions.create(result.getId(),prepared.pipelineId(),prepared.versionNo(),request,reason);
+        assertEquals(before+1,db.queryForObject("SELECT COUNT(*) FROM iqc_decision_revision",Integer.class));
+        var projection=json.readValue(saved.getProjectionJson(),io.github.opensabre.iqc.decision.DecisionRevisionService.Projection.class);
+        assertEquals(result.getId(),projection.sourceResultId());assertEquals("HIGH",projection.originalRiskLevel());assertEquals("HIGH",projection.recalculatedRiskLevel());
+        assertEquals(0,result.getFinalScore().compareTo(projection.recalculated().finalScore()));
+        assertEquals(saved.getId(),revisions.create(result.getId(),prepared.pipelineId(),prepared.versionNo(),request,reason).getId());
+        assertThrows(RuntimeException.class,()->revisions.create(result.getId(),prepared.pipelineId(),prepared.versionNo(),request,"Different reason"));
+        // Already published legacy target remains readable, but new unsafe recalculation must not write a revision.
+        String legacy=db.queryForObject("SELECT id FROM iqc_pipeline_asset WHERE code=?",String.class,"LEGACY_"+suffix.toUpperCase());
+        assertThrows(RuntimeException.class,()->revisions.create(result.getId(),legacy,1,"unsafe_revision_"+suffix,reason));
+        assertEquals(before+1,db.queryForObject("SELECT COUNT(*) FROM iqc_decision_revision",Integer.class));
+        when(scope.canView(any(),any())).thenReturn(false);
+        try {assertThrows(RuntimeException.class,()->revisions.create(result.getId(),prepared.pipelineId(),prepared.versionNo(),request,reason));}
+        finally {when(scope.canView(any(),any())).thenReturn(true);}
+        String retry="revision_retry_"+suffix;
+        db.execute("CREATE TRIGGER reject_decision_revision BEFORE INSERT ON iqc_decision_revision FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='isolated revision write rejection'");
+        try {assertThrows(org.springframework.dao.DataAccessException.class,()->revisions.create(result.getId(),prepared.pipelineId(),prepared.versionNo(),retry,reason));}
+        finally {db.execute("DROP TRIGGER reject_decision_revision");}
+        assertEquals(before+1,db.queryForObject("SELECT COUNT(*) FROM iqc_decision_revision",Integer.class));
+        var retried=revisions.create(result.getId(),prepared.pipelineId(),prepared.versionNo(),retry,reason);
+        assertNotEquals(saved.getId(),retried.getId());assertEquals(before+2,db.queryForObject("SELECT COUNT(*) FROM iqc_decision_revision",Integer.class));
+        assertEquals(Set.of(saved.getId(),retried.getId()),revisions.history(result.getId()).stream().map(io.github.opensabre.iqc.decision.model.DecisionRevision::getId).collect(java.util.stream.Collectors.toSet()));
+        assertEquals(source,db.queryForMap("SELECT * FROM iqc_inspection_conversation_result WHERE id=?",result.getId()));
+        assertEquals(taskSnapshot,db.queryForObject("SELECT rule_snapshot_json FROM iqc_inspection_task WHERE id=?",String.class,task.getId()));
+        assertEquals(actionRows,db.queryForList("SELECT * FROM iqc_action_execution ORDER BY id"));
+        assertEquals(modelCalls,db.queryForObject("SELECT COUNT(*) FROM iqc_model_gateway_call",Integer.class));
+    }
+
     /** Reject one result write, then retry through the existing child execution path with frozen inputs. */
     private void assertBulkChildWriteFailureAndRetry(PipelineAssetService.Prepared prepared,String conversation,String suffix,boolean automatic) throws Exception {
         suffix=(automatic?"auto":"manual")+suffix;
@@ -1149,7 +1190,7 @@ class IsolatedMysqlMeasuredPublicationIT {
                     io.github.opensabre.iqc.schedule.dao.EventSubscriptionMapper.class,io.github.opensabre.iqc.schedule.dao.EventSubscriptionRevisionMapper.class,
                     PipelineAssetMapper.class,PipelineAssetVersionMapper.class,QualitySampleMapper.class,QualitySampleVersionMapper.class,
                     EvaluationDatasetMapper.class,EvaluationDatasetVersionMapper.class,EvaluationSampleResultMapper.class,
-                    ConversationInspectionResultMapper.class,RuleInspectionResultMapper.class,InspectionEvidenceMapper.class,InspectionResultMapper.class,ResultReviewMapper.class,ActionDiscoveryMapper.class))
+                    ConversationInspectionResultMapper.class,RuleInspectionResultMapper.class,InspectionEvidenceMapper.class,InspectionResultMapper.class,ResultReviewMapper.class,ActionDiscoveryMapper.class,io.github.opensabre.iqc.decision.dao.DecisionRevisionMapper.class))
                 if(!f.getConfiguration().hasMapper(type))f.getConfiguration().addMapper(type);
             var pagination=new com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor();
             pagination.addInnerInterceptor(new com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor(com.baomidou.mybatisplus.annotation.DbType.MYSQL));
@@ -1170,6 +1211,9 @@ class IsolatedMysqlMeasuredPublicationIT {
             var grants=mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
             when(grants.current(Set.of("iqc:report:view"))).thenReturn(new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("controlled",true,true,false,Instant.now()));
             return new io.github.opensabre.iqc.quality.BusinessQualityReportService(s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationInspectionResultMapper.class),reviews,scope,j,s.getMapper(TaskExecutionMapper.class),null,null,grants);
+        }
+        @Bean io.github.opensabre.iqc.decision.DecisionRevisionService decisionRevisions(SqlSessionTemplate s,PipelineAssetService assets,IqcDataScope scope,ObjectMapper json,ProductionInputSnapshotService inputs){
+            return new io.github.opensabre.iqc.decision.DecisionRevisionService(s.getMapper(io.github.opensabre.iqc.decision.dao.DecisionRevisionMapper.class),s.getMapper(ConversationInspectionResultMapper.class),s.getMapper(InspectionTaskMapper.class),assets,scope,json,inputs);
         }
         @Bean BusinessItemReviewService reviews(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope){return new BusinessItemReviewService(s.getMapper(ResultReviewMapper.class),s.getMapper(ConversationInspectionResultMapper.class),s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationMessageMapper.class),scope,j);}
         @Bean BusinessReviewSampleService candidates(SqlSessionTemplate s,ObjectMapper j,IqcDataScope scope,BusinessItemReviewService reviews){return new BusinessReviewSampleService(s.getMapper(QualitySampleMapper.class),s.getMapper(ResultReviewMapper.class),s.getMapper(ConversationInspectionResultMapper.class),s.getMapper(InspectionTaskMapper.class),s.getMapper(ConversationMapper.class),s.getMapper(ConversationMessageMapper.class),reviews,scope,j);}
