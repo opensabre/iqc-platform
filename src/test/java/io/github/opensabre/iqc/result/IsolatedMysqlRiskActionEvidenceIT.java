@@ -59,11 +59,13 @@ class IsolatedMysqlRiskActionEvidenceIT {
         scope=org.springframework.test.util.AopTestUtils.getUltimateTargetObject(context.getBean(IqcDataScope.class));
         reset(sources,scope);when(scope.owner()).thenReturn("alice");
     }
-    private Finding raw(String node,boolean evidence,ObjectMapper json){
-        return new Finding(node,"CONSENT","compliance",Finding.ValueType.BOOLEAN,json.valueToTree(true),Finding.State.KNOWN,null,Finding.Severity.LOW,"observed",
+    private Finding raw(String node,boolean evidence,ObjectMapper json){return raw(node,"CONSENT",evidence,json);}
+    private Finding raw(String node,String code,boolean evidence,ObjectMapper json){
+        return new Finding(node,code,"compliance",Finding.ValueType.BOOLEAN,json.valueToTree(true),Finding.State.KNOWN,null,Finding.Severity.LOW,"observed",
                 evidence?List.of(new Finding.Evidence("quote",Finding.EvidenceType.CONVERSATION,"message",null)):List.of(),new Finding.Source(node,"RULE","1",1,"input"));
     }
-    private ActionAdapter.Request seed(String risk,boolean selectedEvidence,boolean rejectedEvidence) throws Exception {
+    private ActionAdapter.Request seed(String risk,boolean selectedEvidence,boolean rejectedEvidence) throws Exception {return seed(risk,selectedEvidence,rejectedEvidence,false);}
+    private ActionAdapter.Request seed(String risk,boolean selectedEvidence,boolean rejectedEvidence,boolean unrelatedEvidence) throws Exception {
         var json=context.getBean(ObjectMapper.class);String token=UUID.randomUUID().toString().replace("-","");
         var action=new ActionPolicy.Action("risk",ActionExecutionContract.Type.CREATE_RISK_EVENT,new ActionPolicy.Condition(ActionPolicy.Kind.ALWAYS,null,null,List.of()),
                 ActionPolicy.Idempotency.PRODUCTION_SOURCE_V1,null,ActionPolicy.FailureHandling.RECORD_ONLY,
@@ -73,9 +75,22 @@ class IsolatedMysqlRiskActionEvidenceIT {
                 io.github.opensabre.iqc.selector.SelectorAssetService.hash(policyBody),"risk","alice");
         var fused=FindingFusion.fuse(List.of(raw("winner",selectedEvidence,json),raw("loser",rejectedEvidence,json)),
                 new FusionPolicy("priority",1,FusionPolicy.Method.PRIORITY,Map.of("winner",2,"loser",1),Map.of(),null,Set.of()));
-        var decision=new ActionPolicy.Context(Map.of("CONSENT",fused.getFirst()),Map.of(),io.github.opensabre.iqc.scoring.InspectionScoring.ScoreStatus.FINAL,
+        var facts=new LinkedHashMap<String,FindingFusion.Result>();facts.put("CONSENT",fused.getFirst());
+        if(unrelatedEvidence)facts.put("OTHER",FindingFusion.fuse(List.of(raw("other","OTHER",true,json)),new FusionPolicy("other",1,FusionPolicy.Method.PRIORITY,Map.of(),Map.of(),null,Set.of())).getFirst());
+        var decision=new ActionPolicy.Context(facts,Map.of(),io.github.opensabre.iqc.scoring.InspectionScoring.ScoreStatus.FINAL,
                 java.math.BigDecimal.TEN,risk,"UNQUALIFIED");
-        String input=json.writeValueAsString(decision),hash=io.github.opensabre.iqc.selector.SelectorAssetService.hash(input);
+        var condition=new ActionPolicy.Condition(ActionPolicy.Kind.FINDING_STATE,"CONSENT",json.valueToTree("KNOWN"),List.of());
+        var riskPolicy=new io.github.opensabre.iqc.pipelineasset.RiskPolicy(io.github.opensabre.iqc.pipelineasset.RiskPolicy.SCHEMA,Finding.Severity.LOW,
+                List.of(new io.github.opensabre.iqc.pipelineasset.RiskPolicy.Rule("consent",Finding.Severity.valueOf(risk),condition)));
+        var release=new io.github.opensabre.iqc.pipelineasset.PipelineRelease(io.github.opensabre.iqc.pipelineasset.PipelineRelease.SCHEMA,
+                new io.github.opensabre.iqc.pipeline.PipelineDefinition(io.github.opensabre.iqc.pipeline.PipelineDefinition.SCHEMA,List.of()),
+                new FusionPolicy("priority",1,FusionPolicy.Method.PRIORITY,Map.of(),Map.of(),null,Set.of()),
+                new io.github.opensabre.iqc.scoring.InspectionScoring.Policy(io.github.opensabre.iqc.scoring.InspectionScoring.POLICY_VERSION,
+                        io.github.opensabre.iqc.scoring.InspectionScoring.Mode.DEDUCTION,100,60,List.of(new io.github.opensabre.iqc.scoring.InspectionScoring.Item("consent",20,false))),
+                List.of(new io.github.opensabre.iqc.pipelineasset.PipelineRelease.ItemMapping("consent","CONSENT",io.github.opensabre.iqc.scheme.SchemeDefinition.HitMeaning.VIOLATION)),null,null,null,riskPolicy);
+        var taskSnapshot=json.createObjectNode();taskSnapshot.putObject("pipelineSnapshot").set("release",json.valueToTree(release));
+        var inputTree=(com.fasterxml.jackson.databind.node.ObjectNode)json.valueToTree(decision);inputTree.put("taskSnapshotJson",json.writeValueAsString(taskSnapshot));
+        String input=json.writeValueAsString(inputTree),hash=io.github.opensabre.iqc.selector.SelectorAssetService.hash(input);
         var reference=new ActionProductionSourceValidator.Reference(source.taskId(),source.executionId(),source.conversationId(),source.resultId(),source.owner());
         var validated=new ActionProductionSourceValidator.Validated(reference,"team",source.decisionReference(),input,hash,policy,decision,
                 new ScheduledActorAccessService.CreationBound("iqc-schedule-owner-scope-v1","user-alice","alice",false,"team"),"SUCCEEDED");
@@ -98,6 +113,12 @@ class IsolatedMysqlRiskActionEvidenceIT {
             assertEquals(0,count(request));assertNull(service.lookup(request));
             assertEquals("RUNNING",db.queryForObject("SELECT status FROM iqc_action_execution WHERE id=?",String.class,request.executionId()));
         }
+    }
+    @Test void unrelatedSelectedEvidenceCannotCreateEventForUnsupportedMatchedRisk() throws Exception {
+        var request=seed("HIGH",false,false,true);
+        var failure=assertThrows(RuntimeException.class,()->service.create(request));assertTrue(failure.getMessage().contains("高风险事件"));
+        assertEquals(0,count(request));assertNull(service.lookup(request));
+        assertEquals("RUNNING",db.queryForObject("SELECT status FROM iqc_action_execution WHERE id=?",String.class,request.executionId()));
     }
     @Test void selectedEvidenceCreatesOneArtifactAndHistoricalLookupSurvivesSettlement() throws Exception {
         var request=seed("CRITICAL",true,false);String id=service.create(request);assertEquals(id,service.create(request));assertEquals(1,count(request));
