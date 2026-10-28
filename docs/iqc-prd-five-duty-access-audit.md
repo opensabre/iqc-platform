@@ -69,3 +69,8 @@
 ## MCP、专家历史和基础状态同码复查（2026-10-28）
 
 复用原资产/方案/总览服务，不新建API或权限模型。mcp:manage保创建，更新/启用/停用分别为mcp:update/enable/disable；scheme:manage保草稿列表，专家历史为scheme:versions:view且原敏感读取前置同码；dashboard:view保总览，基础状态为bootstrap:view。配套V20261028_05按原ACTIVE资源已有角色关系继承，保留原ID/状态与新环境PENDING策略，不默认给额外角色/用户授权。MCP与bootstrap此批仅修资源注册，真实网关正反授权待验；方案历史仍按原数据范围及敏感投影读取。
+
+
+## 标签域同码复查（2026-10-28）
+
+标签树/详情、分类和群组创建修订停用、标签创建修订值绑定停用，集合列表详情和创建修订成员发布停用，以及候选列表相似查询与批准拒绝合并仍有同码多端点。沿原三个Controller及组织资源表逐端点拆分，不新增标签模型/审核服务。原label:view保树，label:manage保标签创建，label:approve仍只标签发布，不从manage推导approve；collection:view保列表、manage保创建，candidate:view保列表、review保批准，其余精确端点新码见配套V20261028_06。旧ID/状态及ACTIVE显式授权继承规则保持，无默认新角色/敏感/all授权；此批仅资源声明与配套迁移，不声称网关或实际成功写权限已验。原数据范围和业务审批约束不变。
