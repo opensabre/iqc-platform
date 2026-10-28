@@ -21,7 +21,7 @@ public class IqcBootstrapController {
     }
 
     @GetMapping
-    @ResourcePermission(code = "iqc:dashboard:view", name = "查看 IQC 基础状态", type = "iqc", description = "查询 IQC 平台基础状态")
+    @ResourcePermission(code = "iqc:bootstrap:view", name = "查看 IQC 基础状态", type = "iqc", description = "查询 IQC 平台基础状态")
     @RateLimit(sceneCode = "iqc-bootstrap", maxCount = 60, period = 60)
     public Map<String, Object> bootstrap() {
         usageCounterRecorder.success("IQC_PLATFORM", "bootstrap", "BOOTSTRAP_QUERY");
