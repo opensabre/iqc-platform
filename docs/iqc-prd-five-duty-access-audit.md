@@ -74,3 +74,8 @@
 ## 标签域同码复查（2026-10-28）
 
 标签树/详情、分类和群组创建修订停用、标签创建修订值绑定停用，集合列表详情和创建修订成员发布停用，以及候选列表相似查询与批准拒绝合并仍有同码多端点。沿原三个Controller及组织资源表逐端点拆分，不新增标签模型/审核服务。原label:view保树，label:manage保标签创建，label:approve仍只标签发布，不从manage推导approve；collection:view保列表、manage保创建，candidate:view保列表、review保批准，其余精确端点新码见配套V20261028_06。旧ID/状态及ACTIVE显式授权继承规则保持，无默认新角色/敏感/all授权；此批仅资源声明与配套迁移，不声称网关或实际成功写权限已验。原数据范围和业务审批约束不变。
+
+
+## 规则与智能体最后五组同码复查（2026-10-28）
+
+QualityConfig 与模板物化仍共用agent:view/approve与rule:view/manage/approve。沿原Controller及组织资源模型拆分16个端点：Agent历史/比较/效果与驳回，规则历史/提交/新版本与驳回，规则集列表/历史/创建/新版本/提交/批准/驳回，以及模板物化。原Agent/规则列表、创建规则、Agent/规则批准保留原码；approve派生端点只继承原approve关系，manage派生只继承原manage，模板物化仍由原rule:manage派生，不从只读template:view授予。配置响应敏感前置同步自身新码；模板物化本批仅修网关注册声明。配套V20261028_07保旧ID/状态及ACTIVE显式关系，新环境缺失原资源保持PENDING。原审批状态/组织数据范围/服务逻辑不改，无新模型、用户、租户或平行RBAC。静态字符串复查与实际全Controller注册/PDP证明分别记录，不能互相代替。

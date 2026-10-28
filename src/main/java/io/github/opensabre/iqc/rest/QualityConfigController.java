@@ -76,9 +76,9 @@ public class QualityConfigController {
     public QualityAgent publishAgent(@PathVariable String id) { var access=access("iqc:agent:approve");return projection.agent(agentService.publish(id),access,false); }
 
     @PostMapping("/agents/{id}/reject")
-    @ResourcePermission(code = "iqc:agent:approve", name = "驳回 Agent", type = "iqc", description = "驳回 Agent")
+    @ResourcePermission(code = "iqc:agent:reject", name = "驳回 Agent", type = "iqc", description = "驳回 Agent")
     @Audit(operationType = OperationType.UPDATE, description = "驳回 IQC Agent", module = "IQC_AGENT", request = false, response = false, key = "#id")
-    public QualityAgent rejectAgent(@PathVariable String id) { var access=access("iqc:agent:approve");return projection.agent(agentService.reject(id),access,false); }
+    public QualityAgent rejectAgent(@PathVariable String id) { var access=access("iqc:agent:reject");return projection.agent(agentService.reject(id),access,false); }
 
     @PostMapping("/agents/{id}/disable")
     @ResourcePermission(code = "iqc:agent:disable", name = "停用 Agent", type = "iqc", description = "停用已发布 Agent")
@@ -86,9 +86,9 @@ public class QualityConfigController {
     public QualityAgent disableAgent(@PathVariable String id) { var access=access("iqc:agent:disable");return projection.agent(agentService.disable(id),access,false); }
 
     @GetMapping("/agents/{id}/versions")
-    @ResourcePermission(code = "iqc:agent:view", name = "查看 Agent 版本", type = "iqc", description = "查询 Agent 版本")
+    @ResourcePermission(code = "iqc:agent:versions:view", name = "查看 Agent 版本", type = "iqc", description = "查询 Agent 版本")
     @Audit(operationType=OperationType.QUERY,description="读取Agent版本",module="IQC_PRIVACY",request=false,response=false,key="#id")
-    public List<QualityAgentVersion> agentVersions(@PathVariable String id) { var access=access("iqc:agent:view");return agentService.versions(id).stream().map(row->projection.agentVersion(row,access,true)).toList(); }
+    public List<QualityAgentVersion> agentVersions(@PathVariable String id) { var access=access("iqc:agent:versions:view");return agentService.versions(id).stream().map(row->projection.agentVersion(row,access,true)).toList(); }
 
     @PostMapping("/agents/{id}/versions")
     @ResourcePermission(code = "iqc:agent:version:manage", name = "创建 Agent 版本", type = "iqc", description = "创建 Agent 版本")
@@ -101,18 +101,18 @@ public class QualityConfigController {
     public QualityAgentVersion rollbackAgent(@PathVariable String id, @PathVariable int versionNo) { var access=access("iqc:agent:version:rollback");return projection.agentVersion(agentService.rollback(id, versionNo),access,false); }
 
     @GetMapping("/agents/{id}/versions/compare")
-    @ResourcePermission(code = "iqc:agent:view", name = "比较 Agent 版本", type = "iqc", description = "比较 Agent 版本配置差异")
+    @ResourcePermission(code = "iqc:agent:versions:compare", name = "比较 Agent 版本", type = "iqc", description = "比较 Agent 版本配置差异")
     @Audit(operationType=OperationType.QUERY,description="读取Agent版本差异",module="IQC_PRIVACY",request=false,response=false,key="#id + ':' + #fromVersion + ':' + #toVersion")
     public QualityAgentService.AgentVersionComparison compareAgentVersions(@PathVariable String id,
             @RequestParam int fromVersion, @RequestParam int toVersion) {
-        var access=access("iqc:agent:view");return projection.agentComparison(agentService.compare(id, fromVersion, toVersion),access);
+        var access=access("iqc:agent:versions:compare");return projection.agentComparison(agentService.compare(id, fromVersion, toVersion),access);
     }
 
     @GetMapping("/agents/{id}/versions/{versionNo}/effect")
-    @ResourcePermission(code = "iqc:agent:view", name = "查看 Agent 版本效果", type = "iqc", description = "查询 Agent 版本历史效果")
+    @ResourcePermission(code = "iqc:agent:version:effect:view", name = "查看 Agent 版本效果", type = "iqc", description = "查询 Agent 版本历史效果")
     @Audit(operationType=OperationType.QUERY,description="读取Agent可见任务效果",module="IQC_PRIVACY",request=false,response=false,key="#id + ':' + #versionNo")
     public AgentEffectService.AgentEffectReport agentEffect(@PathVariable String id, @PathVariable int versionNo) {
-        access("iqc:agent:view");return agentEffectService.report(id, versionNo);
+        access("iqc:agent:version:effect:view");return agentEffectService.report(id, versionNo);
     }
 
     @GetMapping("/rules")
@@ -140,9 +140,9 @@ public class QualityConfigController {
     }
 
     @PostMapping("/rules/{id}/submit")
-    @ResourcePermission(code = "iqc:rule:manage", name = "提交规则审批", type = "iqc", description = "提交规则审批")
+    @ResourcePermission(code = "iqc:rule:submit", name = "提交规则审批", type = "iqc", description = "提交规则审批")
     @Audit(operationType = OperationType.UPDATE, description = "提交 IQC 规则审批", module = "IQC_RULE", request = false, response = false, key = "#id")
-    public QualityRule submitRule(@PathVariable String id) { var access=access("iqc:rule:manage");return projection.rule(ruleService.submit(id),access,false); }
+    public QualityRule submitRule(@PathVariable String id) { var access=access("iqc:rule:submit");return projection.rule(ruleService.submit(id),access,false); }
 
     @PostMapping("/rules/{id}/approve")
     @ResourcePermission(code = "iqc:rule:approve", name = "审批规则", type = "iqc", description = "审批通过规则")
@@ -150,19 +150,19 @@ public class QualityConfigController {
     public QualityRule publishRule(@PathVariable String id) { var access=access("iqc:rule:approve");return projection.rule(ruleService.publish(id),access,false); }
 
     @PostMapping("/rules/{id}/reject")
-    @ResourcePermission(code = "iqc:rule:approve", name = "驳回规则", type = "iqc", description = "驳回规则")
+    @ResourcePermission(code = "iqc:rule:reject", name = "驳回规则", type = "iqc", description = "驳回规则")
     @Audit(operationType = OperationType.UPDATE, description = "驳回 IQC 规则", module = "IQC_RULE", request = false, response = false, key = "#id")
-    public QualityRule rejectRule(@PathVariable String id) { var access=access("iqc:rule:approve");return projection.rule(ruleService.reject(id),access,false); }
+    public QualityRule rejectRule(@PathVariable String id) { var access=access("iqc:rule:reject");return projection.rule(ruleService.reject(id),access,false); }
 
     @GetMapping("/rules/{id}/versions")
-    @ResourcePermission(code = "iqc:rule:view", name = "查看规则版本", type = "iqc", description = "查询规则版本")
+    @ResourcePermission(code = "iqc:rule:versions:view", name = "查看规则版本", type = "iqc", description = "查询规则版本")
     @Audit(operationType=OperationType.QUERY,description="读取规则历史",module="IQC_PRIVACY",request=false,response=false,key="#id")
-    public List<QualityRuleVersion> ruleVersions(@PathVariable String id) { var access=access("iqc:rule:view");return ruleService.versions(id).stream().map(row->projection.ruleVersion(row,access,true)).toList(); }
+    public List<QualityRuleVersion> ruleVersions(@PathVariable String id) { var access=access("iqc:rule:versions:view");return ruleService.versions(id).stream().map(row->projection.ruleVersion(row,access,true)).toList(); }
 
     @PostMapping("/rules/{id}/versions")
-    @ResourcePermission(code = "iqc:rule:manage", name = "创建规则版本", type = "iqc", description = "创建规则版本")
+    @ResourcePermission(code = "iqc:rule:version:manage", name = "创建规则版本", type = "iqc", description = "创建规则版本")
     @Audit(operationType = OperationType.CREATE, description = "创建 IQC 规则版本", module = "IQC_RULE", request = false, response = false, key = "#id")
-    public QualityRuleVersion createRuleVersion(@PathVariable String id, @RequestBody RuleRequest request) { var access=access("iqc:rule:manage");return projection.ruleVersion(ruleService.createVersion(id, request.name(), request.code(), request.category(), request.ruleType(), request.targetRole(), request.expression(), request.description(), request.deduction(), request.riskLevel(), request.veto()),access,false); }
+    public QualityRuleVersion createRuleVersion(@PathVariable String id, @RequestBody RuleRequest request) { var access=access("iqc:rule:version:manage");return projection.ruleVersion(ruleService.createVersion(id, request.name(), request.code(), request.category(), request.ruleType(), request.targetRole(), request.expression(), request.description(), request.deduction(), request.riskLevel(), request.veto()),access,false); }
 
     @PostMapping("/rules/{id}/test")
     @ResourcePermission(code = "iqc:rule:test", name = "测试规则", type = "iqc", description = "测试质检规则")
@@ -177,39 +177,39 @@ public class QualityConfigController {
     }
 
     @GetMapping("/rule-sets")
-    @ResourcePermission(code = "iqc:rule:view", name = "查看规则集", type = "iqc", description = "查询质检规则集")
+    @ResourcePermission(code = "iqc:rule-set:view", name = "查看规则集", type = "iqc", description = "查询质检规则集")
     @Audit(operationType=OperationType.QUERY,description="读取规则集",module="IQC_PRIVACY",request=false,response=false)
-    public List<QualityRuleSet> ruleSets() { var access=access("iqc:rule:view");return ruleSetService.list().stream().map(row->projection.ruleSet(row,access,true)).toList(); }
+    public List<QualityRuleSet> ruleSets() { var access=access("iqc:rule-set:view");return ruleSetService.list().stream().map(row->projection.ruleSet(row,access,true)).toList(); }
 
     @PostMapping("/rule-sets")
-    @ResourcePermission(code = "iqc:rule:manage", name = "管理规则集", type = "iqc", description = "创建质检规则集")
+    @ResourcePermission(code = "iqc:rule-set:manage", name = "管理规则集", type = "iqc", description = "创建质检规则集")
     @Audit(operationType = OperationType.CREATE, description = "创建 IQC 规则集", module = "IQC_RULE", request = false, response = false)
-    public QualityRuleSet createRuleSet(@RequestBody RuleSetRequest request) { var access=access("iqc:rule:manage");return projection.ruleSet(ruleSetService.create(request.name(), request.code(), request.description(), request.ruleIds(), request.aggregationMode()),access,false); }
+    public QualityRuleSet createRuleSet(@RequestBody RuleSetRequest request) { var access=access("iqc:rule-set:manage");return projection.ruleSet(ruleSetService.create(request.name(), request.code(), request.description(), request.ruleIds(), request.aggregationMode()),access,false); }
 
     @GetMapping("/rule-sets/{id}/versions")
-    @ResourcePermission(code = "iqc:rule:view", name = "查看规则集版本", type = "iqc", description = "查询规则集版本")
+    @ResourcePermission(code = "iqc:rule-set:versions:view", name = "查看规则集版本", type = "iqc", description = "查询规则集版本")
     @Audit(operationType=OperationType.QUERY,description="读取规则集历史",module="IQC_PRIVACY",request=false,response=false,key="#id")
-    public List<QualityRuleSetVersion> ruleSetVersions(@PathVariable String id) { var access=access("iqc:rule:view");return ruleSetService.versions(id).stream().map(row->projection.ruleSetVersion(row,access,true)).toList(); }
+    public List<QualityRuleSetVersion> ruleSetVersions(@PathVariable String id) { var access=access("iqc:rule-set:versions:view");return ruleSetService.versions(id).stream().map(row->projection.ruleSetVersion(row,access,true)).toList(); }
 
     @PostMapping("/rule-sets/{id}/versions")
-    @ResourcePermission(code = "iqc:rule:manage", name = "创建规则集版本", type = "iqc", description = "创建规则集版本")
+    @ResourcePermission(code = "iqc:rule-set:version:manage", name = "创建规则集版本", type = "iqc", description = "创建规则集版本")
     @Audit(operationType = OperationType.CREATE, description = "创建 IQC 规则集版本", module = "IQC_RULE", request = false, response = false, key = "#id")
-    public QualityRuleSetVersion createRuleSetVersion(@PathVariable String id, @RequestBody RuleSetRequest request) { var access=access("iqc:rule:manage");return projection.ruleSetVersion(ruleSetService.createVersion(id, request.name(), request.description(), request.ruleIds(), request.aggregationMode()),access,false); }
+    public QualityRuleSetVersion createRuleSetVersion(@PathVariable String id, @RequestBody RuleSetRequest request) { var access=access("iqc:rule-set:version:manage");return projection.ruleSetVersion(ruleSetService.createVersion(id, request.name(), request.description(), request.ruleIds(), request.aggregationMode()),access,false); }
 
     @PostMapping("/rule-sets/{id}/submit")
-    @ResourcePermission(code = "iqc:rule:manage", name = "提交规则集审批", type = "iqc", description = "提交规则集审批")
+    @ResourcePermission(code = "iqc:rule-set:submit", name = "提交规则集审批", type = "iqc", description = "提交规则集审批")
     @Audit(operationType = OperationType.UPDATE, description = "提交 IQC 规则集审批", module = "IQC_RULE", request = false, response = false, key = "#id")
-    public QualityRuleSet submitRuleSet(@PathVariable String id) { var access=access("iqc:rule:manage");return projection.ruleSet(ruleSetService.submit(id),access,false); }
+    public QualityRuleSet submitRuleSet(@PathVariable String id) { var access=access("iqc:rule-set:submit");return projection.ruleSet(ruleSetService.submit(id),access,false); }
 
     @PostMapping("/rule-sets/{id}/approve")
-    @ResourcePermission(code = "iqc:rule:approve", name = "审批规则集", type = "iqc", description = "审批发布规则集")
+    @ResourcePermission(code = "iqc:rule-set:approve", name = "审批规则集", type = "iqc", description = "审批发布规则集")
     @Audit(operationType = OperationType.UPDATE, description = "审批通过 IQC 规则集", module = "IQC_RULE", request = false, response = false, key = "#id")
-    public QualityRuleSet publishRuleSet(@PathVariable String id) { var access=access("iqc:rule:approve");return projection.ruleSet(ruleSetService.publish(id),access,false); }
+    public QualityRuleSet publishRuleSet(@PathVariable String id) { var access=access("iqc:rule-set:approve");return projection.ruleSet(ruleSetService.publish(id),access,false); }
 
     @PostMapping("/rule-sets/{id}/reject")
-    @ResourcePermission(code = "iqc:rule:approve", name = "驳回规则集", type = "iqc", description = "驳回规则集")
+    @ResourcePermission(code = "iqc:rule-set:reject", name = "驳回规则集", type = "iqc", description = "驳回规则集")
     @Audit(operationType = OperationType.UPDATE, description = "驳回 IQC 规则集", module = "IQC_RULE", request = false, response = false, key = "#id")
-    public QualityRuleSet rejectRuleSet(@PathVariable String id) { var access=access("iqc:rule:approve");return projection.ruleSet(ruleSetService.reject(id),access,false); }
+    public QualityRuleSet rejectRuleSet(@PathVariable String id) { var access=access("iqc:rule-set:reject");return projection.ruleSet(ruleSetService.reject(id),access,false); }
 
     public record AgentRequest(String name, String code, String description, String configJson) { }
     public record RuleRequest(String name, String code, String category, String ruleType, String targetRole, String expression, String description, Integer deduction, String riskLevel, Boolean veto) { }
