@@ -72,6 +72,31 @@ class EndpointPermissionSplitTest {
         iqc:scheme:versions:view|GET|/api/iqc/schemes/{id}/versions
         iqc:dashboard:view|GET|/api/iqc/dashboard
         iqc:bootstrap:view|GET|/api/iqc/bootstrap
+        iqc:label:view|GET|/api/iqc/labels/tree
+        iqc:label:detail:view|GET|/api/iqc/labels/{id}
+        iqc:label:manage|POST|/api/iqc/labels
+        iqc:label:category:create|POST|/api/iqc/labels/categories
+        iqc:label:group:create|POST|/api/iqc/labels/groups
+        iqc:label:category:update|PUT|/api/iqc/labels/categories/{id}
+        iqc:label:group:update|PUT|/api/iqc/labels/groups/{id}
+        iqc:label:update|PUT|/api/iqc/labels/{id}
+        iqc:label:values:update|PUT|/api/iqc/labels/{id}/values
+        iqc:label:bindings:update|PUT|/api/iqc/labels/{id}/bindings
+        iqc:label:disable|POST|/api/iqc/labels/{id}/disable
+        iqc:label:group:disable|POST|/api/iqc/labels/groups/{id}/disable
+        iqc:label:category:disable|POST|/api/iqc/labels/categories/{id}/disable
+        iqc:label-collection:view|GET|/api/iqc/label-collections
+        iqc:label-collection:detail:view|GET|/api/iqc/label-collections/{id}
+        iqc:label-collection:manage|POST|/api/iqc/label-collections
+        iqc:label-collection:update|PUT|/api/iqc/label-collections/{id}
+        iqc:label-collection:members:update|PUT|/api/iqc/label-collections/{id}/members
+        iqc:label-collection:publish|POST|/api/iqc/label-collections/{id}/publish
+        iqc:label-collection:disable|POST|/api/iqc/label-collections/{id}/disable
+        iqc:label-candidate:view|GET|/api/iqc/label-candidates
+        iqc:label-candidate:similarities:view|GET|/api/iqc/label-candidates/{id}/similarities
+        iqc:label-candidate:review|POST|/api/iqc/label-candidates/{id}/approve
+        iqc:label-candidate:reject|POST|/api/iqc/label-candidates/{id}/reject
+        iqc:label-candidate:merge|POST|/api/iqc/label-candidates/{id}/merge
         """;
     private SensitiveReadAccessService sensitive;
     private List<Object> services;
@@ -94,7 +119,9 @@ class EndpointPermissionSplitTest {
         var schemes=mock(io.github.opensabre.iqc.scheme.InspectionSchemeService.class);
         var publication=mock(io.github.opensabre.iqc.scheme.SchemePublicationService.class);
         var schemeTasks=mock(io.github.opensabre.iqc.scheme.SchemeTaskService.class);
-        services=List.of(conversations,parser,imports,mcps,schemes,publication,schemeTasks,usage,tasks,executions,batch,hierarchy,labels,exports,reviews,skills,quality,reports,labelReviews,samples,models,connections);
+        var taxonomy=mock(LabelTaxonomyService.class);var collections=mock(LabelCollectionService.class);
+        var candidates=mock(LabelCandidateService.class);
+        services=List.of(taxonomy,collections,candidates,conversations,parser,imports,mcps,schemes,publication,schemeTasks,usage,tasks,executions,batch,hierarchy,labels,exports,reviews,skills,quality,reports,labelReviews,samples,models,connections);
         controllers=List.of(new InspectionTaskController(tasks,usage,sensitive,projection),
             new InspectionResultController(executions,usage,batch,hierarchy,labels,exports,reviews,sensitive,projection),
             new IqcSkillController(skills,sensitive,projection),
@@ -104,22 +131,26 @@ class EndpointPermissionSplitTest {
             new ConversationImportController(parser,imports,usage,new io.github.opensabre.iqc.conversation.ConversationUploadProperties()),
             new IqcMcpServerController(mcps),new IqcBootstrapController(usage),
             new InspectionSchemeController(schemes,publication,schemeTasks,sensitive,projection),
-            new IqcDashboardController(null,null,null,null,labels));
+            new IqcDashboardController(null,null,null,null,labels),
+            new LabelController(taxonomy),new LabelCollectionController(collections),new LabelCandidateController(candidates));
     }
-    @Test void registrationContainsExactlyOneExpectedEndpointForEachOf45Capabilities(){
+    @Test void registrationContainsExactlyOneExpectedEndpointForEachOf70Capabilities(){
         var mvc=MockMvcBuilders.standaloneSetup(controllers.toArray()).build();
         var mapping=mvc.getDispatcherServlet().getWebApplicationContext().getBean(RequestMappingHandlerMapping.class);
         var handler=new MappingInfoHandler();ReflectionTestUtils.setField(handler,"requestMappingHandlerMapping",mapping);
         var snapshot=handler.getMappingInfo();
-        var expected=MANIFEST.lines().filter(line->!line.isBlank()).toList();assertEquals(45,expected.size());
+        var expected=MANIFEST.lines().filter(line->!line.isBlank()).toList();assertEquals(70,expected.size());
         for(String line:expected){
             var fields=line.split("\\|");var matches=snapshot.stream().filter(row->fields[0].equals(row.getCode())).toList();
             assertEquals(1,matches.size(),fields[0]);var row=matches.getFirst();
             assertEquals(fields[1],row.getMethod(),fields[0]);assertEquals(fields[2],row.getUrl(),fields[0]);assertTrue(row.isDeclaredPermission());
         }
+        var approve=snapshot.stream().filter(row->"iqc:label:approve".equals(row.getCode())).toList();
+        assertEquals(1,approve.size());assertEquals("POST",approve.getFirst().getMethod());
+        assertEquals("/api/iqc/labels/{id}/publish",approve.getFirst().getUrl());
         verifyNoInteractions(services.toArray());
     }
-    static Stream<String> guardedCapabilities(){return MANIFEST.lines().filter(line->!line.isBlank()).map(line->line.split("\\|")[0]).filter(code->!code.startsWith("iqc:model:")&&!code.startsWith("iqc:mcp:")
+    static Stream<String> guardedCapabilities(){return MANIFEST.lines().filter(line->!line.isBlank()).map(line->line.split("\\|")[0]).filter(code->!code.startsWith("iqc:label:")&&!code.startsWith("iqc:label-collection:")&&!code.startsWith("iqc:label-candidate:")&&!code.startsWith("iqc:model:")&&!code.startsWith("iqc:mcp:")
             &&!code.equals("iqc:bootstrap:view")&&!code.equals("iqc:dashboard:view")
             &&(!code.startsWith("iqc:conversation:")||Set.of("iqc:conversation:view","iqc:conversation:detail:view","iqc:conversation:api-stats:view").contains(code)));}
     @ParameterizedTest @MethodSource("guardedCapabilities")
