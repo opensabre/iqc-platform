@@ -292,6 +292,7 @@ class IsolatedMysqlMeasuredPublicationIT {
         assertEquals(result.getExecutionTraceJson(),originalAfterFactReview.getExecutionTraceJson());assertEquals(result.getScoringResultJson(),originalAfterFactReview.getScoringResultJson());
         var frozenCandidateAfterReview=sql.getMapper(QualitySampleMapper.class).selectById(captured.getId());
         assertEquals(candidateBody,frozenCandidateAfterReview.getContentSnapshot());assertEquals(candidateLineage,frozenCandidateAfterReview.getExpectedJson());
+        assertHumanHighRiskReviewSaveBoundaries(production,result,entry,suffix);
 
     }
     @Test void controlledModelBridgePersistsIndependentComparableArtifacts() throws Exception {
@@ -1003,6 +1004,60 @@ class IsolatedMysqlMeasuredPublicationIT {
         ((com.fasterxml.jackson.databind.node.ArrayNode)policyTree.path("pipeline").path("nodes")).add(weak);
         var mixed=json.treeToValue(policyTree,PipelineRelease.class);
         assertThrows(RuntimeException.class,()->PipelineAssetService.validateNewRiskEvidence(mixed,json));
+    }
+
+    /** Submit real human facts through the owning review transaction, preserving every machine row. */
+    private void assertHumanHighRiskReviewSaveBoundaries(InspectionTask task,
+            io.github.opensabre.iqc.result.model.ConversationInspectionResult result,BusinessItemReviewService.FindingEntry entry,String suffix) throws Exception {
+        var db=new JdbcTemplate(context.getBean(DataSource.class));var json=context.getBean(ObjectMapper.class);
+        var reviews=context.getBean(BusinessItemReviewService.class);
+        var source=db.queryForMap("SELECT * FROM iqc_inspection_conversation_result WHERE id=?",result.getId());
+        var actions=db.queryForList("SELECT * FROM iqc_action_execution ORDER BY id");
+        String frozen=db.queryForObject("SELECT rule_snapshot_json FROM iqc_inspection_task WHERE id=?",String.class,task.getId());
+        int calls=db.queryForObject("SELECT COUNT(*) FROM iqc_model_gateway_call",Integer.class);
+        var latest=reviews.history(result.getId()).stream().max(java.util.Comparator.comparing(io.github.opensabre.iqc.quality.model.ResultReview::getReviewRevision)).orElseThrow();
+        actor.set("annotator");
+        var pending=reviews.request(result.getId(),latest.getReviewRevision(),"high-fact-review-"+suffix,"Verify high-risk fact with its own evidence");
+        var pendingRow=db.queryForMap("SELECT * FROM iqc_result_review WHERE id=?",pending.getId());
+        var oldRounds=db.queryForList("SELECT * FROM iqc_result_review WHERE business_result_id=? AND id<>? ORDER BY id",result.getId(),pending.getId());
+        var item=new BusinessItemReviewEvaluator.Decision(result.getId(),"gap",InspectionScoring.ItemStatus.FAIL,
+                InspectionScoring.ItemStatus.FAIL,"Confirmed violation from frozen source",List.of(),null);
+        var retained=entry.evidence().stream().map(BusinessItemReviewService.FindingEvidence::id).toList();assertFalse(retained.isEmpty());
+        java.util.function.BiFunction<List<String>,List<String>,io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.Decision> fact=(ids,messages)->
+            new io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.Decision(result.getId(),entry.code(),entry.expectedFindingHash(),
+                Finding.State.KNOWN,json.valueToTree(1000),Finding.Severity.HIGH,"Confirmed high-risk interval",ids,messages);
+        actor.set("reviewer");
+        for(var invalid:List.of(fact.apply(List.of(),List.of()),fact.apply(List.of("other-fact-evidence"),List.of()),
+                fact.apply(retained,List.of("not-in-frozen-conversation")))) {
+            var failure=assertThrows(RuntimeException.class,()->reviews.decide(pending.getId(),pending.getReviewRevision(),false,List.of(item),List.of(invalid),"Reject invalid high-risk evidence"));
+            assertTrue(failure.getMessage().contains("证据"),failure::getMessage);
+            assertEquals(pendingRow,db.queryForMap("SELECT * FROM iqc_result_review WHERE id=?",pending.getId()));
+        }
+        var valid=fact.apply(retained,List.of());
+        var stale=new io.github.opensabre.iqc.quality.HumanFindingReviewEvaluator.Decision(result.getId(),entry.code(),"0".repeat(64),
+                valid.state(),valid.value(),valid.severity(),valid.reason(),retained,List.of());
+        var staleFailure=assertThrows(RuntimeException.class,()->reviews.decide(pending.getId(),pending.getReviewRevision(),false,List.of(item),List.of(stale),"Reject stale fact baseline"));
+        assertTrue(staleFailure.getMessage().contains("基准"),staleFailure::getMessage);
+        assertEquals(pendingRow,db.queryForMap("SELECT * FROM iqc_result_review WHERE id=?",pending.getId()));
+        db.execute("CREATE TRIGGER reject_high_fact_review BEFORE UPDATE ON iqc_result_review FOR EACH ROW BEGIN IF NEW.id='"+pending.getId()+"' AND NEW.status='COMPLETED' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='isolated human fact write rejection'; END IF; END");
+        try {assertThrows(org.springframework.dao.DataAccessException.class,()->reviews.decide(pending.getId(),pending.getReviewRevision(),false,List.of(item),List.of(valid),"Confirmed high-risk fact"));}
+        finally {db.execute("DROP TRIGGER reject_high_fact_review");}
+        assertEquals(pendingRow,db.queryForMap("SELECT * FROM iqc_result_review WHERE id=?",pending.getId()));
+        var saved=reviews.decide(pending.getId(),pending.getReviewRevision(),false,List.of(item),List.of(valid),"Confirmed high-risk fact");
+        assertEquals("COMPLETED",saved.getStatus());
+        var projection=json.readValue(saved.getReviewedResultJson(),BusinessItemReviewEvaluator.Projection.class);
+        assertEquals("HIGH",projection.findingReview().riskLevel());
+        assertEquals(0,new BigDecimal("80").compareTo(projection.reviewed().scoring().finalScore()));
+        var savedRow=db.queryForMap("SELECT * FROM iqc_result_review WHERE id=?",pending.getId());
+        assertEquals(saved.getId(),reviews.decide(pending.getId(),pending.getReviewRevision(),false,List.of(item),List.of(valid),"Confirmed high-risk fact").getId());
+        assertThrows(RuntimeException.class,()->reviews.decide(pending.getId(),pending.getReviewRevision(),false,List.of(item),List.of(valid),"Changed finished decision"));
+        assertEquals(savedRow,db.queryForMap("SELECT * FROM iqc_result_review WHERE id=?",pending.getId()));
+        assertEquals(oldRounds,db.queryForList("SELECT * FROM iqc_result_review WHERE business_result_id=? AND id<>? ORDER BY id",result.getId(),pending.getId()));
+        assertEquals(source,db.queryForMap("SELECT * FROM iqc_inspection_conversation_result WHERE id=?",result.getId()));
+        assertEquals(frozen,db.queryForObject("SELECT rule_snapshot_json FROM iqc_inspection_task WHERE id=?",String.class,task.getId()));
+        assertEquals(actions,db.queryForList("SELECT * FROM iqc_action_execution ORDER BY id"));
+        assertEquals(calls,db.queryForObject("SELECT COUNT(*) FROM iqc_model_gateway_call",Integer.class));
+        actor.set("annotator");
     }
 
     /** Recalculate a real published production trace without detectors/actions or rewriting its source. */
