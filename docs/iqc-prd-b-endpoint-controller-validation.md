@@ -31,3 +31,9 @@ B 在风险证据固定提交 `3c988df` 后合入 A 固定 `258138c`，包含模
 原进程 18580 终态 0，`/tmp/iqc-b-45-mvc-20261028.log.exit` 为 0，离线 `test-compile surefire:test`，fresh EndpointPermissionSplitTest 共 31 项、零失败错误跳过：注册 1 项检查45契约，当前授权拒绝30项（原25项加会话3项、方案草稿/历史2项）。拒绝时核对精确自身资源码，业务服务及usage无交互。
 
 新增导入5项、MCP4项、bootstrap和dashboard各1项仅验证注册，未把它们宣称为当前权限前置拒绝证据。模型4项仍仅注册。受控 SensitiveReadAccessService 不证明真实当前角色撤销、网关/PDP或成功写授权。标签域下一批固定拆分尚未合入，完整适用I1–I7仍进行中。
+
+## 标签域实际注册扩展
+
+仅合入 A 固定 `0e23d47`（含 `cff593e`），新增三个真实标签Controller，14个Controller实际注册核对70项独立URL/HTTP方法；另精确核对保留的 `iqc:label:approve` 只有一个POST `/api/iqc/labels/{id}/publish` 注册，未被标签管理覆盖。
+
+原66505终态0，`/tmp/iqc-b-70-mvc-20261028.log.exit` 为0，离线test-compile/surefire完成，fresh专项31项零失败错误跳过。30项受控当前授权拒绝边界同轮回归；标签25项仅实际注册，不冒充网关拒绝或成功写操作授权。标签管理/查看不扩大授权的关系集合证据另见组织六迁移SQL独立验证，仍不替代实际PDP/登录角色验收。无生产源改动。
