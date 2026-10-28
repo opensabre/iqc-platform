@@ -71,7 +71,7 @@ public class ConversationImportController {
 
     /** Imports several TXT files as one traceable business batch. */
     @PostMapping(value = "/batch-import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @ResourcePermission(code = "iqc:conversation:upload", name = "批量上传会话", type = "iqc", description = "批量上传并解析 txt 会话")
+    @ResourcePermission(code = "iqc:conversation:batch-upload", name = "批量上传会话", type = "iqc", description = "批量上传并解析 txt 会话")
     @Audit(operationType = OperationType.IMPORT, description = "批量导入 IQC txt 会话", module = "IQC_CONVERSATION", request = false)
     @RateLimit(sceneCode = "iqc-conversation-batch-import", maxCount = 10, period = 60)
     public Map<String, Object> importBatch(@RequestPart("files") List<MultipartFile> files,
@@ -98,7 +98,7 @@ public class ConversationImportController {
 
     /** Imports TXT entries from one ZIP archive as a single conversation batch. */
     @PostMapping(value = "/zip-import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @ResourcePermission(code = "iqc:conversation:upload", name = "ZIP 批量上传会话", type = "iqc", description = "从 ZIP 包批量导入 txt 会话")
+    @ResourcePermission(code = "iqc:conversation:zip-upload", name = "ZIP 批量上传会话", type = "iqc", description = "从 ZIP 包批量导入 txt 会话")
     @Audit(operationType = OperationType.IMPORT, description = "ZIP 批量导入 IQC 会话", module = "IQC_CONVERSATION", request = false)
     @RateLimit(sceneCode = "iqc-conversation-zip-import", maxCount = 10, period = 60)
     public Map<String, Object> importZip(@RequestPart("file") MultipartFile archive,
@@ -148,7 +148,7 @@ public class ConversationImportController {
 
     /** Accepts one conversation from an upstream system using a JSON contract. */
     @PostMapping(value = "/ingest", consumes = MediaType.APPLICATION_JSON_VALUE)
-    @ResourcePermission(code = "iqc:conversation:upload", name = "接口接入会话", type = "iqc", description = "通过接口传入单条会话")
+    @ResourcePermission(code = "iqc:conversation:ingest", name = "接口接入会话", type = "iqc", description = "通过接口传入单条会话")
     @Audit(operationType = OperationType.CREATE, description = "接口接入 IQC 会话", module = "IQC_CONVERSATION", request = false, response = false)
     @RateLimit(sceneCode = "iqc-conversation-ingest", maxCount = 120, period = 60)
     public Map<String, Object> ingest(@RequestBody ConversationIngestRequest request) {
@@ -157,7 +157,7 @@ public class ConversationImportController {
 
     /** Accepts several complete conversations while isolating validation failures per item. */
     @PostMapping(value = "/ingest-batch", consumes = MediaType.APPLICATION_JSON_VALUE)
-    @ResourcePermission(code = "iqc:conversation:upload", name = "批量接口接入会话", type = "iqc", description = "通过接口批量传入会话")
+    @ResourcePermission(code = "iqc:conversation:batch-ingest", name = "批量接口接入会话", type = "iqc", description = "通过接口批量传入会话")
     @Audit(operationType = OperationType.CREATE, description = "批量接口接入 IQC 会话", module = "IQC_CONVERSATION", request = false, response = false)
     @RateLimit(sceneCode = "iqc-conversation-ingest-batch", maxCount = 30, period = 60)
     public Map<String, Object> ingestBatch(@RequestBody ConversationIngestBatchRequest request) {

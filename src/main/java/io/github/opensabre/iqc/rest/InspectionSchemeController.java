@@ -75,11 +75,11 @@ public class InspectionSchemeController {
 
     @GetMapping("/{id}/versions")
     @Operation(summary="查看专家发布历史", description="按版本倒序，每次最多 20 个；使用正版本号游标读取更早标准，停用历史仍可读，不改变可用版本")
-    @ResourcePermission(code="iqc:scheme:manage", name="维护业务方案", type="iqc", description="查询业务方案草稿")
+    @ResourcePermission(code="iqc:scheme:versions:view", name="维护业务方案", type="iqc", description="查询业务方案草稿")
     @Audit(operationType=OperationType.QUERY,description="读取专家方案历史",module="IQC_PRIVACY",request=false,response=false,key="#id")
     public ExpertHistoryRead history(@PathVariable String id,
                                                           @RequestParam(required=false) Integer beforeVersion) {
-        var access=access("iqc:scheme:manage");var history=schemes.history(id,beforeVersion);
+        var access=access("iqc:scheme:versions:view");var history=schemes.history(id,beforeVersion);
         return new ExpertHistoryRead(history.versions().stream().map(row->projection.releasedScheme(id,row,access)).toList(),history.nextBeforeVersion());
     }
 

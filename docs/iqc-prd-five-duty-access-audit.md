@@ -59,3 +59,13 @@
 ## 结果端点同码复查（2026-10-28）
 
 继续沿原资源模型修复 result:view 在结果列表/单条详情/任务汇总/标签列表/标签分布/批次会话/层级结果/会话全历史/反馈列表间的冲突，保留原 view 给 GET /api/iqc/results。其余分别为 result:detail:view、summary:view、labels:view、label-insights:view、conversation:view、hierarchy:view、conversation-history:view、feedback:view；export 保留普通结果导出，标签导出使用 result:labels:export。每个读取和导出沿原敏感前置检查对应新码，导出仍要求完整会话和PII，组织范围与业务结果独立端点不变。配套组织 V20261028_03 继承旧有效授权并保留原ID/状态；真实SQL/HTTP及源副本敏感字段验证仍待。没有为修复注册新增查询服务/存储模型。
+
+
+## 会话端点同码复查（2026-10-28）
+
+原 conversation:view 保留列表，详情与 API统计分别为 conversation:detail:view / conversation:api-stats:view；详情保持预览投影，统计也检查当前资源。完整会话和PII入口继续原 view+对应敏感权限的复合要求。原 conversation:upload 保留单TXT导入，批TXT/ZIP/单JSON/批JSON分别使用 conversation:batch-upload、zip-upload、ingest、batch-ingest。沿原已处理会话解析和导入服务，不新增语音处理或并行入口；TaskTriggerService 内嵌已处理内容原 upload 复合授权保持。配套 V20261028_04 按原有效资源关系迁移，不授予敏感权限或扩大组织范围；导入侧此批仅拆分网关资源声明，不能声称已证明真实网关拒绝。
+
+
+## MCP、专家历史和基础状态同码复查（2026-10-28）
+
+复用原资产/方案/总览服务，不新建API或权限模型。mcp:manage保创建，更新/启用/停用分别为mcp:update/enable/disable；scheme:manage保草稿列表，专家历史为scheme:versions:view且原敏感读取前置同码；dashboard:view保总览，基础状态为bootstrap:view。配套V20261028_05按原ACTIVE资源已有角色关系继承，保留原ID/状态与新环境PENDING策略，不默认给额外角色/用户授权。MCP与bootstrap此批仅修资源注册，真实网关正反授权待验；方案历史仍按原数据范围及敏感投影读取。
