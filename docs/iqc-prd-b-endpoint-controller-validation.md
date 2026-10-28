@@ -23,3 +23,11 @@ B 在风险证据固定提交 `3c988df` 后合入 A 固定 `258138c`，包含模
 旧测试按实际接口职责分别使用 task:executions:view、result:hierarchy:view、result:conversation-history:view，业务返回/投影断言保持。既有业务结果 MVC 两场景及空 hierarchy 返回契约同轮回归通过。
 
 证明范围：MVC 注册和受控当前授权失败时的调用边界。未证明登录令牌/PDP/Feign/网关、真实角色、成功写操作授权、审计切面或全部 IQC Controller 资源唯一性；其它重复资源码仍按正式权限审查文档推进。风险纯领域/复核回归通过不替代风险归因完整 SQL/生产 trace 验证。完整适用 I1–I7 保持进行中，无推送/部署/共享 SQL/框架修改。
+
+## 会话与资产历史扩展
+
+固定基线 `be37ff5`（合入 A `e1142fd`），扩展原专项至 11 个真实 Controller、45 项独立契约。新增已处理会话查询/导入、MCP 创建修改启停、方案草稿/历史、总览及基础状态；沿用实际 MVC 与框架 MappingInfoHandler，每个 code 精确一个 URL/HTTP 方法。Dashboard 仅注册，依赖未调用。
+
+原进程 18580 终态 0，`/tmp/iqc-b-45-mvc-20261028.log.exit` 为 0，离线 `test-compile surefire:test`，fresh EndpointPermissionSplitTest 共 31 项、零失败错误跳过：注册 1 项检查45契约，当前授权拒绝30项（原25项加会话3项、方案草稿/历史2项）。拒绝时核对精确自身资源码，业务服务及usage无交互。
+
+新增导入5项、MCP4项、bootstrap和dashboard各1项仅验证注册，未把它们宣称为当前权限前置拒绝证据。模型4项仍仅注册。受控 SensitiveReadAccessService 不证明真实当前角色撤销、网关/PDP或成功写授权。标签域下一批固定拆分尚未合入，完整适用I1–I7仍进行中。

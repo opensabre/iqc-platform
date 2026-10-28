@@ -56,6 +56,22 @@ class EndpointPermissionSplitTest {
         iqc:result:feedback:view|GET|/api/iqc/quality-operations/feedback
         iqc:result:export|GET|/api/iqc/results/export
         iqc:result:labels:export|GET|/api/iqc/tasks/{id}/label-results/export
+        iqc:conversation:view|GET|/api/iqc/conversations
+        iqc:conversation:detail:view|GET|/api/iqc/conversations/{id}
+        iqc:conversation:api-stats:view|GET|/api/iqc/conversations/api-stats
+        iqc:conversation:upload|POST|/api/iqc/conversations/import
+        iqc:conversation:batch-upload|POST|/api/iqc/conversations/batch-import
+        iqc:conversation:zip-upload|POST|/api/iqc/conversations/zip-import
+        iqc:conversation:ingest|POST|/api/iqc/conversations/ingest
+        iqc:conversation:batch-ingest|POST|/api/iqc/conversations/ingest-batch
+        iqc:mcp:manage|POST|/api/iqc/agent-assets/mcps
+        iqc:mcp:update|PUT|/api/iqc/agent-assets/mcps/{id}
+        iqc:mcp:enable|POST|/api/iqc/agent-assets/mcps/{id}/enable
+        iqc:mcp:disable|POST|/api/iqc/agent-assets/mcps/{id}/disable
+        iqc:scheme:manage|GET|/api/iqc/schemes
+        iqc:scheme:versions:view|GET|/api/iqc/schemes/{id}/versions
+        iqc:dashboard:view|GET|/api/iqc/dashboard
+        iqc:bootstrap:view|GET|/api/iqc/bootstrap
         """;
     private SensitiveReadAccessService sensitive;
     private List<Object> services;
@@ -71,19 +87,31 @@ class EndpointPermissionSplitTest {
         var reports=mock(BusinessQualityReportService.class);var labelReviews=mock(LabelResultReviewService.class);
         var samples=mock(BusinessReviewSampleService.class);var models=mock(IqcModelProfileService.class);
         var connections=mock(ModelConnectionTestService.class);
-        services=List.of(usage,tasks,executions,batch,hierarchy,labels,exports,reviews,skills,quality,reports,labelReviews,samples,models,connections);
+        var conversations=mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class);
+        var parser=mock(io.github.opensabre.iqc.conversation.TxtConversationParser.class);
+        var imports=mock(io.github.opensabre.iqc.conversation.ConversationImportService.class);
+        var mcps=mock(io.github.opensabre.iqc.mcp.IqcMcpServerService.class);
+        var schemes=mock(io.github.opensabre.iqc.scheme.InspectionSchemeService.class);
+        var publication=mock(io.github.opensabre.iqc.scheme.SchemePublicationService.class);
+        var schemeTasks=mock(io.github.opensabre.iqc.scheme.SchemeTaskService.class);
+        services=List.of(conversations,parser,imports,mcps,schemes,publication,schemeTasks,usage,tasks,executions,batch,hierarchy,labels,exports,reviews,skills,quality,reports,labelReviews,samples,models,connections);
         controllers=List.of(new InspectionTaskController(tasks,usage,sensitive,projection),
             new InspectionResultController(executions,usage,batch,hierarchy,labels,exports,reviews,sensitive,projection),
             new IqcSkillController(skills,sensitive,projection),
             new QualityOperationsController(quality,reviews,reports,labelReviews,samples,sensitive,projection),
-            new IqcModelProfileController(models,connections));
+            new IqcModelProfileController(models,connections),
+            new ConversationQueryController(conversations,sensitive),
+            new ConversationImportController(parser,imports,usage,new io.github.opensabre.iqc.conversation.ConversationUploadProperties()),
+            new IqcMcpServerController(mcps),new IqcBootstrapController(usage),
+            new InspectionSchemeController(schemes,publication,schemeTasks,sensitive,projection),
+            new IqcDashboardController(null,null,null,null,labels));
     }
-    @Test void registrationContainsExactlyOneExpectedEndpointForEachOf29Capabilities(){
+    @Test void registrationContainsExactlyOneExpectedEndpointForEachOf45Capabilities(){
         var mvc=MockMvcBuilders.standaloneSetup(controllers.toArray()).build();
         var mapping=mvc.getDispatcherServlet().getWebApplicationContext().getBean(RequestMappingHandlerMapping.class);
         var handler=new MappingInfoHandler();ReflectionTestUtils.setField(handler,"requestMappingHandlerMapping",mapping);
         var snapshot=handler.getMappingInfo();
-        var expected=MANIFEST.lines().filter(line->!line.isBlank()).toList();assertEquals(29,expected.size());
+        var expected=MANIFEST.lines().filter(line->!line.isBlank()).toList();assertEquals(45,expected.size());
         for(String line:expected){
             var fields=line.split("\\|");var matches=snapshot.stream().filter(row->fields[0].equals(row.getCode())).toList();
             assertEquals(1,matches.size(),fields[0]);var row=matches.getFirst();
@@ -91,7 +119,9 @@ class EndpointPermissionSplitTest {
         }
         verifyNoInteractions(services.toArray());
     }
-    static Stream<String> guardedCapabilities(){return MANIFEST.lines().filter(line->!line.isBlank()).map(line->line.split("\\|")[0]).filter(code->!code.startsWith("iqc:model:"));}
+    static Stream<String> guardedCapabilities(){return MANIFEST.lines().filter(line->!line.isBlank()).map(line->line.split("\\|")[0]).filter(code->!code.startsWith("iqc:model:")&&!code.startsWith("iqc:mcp:")
+            &&!code.equals("iqc:bootstrap:view")&&!code.equals("iqc:dashboard:view")
+            &&(!code.startsWith("iqc:conversation:")||Set.of("iqc:conversation:view","iqc:conversation:detail:view","iqc:conversation:api-stats:view").contains(code)));}
     @ParameterizedTest @MethodSource("guardedCapabilities")
     void revokedOrUnrelatedGrantCannotReachOwningService(String code) throws Exception {
         // All requests, including an implementation accidentally checking the old code, fail.
