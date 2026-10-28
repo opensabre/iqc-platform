@@ -7,3 +7,11 @@
 先让会话API统计成功返回，再把当前授权降为旧conversation:view，第二次读取被拒，组织当前投影重新查询两次，未再次调用业务查询。其余十组覆盖旧码、ADMIN缺少精确基础码、过期/未来证据、停用账号、稳定ID不匹配、用户名变化、group变化、原all范围撤销与缺少组织响应；全部在业务查询前拒绝。每组确认当前认证与UserContext不变，且未调用后台schedulerAccess入口。
 
 本次补齐应用内多服务组合边界，未把SensitiveReadAccessService直接mock为拒绝。组织返回仍为受控响应，未执行Feign HTTP、组织数据库、网关/PDP或真实登录。只直接验证统计入口；不能推断全部Controller成功路径及写权限。完整适用PRD I1–I7仍待逐项验收，不包含语音转换。
+
+## 签名Feign HTTP组合
+
+基线6019c51，新增CurrentConversationAccessFeignTest，真实应用授权链通过生产IqcOrganizationClient接口、SpringMvcContract、FeignInternalTokenInterceptor和内部签名组件访问本机127.0.0.1临时HTTP服务。用户查询与当前授权查询均逐请求校验GET路径、目标base-organization签名、调用方Authorization及伪造身份头清除。原网关入站用户令牌派生为iqc-platform用户身份、hop2、新tokenId及原parentTokenId，原入站claims不变。服务端以当前时间返回新授权投影，首次统计成功后改为旧conversation:view，后续实际HTTP读取投影后拒绝，业务query不再调用。
+
+原7571编译失败为测试decoder泛型推断，改用JavaType；原76475完成编译后测试退出1，仅两个HTTP测试因沙箱禁止bind。未把失败算通过。源码未再变化，原2393在允许loopback绑定的环境仅重跑surefire终态0，/tmp/iqc-b-current-feign-chain-loopback-20261028.log.exit为0，fresh新HTTP1+原HTTP1+应用内11=13项全部通过。
+
+HTTP服务端和业务查询仍为夹具，Feign decoder显式按接口返回类型解码data；未运行组织Controller/数据库、生产默认Decoder配置、真实网关或登录鉴权。该证据补应用到签名HTTP的组合，不代替完整部署验收。服务退出finally停止本机server并清理用户上下文，无共享服务/数据操作。
