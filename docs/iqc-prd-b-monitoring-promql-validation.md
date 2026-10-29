@@ -7,3 +7,14 @@
 通过SSH将本地JSON（YAML兼容）送入docker exec -i opensabre-prometheus /bin/promtool test rules /dev/stdin，不写远端文件、规则、配置。原46925 terminal0，/tmp/iqc-b-monitoring-promtool.log.exit=0，SUCCESS。两组共12条表达式检查：双实例共享任务快照7不是14；完成600轮/300=2不是4；历史未测量4不是8；真实调用在途2+3=5；健康min=0、年龄max=30；外应用及评测状态不污染生产；完全缺测保持空vector不制造0。
 
 这是实际PromQL求值引擎+受控时序，不是新应用版本真实scrape，也不证明所有24条查询、真实Feign/PDP或容量。当前线上新指标无样本的原因仍须核对部署版本/采集，不擅改服务。
+
+
+## 2026-10-29 现网只读采集复核
+
+SSH原62777 docker ps terminal0：IQC API容器4f664ad1f6d4运行10小时，管理端013f994713f7与组织79e7e84bb346运行3周；不从镜像ID推断源码提交。未部署、未更改采集配置/凭据或数据库。
+
+原13657查询现有Prometheus /api/v1/targets成功，七目标均up。原28391再次成功核对，IQC目标标签为application=iqc-platform、instance=iqc-platform:18080、job=opensabre-applications，lastScrape=2026-10-29T13:08:01.052829483Z、lastError为空；其余六目标up。
+
+原5086通过同一Prometheus实际执行 `count by (__name__) ({__name__=~"iqc_(task|pipeline|model).*",application="iqc-platform"})`，返回status=success、result为空（0个指标族）。该查询覆盖上文新增任务/流水线/模型指标名称前缀，目标标签核对排除本次application拼写不匹配。结论仅为查询时刻无匹配即时样本，不意味着任务计数为0，也不证明根因必然是旧镜像；条件启用、注册与运行配置尚需调查。不得把UP或历史promtool受控求值当新指标真实采集通过。
+
+完整24条固定查询、真实业务样本与时序仍未验收；后续应先核对当前部署版本和指标注册条件，准备可审阅的部署差异后再执行授权范围内动作。此复核全程只读。
