@@ -79,3 +79,57 @@
 ## 规则与智能体最后五组同码复查（2026-10-28）
 
 QualityConfig 与模板物化仍共用agent:view/approve与rule:view/manage/approve。沿原Controller及组织资源模型拆分16个端点：Agent历史/比较/效果与驳回，规则历史/提交/新版本与驳回，规则集列表/历史/创建/新版本/提交/批准/驳回，以及模板物化。原Agent/规则列表、创建规则、Agent/规则批准保留原码；approve派生端点只继承原approve关系，manage派生只继承原manage，模板物化仍由原rule:manage派生，不从只读template:view授予。配置响应敏感前置同步自身新码；模板物化本批仅修网关注册声明。配套V20261028_07保旧ID/状态及ACTIVE显式关系，新环境缺失原资源保持PENDING。原审批状态/组织数据范围/服务逻辑不改，无新模型、用户、租户或平行RBAC。静态字符串复查与实际全Controller注册/PDP证明分别记录，不能互相代替。
+
+
+## 五职责组织库只读快照（2026-10-29）
+
+本批没有执行迁移、DDL/DML、角色或账号授权变更。SSH读取运行容器清单后，在源码
+`base-organization/src/main/resources/application.yml` 第38行指定的默认库
+`os_base_organization` 中使用 `START TRANSACTION READ ONLY` 查询角色、关系计数与资源状态。
+不读取账号名称、个人身份或逐用户角色明细；凭据仅在原MySQL容器内部使用，不输出或写入文件。
+
+原59400 terminal0，`/tmp/iqc-org-role-readonly-audit-20261029.exit=0`；
+原24555 terminal0，`/tmp/iqc-org-role-readonly-detail-20261029.exit=0`。
+首轮客户端未显式指定UTF-8，中文名称显示问号，不能引用该轮中文名称；第二轮显式utf8mb4
+核对名称和资源范围。角色code、计数及状态使用原查询实际结果，不根据中文标签推导职责。
+
+| 现有角色code | 用户角色关系数 | IQC菜单关系数 | IQC API ACTIVE / PENDING / STALE关系数 |
+| --- | ---: | ---: | --- |
+| IQC_ADMIN | 3 | 65 | 45 / 7 / 7 |
+| IQC_QUALITY_MANAGER | 1 | 37 | 37 / 7 / 0 |
+| IQC_INSPECTOR | 1 | 24 | 18 / 3 / 0 |
+| IQC_VIEWER | 1 | 18 | 14 / 3 / 0 |
+| ADMIN | 25 | 0 | 1 / 0 / 0 |
+| DEV | 2 | 0 | 0 / 0 / 0 |
+
+这里计数的是关系，不代表互斥岗位或不同自然人。资源严格限定
+`application=iqc-platform, product_code=iqc`；该库全部IQC资源按状态为45 ACTIVE、8 PENDING、7 STALE。
+不能把非ACTIVE关系算作已可调用能力，也不能把菜单可见性算作API授权。
+ADMIN的一条既有IQC关系具体是`iqc:agent:manage` ACTIVE；本批记录现状，不自动撤回或扩展它。
+DEV名为“开发人员”，但没有IQC菜单/API关系，不能把名称直接当作模型/算法工程师已经交付。
+
+选取的能力中，方案创建/发布和任务执行在IQC_ADMIN与IQC_QUALITY_MANAGER有ACTIVE关系；
+标签值裁决在这两个角色有ACTIVE关系。IQC_INSPECTOR有任务执行及业务结果读取，但选取的裁决能力
+没有ACTIVE关系，不能以“质检员”名称证明PRD人工复核职责。`iqc:review:create/view/decide`
+资源为PENDING；`iqc:report:view`的既有角色关系为PENDING；model/skill原manage在IQC_ADMIN为STALE。
+这些是升级前基线事实，不能据此判断尚未部署的新源码错误，也不能以草稿中新增资源码替代线上激活验收。
+
+### 部署和职责映射的后续要求
+
+1. 复用原角色配置页/API表达五类职责，保留历史角色ID、代码和既有关系；不能将VIEWER当工程师，
+   也不能直接把现有DEV用户统一授予IQC。实际用户的职责组合与所属组织需要单独核对。
+2. 质检管理员保方案/任务/评分配置；业务管理员组合团队报表/风险/整改读取，不能因此得到模型写入或裁决；
+   质检员需要真实可用的复核/修正/申诉/证据能力；模型工程师组合模型/Prompt/Skill/数据集/Benchmark；
+   系统管理员继续原组织/RBAC、连接、审计与配置。单租户边界不增加租户主数据模型。
+3. API/menu迁移与对应源码部署后，按新资源实际ACTIVE状态、显式角色关系、菜单树和fresh当前授权逐项验收。
+   缺失或PENDING/STALE保留原组织审批流程，不用数据库全量激活、全角色授权或全局ADMIN来使页面通过。
+4. 数据范围仍按`IqcDataScope`原实现：可信ADMIN/SUPER_ADMIN或`iqc:result:all`提供all读取，
+   其余按当前组织group及owner；例外发布的可信管理员检查另行保持。此处不是改变数据范围规则的授权。
+
+### 证据边界
+
+这是指定组织库的只读配置快照，不是五职责登录验收。容器直接配置键中未发现datasource schema，
+按容器IP查询数据库连接未返回映射，未继续读取Nacos凭据；因此未证明运行服务最终解析的数据源与本库绑定。
+即使后续确认同库，也仍须真实网关/PDP、同组/跨组、敏感正文及成功写/撤权请求。
+本批没有查询JWT、发登录令牌、读取个人账号或运行测试；不将关系计数替代这些行为证据。
+完整适用I1–I7继续进行。
