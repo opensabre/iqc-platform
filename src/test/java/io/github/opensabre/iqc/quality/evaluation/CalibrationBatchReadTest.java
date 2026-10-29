@@ -42,7 +42,7 @@ class CalibrationBatchReadTest {
         var entries=new ArrayList<NodeConfidenceMetrics.Node>();
         for(String node:nodes) {
             long[] counts=new long[10],correct=new long[10];counts[0]=1;correct[0]=1;
-            var artifact=EmpiricalConfidenceCalibration.fit(new EmpiricalConfidenceCalibration.Source(taskId,execution.getId(),"a".repeat(64),"b".repeat(64),"c".repeat(64),node,"d".repeat(64),"QUALITY_HIT"),1,1,counts,correct);
+            var artifact=EmpiricalConfidenceCalibration.fit(new EmpiricalConfidenceCalibration.Source(taskId,execution.getId(),"a".repeat(64),"b".repeat(64),"c".repeat(64),node,"d".repeat(64),"QUALITY_HIT","e".repeat(64),"deployment-one"),1,1,counts,correct);
             entries.add(new NodeConfidenceMetrics.Node(node,"LLM","1","QUALITY_HIT",null,artifact));
         }
         when(report.nodeConfidenceMetrics()).thenReturn(new NodeConfidenceMetrics.Summary("iqc-node-confidence-diagnostics-v1",entries));

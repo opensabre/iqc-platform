@@ -61,7 +61,7 @@ class FeedbackPrivacyTest {
         var posted=controller.feedback("result-1",new QualityOperationsController.FeedbackRequest("CORRECT",source.getComment(),source.getEvidenceJson()));
         assertFalse(posted.getComment().contains("13812345678"));
         assertFalse(controller.feedbacks("result-1",null).getFirst().getEvidenceJson().contains("13812345678"));
-        verify(grants).current(Set.of("iqc:result:feedback")); verify(grants).current(Set.of("iqc:result:view"));
+        verify(grants).current(Set.of("iqc:result:feedback")); verify(grants).current(Set.of("iqc:result:feedback:view"));
         verify(service).feedback("result-1","CORRECT",source.getComment(),source.getEvidenceJson());
         assertEquals(row().getComment(),source.getComment());
     }

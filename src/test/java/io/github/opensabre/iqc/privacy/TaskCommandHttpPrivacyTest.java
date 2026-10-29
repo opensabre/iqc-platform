@@ -66,7 +66,7 @@ class TaskCommandHttpPrivacyTest {
                 .andExpect(header().string("Cache-Control","private, no-store")).andReturn().getResponse().getContentAsString();
         assertFalse(deleted.contains("private-"));
         verify(executions,times(2)).executeAsync("t","e");verify(usage,times(2)).record(any());verify(tasks).deleteTerminal("t");
-        verify(grants).current(Set.of("iqc:task:create"));verify(grants).current(Set.of("iqc:task:cancel"));verify(grants,times(4)).current(Set.of("iqc:task:execute"));verify(grants).current(Set.of("iqc:task:delete"));
+        verify(grants).current(Set.of("iqc:task:create"));verify(grants).current(Set.of("iqc:task:cancel"));verify(grants).current(Set.of("iqc:task:execute"));verify(grants).current(Set.of("iqc:task:pause"));verify(grants).current(Set.of("iqc:task:resume"));verify(grants).current(Set.of("iqc:task:priority"));verify(grants).current(Set.of("iqc:task:delete"));
         assertEquals(original,json.writeValueAsString(row));
     }
     @ParameterizedTest @CsvSource({"false,false","false,true","true,false","true,true"})

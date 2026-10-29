@@ -17,7 +17,7 @@ class InspectionSchemeControllerTest {
     void ordinaryUseAndExpertPublicationHaveSeparatePermissions() throws Exception {
         assertThat(permission("templates", String.class, Integer.class)).isEqualTo("iqc:scheme:view");
         assertThat(permission("drafts")).isEqualTo("iqc:scheme:manage");
-        assertThat(permission("history", String.class, Integer.class)).isEqualTo("iqc:scheme:manage");
+        assertThat(permission("history", String.class, Integer.class)).isEqualTo("iqc:scheme:versions:view");
         assertThat(permission("task", String.class, int.class, InspectionSchemeController.TaskRequest.class)).isEqualTo("iqc:scheme:use");
         assertThat(permission("publish", String.class, InspectionSchemeController.PublishRequest.class)).isEqualTo("iqc:scheme:publish");
         assertThat(permission("trial", String.class, InspectionSchemeController.TrialRequest.class)).isEqualTo("iqc:scheme:trial:create");
@@ -25,7 +25,7 @@ class InspectionSchemeControllerTest {
                 .map(m -> m.getAnnotation(ResourcePermission.class)).filter(java.util.Objects::nonNull)
                 .map(ResourcePermission::code).toList();
         assertThat(codes).hasSize(10);
-        assertThat(codes.stream().distinct().toList()).hasSize(9); // History reuses expert maintenance authorization.
+        assertThat(codes.stream().distinct().toList()).hasSize(10); // Version history has its own resource identity.
     }
 
     @Test

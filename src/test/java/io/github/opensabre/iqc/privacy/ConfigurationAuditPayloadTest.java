@@ -36,7 +36,11 @@ class ConfigurationAuditPayloadTest {
         var versions = mock(io.github.opensabre.iqc.rule.dao.QualityRuleVersionMapper.class);
         var service = new io.github.opensabre.iqc.rule.QualityRuleService(rules, versions,
                 new com.fasterxml.jackson.databind.ObjectMapper());
-        var controller = new QualityConfigController(null, null, service, null, null);
+        var access = mock(SensitiveReadAccessService.class);
+        when(access.current(java.util.Set.of("iqc:rule:manage"))).thenReturn(new SensitiveReadAccessService.Access(
+                "test",true,true,true,java.time.Instant.now()));
+        var controller = new QualityConfigController(null, null, service, null, null, access,
+                new ResultReadProjection(new com.fasterxml.jackson.databind.ObjectMapper()));
         var request = new QualityConfigController.RuleRequest("Name", "code", "CUSTOM", ruleType,
                 "ALL", SECRET + "[", null, 10, "LOW", false);
         var method = QualityConfigController.class.getMethod("createRule", QualityConfigController.RuleRequest.class);

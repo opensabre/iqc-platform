@@ -227,6 +227,7 @@ class JointLabelMaterializationTransactionTest {
                 """);
         jdbc.execute("""
                 CREATE TABLE iqc_inspection_task (
+                  bulk_parent_task_id varchar(64), bulk_shard_no int, bulk_progress_json clob,
                   retry_policy_json clob, retry_policy_hash varchar(128), automatic_retry_enabled boolean,
                   retry_not_before_utc timestamp, retry_error varchar(128), event_subscription_id varchar(128),
                   event_subscription_revision_id varchar(128), trigger_source varchar(128), trigger_event_id varchar(128),
@@ -248,7 +249,7 @@ class JointLabelMaterializationTransactionTest {
         jdbc.execute("""
                 CREATE TABLE iqc_task_execution (
                   id varchar(64) PRIMARY KEY, task_id varchar(64), attempt_no int, status varchar(32),
-                  processed_messages int, failed_messages int, error_message varchar(1000),
+                  completed_at_utc timestamp, processed_messages int, failed_messages int, error_message varchar(1000),
                   created_by varchar(128), created_time timestamp, updated_by varchar(128), updated_time timestamp)
                 """);
         jdbc.execute("""
@@ -610,6 +611,7 @@ class JointLabelMaterializationTransactionTest {
 
     private static java.util.Set<String> httpWorkflowResources() {
         return java.util.Set.of("iqc:result:view","iqc:result:business:view","iqc:task:view",
+                "iqc:task:detail:view","iqc:result:labels:view","iqc:scheme:view","iqc:scheme:publish",
                 "iqc:task:execute","iqc:task:create","iqc:scheme:trial:create","iqc:scheme:use");
     }
 

@@ -18,6 +18,17 @@ class BusinessReviewControllerTest {
     private final QualityOperationsController controller = new QualityOperationsController(legacy, business, reports, labels, null,
             grants, new io.github.opensabre.iqc.privacy.ResultReadProjection(new com.fasterxml.jackson.databind.ObjectMapper()));
     @org.junit.jupiter.api.BeforeEach void responseFixtures() {
+        // Controllers project stored review responses; routing mocks must return real domain rows.
+        var labelRow=new io.github.opensabre.iqc.quality.model.ResultReview();labelRow.setId("label-review");labelRow.setTargetType("LABEL");
+        var businessRow=new io.github.opensabre.iqc.quality.model.ResultReview();businessRow.setId("business-review");businessRow.setTargetType("BUSINESS");
+        var messageRow=new io.github.opensabre.iqc.quality.model.ResultReview();messageRow.setId("message-review");messageRow.setTargetType("MESSAGE");
+        when(labels.request(anyString(),anyInt(),anyString(),anyString())).thenReturn(labelRow);
+        when(labels.decide(anyString(),anyInt(),anyBoolean(),any(),anyString())).thenReturn(labelRow);
+        when(business.request(anyString(),anyInt(),anyString(),anyString())).thenReturn(businessRow);
+        when(business.request(anyString(),anyInt(),anyString(),anyString(),any(),any())).thenReturn(businessRow);
+        when(business.decide(anyString(),anyInt(),anyBoolean(),anyList(),any(),anyString())).thenReturn(businessRow);
+        when(legacy.requestReview(anyString(),any())).thenReturn(messageRow);
+        when(legacy.decideReview(anyString(),anyString(),anyString(),any(),anyString(),anyString())).thenReturn(messageRow);
         when(grants.current(anySet())).thenReturn(new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access(
                 "test", true, true, false, java.time.Instant.now()));
         when(labels.queue(any(), any(), anyInt(), anyInt())).thenReturn(new io.github.opensabre.iqc.shared.IqcPage<>(List.of(),2,10,0));

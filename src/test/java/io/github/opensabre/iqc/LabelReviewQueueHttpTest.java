@@ -72,6 +72,7 @@ class LabelReviewQueueHttpTest {
     void fixture() {
         jdbc.execute("""
                 CREATE TABLE iqc_inspection_task (
+                  bulk_parent_task_id varchar(64), bulk_shard_no int, bulk_progress_json clob,
                   retry_policy_json clob, retry_policy_hash varchar(128), automatic_retry_enabled boolean,
                   retry_not_before_utc timestamp, retry_error varchar(128), event_subscription_id varchar(128),
                   event_subscription_revision_id varchar(128), trigger_source varchar(128), trigger_event_id varchar(128),
@@ -174,7 +175,7 @@ class LabelReviewQueueHttpTest {
             return Result.success(new IqcOrganizationClient.SchedulerAccess("iqc-scheduler-access-v1",id,
                     "a".equals(id)?"alice":admin?"admin":"other",true,"a".equals(id)?"g1":"g2",
                     admin?java.util.Set.of("ADMIN"):java.util.Set.of(),
-                    java.util.Set.of("iqc:result:business:view","iqc:review:label:queue","iqc:scheme:manage"),java.time.Instant.now()));
+                    java.util.Set.of("iqc:result:business:view","iqc:review:label:queue","iqc:scheme:versions:view"),java.time.Instant.now()));
         });
     }
 

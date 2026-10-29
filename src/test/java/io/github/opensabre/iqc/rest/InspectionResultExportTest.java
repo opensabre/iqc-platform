@@ -21,8 +21,9 @@ class InspectionResultExportTest {
 
     @BeforeEach
     void authorizeSensitiveExport() {
-        when(sensitive.current(java.util.Set.of("iqc:result:export"))).thenReturn(
-                new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test", true, true, false, java.time.Instant.now()));
+        var allowed=new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test",true,true,false,java.time.Instant.now());
+        when(sensitive.current(java.util.Set.of("iqc:result:export"))).thenReturn(allowed);
+        when(sensitive.current(java.util.Set.of("iqc:result:labels:export"))).thenReturn(allowed);
     }
 
     @Test
@@ -36,7 +37,7 @@ class InspectionResultExportTest {
             var permission = method.getAnnotation(ResourcePermission.class);
             var audit = method.getAnnotation(Audit.class);
             assertThat(permission).isNotNull();
-            assertThat(permission.code()).isEqualTo("iqc:result:export");
+            assertThat(permission.code()).isEqualTo(method.getName().equals("exportLabelResults") ? "iqc:result:labels:export" : "iqc:result:export");
             assertThat(audit).isNotNull();
             assertThat(audit.operationType()).isEqualTo(OperationType.EXPORT);
             assertThat(audit.module()).isEqualTo("IQC_RESULT");
@@ -54,8 +55,9 @@ class InspectionResultExportTest {
 
     @Test
     void resultExportsRequireBothFullConversationAndPiiGrantsBeforeReading() {
-        when(sensitive.current(java.util.Set.of("iqc:result:export"))).thenReturn(
-                new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test", false, true, false, java.time.Instant.now()));
+        var denied=new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test",false,true,false,java.time.Instant.now());
+        when(sensitive.current(java.util.Set.of("iqc:result:export"))).thenReturn(denied);
+        when(sensitive.current(java.util.Set.of("iqc:result:labels:export"))).thenReturn(denied);
         assertThatThrownBy(() -> controller.export("t1", null, null, null, null, null, null, null, null, "SCHEME", null))
                 .hasMessageContaining("完整会话");
         assertThatThrownBy(() -> controller.exportLabelResults("t1"))

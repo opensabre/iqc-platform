@@ -40,11 +40,11 @@ class BusinessSummaryPrivacyTest {
         var controller=new InspectionResultController(null,null,batch,null,null,null,null,grants,projection);
         var access=new SensitiveReadAccessService.Access("test",false,false,false,Instant.now());
         when(grants.current(Set.of("iqc:result:business:view"))).thenReturn(access).thenThrow(new IllegalStateException("revoked"));
-        when(batch.businessPage(1,20,null,null,null,null,null)).thenReturn(new IqcPage<>(List.of(),1,20,0));
+        when(batch.businessPage(1,20,null,null,null,null,null,null)).thenReturn(new IqcPage<>(List.of(),1,20,0));
         assertEquals(0,controller.businessResults(1,20,null,null,null,null,null).total());
         assertThrows(IllegalStateException.class,()->controller.businessResults(1,20,null,null,null,null,null));
-        verify(batch,times(1)).businessPage(1,20,null,null,null,null,null);
-        when(grants.current(Set.of("iqc:result:view"))).thenThrow(new IllegalStateException("denied"));
+        verify(batch,times(1)).businessPage(1,20,null,null,null,null,null,null);
+        when(grants.current(Set.of("iqc:result:summary:view"))).thenThrow(new IllegalStateException("denied"));
         assertThrows(IllegalStateException.class,()->controller.batchSummary("task"));verify(batch,never()).summary(anyString());
     }
 }

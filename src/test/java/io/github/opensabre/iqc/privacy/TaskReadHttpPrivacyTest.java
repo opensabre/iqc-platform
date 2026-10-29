@@ -42,7 +42,7 @@ class TaskReadHttpPrivacyTest {
     @ParameterizedTest @CsvSource({"false,false,false","false,false,true","false,true,false","false,true,true","true,false,false","true,false,true","true,true,false","true,true,true"})
     void detailNeedsThreeGrantsButAllListsAndInstancesAlwaysWithholdInputs(boolean full,boolean pii,boolean prompt) throws Exception {
         allow(full,pii,prompt);var source=row();String original=json.writeValueAsString(source);var page=new IqcPage<>(List.of(source),2,3,9);
-        when(tasks.get("b")).thenReturn(source);when(tasks.page(2,3,null,null,null)).thenReturn(page);
+        when(tasks.get("b")).thenReturn(source);when(tasks.page(2,3,null,null,null,null)).thenReturn(page);
         when(periodic.instances("p",2,3)).thenReturn(page);when(events.instances("s",2,3)).thenReturn(page);
         var run=new InspectionTaskService.TaskRunSummary("e",2,"FAILED",0,null,new Date(1700000000000L),true);when(tasks.executions("b")).thenReturn(List.of(run));
         var mvc=mvc();String detail=mvc.perform(get("/api/iqc/tasks/b")).andExpect(status().isOk()).andExpect(jsonPath("$.code").value("000000"))
@@ -67,7 +67,7 @@ class TaskReadHttpPrivacyTest {
         assertEquals(expected,actual);
         assertEquals(run.createdTime().toInstant(),Instant.parse(actual.get(0).path("createdTime").asText()));
         assertEquals(original,json.writeValueAsString(source));
-        verify(grants,times(3)).current(Set.of("iqc:task:view"));verify(grants).current(Set.of("iqc:schedule:instances:view"));verify(grants).current(Set.of("iqc:subscription:instances:view"));
+        verify(grants).current(Set.of("iqc:task:view"));verify(grants).current(Set.of("iqc:task:detail:view"));verify(grants).current(Set.of("iqc:task:executions:view"));verify(grants).current(Set.of("iqc:schedule:instances:view"));verify(grants).current(Set.of("iqc:subscription:instances:view"));
     }
     @Test void countsRemainUnknownForMissingOrDamagedSourcesAndZeroOnlyForKnownEmpty(){
         allow(false,false,false);var access=grants.current(Set.of());var source=row();
