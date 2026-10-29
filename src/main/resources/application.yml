@@ -32,8 +32,8 @@ spring:
     password: ${DATASOURCE_PASSWORD:root123}
   servlet:
     multipart:
-      max-file-size: ${IQC_CONVERSATION_MAX_FILE_SIZE:20MB}
-      max-request-size: ${IQC_CONVERSATION_MAX_REQUEST_SIZE:20MB}
+      max-file-size: ${IQC_UPLOAD_MAX_FILE_SIZE:${IQC_CONVERSATION_MAX_FILE_SIZE:200MB}}
+      max-request-size: ${IQC_UPLOAD_MAX_REQUEST_SIZE:${IQC_CONVERSATION_MAX_REQUEST_SIZE:201MB}}
   security:
     oauth2:
       resourceserver:
@@ -70,6 +70,8 @@ iqc:
     service-id: ${ORGANIZATION_SERVICE_ID:base-organization}
   conversation:
     max-file-size-bytes: ${IQC_CONVERSATION_MAX_FILE_SIZE_BYTES:20971520}
+    audio-directory: ${IQC_AUDIO_DIRECTORY:}
+    max-audio-size-bytes: ${IQC_AUDIO_MAX_SIZE_BYTES:209715200}
   llm:
     provider: ${IQC_LLM_PROVIDER:spring-ai}
     endpoint: ${IQC_LLM_ENDPOINT:}

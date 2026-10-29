@@ -1,0 +1,128 @@
+# 人工复核 V2 实施边界
+
+## 需求与现有能力
+
+依据工作区《IQC智能质检平台_PRD_V1.0.md》13.2/13.3。当前BusinessItemReviewService使用原iqc_result_review，Task行锁、sourceHash、reviewRevision及request/decisionFingerprint约束轮次与重试；BusinessItemReviewEvaluator保留机器投影并重算业务项目裁决。BusinessReviewSampleService将projection.decisions写入候选expectedJson.humanDecisions。LabelResultReviewService另有标签值复核，不能复制第二套标签持久化。
+
+现有业务项目结论改判不能覆盖Finding值/严重度/证据、评分手改、反馈分类、二审仲裁。以下均为待实施需求，不是验收完成声明。
+
+## 分步实施
+
+1. 项目反馈分类：扩展原Decision可选feedbackCategory，原六参数构造与旧JSON保持；空字段不序列化，避免改变旧幂等摘要/历史投影。仅接受PRD七个精确值：AI_FALSE_POSITIVE、AI_FALSE_NEGATIVE、EVIDENCE_WRONG、SCORE_POLICY_WRONG、DATA/ASR_ERROR、RULE_ERROR、BUSINESS_STANDARD_CHANGED。归一化时保留该字段，复算校验/跨轮累计/候选humanDecisions自然沿用，原原因仍必填。UI编辑和历史展示，导出显式列出；不自动从PASS/FAIL猜分类，不把DATA/ASR_ERROR解释为恢复ASR范围。
+2. Finding人工投影：复用冻结FindingDefinition、原Finding/value/evidence校验与原Pipeline决策映射。机器raw Finding/Trace保持独立；人工修改必须带原Finding身份及预期摘要、原因和属于同一冻结输入的证据。保存原/人工有效Finding和对应评分/风险/标签/Review决策，不能冒充原引擎输出或重跑外部Action。需同步历史复算、报告/导出、候选Gold和前端展示。
+3. 分数手改：原冻结评分计算与人工总分分别保留，显式原因/操作者/时间。评分覆盖不得改写机器score，也不能把手改值伪称冻结政策计算。与自动风险/复核决策关系需要在同一投影中明确并审计。
+4. 二审仲裁：先检查原组织角色、队列/派发和复核轮次是否可扩展；不能把再开普通轮次当作二审完成。需要明确阶段、提交人/审理人、结论状态与不可覆盖历史，复用原权限/数据范围及Task锁。若必须新增列或资源，记录现有模型缺口后提供迁移，执行迁移另按既有发布约束。
+
+## 验收边界
+
+每项需覆盖服务/API/UI、冻结来源复算、旧历史/幂等兼容、候选与导出。编译/构建不替代真实队列、角色、并发、数据库与浏览器验收。当前Root不新增或运行测试；另一位开发者按其授权独立验证，仅集成其已提交产物。
+
+## 反馈分类当前实现
+
+后端475d1ae在原Decision增加可选feedbackCategory，旧六参构造保留且null不序列化；只接受上列七个精确值，原必填原因不放宽。归一化复制保留分类，Service原跨轮effective map和已保存Projection复算自然携带；QualityOperationsController直接接收Decision列表，无另一次丢字段映射。BusinessReviewSampleService原humanDecisions整体序列化保留分类。CSV仅有分类时追加“有效裁决反馈分类（可能沿用前轮）”，保持旧无分类导出列结构。
+
+UI27f48b5提供可清空分类选择、提交时仅有值才增加字段、冻结命令用于重试、成功/切结果清空和历史有效项目分类展示。历史缺少decisions数组按损坏处理。前端合入B d3be2d5事实版本类型修正为1eb3232，无框架修改。
+
+backend22842离线skipTests test-compile已terminal exit0；UI44434完整构建仍运行中。上述为代码/编译证据，不是数据库/API/浏览器/Gold审批端到端验收。Finding编辑、人工总分覆盖和二审仲裁仍未实施。
+
+## Finding人工投影内核（待接入服务）
+
+原FindingFusion只表示机器源融合，不能把人工修正写回rawFinding或伪造HUMAN引擎。新增HumanFindingReviewEvaluator是原复核领域的纯投影校验：保留原融合，人工覆盖仅为reviewed列表；原输入先由调用方的现有trace/source校验确认。精确摘要复用SelectorAssetService.hash，指定结果/事实/预期融合摘要后才可改值。每事实一次，状态仅KNOWN/UNKNOWN，原因必填；冻结FindingDefinition约束类型/枚举/允许证据与高风险证据要求。
+
+证据通过保留原融合证据ID及新增冻结消息ID两列表表达，未保留即删除，不接受客户端自造证据详情。新增CONVERSATION证据只从同一冻结消息manifest取坐标，不读取当前会话；不允许跨事实保留证据。人工投影不选中任何机器raw ID，原raw全部保留为rejected，避免把模型校准置信度借给人工结论。该列表不能作为机器Trace提交或通过机器Fusion复算。
+
+此阶段仅内核，尚未接入Service/API/持久投影、评分风险标签重算、候选Gold和UI；不能声称Finding人工编辑已可用。后续须在同一轮复核中保存原/人工Finding及对应决策，继续复用原锁/权限/幂等与历史校验。
+
+人工Finding内核a5aed92离线skipTests test-compile已terminal exit0。后续加入validatedExecutionInput复用原prepare/validateResult取完整冻结manifest；无冻结输入的旧历史拒绝新增证据，不从当前归档合成。evaluatePolicies先沿原BusinessItemReviewEvaluator核对机器融合/项目/评分，再用人工事实调用原PipelineDecisionEvaluator评分、标签投影、风险和Review政策；结果状态复用原助手，V2抽样身份使用原完整冻结input的精确hash。无检测器/Action执行，结果标注为独立PolicyProjection。该入口尚未由复核Service/API调用，不能视作端到端完成。
+
+## Service/API轮次接入
+
+接入沿原`/reviews/{id}/decision`增加可选findingDecisions，保留旧DTO构造/Service入口与无新事实裁决的原指纹算法。每轮保存完整有效Finding修正及项目裁决，先Finding映射再人工项目裁决（项目裁决优先），评分/风险/Review均用最终项目状态；机器评分与原始Trace不变。原Projection增加可空且不序列化的findingReview，历史读取按冻结来源重新计算并比较；跨轮沿用仍明确保留。
+
+新增值树使用局部精确小数解码（检索未发现现成JsonNode精确decoder；不改全局ObjectMapper），Finding历史/原Trace在该路径也精确读取，避免NUMBER/OBJECT的人工值被浮点归一。新增证据和人工项目证据校验以原完整冻结消息ID为准；无冻结输入拒绝新事实修正。CSV追加该轮有效Finding裁决，候选保存人工修正与规范事实/消息证据身份，不携带原检测器payload。标签和风险仅保存人工投影，不触发实际标签更新或任何外部Action。
+
+上述尚待编译/服务API/持久性/权限/浏览器/Gold审核验收；前端Finding编辑与服务上下文读取入口仍待接入，原无Finding人工复核界面保持现有路径。
+
+## 编辑上下文与精确值提交
+
+2e6a207服务/API轮次接入离线skipTests test-compile已terminal exit0。现沿原reviews查询增加`view=FINDING_CONTEXT,targetType=BUSINESS,resultId=...`，复用iqc:review:view与原数据范围，REPEATABLE_READ无写锁；返回服务器计算的原事实摘要、冻结消息、原证据身份及最近有效Finding修正。非流水线或无生产冻结输入返回available=false，损坏来源仍拒绝，不读当前消息合成上下文。
+
+新findingDecisions请求指纹改用原Selector精确摘要，旧无Finding请求继续原算法。客户端可用valueJson原文提交，服务端精确解析后归一为value，拒绝双值与尾随JSON；旧原生value与构造仍兼容。复用NumericPredicate的38位/18小数范围限制，拒绝异常指数；人工OBJECT最多32层、10000节点和100000字符，避免精确摘要展开异常数值或无限文本。不修改全局JSON或全局hash。
+
+前端独立HumanFindingReviewEditor接原BusinessReviewPanel命令冻结/重试，支持KNOWN/UNKNOWN、JSON原文、严重度、保留/删除原证据、补充冻结消息、必填原因；当前值由服务端以字符串返回，浏览器不重新序列化小数。历史提供原保存JSON全文以保留精确值，原机器与人工项目/分数分列仍保留。以上待本轮构建、API/DB/浏览器验收，未部署；人工总分与二审仲裁继续。
+
+## 人工改分复用与基准规则（实施前）
+
+已检查QualityOperationsService.decideReview：既有消息复核支持0..100整数finalScore，ResultReview同一表已有审核人/时间/原因；业务复核是独立小数投影，不能把人工小数截断写回旧整数字段。扩展原BusinessItemReviewEvaluator/Projection与同一ResultReview JSON，复用原轮次、权限和审计，不新增评分表或第二套记录。
+
+人工改分命令须包含sourceResultId、当前计算评分的精确摘要、0..100且最多2位小数的字符串、必填原因。保留机器分数、项目/Finding重算分数及人工数字覆盖三者身份。新提交基准不匹配拒绝；沿用的人工改分遇到后续项目/Finding变化则标为STALE并停止生效，待重新确认，不能静默移植到新计算结果。原计算明细、一票否决和未确认事实保留，单纯改数字不能伪装成公式重算或证据确认。后续需同步Service/API、导出/报告/候选与UI，明确人工分数与计算分数显示；此段为设计边界，尚未实现人工改分流程。
+
+人工改分纯校验已加入原BusinessItemReviewEvaluator（未新增评分类/表）：ScoreAdjustment/ManualScoreProjection保存字符串分数、必填原因与计算摘要，scoringHash复用Selector精确摘要并绑定resultId。新命令基准不符拒绝，继承命令基准不符返回STALE/effectiveScore=null；APPLIED单独提供人工数字，不修改原InspectionScoring.Result、明细、否决或事实完整性。此阶段尚未接Service/API/报告/候选/UI，不能宣称人工改分已可用；仍须显式展示计算与人工分数并完成后续接入。
+
+## 人工改分轮次与界面接入
+
+c5d59ff纯内核离线skipTests test-compile已terminal exit0。原Projection增加可选manualScore，原4/5参构造与null JSON兼容。原decide支持score-only及同轮组合命令，旧无改分分支指纹保持，含改分用exact hash；继承前轮调整由新计算基准决定APPLIED/STALE。历史重算比较manualScore，机器与复核计算Result均不改写。原CSV追加改分状态/有效覆盖分数/原因/基准，候选expected.manualScore保留完整命令与状态；原reviewer/time与不可变轮次保留修改审计。
+
+原reviews查询增加SCORE_CONTEXT，复用原查看权限/数据范围与REPEATABLE_READ，返回当前复核计算摘要、字符串分数及有效/过期调整。原Controller仅在新scoreAdjustment有值时调用新重载，原消息整数finalScore不接业务覆盖，旧DTO构造/调用保留。
+
+ManualScoreReviewEditor接原父级冻结命令与重试，0..100两位小数字符串、必填原因、服务端基准hash、迟到响应隔离；历史人工分数与计算分数分列，STALE不冒充有效分数。当前业务汇总报表仍按计算分数统计，需下一步新增清楚标记的人工覆盖口径，不能把现有reviewed平均分宣称含人工改分。API/数据库/权限/浏览器/Gold审批与完整PRD继续，未部署。
+
+## 汇总报表复用缺口与扩展（实施前）
+
+只读核查BusinessQualityReportService：现有选择只调用SchemeResultEvaluator.definition，Pipeline任务被当旧消息任务拒绝；reviewed分数只含计算结果。必须扩展原report/Group选择模型，不新增统计API或伪造Scheme/Rule。Pipeline release校验复用BusinessItemReviewService原冻结摘要方法，报表内部仅投影评分政策与itemCode/name，增加明确pipelineId；Scheme字段/旧DTO构造/JSON保留。
+
+计算分数与合格率保持现有算法。新增manualOverrides摘要：有效覆盖数、STALE数、有效覆盖均分、有效数字分数数量及均分（同一复核有APPLIED则用人工数字，否则仅取FINAL计算分数）。覆盖均分分母仅APPLIED；有效数字分母不混入缺失/未定计算分数。人工改数字不使原否决或未确认事实消失，因此不从该均分推断新合格率。仍按冻结政策/来源/精确版本/内容分组，沿原范围/500会话/50000项目约束。
+
+## 汇总扩展当前实现
+
+78755后台人工改分服务与56340前端编辑器原handle均terminal exit0。原BusinessQualityReportService接入Pipeline任务（仍拒绝评测/旧消息任务），复用原pipelineRelease校验，不造Scheme/Rule；内部ReportItem只持有展示代码/名称，Pipeline分组额外带pipelineId，精确JSON摘要区分冻结来源/版本/完整内容，Scheme旧分组算法保留。ScoreSummary/PolicyGroup旧构造保留，新可选字段null不序列化。
+
+reviewed.manualOverrides独立提供appliedCount、staleCount、averageOverrideScore、effectiveNumericCount、averageEffectiveScore。基于每个已验证最近完成复核，一次计数；APPLIED优先数字覆盖，否则仅FINAL计算分数纳入有效数字，缺失/待定/不适用不补零；两个均分都以BigDecimal求和并最后一次两位舍入。原计算评分/合格率和项目分母不改。
+
+前端明确显示流水线身份与人工改分独立区，解释两个均分分母及不推断否决/合格率。真实跨任务/版本/执行去重、API/DB/浏览器与候选Gold尚未端到端验收，本批编译/构建结果待记录，未部署。二审仲裁与完整PRD继续。
+
+## 二审/仲裁复用与流程规则（实施前）
+
+检查原ResultReview轮次、BusinessReviewQueueItem/ResultReviewMapper分页、IqcDataScope及framework文件清单，未发现可直接复用的独立工作流/审批引擎；不新增仲裁表或平行待办。沿原reviewedResultJson保存PENDING阶段元数据，完成后保留于Projection.workflow，原空元数据历史视为INITIAL。复用原review:create/review:decide功能权限及任务数据范围，阶段绑定和审理独立性在Service强制，不能靠前端隐藏按钮。
+
+阶段INITIAL→SECOND_REVIEW→ARBITRATION：升级必须引用同result/sourceHash的最近已完成有效轮次，并冻结其ID、revision和完整裁决精确摘要；拒绝跨来源、跳级或篡改上游。审理人须不同于升级申请人及上游审理人；仲裁须核对两层历史，不能由原审理人自仲裁。仲裁完成后同一结果不得再开普通轮次覆盖终局；新的执行结果拥有独立结果ID。退回仍保留不可变历史，可依原最近有效轮次重新提交合适阶段。
+
+后续原request/decision入口、幂等、Task锁、历史复算、队列阶段投影、前端提交与证据/评分/候选/导出均须接入；不把普通再开轮次称为二审。此段为实施规则，当前尚未提供二审/仲裁完整流程。若后续需要专属角色细分，沿原组织资源扩展，不能从canViewAll推断仲裁权限。
+
+## 二审/仲裁服务接入（阶段一）
+
+ac5b7a9阶段内核离线skipTests test-compile已terminal exit0。原request重载支持stage/parentReviewId，保留普通请求的原指纹和DTO构造；升级请求用精确指纹，Task锁下核对最近有效已完成轮次、原sourceHash、上游完整历史投影及阶段。PENDING用原reviewedResultJson冻结阶段，COMPLETED转入可选Projection.workflow；旧空字段历史不增加JSON字段。拒绝状态保留其阶段申请元数据。
+
+原decide校验最多两层上游revision严格递减/阶段/hash，避免循环；二审/仲裁审理人不能是申请人或上游审核人。升级可空裁决明确认可上游，沿用原有效项目/Finding/改分；仍须原因。历史读取重新校验完整链与独立审理，保存/导出/候选保留阶段及parent摘要，仲裁已完成同结果不能重新开普通轮次覆盖。旧请求重试仍返回原收据。
+
+本阶段尚未队列阶段投影/前端提交/阶段历史可视化及真实API/DB/权限/浏览器验收；纯编译不证明端到端可用。不引入平行工作流、表或消息总分覆盖，完整PRD继续。
+
+## 阶段队列与前端接入
+
+62715服务编译原handle已terminal exit0。原分页SQL只增加stage投影：从PENDING/REJECTED申请元数据或COMPLETED.workflow读取阶段，旧空历史为INITIAL，损坏/未知协议为INVALID；scope/count/分页/任务排序逻辑不变，无DDL或迁移执行。BusinessReviewQueueItem旧12参构造保留，显式标记13参canonical自动映射并保持SQL列顺序。
+
+前端普通/二审/仲裁阶段选择只引用最近已完成轮次；普通请求不增加阶段字段，升级冻结stage/parent ID。待办与详情展示阶段和上游，升级支持明确认可上游（原因仍必填）；前端说明独立审核要求，最终权限与链校验在服务端。已完成仲裁隐藏再开入口；损坏阶段显示错误并阻止修改，旧无workflow历史仍正常展示。原项目/Finding/改分裁决与命令重试沿用。
+
+本批待前后端构建；阶段SQL实际MySQL/权限/多账号/队列/浏览器/历史链/Gold端到端仍待，不能以组件代码代替验收。无框架改动/SQL执行/部署，完整PRD继续。
+
+## 队列JSON方言回归修复
+
+协作者原BusinessReviewQueueSqlTest真实H2 Mapper复现`Function "JSON_VALID" not found`，同轮候选9/改分5通过，队列1项报错。三种候选原因中，首先证实MySQL函数依赖；原H2夹具亦无reviewed_result_json，不能通过删除原scope/分页用例或伪造函数绕过。
+
+现原授权分页SQL恢复跨方言查询，只给DTO提供INITIAL中间值；Service在同一REPEATABLE_READ事务内仅批取当前授权页（≤100）的review ID/目标/状态/revision/JSON字段，核对ID/来源/状态一致后由Java计算最终stage。不另扫队列、不先抓全量后过滤、不扩大scope、不改变total/order。COMPLETED只流式读取workflow并skip其他大字段，原业务JSON不返回待办；旧空INITIAL、损坏协议/重复key/尾随JSON/不递减parent轮次INVALID。
+
+当前为修复代码，Root仅编译；原真实H2作用域/分页回归及新Service阶段投影须由B原授权专项反馈，尚未称通过。未改测试夹具/框架/数据库函数，不运行Root测试/SQL/部署。
+
+## 队列阶段投影的数据库兼容修复
+
+2026-10-16：真实H2 Mapper回归确认原JSON_VALID等MySQL函数不可用，最终采用单查询投影，不保留并行的Service页后批取方案。原SQL只增加固定INITIAL及reviewed_result_json作为workflowMetadata输入，scope/count/分页/排序不变；原已有字段不需要迁移。
+
+BusinessReviewQueueItem的14参canonical由MyBatis映射，仅有原始metadata时解析阶段，随后立即清空该输入；该字段@JsonIgnore，响应与record toString不保留原快照。12参旧构造与13参已投影stage构造兼容，JSON往返不重新解释stage。旧空/完成无workflow历史为INITIAL，未知协议或损坏JSON为INVALID，原始输入超过100万字符保守标INVALID；阶段展示不替代服务端的完整来源链/独立审理校验。
+
+本地原handle23676 terminal exit0：Service23、候选9、真实H2 Mapper及DTO往返2共34通过。SQL测试保留权限、分页和执行实例断言，外部连接修改fixture后显式清理MyBatis会话缓存。此结果不证明真实MySQL、网关、浏览器或多账号验收完成；完整PRD继续。
+
+## 队列最终集成选择（2026-10-16）
+
+采用B9765fce已通过34项回归的单查询投影，移除A临时cb8be79的Service页后批取和queueStage；上文该批取段仅为历史尝试，非当前实现。原SQL固定INITIAL中间stage并以独立workflowMetadata列输入14参DTO，canonical只对非null metadata解析，随后强制清空且@JsonIgnore；13参投影stage/12参旧调用与JSON往返保持，原数据不进入响应或toString。原scope/count/分页不变，不使用数据库JSON函数，也不新增二次查询。原Service单查询queue恢复，审计f85e1d9保留。
+
+B23676的真实H2 Mapper/Service/候选34项已通过，Root17762首批审计编译通过；以上不是合并后实际MySQL/API/浏览器验收。合并后编译待记录，全PRD继续。

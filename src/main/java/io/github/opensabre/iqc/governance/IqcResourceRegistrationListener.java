@@ -38,10 +38,21 @@ public class IqcResourceRegistrationListener {
         String application = environment.getProperty("spring.application.name", "iqc-platform");
         String token = environment.getProperty("opensabre.governance.registration-token", "");
         if (token.isBlank()) throw new IllegalStateException("IQC resource registration token is missing");
+        var resources = new java.util.HashSet<>(mappingInfoHandler.getMappingInfo());
+        // Reuse a declared HTTP capability when present; older releases need a background declaration.
+        // Both use the same existing authorization code and never grant roles automatically.
+        if (resources.stream().noneMatch(value -> "iqc:action:enqueue".equals(value.getCode()))) {
+            resources.add(io.github.opensabre.boot.entity.RestMappingInfo.builder()
+                .url("/internal/iqc/actions/enqueue").method("BACKGROUND")
+                .code("iqc:action:enqueue").name("生产动作入队").type("iqc")
+                .description("后台按负责人当前授权将已提交生产结果匹配动作入账，不授予发送权限或自动赋权")
+                .handlerClass(io.github.opensabre.iqc.action.ActionEnqueueService.class.getName())
+                .handlerMethod("enqueue").declaredPermission(true).build());
+        }
         ResourceMappingSnapshot snapshot = ResourceMappingSnapshot.builder()
                 .application(application)
                 .version(OpensabreVersion.getVersion())
-                .resources(mappingInfoHandler.getMappingInfo())
+                .resources(resources)
                 .build();
         Result<IqcOrganizationClient.ResourceRegistrationResult> response = organizationClient.registerResources(
                 application, true, token, snapshot);

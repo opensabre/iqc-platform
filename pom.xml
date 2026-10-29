@@ -35,6 +35,11 @@
     </dependencyManagement>
 
     <dependencies>
+        <!-- External event transport; business acceptance still uses the existing trigger ledger. -->
+        <dependency>
+            <groupId>org.springframework.amqp</groupId>
+            <artifactId>spring-rabbit</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.github.opensabre</groupId>
             <artifactId>opensabre-starter-persistence</artifactId>
@@ -102,6 +107,12 @@
         <dependency>
             <groupId>io.modelcontextprotocol.sdk</groupId>
             <artifactId>mcp-core</artifactId>
+            <version>0.14.0</version>
+        </dependency>
+        <!-- MCP core exposes the JSON SPI; HTTP transports need its matching runtime implementation. -->
+        <dependency>
+            <groupId>io.modelcontextprotocol.sdk</groupId>
+            <artifactId>mcp-json-jackson2</artifactId>
             <version>0.14.0</version>
         </dependency>
         <dependency>

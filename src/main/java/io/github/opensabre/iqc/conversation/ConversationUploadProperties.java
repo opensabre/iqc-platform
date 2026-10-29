@@ -7,5 +7,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @Data
 @ConfigurationProperties(prefix = "iqc.conversation")
 public class ConversationUploadProperties {
+    private String audioDirectory;
+    private long maxAudioSizeBytes = 200L * 1024 * 1024;
     private long maxFileSizeBytes = 20L * 1024 * 1024;
 }

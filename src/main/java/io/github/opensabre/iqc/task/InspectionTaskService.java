@@ -25,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.ArrayList;
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -32,8 +33,11 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
 @Service
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_=@org.springframework.beans.factory.annotation.Autowired)
 public class InspectionTaskService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.selector.SelectorAssetService> selectorAssets;
+
     private final InspectionTaskMapper taskMapper;
     private final ConversationMapper conversationMapper;
     private final QualityAgentMapper agentMapper;
@@ -43,6 +47,61 @@ public class InspectionTaskService {
     private final TaskExecutionMapper executionMapper;
     private final IqcDataScope dataScope;
     private final LabelResolutionService labelResolutionService;
+    private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.selector.ConversationSelectionService> selections;
+    private final io.github.opensabre.iqc.conversation.ProductionInputSnapshotService productionInputs;
+    private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.pipelineasset.PipelineAssetService> pipelineSources;
+    private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.schedule.ScheduledActorAccessService> actionActors;
+
+    private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService> knowledgeInputs;
+
+    private final org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.quality.evaluation.CalibrationTaskSnapshotService> calibrationInputs;
+
+    public InspectionTaskService(InspectionTaskMapper taskMapper,ConversationMapper conversationMapper,QualityAgentMapper agentMapper,
+            QualityRuleMapper ruleMapper,QualityRuleSetService ruleSetService,ObjectMapper objectMapper,TaskExecutionMapper executionMapper,
+            IqcDataScope dataScope,LabelResolutionService labelResolutionService,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.selector.ConversationSelectionService> selections,
+            io.github.opensabre.iqc.conversation.ProductionInputSnapshotService productionInputs,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.pipelineasset.PipelineAssetService> pipelineSources,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.schedule.ScheduledActorAccessService> actionActors,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService> knowledgeInputs) {
+        this(taskMapper,conversationMapper,agentMapper,ruleMapper,ruleSetService,objectMapper,executionMapper,dataScope,
+                labelResolutionService,selections,productionInputs,pipelineSources,actionActors,knowledgeInputs,null);
+    }
+
+    public InspectionTaskService(InspectionTaskMapper taskMapper,ConversationMapper conversationMapper,QualityAgentMapper agentMapper,
+            QualityRuleMapper ruleMapper,QualityRuleSetService ruleSetService,ObjectMapper objectMapper,TaskExecutionMapper executionMapper,
+            IqcDataScope dataScope,LabelResolutionService labelResolutionService,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.selector.ConversationSelectionService> selections,
+            io.github.opensabre.iqc.conversation.ProductionInputSnapshotService productionInputs,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.pipelineasset.PipelineAssetService> pipelineSources,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.schedule.ScheduledActorAccessService> actionActors) {
+        this(taskMapper,conversationMapper,agentMapper,ruleMapper,ruleSetService,objectMapper,executionMapper,dataScope,
+                labelResolutionService,selections,productionInputs,pipelineSources,actionActors,null);
+    }
+
+    public InspectionTaskService(InspectionTaskMapper taskMapper,ConversationMapper conversationMapper,QualityAgentMapper agentMapper,
+            QualityRuleMapper ruleMapper,QualityRuleSetService ruleSetService,ObjectMapper objectMapper,TaskExecutionMapper executionMapper,
+            IqcDataScope dataScope,LabelResolutionService labelResolutionService,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.selector.ConversationSelectionService> selections,
+            io.github.opensabre.iqc.conversation.ProductionInputSnapshotService productionInputs,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.pipelineasset.PipelineAssetService> pipelineSources) {
+        this(taskMapper,conversationMapper,agentMapper,ruleMapper,ruleSetService,objectMapper,executionMapper,dataScope,
+                labelResolutionService,selections,productionInputs,pipelineSources,null);
+    }
+
+    /** Existing direct callers retain their original constructor; Spring uses the full dependency constructor. */
+    public InspectionTaskService(InspectionTaskMapper taskMapper,ConversationMapper conversationMapper,QualityAgentMapper agentMapper,
+            QualityRuleMapper ruleMapper,QualityRuleSetService ruleSetService,ObjectMapper objectMapper,TaskExecutionMapper executionMapper,
+            IqcDataScope dataScope,LabelResolutionService labelResolutionService) {
+        this(taskMapper,conversationMapper,agentMapper,ruleMapper,ruleSetService,objectMapper,executionMapper,dataScope,labelResolutionService,null);
+    }
+
+    public InspectionTaskService(InspectionTaskMapper taskMapper,ConversationMapper conversationMapper,QualityAgentMapper agentMapper,
+            QualityRuleMapper ruleMapper,QualityRuleSetService ruleSetService,ObjectMapper objectMapper,TaskExecutionMapper executionMapper,
+            IqcDataScope dataScope,LabelResolutionService labelResolutionService,
+            org.springframework.beans.factory.ObjectProvider<io.github.opensabre.iqc.selector.ConversationSelectionService> selections) {
+        this(taskMapper,conversationMapper,agentMapper,ruleMapper,ruleSetService,objectMapper,executionMapper,dataScope,labelResolutionService,selections,null,null);
+    }
 
     /** Creates tasks with an explicit execution strategy while preserving legacy label scoring semantics. */
     @Transactional
@@ -216,6 +275,7 @@ public class InspectionTaskService {
         task.setProcessedMessages(0);
         task.setFailedMessages(0);
         task.setAttemptCount(0);
+        freezeKnowledge(task);
         taskMapper.insert(task);
         return task;
     }
@@ -372,8 +432,389 @@ public class InspectionTaskService {
                                     String agentId, String agentSnapshotJson, String labelSnapshotJson,
                                     int concurrency, int maxConversations) { }
 
+    /** Reuses authorized batch materialization; published assets and trial drafts are frozen before this boundary. */
+    @Transactional(isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public InspectionTask createUsingPipelineSnapshot(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name, List<String> conversationIds, Integer concurrency, String requestId) {
+        return createUsingPipelineSnapshot(prepared,name,conversationIds,concurrency,requestId,null,null,null);
+    }
+    private InspectionTask createUsingPipelineSnapshot(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,List<String> conversationIds,Integer concurrency,String requestId,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,String selectorRequestHash,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset) {
+        return createUsingPipelineSnapshot(prepared,name,conversationIds,concurrency,requestId,selection,selectorRequestHash,selectorAsset,null);
+    }
+    /** Internal bulk coordinator boundary: called inside its locked parent/checkpoint transaction. */
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask createBulkShardUsingPipelineSnapshot(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name, Integer concurrency, String requestId,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection, String selectionRequestHash, com.fasterxml.jackson.databind.JsonNode scanEvidence) {
+        if(selection==null || selection.selectedConversationIds().isEmpty() || selection.limited()
+                || selectionRequestHash==null || !selectionRequestHash.matches("[a-f0-9]{64}"))
+            throw IqcException.invalidState("分片需要完整的原始选数证据");
+        if(scanEvidence==null || !"iqc-bulk-shard-scan-v1".equals(scanEvidence.path("schemaVersion").asText())
+                || scanEvidence.toString().length()>4096)throw IqcException.invalidState("分片扫描来源无效");
+        var child=createUsingPipelineSnapshot(prepared,name,selection.selectedConversationIds(),concurrency,requestId,selection,selectionRequestHash,null);
+        com.fasterxml.jackson.databind.node.ObjectNode root;
+        try {
+            var exact=objectMapper.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                    .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));
+            root=(com.fasterxml.jackson.databind.node.ObjectNode)exact.readTree(child.getRuleSnapshotJson());
+        } catch(com.fasterxml.jackson.core.JsonProcessingException | ClassCastException bad) {
+            throw IqcException.invalidState("分片任务冻结快照无法读取");
+        }
+        if(root.has("bulkShardSnapshot"))throw IqcException.invalidState("分片扫描来源已存在但检查点未推进");
+        root.set("bulkShardSnapshot",scanEvidence.deepCopy());child.setRuleSnapshotJson(root.toString());
+        if(taskMapper.updateById(child)!=1)throw IqcException.invalidState("分片扫描来源保存失败");
+        return child;
+    }
+    public record PeriodicIdentity(String scheduleId,String revisionId,java.time.Instant plannedAt,com.fasterxml.jackson.databind.JsonNode evidence) { }
+    @Transactional
+    public InspectionTask createPeriodicPipelineTask(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared pipeline,String name,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,PeriodicIdentity identity,int concurrency) {
+        if(identity==null || identity.plannedAt()==null || pipeline==null || pipeline.versionNo()==null || selector==null || selection==null)
+            throw IqcException.invalidArgument("周期物化缺少冻结配置或计划时刻");
+        if(identity.scheduleId()==null || identity.revisionId()==null || concurrency<1 || concurrency>32
+                || !identity.plannedAt().equals(selection.anchor())
+                || !io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(selector.definition())).equals(selector.contentHash())
+                || !selector.definition().equals(selection.definition()))
+            throw IqcException.invalidArgument("周期选数锚点或资产定义不一致");
+        String requestId="cron:"+io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(java.util.List.of(
+                identity.scheduleId(),identity.revisionId(),identity.plannedAt())));
+        String requestHash=io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(java.util.Map.of(
+                "pipeline",pipeline,"selector",selector,"periodic",identity)));
+        return createUsingPipelineSnapshot(pipeline,name,selection.selectedConversationIds(),concurrency,requestId,selection,requestHash,selector,identity);
+    }
+    private InspectionTask createUsingPipelineSnapshot(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,List<String> conversationIds,Integer concurrency,String requestId,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,String selectorRequestHash,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset,PeriodicIdentity periodic) {
+        return createUsingPipelineSnapshot(prepared,name,conversationIds,concurrency,requestId,selection,selectorRequestHash,selectorAsset,periodic,null,null);
+    }
+    public record TriggerIdentity(String payloadHash,java.time.Instant occurredAt,JsonNode evidence) { }
+    @Transactional
+    public InspectionTask materializeTriggeredPipelineTask(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared pipeline,
+            InspectionTask receipt,List<String> ids,Integer concurrency,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,TriggerIdentity trigger) {
+        return materializeTriggeredPipelineTask(pipeline,receipt,ids,concurrency,selector,selection,trigger,null);
+    }
+    @Transactional
+    public InspectionTask materializeTriggeredPipelineTask(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared pipeline,
+            InspectionTask receipt,List<String> ids,Integer concurrency,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,TriggerIdentity trigger,
+            io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence rollout) {
+        if(receipt==null || trigger==null || !"WAITING_INPUT".equals(receipt.getStatus()) || receipt.getId()==null
+                || !dataScope.owner().equals(receipt.getCreatedBy()) || !trigger.payloadHash().equals(receipt.getTriggerPayloadHash())
+                || pipeline==null || pipeline.versionNo()==null || ids==null || concurrency==null || concurrency<1 || concurrency>32)
+            throw IqcException.invalidState("事件接收记录不允许物化");
+        if(selection!=null && (selector==null || !trigger.occurredAt().equals(selection.anchor())
+                || !selector.definition().equals(selection.definition()) || !ids.equals(selection.selectedConversationIds())))
+            throw IqcException.invalidState("事件筛选证据不一致");
+        var accepted=receipt.getTriggerRequestJson()==null&&rollout==null?null:
+                io.github.opensabre.iqc.schedule.TaskTriggerService.readAcceptedEvidence(receipt,objectMapper);
+        if(accepted!=null&&((accepted.rollout()!=null)!=(rollout!=null)))throw IqcException.invalidState("事件灰度证据不能缺省或替换");
+        if(rollout!=null){
+            if(accepted==null||!io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.TRIGGER_SCHEMA.equals(rollout.schemaVersion())
+                    ||!rollout.taskId().equals(receipt.getId())||!trigger.occurredAt().equals(accepted.request().occurredAt())
+                    ||!io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(accepted.rollout())).equals(
+                            io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(rollout)))
+                    ||(accepted.selector()!=null)!=(selector!=null)||(selector!=null&&selection==null))
+                throw IqcException.invalidState("事件灰度原接收来源不一致");
+            if(selector!=null&&!io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(selector)).equals(
+                    io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(accepted.selector()))))throw IqcException.invalidState("事件灰度Selector来源不一致");
+            var marker=objectMapper.valueToTree(pipeline);
+            if(selector!=null)((com.fasterxml.jackson.databind.node.ObjectNode)marker).put("selectorRequestHash",trigger.payloadHash());
+            rollout.verifyTriggered(dataScope.actorUserId(),accepted.request(),trigger.payloadHash(),marker,objectMapper);
+        }
+        return createUsingPipelineSnapshot(pipeline,receipt.getName(),ids,concurrency,null,selection,
+                selector==null?null:trigger.payloadHash(),selector,null,trigger,receipt,rollout);
+    }
+    /** Internal rollout boundary; HTTP callers cannot supply allocation evidence. */
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask createUsingPipelineRollout(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,List<String> conversationIds,Integer concurrency,String requestKey,
+            io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence rollout){
+        if(rollout==null||prepared==null)throw IqcException.invalidArgument("缺少灰度任务证据或发布版本");
+        rollout.verify(dataScope.actorUserId(),prepared.pipelineId(),requestKey,
+                io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.requestFingerprint(name,conversationIds,concurrency,objectMapper),
+                objectMapper.valueToTree(prepared),objectMapper);
+        return createUsingPipelineSnapshot(prepared,name,conversationIds,concurrency,null,null,null,null,null,null,null,rollout);
+    }
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask createUsingPipelineRolloutSelector(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,Integer concurrency,String requestKey,
+            io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence rollout){
+        return materializeRolloutSelection(prepared,name,selector,selection,null,concurrency,requestKey,rollout);
+    }
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask createPeriodicPipelineRollout(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,PeriodicIdentity identity,Integer concurrency,String requestKey,
+            io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence rollout){
+        if(identity==null||selection==null||!Objects.equals(identity.plannedAt(),selection.anchor())
+                ||!requestKey.equals(io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.periodicRequestKey(identity,objectMapper)))
+            throw IqcException.invalidArgument("周期灰度选数锚点或请求键无效");
+        return materializeRolloutSelection(prepared,name,selector,selection,identity,concurrency,requestKey,rollout);
+    }
+    private InspectionTask materializeRolloutSelection(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selector,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,PeriodicIdentity periodic,Integer concurrency,String requestKey,
+            io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence rollout){
+        String expectedSchema=periodic==null?io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.SELECTOR_SCHEMA:
+                io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.PERIODIC_SCHEMA;
+        if(prepared==null||selector==null||selection==null||rollout==null||selectorAssets==null
+                ||!expectedSchema.equals(rollout.schemaVersion())
+                ||!selector.definition().equals(selection.definition()))throw IqcException.invalidArgument("灰度选数来源缺失或不一致");
+        var locked=selectorAssets.getObject().publishedForTask(selector.selectorId(),selector.versionNo());
+        if(!io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(locked)).equals(
+                io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(selector))))throw IqcException.invalidState("灰度Selector来源已变化");
+        var reference=new io.github.opensabre.iqc.selector.SelectorAssetService.Reference(selector.selectorId(),selector.versionNo());
+        String fingerprint=periodic==null?io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.selectorRequestFingerprint(name,reference,concurrency,objectMapper)
+                :io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.periodicRequestFingerprint(name,reference,concurrency,periodic,objectMapper);
+        var marker=objectMapper.valueToTree(prepared);((com.fasterxml.jackson.databind.node.ObjectNode)marker).put("selectorRequestHash",fingerprint);
+        rollout.verify(dataScope.actorUserId(),prepared.pipelineId(),requestKey,fingerprint,marker,objectMapper);
+        return createUsingPipelineSnapshot(prepared,name,selection.selectedConversationIds(),concurrency,null,selection,fingerprint,locked,periodic,null,null,rollout);
+    }
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask requireRolloutSelectorRetry(InspectionTask task,String fingerprint,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Reference reference){
+        if(selectorAssets==null||reference==null)throw IqcException.invalidState("灰度Selector历史依赖不可用");
+        try{
+            var exact=objectMapper.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                    .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));
+            var frozen=exact.treeToValue(exact.readTree(task.getSelectionFilterJson()).path("asset"),
+                    io.github.opensabre.iqc.selector.SelectorAssetService.Prepared.class);
+            var original=selectorAssets.getObject().viewVersion(reference.selectorId(),reference.versionNo());
+            if(frozen==null||!reference.selectorId().equals(frozen.selectorId())||reference.versionNo()!=frozen.versionNo()
+                    ||!original.contentHash().equals(frozen.contentHash())||original.sourceDraftRevision()!=frozen.sourceDraftRevision()
+                    ||!original.contentHash().equals(io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(frozen.definition()))))
+                throw IqcException.invalidState("灰度Selector历史来源不一致");
+            return requireSelectorRetry(task,fingerprint,frozen);
+        }catch(com.fasterxml.jackson.core.JsonProcessingException|IllegalArgumentException invalid){throw IqcException.invalidState("灰度Selector历史选数证据无效");}
+    }
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public InspectionTask findRolloutRequest(String id){
+        var task=taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,id).last("FOR UPDATE"));
+        if(task!=null&&!dataScope.canView(task.getCreatedBy(),task.getOwnerGroupId()))throw IqcException.accessDenied("无权读取原灰度任务");
+        return task;
+    }
+    private InspectionTask createUsingPipelineSnapshot(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,List<String> conversationIds,Integer concurrency,String requestId,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,String selectorRequestHash,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset,PeriodicIdentity periodic,
+            TriggerIdentity trigger,InspectionTask receipt) {
+        return createUsingPipelineSnapshot(prepared,name,conversationIds,concurrency,requestId,selection,selectorRequestHash,selectorAsset,periodic,trigger,receipt,null);
+    }
+    private InspectionTask createUsingPipelineSnapshot(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,List<String> conversationIds,Integer concurrency,String requestId,
+            io.github.opensabre.iqc.selector.ConversationSelectionService.Selection selection,String selectorRequestHash,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset,PeriodicIdentity periodic,
+            TriggerIdentity trigger,InspectionTask receipt,io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence rollout) {
+        if (prepared == null || !io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(writeSnapshot(prepared.release())).equals(prepared.contentHash()))
+            throw IqcException.invalidState("流水线冻结摘要无效");
+        boolean trial = prepared.versionNo() == null;
+        if (trial && (conversationIds == null || conversationIds.size() > 10)) throw IqcException.invalidArgument("草稿试跑最多10个会话");
+        if (requestId != null && !requestId.matches("[A-Za-z0-9:_-]{1,128}")) throw IqcException.invalidArgument("无效幂等请求标识");
+        var marker = objectMapper.valueToTree(prepared);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) marker).put("trial", trial);
+        var root = objectMapper.createObjectNode(); root.set("pipelineSnapshot", marker);
+        if(rollout!=null)root.set("rolloutSnapshot",rollout.envelope(objectMapper));
+        if(!trial && prepared.release().actionPolicy()!=null && !prepared.release().actionPolicy().actions().isEmpty()) {
+            if(actionActors==null)throw IqcException.invalidState("当前物化器未启用动作负责人身份冻结");
+            root.set("actionOwnerBound",objectMapper.valueToTree(actionActors.getObject().capture()));
+        }
+        if(periodic!=null)root.set("periodicSnapshot",objectMapper.valueToTree(periodic));
+        if(trigger!=null)root.set("triggerSnapshot",objectMapper.valueToTree(trigger));
+        root.set("executionStrategy", objectMapper.createObjectNode().put("schemaVersion", "iqc-pipeline-task-v1").put("mode", "PIPELINE"));
+        var frozenRules = root.putArray("rules"); var ruleIds = new java.util.LinkedHashSet<String>();
+        for (var node : prepared.release().pipeline().nodes()) {
+            frozenRules.add(node.config().path("ruleSnapshot")); ruleIds.add(node.config().path("ruleSnapshot").path("id").asText());
+        }
+        var fingerprint = objectMapper.createObjectNode().put("contentHash", prepared.contentHash()).put("name", name)
+                .put("concurrency", concurrency == null ? 1 : concurrency).put("trial", trial);
+        fingerprint.set("conversationIds", objectMapper.valueToTree(conversationIds == null ? List.of() : conversationIds.stream().filter(id -> id != null && !id.isBlank()).distinct().sorted().toList()));
+        if(selectorRequestHash!=null) { fingerprint.put("selectorRequestHash",selectorRequestHash);
+            ((com.fasterxml.jackson.databind.node.ObjectNode)marker).put("selectorRequestHash",selectorRequestHash); }
+        if(rollout!=null)fingerprint.put("rolloutEvidenceHash",root.path("rolloutSnapshot").path("evidenceHash").asText());
+        String requestFingerprint = io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(fingerprint.toString());
+        ((com.fasterxml.jackson.databind.node.ObjectNode) marker).put("requestFingerprint", requestFingerprint);
+        String taskId = rollout!=null?rollout.taskId():requestId == null ? null : "p" + io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(
+                objectMapper.createArrayNode().add(dataScope.owner()).add(prepared.pipelineId()).add(requestId).toString()).substring(0, 63);
+        // A validated WAITING_INPUT receipt intentionally owns this ID before its first materialization.
+        // Only new-task creation can reuse an already frozen pipeline fingerprint here.
+        if (taskId != null && receipt == null) {
+            var existing = taskMapper.selectById(taskId);
+            if (existing != null) {
+                if (!dataScope.canView(existing.getCreatedBy(), existing.getOwnerGroupId()) || !requestFingerprint.equals(
+                        readPipelineFingerprint(existing.getRuleSnapshotJson()))) throw IqcException.invalidState("幂等请求内容不同");
+                return existing;
+            }
+        }
+        io.github.opensabre.iqc.pipelineasset.PipelineAssetService.validateNewRiskEvidence(prepared.release(),objectMapper);
+        if(productionInputs==null)throw IqcException.invalidState("当前物化器未启用生产输入冻结");
+        var frozenInputs=productionInputs.capture(conversationIds==null?List.of():conversationIds.stream()
+                .filter(value->value!=null && !value.isBlank()).distinct().toList());
+        root.set("productionInputs",frozenInputs);
+        if(pipelineSources==null)throw IqcException.invalidState("当前物化器未启用流水线来源范围");
+        String pipelineGroup=pipelineSources.getObject().get(prepared.pipelineId()).getOwnerGroupId();
+        int frozenMessageCount=0;for(var input:frozenInputs.path("conversations"))frozenMessageCount+=input.path("messages").size();
+        final String identity = taskId;
+        try {
+            java.util.function.Consumer<InspectionTask> freeze=task -> {
+                if (identity != null) task.setId(identity);
+                task.setTaskType(trial ? "PIPELINE_TRIAL" : "PIPELINE");
+                if(periodic!=null){task.setPeriodicScheduleId(periodic.scheduleId());task.setPeriodicRevisionId(periodic.revisionId());
+                    task.setPlannedAtUtc(java.time.LocalDateTime.ofInstant(periodic.plannedAt(),java.time.ZoneOffset.UTC));}
+                if(selection!=null) {
+                    var selectionJson=objectMapper.valueToTree(selection);
+                    var envelope=objectMapper.createObjectNode().put("schemaVersion","iqc-selector-task-v1")
+                            .put("requestHash",selectorRequestHash).put("selectionHash",io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(selectionJson.toString()));
+                    envelope.set("selection",selectionJson);
+                    if(selectorAsset!=null) {
+                        ((com.fasterxml.jackson.databind.node.ObjectNode)selectionJson).put("definitionHash",selectorAsset.contentHash());
+                        envelope.set("asset",objectMapper.valueToTree(selectorAsset));
+                        envelope.put("hashAlgorithm","selector-decimal-sha256-v1");
+                        envelope.put("selectionHash",io.github.opensabre.iqc.selector.SelectorAssetService.hash(selectionJson.toString()));
+                    }
+                    String body=envelope.toString();
+                    if(body.getBytes(StandardCharsets.UTF_8).length>8*1024*1024) throw IqcException.invalidArgument("Selector冻结证据超过8MiB，请缩小选数");
+                    task.setSelectionFilterJson(body);
+                }
+                if(prepared.release().labelPolicy()!=null) {
+                    prepared.release().labelPolicy().validateFrozen();
+                    task.setLabelScopeSnapshotJson(prepared.release().labelPolicy().directory().toString());
+                }
+                task.setRuleSnapshotJson(root.toString()); task.setRuleIdsJson(writeSnapshot(ruleIds)); task.setRunCount(1);
+            };
+            boolean noData=(periodic!=null || trigger!=null) && (conversationIds==null || conversationIds.isEmpty());
+            var created=noData?saveSnapshotTask(name,"周期无数据",List.of(),concurrency==null?1:concurrency,dataScope.groupId(),0,freeze,receipt)
+                    :createBatchWithSnapshot(name,conversationIds,concurrency,freeze,receipt);
+            created.setTotalMessages(frozenMessageCount);
+            if(noData)created.setStatus("NO_DATA");
+            if(taskMapper.updateById(created)!=1)throw IqcException.invalidState("生产冻结消息数保存失败");
+            productionInputs.prepare(created,root);
+            String selectedGroup=created.getOwnerGroupId();
+            if(selectedGroup!=null && (!selectedGroup.equals(dataScope.groupId()) || !selectedGroup.equals(pipelineGroup)
+                    || (selection!=null && !selectedGroup.equals(selection.evidenceGroupId()))
+                    || (selectorAsset!=null && !selectedGroup.equals(selectorAsset.ownerGroupId()))
+                    || (receipt!=null && !selectedGroup.equals(receipt.getOwnerGroupId())))) {
+                // Counts and distributions also derive from unselected candidates; preserve the whole consulted corpus scope.
+                if(taskMapper.update(null,Wrappers.<InspectionTask>lambdaUpdate().eq(InspectionTask::getId,created.getId())
+                        .set(InspectionTask::getOwnerGroupId,null))!=1)throw IqcException.invalidState("流水线来源范围保存失败");
+                created.setOwnerGroupId(null);
+            }
+            return created;
+        } catch (org.springframework.dao.DuplicateKeyException duplicate) {
+            if (identity == null) throw duplicate;
+            var winner = taskMapper.selectOne(com.baomidou.mybatisplus.core.toolkit.Wrappers.<InspectionTask>lambdaQuery()
+                    .eq(InspectionTask::getId, identity).last("FOR UPDATE"));
+            if (winner == null || !requestFingerprint.equals(readPipelineFingerprint(winner.getRuleSnapshotJson())))
+                throw IqcException.invalidState("并发幂等请求内容不同");
+            return winner;
+        }
+    }
+    /** Retry reuses the first immutable selection before resolving a new relative window or reading live data. */
+    @Transactional(isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public InspectionTask createUsingPipelineSelector(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,io.github.opensabre.iqc.selector.SelectorDefinition definition,Integer concurrency,String requestId) {
+        return createUsingPipelineSelector(prepared,name,definition,concurrency,requestId,null);
+    }
+    @Transactional(isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public InspectionTask createUsingPipelineSelectorAsset(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset,Integer concurrency,String requestId) {
+        if(selectorAsset==null || !io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(selectorAsset.definition())).equals(selectorAsset.contentHash()))
+            throw IqcException.invalidState("Selector资产冻结摘要无效");
+        if(selectorAssets==null)throw IqcException.invalidState("当前任务服务未启用Selector资产");
+        var locked=selectorAssets.getObject().publishedForTask(selectorAsset.selectorId(),selectorAsset.versionNo());
+        if(!io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(locked)).equals(
+                io.github.opensabre.iqc.selector.SelectorAssetService.hash(writeSnapshot(selectorAsset))))
+            throw IqcException.invalidState("Selector资产冻结来源已变化");
+        return createUsingPipelineSelector(prepared,name,locked.definition(),concurrency,requestId,locked);
+    }
+    private InspectionTask createUsingPipelineSelector(io.github.opensabre.iqc.pipelineasset.PipelineAssetService.Prepared prepared,
+            String name,io.github.opensabre.iqc.selector.SelectorDefinition definition,Integer concurrency,String requestId,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset) {
+        if(prepared==null || prepared.versionNo()==null) throw IqcException.invalidArgument("Selector任务必须使用精确发布版本");
+        if(requestId==null || !requestId.matches("[A-Za-z0-9:_-]{1,128}")) throw IqcException.invalidArgument("Selector创建需要稳定requestId");
+        if(selections==null) throw IqcException.invalidState("当前任务服务未启用Selector");
+        selections.getObject().validate(definition);
+        var request=objectMapper.createObjectNode().put("pipelineId",prepared.pipelineId()).put("versionNo",prepared.versionNo())
+                .put("contentHash",prepared.contentHash()).put("name",name).put("concurrency",concurrency==null?1:concurrency);
+        request.set("definition",objectMapper.valueToTree(definition));
+        if(selectorAsset!=null)request.set("selectorAsset",objectMapper.valueToTree(selectorAsset));
+        String requestHash=selectorAsset==null?io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(request.toString())
+                :io.github.opensabre.iqc.selector.SelectorAssetService.hash(request.toString());
+        String taskId="p"+io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(objectMapper.createArrayNode()
+                .add(dataScope.owner()).add(prepared.pipelineId()).add(requestId).toString()).substring(0,63);
+        var existing=taskMapper.selectById(taskId);
+        if(existing!=null) return requireSelectorRetry(existing,requestHash,selectorAsset);
+        var selected=selections.getObject().materialize(definition);
+        try {
+            var task=createUsingPipelineSnapshot(prepared,name,selected.selectedConversationIds(),concurrency,requestId,selected,requestHash,selectorAsset);
+            return requireSelectorRetry(task,requestHash,selectorAsset);
+        } catch(org.springframework.dao.DuplicateKeyException conflict) {
+            var winner=taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,taskId).last("FOR UPDATE"));
+            if(winner==null) throw conflict;
+            return requireSelectorRetry(winner,requestHash,selectorAsset);
+        } catch(io.github.opensabre.iqc.governance.IqcException conflict) {
+            // A concurrent first creator may have selected a newer corpus under the same exact request.
+            var winner=taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,taskId).last("FOR UPDATE"));
+            if(winner==null) throw conflict;
+            return requireSelectorRetry(winner,requestHash,selectorAsset);
+        }
+    }
+    private InspectionTask requireSelectorRetry(InspectionTask task,String requestHash,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset) {
+        if(!dataScope.canView(task.getCreatedBy(),task.getOwnerGroupId()))throw IqcException.accessDenied("无权查看既有选数任务");
+        validateSelectorEvidence(task,requestHash,selectorAsset,objectMapper);return task;
+    }
+    /** Pure immutable-source check shared by request replay and background rollout validation. */
+    public static void validateSelectorEvidence(InspectionTask task,String requestHash,
+            io.github.opensabre.iqc.selector.SelectorAssetService.Prepared selectorAsset,ObjectMapper objectMapper){
+        if(task==null||task.getSelectionFilterJson()==null)throw IqcException.invalidState("Selector选数证据缺失");
+        try {
+            var exactJson=objectMapper.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                    .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));
+            var envelope=exactJson.readTree(task.getSelectionFilterJson());var selection=envelope.path("selection");
+            var pipeline=exactJson.readTree(task.getRuleSnapshotJson()).path("pipelineSnapshot");
+            var source=envelope.get("asset");
+            if(selectorAsset==null ? source!=null : source==null || !io.github.opensabre.iqc.selector.SelectorAssetService.hash(source.toString()).equals(
+                    io.github.opensabre.iqc.selector.SelectorAssetService.hash(objectMapper.writeValueAsString(selectorAsset))))
+                throw IqcException.invalidState("幂等请求Selector资产来源不同或缺失");
+            if(selectorAsset!=null && (!"selector-decimal-sha256-v1".equals(envelope.path("hashAlgorithm").asText())
+                    || !selectorAsset.contentHash().equals(selection.path("definitionHash").asText())
+                    || !io.github.opensabre.iqc.selector.SelectorAssetService.hash(selection.path("definition").toString()).equals(selectorAsset.contentHash())))
+                throw IqcException.invalidState("Selector资产定义与冻结选数不一致");
+            if(selectorAsset==null && envelope.has("hashAlgorithm"))throw IqcException.invalidState("内联Selector摘要协议不同");
+            String selectionHash=selectorAsset==null?io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(selection.toString())
+                    :io.github.opensabre.iqc.selector.SelectorAssetService.hash(selection.toString());
+            if(!"PIPELINE".equals(task.getTaskType()) || !"iqc-selector-task-v1".equals(envelope.path("schemaVersion").asText())
+                    || !"iqc-selector-selection-v1".equals(selection.path("schemaVersion").asText())
+                    || !requestHash.equals(pipeline.path("selectorRequestHash").asText())
+                    || !requestHash.equals(envelope.path("requestHash").asText())
+                    || !selectionHash.equals(envelope.path("selectionHash").asText())
+                    || !selection.path("selectedConversationIds").equals(objectMapper.readTree(task.getConversationIdsJson())))
+                throw IqcException.invalidState("幂等请求不同或冻结选数证据无效");
+            return;
+        } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException invalid) {
+            throw IqcException.invalidState("既有Selector任务快照无效");
+        }
+    }
+    private String readPipelineFingerprint(String value) {
+        try { return objectMapper.readTree(value).path("pipelineSnapshot").path("requestFingerprint").asText(); }
+        catch (Exception ex) { throw IqcException.invalidState("既有流水线任务快照无效"); }
+    }
+
     private InspectionTask createBatchWithSnapshot(String name, List<String> requestedConversationIds, Integer concurrencyLimit,
                                                     java.util.function.Consumer<InspectionTask> snapshot) {
+        return createBatchWithSnapshot(name,requestedConversationIds,concurrencyLimit,snapshot,null);
+    }
+    private InspectionTask createBatchWithSnapshot(String name,List<String> requestedConversationIds,Integer concurrencyLimit,
+            java.util.function.Consumer<InspectionTask> snapshot,InspectionTask receipt) {
         List<String> conversationIds = requestedConversationIds == null ? List.of() : requestedConversationIds.stream()
                 .filter(id -> id != null && !id.isBlank()).distinct().toList();
         if (conversationIds.isEmpty()) throw IqcException.invalidArgument("至少选择一个会话");
@@ -388,22 +829,105 @@ public class InspectionTaskService {
             conversations.add(conversation);
         }
 
+        String ownerGroupId = conversations.get(0).getOwnerGroupId();
+        return saveSnapshotTask(name, "批量质检-" + conversations.size() + "个会话", conversationIds, safeConcurrency,
+                conversations.stream().allMatch(item -> java.util.Objects.equals(ownerGroupId, item.getOwnerGroupId())) ? ownerGroupId : null,
+                conversations.stream().map(Conversation::getMessageCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum(), snapshot,receipt);
+    }
+
+    private InspectionTask saveSnapshotTask(String name, String defaultName, List<String> conversationIds, int concurrency,
+                                            String groupId, int messageCount, java.util.function.Consumer<InspectionTask> snapshot) {
+        return saveSnapshotTask(name,defaultName,conversationIds,concurrency,groupId,messageCount,snapshot,null);
+    }
+    private InspectionTask saveSnapshotTask(String name,String defaultName,List<String> conversationIds,int concurrency,
+            String groupId,int messageCount,java.util.function.Consumer<InspectionTask> snapshot,InspectionTask receipt) {
         InspectionTask task = new InspectionTask();
-        task.setName(name == null || name.isBlank() ? "批量质检-" + conversations.size() + "个会话" : name.trim());
+        task.setName(name == null || name.isBlank() ? defaultName : name.trim());
         task.setTaskType("BATCH");
         task.setConversationId(conversationIds.size() == 1 ? conversationIds.get(0) : null);
         task.setConversationIdsJson(writeSnapshot(conversationIds));
-        task.setConcurrencyLimit(safeConcurrency);
+        task.setConcurrencyLimit(concurrency);
         snapshot.accept(task);
-        String ownerGroupId = conversations.get(0).getOwnerGroupId();
-        task.setOwnerGroupId(conversations.stream().allMatch(item -> java.util.Objects.equals(ownerGroupId, item.getOwnerGroupId())) ? ownerGroupId : null);
+        task.setOwnerGroupId(groupId);
         task.setStatus("CREATED");
-        task.setTotalMessages(conversations.stream().map(Conversation::getMessageCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum());
+        task.setTotalMessages(messageCount);
         task.setProcessedMessages(0);
         task.setFailedMessages(0);
         task.setAttemptCount(0);
-        taskMapper.insert(task);
+        freezeKnowledge(task);
+        if(receipt==null)taskMapper.insert(task);
+        else {
+            task.setId(receipt.getId());task.setCreatedBy(receipt.getCreatedBy());task.setCreatedTime(receipt.getCreatedTime());
+            task.setRetryPolicyJson(receipt.getRetryPolicyJson());task.setRetryPolicyHash(receipt.getRetryPolicyHash());
+            task.setAutomaticRetryEnabled(receipt.getAutomaticRetryEnabled());
+            task.setRetryNotBeforeUtc(receipt.getRetryNotBeforeUtc());task.setRetryError(receipt.getRetryError());
+            task.setEventSubscriptionId(receipt.getEventSubscriptionId());task.setEventSubscriptionRevisionId(receipt.getEventSubscriptionRevisionId());
+            task.setTriggerSource(receipt.getTriggerSource());task.setTriggerEventId(receipt.getTriggerEventId());
+            task.setTriggerPayloadHash(receipt.getTriggerPayloadHash());task.setTriggerRequestHash(receipt.getTriggerRequestHash());task.setTriggerRequestJson(receipt.getTriggerRequestJson());
+            var transition=Wrappers.<InspectionTask>lambdaUpdate().eq(InspectionTask::getId,receipt.getId()).eq(InspectionTask::getStatus,"WAITING_INPUT");
+            if(task.getConversationId()==null)transition.set(InspectionTask::getConversationId,null);
+            if(task.getOwnerGroupId()==null)transition.set(InspectionTask::getOwnerGroupId,null);
+            if(taskMapper.update(task,transition)!=1)throw IqcException.invalidState("事件任务已取消或被其他进程物化");
+        }
         return task;
+    }
+
+    /** Internal evaluated-input boundary: the caller has scoped and validated exact Dataset/Pipeline versions. */
+    @Transactional
+    public InspectionTask createEvaluationTask(String name, JsonNode snapshot,
+            List<io.github.opensabre.iqc.quality.evaluation.GoldConversation> golds, int concurrency, String requestId) {
+        if (golds == null || golds.isEmpty() || golds.size() > 1000 || concurrency < 1 || concurrency > 32
+                || requestId == null || !requestId.matches("[A-Za-z0-9_-]{16,64}"))
+            throw IqcException.invalidArgument("评测必须包含1–1000个冻结样本、1–32并发及16–64字符请求标识");
+        if (name != null && name.length() > 128) throw IqcException.invalidArgument("评测名称不得超过128字");
+        if (snapshot == null || !snapshot.isObject() || !snapshot.has("pipelineSnapshot")
+                || !"iqc-pipeline-evaluation-task-v1".equals(snapshot.path("evaluationSnapshot").path("schemaVersion").asText()))
+            throw IqcException.invalidArgument("评测任务快照协议无效");
+        List<String> ids = golds.stream().map(io.github.opensabre.iqc.quality.evaluation.GoldConversation::conversationId).toList();
+        if (ids.stream().distinct().count() != ids.size()) throw IqcException.invalidArgument("冻结评测会话重复");
+        var body = (com.fasterxml.jackson.databind.node.ObjectNode) snapshot.deepCopy();
+        var fingerprintBody = objectMapper.createObjectNode(); fingerprintBody.set("snapshot", body.deepCopy());
+        fingerprintBody.put("name", name == null ? "" : name.trim()).put("concurrency", concurrency);
+        String fingerprint = io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(fingerprintBody.toString());
+        ((com.fasterxml.jackson.databind.node.ObjectNode) body.get("evaluationSnapshot")).put("requestFingerprint", fingerprint);
+        String id = evaluationRequestTaskId(requestId);
+        var existing = taskMapper.selectById(id);
+        if (existing != null) return requireEvaluationRetry(existing, fingerprint);
+        var riskRelease=body.path("pipelineSnapshot").path("release");
+        if(riskRelease.hasNonNull("riskPolicy"))try {
+            var release=objectMapper.treeToValue(riskRelease,io.github.opensabre.iqc.pipelineasset.PipelineRelease.class);
+            io.github.opensabre.iqc.pipelineasset.PipelineAssetService.validateNewRiskEvidence(release,objectMapper);
+        } catch(JsonProcessingException invalid){throw IqcException.invalidArgument("评测流水线风险政策无效");}
+        int messages = golds.stream().mapToInt(gold -> gold.messages().size()).sum();
+        try {
+            return saveSnapshotTask(name, "离线评测-" + ids.size() + "个会话", ids, concurrency, dataScope.groupId(), messages, task -> {
+                task.setId(id); task.setTaskType("PIPELINE_EVALUATION"); task.setRuleSnapshotJson(body.toString());
+                task.setRuleIdsJson(writeSnapshot(java.util.stream.StreamSupport.stream(body.path("rules").spliterator(),false)
+                        .map(rule->rule.path("id").asText()).distinct().toList()));
+                task.setRunCount(1);
+            });
+        } catch (org.springframework.dao.DuplicateKeyException duplicate) {
+            var winner = taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId, id).last("FOR UPDATE"));
+            if (winner == null) throw duplicate;
+            return requireEvaluationRetry(winner, fingerprint);
+        }
+    }
+    private InspectionTask requireEvaluationRetry(InspectionTask task, String fingerprint) {
+        if (!dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId()) || !"PIPELINE_EVALUATION".equals(task.getTaskType()))
+            throw IqcException.accessDenied("无权复用该评测请求");
+        try {
+            if (!fingerprint.equals(objectMapper.readTree(task.getRuleSnapshotJson()).path("evaluationSnapshot").path("requestFingerprint").asText()))
+                throw IqcException.invalidState("同一评测请求标识不能用于不同内容");
+        } catch (JsonProcessingException exception) { throw IqcException.invalidState("既有评测快照无效"); }
+        return task;
+    }
+
+    /** Shared actor-scoped identity for single evaluations and atomic benchmark pairs. */
+    public String evaluationRequestTaskId(String requestId) {
+        if (requestId == null || !requestId.matches("[A-Za-z0-9_-]{16,64}"))
+            throw IqcException.invalidArgument("评测请求标识必须为16–64字符");
+        return "e" + io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(
+                objectMapper.createArrayNode().add(dataScope.owner()).add(requestId).toString()).substring(0, 63);
     }
 
     /** Saves selection criteria now; matching conversations are resolved only when the schedule becomes due. */
@@ -436,6 +960,7 @@ public class InspectionTaskService {
         snapshotAgentAndRules(task, agentId, ruleSetId, requestedRuleIds, executionMode);
         task.setStatus("SCHEDULED"); task.setTotalMessages(0); task.setProcessedMessages(0);
         task.setFailedMessages(0); task.setAttemptCount(0); task.setOwnerGroupId((String) snapshot.get("scopeGroupId"));
+        freezeKnowledge(task);
         taskMapper.insert(task);
         return task;
     }
@@ -521,6 +1046,15 @@ public class InspectionTaskService {
             if (!conversations.isEmpty()) ready.add(candidate);
         }
         return ready;
+    }
+
+    private void freezeKnowledge(InspectionTask task){
+        if(knowledgeInputs!=null)knowledgeInputs.getObject().freeze(task);
+        else if(io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.requiresSnapshot(task,objectMapper))
+            throw IqcException.invalidState("当前物化器未启用任务知识库正文冻结");
+        if(calibrationInputs!=null)calibrationInputs.getObject().freeze(task);
+        else if(io.github.opensabre.iqc.quality.evaluation.CalibrationTaskSnapshotService.requiresSnapshot(task,objectMapper))
+            throw IqcException.invalidState("当前物化器未启用校准系数冻结");
     }
 
     private void snapshotAgentAndRules(InspectionTask task, String agentId, String ruleSetId, List<String> requestedRuleIds, String executionMode) {
@@ -642,6 +1176,13 @@ public class InspectionTaskService {
 
     /** Pages visible tasks and applies the task-list business filters. */
     public IqcPage<InspectionTask> page(long current, long size, String keyword, String status, String taskType) {
+        return page(current,size,keyword,status,taskType,null);
+    }
+    public IqcPage<InspectionTask> page(long current,long size,String keyword,String status,String taskType,String parentTaskId) {
+        if(parentTaskId!=null) {
+            if(!parentTaskId.matches("[A-Za-z0-9:_-]{1,64}") || !BulkTaskMaterializationService.TYPE.equals(getDispatchIdentity(parentTaskId).getTaskType()))
+                throw IqcException.invalidArgument("无效批次父任务");
+        }
         Page<InspectionTask> page = new Page<>(safeCurrent(current), safeSize(size));
         var query = Wrappers.<InspectionTask>lambdaQuery().ne(InspectionTask::getStatus, "DELETED").orderByDesc(InspectionTask::getCreatedTime);
         if (!dataScope.canViewAll()) {
@@ -655,6 +1196,9 @@ public class InspectionTaskService {
         }
         if (status != null && !status.isBlank()) query.eq(InspectionTask::getStatus, status.trim());
         if (taskType != null && !taskType.isBlank()) query.eq(InspectionTask::getTaskType, taskType.trim());
+        if(parentTaskId!=null)query.eq(InspectionTask::getBulkParentTaskId,parentTaskId);
+        // Large frozen transcripts belong to authorized task detail, not every list row.
+        query.select(InspectionTask.class,field->!java.util.Set.of("ruleSnapshotJson","triggerRequestJson","retryPolicyJson","bulkProgressJson").contains(field.getProperty()));
         return IqcPage.from(taskMapper.selectPage(page, query));
     }
 
@@ -666,31 +1210,50 @@ public class InspectionTaskService {
                 .eq(InspectionTask::getId, id).in(InspectionTask::getStatus, "CREATED", "MATERIALIZING"));
     }
 
-    /** Converts abandoned queue/running leases into a retryable state after a process crash. */
+    /** Legacy callers retain queued-expiry behavior; durable discovery explicitly excludes waiting rows. */
     @Transactional
-    public int recoverStaleExecutions(java.time.Duration timeout) {
+    public int recoverStaleExecutions(java.time.Duration timeout) {return recoverStaleExecutions(timeout,true);}
+    @Transactional
+    public int recoverStaleExecutions(java.time.Duration timeout,boolean includeQueued) {
         java.util.Date cutoff = java.util.Date.from(java.time.Instant.now().minus(timeout));
         List<InspectionTask> stale = taskMapper.selectList(Wrappers.<InspectionTask>lambdaQuery()
-                .in(InspectionTask::getStatus, "QUEUED", "RUNNING")
+                .in(InspectionTask::getStatus,includeQueued?List.of("QUEUED","RUNNING","PAUSE_REQUESTED","CANCEL_REQUESTED")
+                        :List.of("RUNNING","PAUSE_REQUESTED","CANCEL_REQUESTED"))
                 .lt(InspectionTask::getUpdatedTime, cutoff).last("LIMIT 100"));
         int recovered = 0;
         for (InspectionTask task : stale) {
+            boolean bulk=BulkTaskMaterializationService.TYPE.equals(task.getTaskType());
+            String targetStatus=bulk?("RUNNING".equals(task.getStatus())?"QUEUED":task.getStatus())
+                    :switch(task.getStatus()){case "PAUSE_REQUESTED"->"PAUSED";case "CANCEL_REQUESTED"->"CANCELLED";default->"FAILED";};
             int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
-                    .set(InspectionTask::getStatus, "FAILED")
+                    .set(InspectionTask::getStatus, targetStatus)
+                    .set(bulk,InspectionTask::getUpdatedTime,new java.util.Date())
                     .eq(InspectionTask::getId, task.getId())
                     .eq(InspectionTask::getStatus, task.getStatus())
+                    .eq(InspectionTask::getCurrentExecutionId,task.getCurrentExecutionId())
                     .lt(InspectionTask::getUpdatedTime, cutoff));
             if (changed != 1) continue;
             recovered++;
             if (task.getCurrentExecutionId() != null) {
                 executionMapper.update(null, Wrappers.<TaskExecution>lambdaUpdate()
-                        .set(TaskExecution::getStatus, "FAILED")
-                        .set(TaskExecution::getErrorMessage, "执行心跳超时，可安全重试失败消息")
+                        .set(TaskExecution::getStatus, bulk?"QUEUED":targetStatus)
+                        .setSql(!bulk&&!"PAUSED".equals(targetStatus),"completed_at_utc=COALESCE(completed_at_utc,UTC_TIMESTAMP(3))")
+                        .set(TaskExecution::getErrorMessage, "执行心跳超时，已按当前运行/暂停/取消状态回收")
                         .eq(TaskExecution::getId, task.getCurrentExecutionId())
+                        .eq(TaskExecution::getTaskId,task.getId())
                         .in(TaskExecution::getStatus, "QUEUED", "RUNNING"));
             }
         }
         return recovered;
+    }
+
+    /** Metadata only: type routing must not load frozen transcripts for an ordinary run request. */
+    public InspectionTask getDispatchIdentity(String id) {
+        var task=taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,id)
+                .select(InspectionTask::getId,InspectionTask::getTaskType,InspectionTask::getCreatedBy,InspectionTask::getOwnerGroupId));
+        if(task==null)throw IqcException.notFound("质检任务不存在");
+        if(!dataScope.canView(task.getCreatedBy(),task.getOwnerGroupId()))throw IqcException.accessDenied("无权执行该任务");
+        return task;
     }
 
     public InspectionTask get(String id) {
@@ -716,51 +1279,98 @@ public class InspectionTaskService {
 
     @Transactional
     public InspectionTask cancel(String id) {
-        InspectionTask task = taskMapper.selectById(id);
+        InspectionTask task = taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery()
+                .eq(InspectionTask::getId,id).last("FOR UPDATE"));
         if (task == null) throw IqcException.notFound("质检任务不存在: " + id);
         if (!dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权取消该质检任务");
+        boolean bulk=BulkTaskMaterializationService.TYPE.equals(task.getTaskType()) && task.getCurrentExecutionId()!=null;
         boolean running = "RUNNING".equals(task.getStatus()) || "PAUSE_REQUESTED".equals(task.getStatus());
-        String targetStatus = running ? "CANCEL_REQUESTED" : "CANCELLED";
+        String targetStatus = running || bulk ? "CANCEL_REQUESTED" : "CANCELLED";
         int cancelled = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
                 .set(InspectionTask::getStatus, targetStatus)
                 .set(InspectionTask::getCancelRequested, true)
+                .set(InspectionTask::getAutomaticRetryEnabled, false)
+                .set(InspectionTask::getRetryNotBeforeUtc, null)
                 .eq(InspectionTask::getId, id)
-                .in(InspectionTask::getStatus, "SCHEDULED", "MATERIALIZING", "CREATED", "QUEUED", "RUNNING", "PAUSE_REQUESTED", "PAUSED"));
-        if (cancelled == 1 && !running && task.getCurrentExecutionId() != null) {
+                .in(InspectionTask::getStatus, "SCHEDULED", "MATERIALIZING", "CREATED", "QUEUED", "RUNNING", "PAUSE_REQUESTED", "PAUSED", "WAITING_INPUT", "FAILED", "PARTIAL_FAILED"));
+        if(cancelled==1 && bulk && !running) {
+            var row=executionMapper.selectOne(Wrappers.<TaskExecution>lambdaQuery().eq(TaskExecution::getId,task.getCurrentExecutionId())
+                    .eq(TaskExecution::getTaskId,id).last("FOR UPDATE"));
+            if(row==null)throw IqcException.invalidState("批次取消轮次缺失");
+            row.setStatus("QUEUED");if(executionMapper.updateById(row)!=1)throw IqcException.invalidState("批次取消调度失败");
+        }
+        if (cancelled == 1 && !running && !bulk && task.getCurrentExecutionId() != null) {
             TaskExecution execution = executionMapper.selectById(task.getCurrentExecutionId());
-            if (execution != null) { execution.setStatus("CANCELLED"); executionMapper.updateById(execution); }
+            if (execution != null && List.of("QUEUED", "PAUSED").contains(execution.getStatus())) {
+                execution.setStatus("CANCELLED");
+                if(execution.getCompletedAtUtc()==null)execution.setCompletedAtUtc(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
+                if (executionMapper.updateById(execution) != 1) throw IqcException.invalidState("取消执行轮次失败");
+            }
         }
         return taskMapper.selectById(id);
     }
 
     @Transactional
     public InspectionTask requestPause(String id) {
-        InspectionTask task = get(id);
-        int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
-                .set(InspectionTask::getStatus, "PAUSE_REQUESTED")
-                .set(InspectionTask::getPauseRequested, true)
-                .eq(InspectionTask::getId, id)
-                .eq(InspectionTask::getStatus, "RUNNING"));
-        if (changed != 1) throw IqcException.invalidState("只有执行中的任务可以暂停");
+        InspectionTask task=taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,id).last("FOR UPDATE"));
+        if(task==null)throw IqcException.notFound("质检任务不存在");
+        if(!dataScope.canView(task.getCreatedBy(),task.getOwnerGroupId()))throw IqcException.accessDenied("无权暂停该质检任务");
+        if(!List.of("RUNNING","QUEUED").contains(task.getStatus()))throw IqcException.invalidState("只有排队或执行中的任务可以暂停");
+        boolean queued="QUEUED".equals(task.getStatus());
+        boolean bulk=BulkTaskMaterializationService.TYPE.equals(task.getTaskType());
+        String target=queued&&!bulk?"PAUSED":"PAUSE_REQUESTED";
+        int changed=taskMapper.update(null,Wrappers.<InspectionTask>lambdaUpdate().eq(InspectionTask::getId,id)
+                .eq(InspectionTask::getStatus,task.getStatus()).eq(InspectionTask::getCurrentExecutionId,task.getCurrentExecutionId())
+                .set(InspectionTask::getPauseRequested,true).set(InspectionTask::getStatus,target));
+        if(changed!=1)throw IqcException.invalidState("任务暂停状态已变化");
+        if(queued&&!bulk) {
+            int paused=executionMapper.update(null,Wrappers.<TaskExecution>lambdaUpdate().eq(TaskExecution::getId,task.getCurrentExecutionId())
+                    .eq(TaskExecution::getTaskId,id).eq(TaskExecution::getStatus,"QUEUED").set(TaskExecution::getStatus,"PAUSED"));
+            if(paused!=1)throw IqcException.invalidState("排队任务暂停轮次已变化");
+        }
         return taskMapper.selectById(id);
     }
 
     @Transactional
     public InspectionTask changePriority(String id, long priority) {
-        get(id);
+        var task=get(id);
         int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
                 .set(InspectionTask::getQueuePriority, priority)
                 .eq(InspectionTask::getId, id)
                 .in(InspectionTask::getStatus, "CREATED", "SCHEDULED", "QUEUED", "PAUSED"));
         if (changed != 1) throw IqcException.invalidState("当前任务状态不允许调整优先级");
+        if(BulkTaskMaterializationService.TYPE.equals(task.getTaskType()))
+            taskMapper.update(null,Wrappers.<InspectionTask>lambdaUpdate().eq(InspectionTask::getBulkParentTaskId,id)
+                    .in(InspectionTask::getStatus,"CREATED","QUEUED","PAUSED").set(InspectionTask::getQueuePriority,priority));
         return taskMapper.selectById(id);
     }
 
     @Transactional
     public void deleteTerminal(String id) {
-        InspectionTask task = get(id);
-        if (!List.of("SUCCEEDED", "PARTIAL_FAILED", "FAILED", "NO_DATA", "CANCELLED").contains(task.getStatus())) {
+        get(id);
+        InspectionTask task = taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery()
+                .eq(InspectionTask::getId, id).last("FOR UPDATE"));
+        if (task == null) throw IqcException.notFound("任务不存在");
+        if(task.getBulkParentTaskId()!=null)
+            throw IqcException.invalidState("分片须通过父批次统一清理，不能独立删除");
+        if (!List.of("SUCCEEDED", "PARTIAL_FAILED", "FAILED", "NO_DATA", "CANCELLED", "TRIGGER_EXPIRED", "TRIGGER_CONFLICT").contains(task.getStatus())) {
             throw IqcException.invalidState("只有终态任务可以删除");
+        }
+        if(BulkTaskMaterializationService.TYPE.equals(task.getTaskType())) {
+            // The parent lock fences every child queue/resume and further materialization.
+            // Probe IDs only; never load all frozen shard transcripts just to clean the directory.
+            var active=taskMapper.selectList(Wrappers.<InspectionTask>lambdaQuery()
+                    .select(InspectionTask::getId).eq(InspectionTask::getBulkParentTaskId,id)
+                    .notIn(InspectionTask::getStatus,List.of("SUCCEEDED","PARTIAL_FAILED","FAILED","NO_DATA","CANCELLED","DELETED"))
+                    .last("LIMIT 1"));
+            if(active==null || !active.isEmpty())throw IqcException.invalidState("仍有未终态分片，请先取消并等待回收");
+            taskMapper.update(null,Wrappers.<InspectionTask>lambdaUpdate().eq(InspectionTask::getBulkParentTaskId,id)
+                    .in(InspectionTask::getStatus,List.of("SUCCEEDED","PARTIAL_FAILED","FAILED","NO_DATA","CANCELLED"))
+                    .set(InspectionTask::getStatus,"DELETED").set(InspectionTask::getAutomaticRetryEnabled,false)
+                    .set(InspectionTask::getRetryNotBeforeUtc,null));
+            var retained=taskMapper.selectList(Wrappers.<InspectionTask>lambdaQuery().select(InspectionTask::getId)
+                    .eq(InspectionTask::getBulkParentTaskId,id).ne(InspectionTask::getStatus,"DELETED").last("LIMIT 1"));
+            if(retained==null || !retained.isEmpty())throw IqcException.invalidState("分片清理未完整保存，已回滚");
         }
         int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
                 .set(InspectionTask::getStatus, "DELETED")

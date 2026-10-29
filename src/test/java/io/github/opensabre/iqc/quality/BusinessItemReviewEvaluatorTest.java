@@ -122,4 +122,47 @@ class BusinessItemReviewEvaluatorTest {
         assertThat(projected.decisions().getFirst().evidenceMessageIds()).containsExactly("m1");
         assertThatThrownBy(() -> projected.reviewed().items().clear()).isInstanceOf(UnsupportedOperationException.class);
     }
+    @org.junit.jupiter.api.Test
+    void dedicatedModelSourceKeepsOriginalNodeAndExactProtocolWithoutInventingRule() {
+        org.assertj.core.api.Assertions.assertThat(new BusinessItemReviewEvaluator.ItemContract("item","Item","",0,
+                "classifier","SMALL_MODEL","small-model-v1").validSource()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(new BusinessItemReviewEvaluator.ItemContract("item","Item","",0,
+                "classifier","SMALL_MODEL","unknown").validSource()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(new BusinessItemReviewEvaluator.ItemContract("item","Item","",0,
+                "","SMALL_MODEL","small-model-v1").validSource()).isFalse();
+    }
+    @Test
+    void dedicatedModelReviewRecalculatesOriginalPolicyAndKeepsMachineOutcome() {
+        var policy=new InspectionScoring.Policy(InspectionScoring.POLICY_VERSION,InspectionScoring.Mode.DEDUCTION,100,60,
+                List.of(new InspectionScoring.Item("model-item",20,false)));
+        var contracts=List.of(new BusinessItemReviewEvaluator.ItemContract("model-item","Classifier","",0,
+                "classifier","SMALL_MODEL","small-model-v1"));
+        var machine=List.of(new SchemeResultEvaluator.ItemResult("model-item","Classifier","",0,FAIL,List.of()));
+        var human=new BusinessItemReviewEvaluator.Decision("result-1","model-item",FAIL,PASS,"核对已处理会话",List.of("m1"));
+        var projection=BusinessItemReviewEvaluator.evaluateFrozen("result-1",policy,contracts,machine,List.of(human),Set.of("m1"));
+        assertThat(projection.original().scoring().finalScore()).isEqualByComparingTo("80");
+        assertThat(projection.reviewed().scoring().finalScore()).isEqualByComparingTo("100");
+        assertThat(machine.getFirst().status()).isEqualTo(FAIL);
+        assertThat(projection.reviewed().items().getFirst().ruleId()).isEmpty();
+        assertThat(projection.reviewed().items().getFirst().ruleVersionNo()).isZero();
+        assertThat(projection.reviewed().items().getFirst().matchedMessageIds()).containsExactly("m1");
+    }
+    @Test void classifiedFeedbackSurvivesNormalizationAndOldCommandsKeepTheirJsonShape() throws Exception {
+        var json=new com.fasterxml.jackson.databind.ObjectMapper();
+        var legacy=decision("a",FAIL,PASS);
+        assertThat(json.valueToTree(legacy).has("feedbackCategory")).isFalse();
+        for(String category:List.of("AI_FALSE_POSITIVE","AI_FALSE_NEGATIVE","EVIDENCE_WRONG","SCORE_POLICY_WRONG",
+                "DATA/ASR_ERROR","RULE_ERROR","BUSINESS_STANDARD_CHANGED")) {
+            var change=new BusinessItemReviewEvaluator.Decision("result-1","a",FAIL,PASS," reason ",List.of("m1"),category);
+            var result=BusinessItemReviewEvaluator.evaluate("result-1",definition(InspectionScoring.Mode.DEDUCTION,false),
+                    items(FAIL,PASS),List.of(change),Set.of("m1"));
+            assertThat(result.decisions().getFirst().feedbackCategory()).isEqualTo(category);
+            assertThat(result.decisions().getFirst().reason()).isEqualTo("reason");
+            assertThat(json.treeToValue(json.valueToTree(result.decisions().getFirst()),BusinessItemReviewEvaluator.Decision.class).feedbackCategory()).isEqualTo(category);
+        }
+        assertThatThrownBy(()->BusinessItemReviewEvaluator.evaluate("result-1",definition(InspectionScoring.Mode.DEDUCTION,false),
+                items(FAIL,PASS),List.of(new BusinessItemReviewEvaluator.Decision("result-1","a",FAIL,PASS,"reason",List.of(),"OTHER")),Set.of("m1")))
+                .isInstanceOf(RuntimeException.class);
+    }
+
 }

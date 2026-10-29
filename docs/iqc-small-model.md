@@ -1,0 +1,21 @@
+# 专用小模型接入缺口与取舍
+
+PRD8.2要求分类、NER、情绪、意图和语义匹配的专用模型。原ModelProfile/Agent ModelSnapshot已有模型身份、版本、部署引用和凭据引用；原ModelGateway.invoke是通用supplier调用，能够复用容量/限流/预算/记录，不能新建并行模型资产或网关。原OpenAI聊天传输本身不能证明这些专用推理协议可用。
+
+接入沿已发布Agent3.0的明确模型版本和MCP只读工具快照，以独立small-model-v1请求/回执协议执行专用推理，不由LLM提示模拟。模型拥有方须提供能够对应原deploymentRef/modelName/version的只读推理工具。沿已批准的原MCP客户端调用，并与Skill/API复用可信会话、schema、输入hash及Finding输出校验；专用模型调用还须包在原ModelGateway中，不能因传输是MCP而绕过模型容量和预算。
+
+操作固定为CLASSIFICATION、NER、EMOTION、INTENT、SEMANTIC_MATCHING。分类可输出BOOLEAN/STRING/ENUM，情绪和意图输出STRING/ENUM，NER输出OBJECT，语义匹配输出NUMBER；业务阈值继续由原项目NumericPredicate承担。每个操作须冻结明确输入和结构化回执schema，模型回执须对应冻结模型id/version和请求hash，未知或失败不伪造规范值。请求仅携带安全模型身份和部署引用，不向工具发送模型secretRef。
+
+本文件为实施前复用与协议取舍记录；发布校验、执行器、原网关、界面及真实推理/Task/SQL/API/浏览器验收须分别完成并记录，不把协议类当作引擎已经实现。语音转换全部排除。
+
+## 当前请求与回执边界
+
+`iqc-small-model-request-v1`携带operation、安全model身份、映射input、可信messages与inputHash。messages始终来自运行时处理好的会话，不依赖管理员重复映射正文。model字段为白名单，禁止传递secretRef；MCP自身认证仍由原凭据解析器处理。
+
+`iqc-small-model-response-v1`须回显modelId、精确整数modelVersion、modelName、deploymentRef、operation和inputHash，提供原Finding所需state/value/reason/evidence/confidence。可选usage的token字段必须为精确整数；缺失用量沿原网关MISSING处理，不伪造零用量。外部拥有方对这些声明真实性的保障仍需要真实模型协议验收。
+
+发布从明确已发布Agent版本的primaryModel或fallbackModels和mcpServers选择唯一id/version，覆盖请求携带的snapshot。运行时复用原网关与当前资产enabled校验，历史读取沿原冻结恢复入口。注册和单元回归不等于实际数据库预算、权限、历史重算、真实模型部署或浏览器流程验收通过。
+
+## 请求摘要精度缺口（实施取舍）
+
+原PipelineAssetService.hash沿浮点JSON读取，不能保证高精度会话/业务值的请求身份区分；改变全局算法会影响原历史快照。专用工具请求须复用SelectorAssetService的精确JSON摘要，以inputHashAlgorithm=EXACT_JSON_V1显式冻结到新发布配置；无标记历史配置继续原算法，显式LEGACY_JSON_V1可保持原摘要。工具仍回显opaque inputHash，不另建hash实现。已在原发布冻结与两adapter接入上述版本分派，前端重发布保留显式算法标记。专项回归正在运行，尚无精度/发布/历史兼容通过结论；不改变全局Pipeline摘要。

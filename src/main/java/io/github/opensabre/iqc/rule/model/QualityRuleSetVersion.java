@@ -12,6 +12,9 @@ import lombok.EqualsAndHashCode;
 public class QualityRuleSetVersion extends BasePo {
     private String ruleSetId;
     private Integer versionNo;
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private java.util.Map<String, Object> privacy;
     private String name;
     private String code;
     private String description;

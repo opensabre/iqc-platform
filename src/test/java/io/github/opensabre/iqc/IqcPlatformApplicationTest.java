@@ -39,6 +39,7 @@ import static org.mockito.Mockito.when;
         "spring.datasource.username=sa",
         "spring.datasource.password=",
         "iqc.task.scheduler-enabled=false",
+        "iqc.task.worker-enabled=false",
         "opensabre.governance.dictionary.registration-enabled=false",
         "opensabre.governance.error-catalog.enabled=false",
         "opensabre.resource-registration.enabled=false",
@@ -66,6 +67,8 @@ public class IqcPlatformApplicationTest {
 
     @Test
     void loadsWithOpenSabreGovernanceAndSafeLlmDefault() {
+        assertThat(applicationContext.getBean(io.github.opensabre.governance.config.GovernanceProperties.class)
+                .getRegistration().isWaitForTasksToCompleteOnShutdown()).isFalse();
         assertThat(applicationContext.getBeansOfType(ErrorCatalogProvider.class)).isNotEmpty();
         assertThat(applicationContext.getBeansOfType(DictionaryProvider.class)).isNotEmpty();
         assertThat(applicationContext.getBeansOfType(AuditAspect.class)).hasSize(1);
@@ -112,6 +115,36 @@ public class IqcPlatformApplicationTest {
                     HttpResponse.BodyHandlers.discarding());
             assertThat(response.statusCode()).as(path).isEqualTo(401);
         }
+    }
+
+    @Test
+    void recoveryRouteIsPublishedAndRejectsAnonymousMutation() throws Exception {
+        var client=HttpClient.newHttpClient();
+        var document=client.send(HttpRequest.newBuilder(URI.create("http://localhost:"+port+"/v3/api-docs")).GET().build(),HttpResponse.BodyHandlers.ofString());
+        assertThat(document.statusCode()).isEqualTo(200);
+        var json=new com.fasterxml.jackson.databind.ObjectMapper().readTree(document.body());
+        assertThat(json.path("paths").path("/api/iqc/conversation-results/{id}/actions/{actionExecutionId}/recover").has("post")).isTrue();
+        var response=client.send(HttpRequest.newBuilder(URI.create("http://localhost:"+port+"/api/iqc/conversation-results/result/actions/"+"a".repeat(64)+"/recover"))
+                .header("Content-Type","application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"version\":0,\"reason\":\"恢复原因\"}")).build(),HttpResponse.BodyHandlers.ofString());
+        assertThat(response.statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    void recoveryUsesTheSpringTransactionProxyAndDedicatedResource() throws Exception {
+        var recovery=applicationContext.getBean(io.github.opensabre.iqc.action.ActionRecoveryService.class);
+        assertThat(org.springframework.aop.support.AopUtils.isAopProxy(recovery)).isTrue();
+        var transactions=applicationContext.getBean(org.springframework.transaction.interceptor.TransactionAttributeSource.class);
+        var method=io.github.opensabre.iqc.action.ActionRecoveryService.class.getMethod("recover",String.class,String.class,long.class,
+                io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved.class,String.class);
+        var attribute=transactions.getTransactionAttribute(method,io.github.opensabre.iqc.action.ActionRecoveryService.class);
+        assertThat(attribute).isNotNull();
+        assertThat(attribute.getPropagationBehavior()).isEqualTo(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        assertThat(attribute.getIsolationLevel()).isEqualTo(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+        assertThat(attribute.rollbackOn(new IllegalStateException("reason unavailable"))).isTrue();
+        var controller=io.github.opensabre.iqc.rest.ActionExecutionController.class.getMethod("recover",String.class,String.class,
+                io.github.opensabre.iqc.rest.ActionExecutionController.ReconciliationRequest.class);
+        assertThat(controller.getAnnotation(io.github.opensabre.boot.annotations.ResourcePermission.class).code()).isEqualTo("iqc:action:recover");
     }
 
     @TestConfiguration(proxyBeanMethods = false)

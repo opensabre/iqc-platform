@@ -51,7 +51,7 @@ import java.util.Collections;
 import java.math.BigDecimal;
 
 @Service
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
 @Slf4j
 public class InspectionExecutionService {
     private final InspectionTaskMapper taskMapper;
@@ -67,6 +67,78 @@ public class InspectionExecutionService {
     private final HierarchicalResultService hierarchicalResultService;
     private final LabelCandidateService labelCandidateService;
     private final io.github.opensabre.iqc.scheme.SchemeDependencyResolver schemeDependencies;
+    private final io.github.opensabre.iqc.pipelineasset.PipelineAssetService pipelineAssets;
+    private final io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator pipelineEvaluator;
+    private final io.github.opensabre.iqc.quality.evaluation.PipelineEvaluationService evaluationService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private io.github.opensabre.iqc.task.TaskExecutionStateService executionStates;
+    @org.springframework.beans.factory.annotation.Autowired
+    private io.github.opensabre.iqc.conversation.ProductionInputSnapshotService productionInputSnapshots;
+    private io.github.opensabre.iqc.task.TaskExecutionStateService states() {
+        // Direct embedding callers already own their transaction boundary; managed calls use the proxied bean.
+        return executionStates==null?new io.github.opensabre.iqc.task.TaskExecutionStateService(taskMapper,executionMapper):executionStates;
+    }
+    /** Keeps the existing embedding constructor compatible; Pipeline tasks require the fully wired constructor. */
+    public InspectionExecutionService(InspectionTaskMapper tasks, ConversationMapper conversations, ConversationMessageMapper messages,
+            InspectionResultMapper results, ObjectMapper mapper, TaskExecutionMapper executions, TaskItemMapper items,
+            IqcDataScope scope, LlmQualityProvider llm, UsageCounterRecorder usage, HierarchicalResultService hierarchy,
+            LabelCandidateService candidates, io.github.opensabre.iqc.scheme.SchemeDependencyResolver schemes) {
+        this(tasks, conversations, messages, results, mapper, executions, items, scope, llm, usage, hierarchy, candidates, schemes, null, null, null);
+    }
+    public InspectionExecutionService(InspectionTaskMapper tasks, ConversationMapper conversations, ConversationMessageMapper messages,
+            InspectionResultMapper results, ObjectMapper mapper, TaskExecutionMapper executions, TaskItemMapper items,
+            IqcDataScope scope, LlmQualityProvider llm, UsageCounterRecorder usage, HierarchicalResultService hierarchy,
+            LabelCandidateService candidates, io.github.opensabre.iqc.scheme.SchemeDependencyResolver schemes,
+            io.github.opensabre.iqc.pipelineasset.PipelineAssetService assets,
+            io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator pipeline) {
+        this(tasks, conversations, messages, results, mapper, executions, items, scope, llm, usage, hierarchy, candidates, schemes, assets, pipeline, null);
+    }
+    private io.github.opensabre.iqc.quality.evaluation.PipelineEvaluationService.Prepared prepareEvaluation(InspectionTask task,JsonNode snapshot) {
+        if (!"PIPELINE_EVALUATION".equals(task.getTaskType())
+                && !io.github.opensabre.iqc.quality.evaluation.PipelineEvaluationService.isEvaluation(snapshot)) return null;
+        if (evaluationService==null) throw IqcException.invalidState("当前执行器未启用冻结输入评测");
+        return evaluationService.prepare(task,snapshot,true);
+    }
+    private io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Prepared prepareProduction(InspectionTask task,JsonNode snapshot) {
+        if (!io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.hasSnapshot(snapshot)) return null;
+        if (productionInputSnapshots==null) throw IqcException.invalidState("当前执行器未启用生产冻结输入");
+        return productionInputSnapshots.prepare(task,snapshot);
+    }
+    private void validateProductionCheckpoints(InspectionTask task,String executionId,List<TaskItem> items,
+            io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Prepared inputs) {
+        if(inputs==null)return;
+        Map<String,String> conversationByMessage=new LinkedHashMap<>();
+        inputs.messages().forEach((conversationId,messages)->messages.forEach(message->conversationByMessage.put(message.getId(),conversationId)));
+        Set<String> seen=new HashSet<>();
+        if(items.size()!=conversationByMessage.size())throw IqcException.invalidState("生产检查点未完整覆盖冻结消息");
+        for(var item:items) {
+            if(!task.getId().equals(item.getTaskId()) || !executionId.equals(item.getExecutionId())
+                    || !Set.of("PENDING","RUNNING","SUCCEEDED","FAILED","CANCELLED").contains(item.getStatus())
+                    || ("SUCCEEDED".equals(item.getStatus()) && (item.getResultId()==null || item.getResultId().isBlank()))
+                    || !seen.add(item.getMessageId()) || !java.util.Objects.equals(conversationByMessage.get(item.getMessageId()),item.getConversationId())
+                    || !conversationByMessage.containsKey(item.getMessageId()))
+                throw IqcException.invalidState("生产检查点不在冻结会话中或重复");
+        }
+    }
+    /** Inherited terminal checkpoints retain their original result IDs; no new inference artifact is fabricated. */
+    private TaskItem productionCheckpoint(InspectionTask task,String executionId,ConversationMessage message,int sequence,TaskItem previous) {
+        var item=new TaskItem();item.setTaskId(task.getId());item.setExecutionId(executionId);
+        item.setMessageId(message.getId());item.setConversationId(message.getConversationId());item.setSequenceNo(sequence);
+        boolean terminal=previous!=null && List.of("SUCCEEDED","CANCELLED").contains(previous.getStatus());
+        item.setStatus(terminal?previous.getStatus():"PENDING");
+        item.setAttemptCount(previous==null || previous.getAttemptCount()==null?0:previous.getAttemptCount());
+        if(terminal){item.setResultId(previous.getResultId());item.setErrorMessage(previous.getErrorMessage());}
+        return item;
+    }
+    private void validatePipelineDependencies(InspectionTask task,JsonNode snapshot) {
+        io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.verifiedSources(task,objectMapper);
+        io.github.opensabre.iqc.quality.evaluation.CalibrationTaskSnapshotService.requireRunnable(task,objectMapper);
+        boolean rollout=io.github.opensabre.iqc.pipelineasset.PipelineRolloutTaskEvidence.requiresEvidence(task.getId())
+                ||snapshot!=null&&snapshot.has("rolloutSnapshot");
+        if (!rollout&&!io.github.opensabre.iqc.pipelineasset.PipelineAssetService.isPipeline(snapshot)) return;
+        if (pipelineAssets == null || pipelineEvaluator == null) throw IqcException.invalidState("当前执行器未启用流水线能力");
+        if(rollout)pipelineAssets.validateTask(snapshot,task.getId());else pipelineAssets.validateTask(snapshot);
+    }
     private final Map<String, DlsEngine.Compiled> dlsCompileCache = Collections.synchronizedMap(
             new LinkedHashMap<>(32, 0.75f, true) {
                 @Override protected boolean removeEldestEntry(Map.Entry<String, DlsEngine.Compiled> eldest) {
@@ -85,10 +157,28 @@ public class InspectionExecutionService {
         return queue(taskId, false);
     }
 
+    /** Compare the exact failed generation under the same Task lock used by manual queueing. */
+    @Transactional
+    public InspectionTask queueRetrySystem(String taskId,String expectedExecutionId,int expectedAttemptCount) {
+        if(expectedExecutionId==null || expectedExecutionId.isBlank() || expectedAttemptCount<1)
+            throw IqcException.invalidArgument("自动重试需要明确的失败执行轮次");
+        return queue(taskId,false,expectedExecutionId,expectedAttemptCount);
+    }
     private InspectionTask queue(String taskId, boolean enforceDataScope) {
-        InspectionTask task = taskMapper.selectById(taskId);
-        if (task == null) throw IqcException.notFound("质检任务不存在: " + taskId);
+        return queue(taskId,enforceDataScope,null,null);
+    }
+    private InspectionTask queue(String taskId,boolean enforceDataScope,String expectedExecutionId,Integer expectedAttemptCount) {
+        String parentId=lockBulkParentForChild(taskId,true);
+        InspectionTask task = taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,taskId).last("FOR UPDATE"));
+        if (task == null) {if(expectedExecutionId!=null)return null;throw IqcException.notFound("质检任务不存在: " + taskId);}
+        if(!java.util.Objects.equals(parentId,task.getBulkParentTaskId()))throw IqcException.invalidState("分片归属已变化，请重试原请求");
         if (enforceDataScope && !dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权执行该质检任务");
+        if(expectedExecutionId!=null){
+            if(!Set.of("FAILED","PARTIAL_FAILED").contains(task.getStatus()) || !expectedExecutionId.equals(task.getCurrentExecutionId())
+                    || !java.util.Objects.equals(expectedAttemptCount,task.getAttemptCount()))return null;
+            if(!"PIPELINE".equals(task.getTaskType()) || !io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.hasSnapshot(readSnapshot(task.getRuleSnapshotJson())))
+                throw IqcException.invalidState("自动重试仅支持完整冻结的生产流水线任务");
+        }
         if ("CREATED".equals(task.getStatus()) || "FAILED".equals(task.getStatus()) || "PARTIAL_FAILED".equals(task.getStatus())) {
             JsonNode snapshot = readSnapshot(task.getRuleSnapshotJson());
             requireSupportedRouteRunCount(task, snapshot);
@@ -97,13 +187,25 @@ public class InspectionExecutionService {
             io.github.opensabre.iqc.scheme.SchemeDependencyResolver.validateJointTaskProjection(snapshot,
                     task.getLabelScopeSnapshotJson(), objectMapper);
             schemeDependencies.validateTaskDependencies(snapshot);
+            validatePipelineDependencies(task,snapshot);
+            var productionInputs=prepareProduction(task,snapshot);
+            var evaluationInputs=prepareEvaluation(task,snapshot);
             String previousStatus = task.getStatus();
             String previousExecutionId = task.getCurrentExecutionId();
             Set<String> retryMessageIds = null;
             int successfulMessages = 0;
-            if (previousExecutionId != null && ("FAILED".equals(previousStatus) || "PARTIAL_FAILED".equals(previousStatus))) {
+            Map<String,TaskItem> productionPrevious=new LinkedHashMap<>();
+            if(productionInputs!=null && previousExecutionId!=null){
+                var previousItems=taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery().eq(TaskItem::getExecutionId,previousExecutionId));
+                validateProductionCheckpoints(task,previousExecutionId,previousItems,productionInputs);
+                if(previousItems.isEmpty())throw IqcException.invalidState("生产前轮检查点缺失");
+                previousItems.forEach(item->productionPrevious.put(item.getMessageId(),item));
+                successfulMessages=(int)previousItems.stream().filter(item->List.of("SUCCEEDED","CANCELLED").contains(item.getStatus())).count();
+            }
+            if (productionInputs==null && previousExecutionId != null && ("FAILED".equals(previousStatus) || "PARTIAL_FAILED".equals(previousStatus))) {
                 List<TaskItem> previousItems = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
                         .eq(TaskItem::getExecutionId, previousExecutionId));
+                validateProductionCheckpoints(task,previousExecutionId,previousItems,productionInputs);
                 if (!previousItems.isEmpty()) {
                     retryMessageIds = new HashSet<>();
                     for (TaskItem previousItem : previousItems) {
@@ -116,32 +218,44 @@ public class InspectionExecutionService {
                             (task.getTotalMessages() == null ? 0 : task.getTotalMessages()) - retryMessageIds.size());
                 }
             }
-            int claimed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
-                    .set(InspectionTask::getStatus, "QUEUED")
-                    .eq(InspectionTask::getId, taskId)
-                    .eq(InspectionTask::getStatus, previousStatus));
+            Integer previousAttemptCount=task.getAttemptCount();
+            if(previousAttemptCount!=null && (previousAttemptCount<0 || previousAttemptCount==Integer.MAX_VALUE))
+                throw IqcException.invalidState("执行轮次计数无效或已达上限");
+            var claim=Wrappers.<InspectionTask>lambdaUpdate().set(InspectionTask::getStatus,"QUEUED")
+                    .eq(InspectionTask::getId,taskId).eq(InspectionTask::getStatus,previousStatus);
+            if(previousExecutionId==null)claim.isNull(InspectionTask::getCurrentExecutionId);else claim.eq(InspectionTask::getCurrentExecutionId,previousExecutionId);
+            if(previousAttemptCount==null)claim.isNull(InspectionTask::getAttemptCount);else claim.eq(InspectionTask::getAttemptCount,previousAttemptCount);
+            int claimed=taskMapper.update(null,claim);
             if (claimed != 1) throw IqcException.invalidState("任务正在被其他请求处理");
             int attempt = task.getAttemptCount() == null ? 1 : task.getAttemptCount() + 1;
             TaskExecution execution = new TaskExecution();
             execution.setTaskId(taskId); execution.setAttemptNo(attempt); execution.setStatus("QUEUED"); execution.setProcessedMessages(0); execution.setFailedMessages(0);
             execution.setProcessedMessages(successfulMessages);
-            executionMapper.insert(execution);
+            if(executionMapper.insert(execution)!=1)throw IqcException.invalidState("新执行轮次保存失败");
             List<String> conversationIds = conversationIds(task);
-            List<ConversationMessage> messages = conversationIds.isEmpty() ? List.of() : messageMapper.selectList(Wrappers.<ConversationMessage>lambdaQuery()
+            List<ConversationMessage> messages = productionInputs!=null?productionInputs.messages().values().stream().flatMap(List::stream).toList()
+                    :evaluationInputs!=null?evaluationInputs.messages().values().stream().flatMap(List::stream).toList()
+                    :conversationIds.isEmpty() ? List.of() : messageMapper.selectList(Wrappers.<ConversationMessage>lambdaQuery()
                     .in(ConversationMessage::getConversationId, conversationIds)
                     .orderByAsc(ConversationMessage::getConversationId).orderByAsc(ConversationMessage::getSequenceNo));
             int batchSequence = 0;
             for (ConversationMessage message : messages) {
+                if(productionInputs!=null){
+                    if(taskItemMapper.insert(productionCheckpoint(task,execution.getId(),message,++batchSequence,productionPrevious.get(message.getId())))!=1)
+                        throw IqcException.invalidState("生产冻结检查点保存失败");
+                    continue;
+                }
                 if (retryMessageIds != null && !retryMessageIds.contains(message.getId())) continue;
                 TaskItem item = new TaskItem();
                 item.setTaskId(taskId); item.setExecutionId(execution.getId()); item.setMessageId(message.getId());
                 item.setConversationId(message.getConversationId()); item.setSequenceNo(++batchSequence); item.setStatus("PENDING"); item.setAttemptCount(0);
-                taskItemMapper.insert(item);
+                if(taskItemMapper.insert(item)!=1)throw IqcException.invalidState("执行工作项保存失败");
             }
             task = taskMapper.selectById(taskId);
             task.setCurrentExecutionId(execution.getId()); task.setAttemptCount(attempt);
             task.setProcessedMessages(successfulMessages); task.setFailedMessages(0);
-            taskMapper.updateById(task);
+            task.setRetryNotBeforeUtc(null);task.setRetryError(null);
+            if(taskMapper.updateById(task)!=1)throw IqcException.invalidState("新执行轮次绑定失败");
             return task;
         } else {
             throw IqcException.taskNotExecutable("当前任务状态不可重复执行: " + task.getStatus());
@@ -149,30 +263,44 @@ public class InspectionExecutionService {
     }
 
     @Async("iqcTaskExecutor")
-    public void executeAsync(String taskId, String executionId) {
-        long startedAt = System.nanoTime();
+    public void executeAsync(String taskId,String executionId) {executePersisted(taskId,executionId);}
+
+    /** Synchronous runner for bounded persistent worker admission on the existing executor. */
+    public void executePersisted(String taskId,String executionId) {
+        long startedAt=System.nanoTime();var claimed=new java.util.concurrent.atomic.AtomicBoolean();
         try {
-            run(taskId, executionId);
-            InspectionTask completed = taskMapper.selectById(taskId);
-            log.info("event=iqc_task_execution taskId={} executionId={} status={} processedMessages={} failedMessages={} elapsedMs={}",
-                    taskId, executionId, completed == null ? "UNKNOWN" : completed.getStatus(),
-                    completed == null ? null : completed.getProcessedMessages(), completed == null ? null : completed.getFailedMessages(), elapsedMillis(startedAt));
-        } catch (RuntimeException exception) {
-            InspectionTask failed = taskMapper.selectById(taskId);
-            if (failed != null) {
-                failed.setStatus("FAILED");
-                failed.setFailedMessages((failed.getTotalMessages() == null ? 0 : failed.getTotalMessages()) - (failed.getProcessedMessages() == null ? 0 : failed.getProcessedMessages()));
-                taskMapper.updateById(failed);
+            run(taskId,executionId,()->claimed.set(true));
+            var completed=taskMapper.selectById(taskId);
+            log.info("event=iqc_task_execution taskId={} executionId={} status={} elapsedMs={}",taskId,executionId,
+                    completed==null?"UNKNOWN":completed.getStatus(),elapsedMillis(startedAt));
+        } catch(RuntimeException exception) {
+            var budgetWait=io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException.budgetWait(exception);
+            if(claimed.get() && budgetWait!=null && states().waitForBudget(taskId,executionId,budgetWait)){
+                log.info("event=iqc_task_budget_wait taskId={} executionId={} reason={}",taskId,executionId,budgetWait.getMessage());return;
             }
-            TaskExecution execution = executionMapper.selectById(executionId);
-            if (execution != null) { execution.setStatus("FAILED"); execution.setErrorMessage(persistedErrorMessage(exception.getMessage())); executionMapper.updateById(execution); }
-            log.error("event=iqc_task_execution taskId={} executionId={} status=FAILED errorType={} elapsedMs={}",
-                    taskId, executionId, exception.getClass().getSimpleName(), elapsedMillis(startedAt), exception);
+            boolean recorded=states().fail(taskId,executionId,claimed.get(),persistedErrorMessage(exception.getMessage()));
+            log.error("event=iqc_task_execution taskId={} executionId={} failureRecorded={} errorType={} elapsedMs={}",
+                    taskId,executionId,recorded,exception.getClass().getSimpleName(),elapsedMillis(startedAt),exception);
         }
+    }
+
+    /** All enqueue/resume paths share parent -> child locking with bulk cleanup and coordination. */
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public String lockBulkParentForChild(String taskId,boolean requireRunnable) {
+        String parentId=taskMapper.bulkParentTaskId(taskId);
+        if(parentId==null)return null;
+        var parent=taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,parentId)
+                .select(InspectionTask::getId,InspectionTask::getTaskType,InspectionTask::getStatus).last("FOR UPDATE"));
+        if(parent==null || !"PIPELINE_BULK".equals(parent.getTaskType()) || "DELETED".equals(parent.getStatus())
+                || requireRunnable && Set.of("CANCEL_REQUESTED","CANCELLED","PAUSE_REQUESTED","PAUSED").contains(parent.getStatus()))
+            throw IqcException.invalidState("批次已停止或删除，不能独立启动分片");
+        return parentId;
     }
 
     /** Validate route vote configuration before claiming a lease or creating execution progress. */
     private void requireSupportedRouteRunCount(InspectionTask task, JsonNode snapshot) {
+        if("PIPELINE_BULK".equals(task.getTaskType()))
+            throw IqcException.invalidState("批次父任务必须由持久协调器分派，不能按普通会话执行");
         if (snapshot == null || !SchemeDefinition.ROUTED_TASK_SCHEMA.equals(
                 snapshot.at("/schemeSnapshot/release/definition/schemaVersion").asText())) return;
         int runCount = task.getRunCount() == null ? 1 : task.getRunCount();
@@ -187,7 +315,8 @@ public class InspectionExecutionService {
         return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
     }
 
-    public InspectionTask run(String taskId, String executionId) {
+    public InspectionTask run(String taskId,String executionId) {return run(taskId,executionId,()->{});}
+    private InspectionTask run(String taskId,String executionId,Runnable onClaim) {
         InspectionTask task = taskMapper.selectById(taskId);
         if (task == null) throw IqcException.notFound("质检任务不存在: " + taskId);
         if ("RUNNING".equals(task.getStatus()) || "SUCCEEDED".equals(task.getStatus())) return task;
@@ -195,19 +324,11 @@ public class InspectionExecutionService {
 
         TaskExecution execution = executionMapper.selectById(executionId);
         if (execution == null) throw IqcException.notFound("执行实例不存在: " + executionId);
-        if (List.of("CANCELLED", "CANCEL_REQUESTED").contains(task.getStatus())) { execution.setStatus("CANCELLED"); executionMapper.updateById(execution); return task; }
-        int claimed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
-                .set(InspectionTask::getStatus, "RUNNING")
-                .eq(InspectionTask::getId, taskId)
-                .eq(InspectionTask::getCurrentExecutionId, executionId)
-                .eq(InspectionTask::getStatus, "QUEUED"));
-        if (claimed != 1) {
-            InspectionTask current = taskMapper.selectById(taskId);
-            if (current != null && List.of("RUNNING", "SUCCEEDED").contains(current.getStatus())) return current;
-            throw IqcException.invalidState("任务执行实例未能取得运行租约");
-        }
-        task.setStatus("RUNNING");
-        execution.setStatus("RUNNING"); executionMapper.updateById(execution);
+        if(!taskId.equals(execution.getTaskId()) || !executionId.equals(task.getCurrentExecutionId()))return task;
+        boolean claimed=states().claim(taskId,executionId);
+        if(!claimed)return taskMapper.selectById(taskId);
+        onClaim.run();
+        task.setStatus("RUNNING");execution.setStatus("RUNNING");
         JsonNode ruleSnapshot = readSnapshot(task.getRuleSnapshotJson());
         // An asset can be disabled while this task waits in the executor queue. Check before any conversation work.
         io.github.opensabre.iqc.scheme.SchemeDependencyResolver.validateRouteTaskProjection(ruleSnapshot,
@@ -215,9 +336,13 @@ public class InspectionExecutionService {
         io.github.opensabre.iqc.scheme.SchemeDependencyResolver.validateJointTaskProjection(ruleSnapshot,
                 task.getLabelScopeSnapshotJson(), objectMapper);
         schemeDependencies.validateTaskDependencies(ruleSnapshot);
+        validatePipelineDependencies(task,ruleSnapshot);
+        var productionInputs=prepareProduction(task,ruleSnapshot);
+        var evaluationInputs=prepareEvaluation(task,ruleSnapshot);
         List<TaskItem> items = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
                 .eq(TaskItem::getExecutionId, executionId).orderByAsc(TaskItem::getSequenceNo));
-        int previouslyProcessed = Math.max(0, (task.getTotalMessages() == null ? items.size() : task.getTotalMessages()) - items.size());
+        validateProductionCheckpoints(task,executionId,items,productionInputs);
+        int previouslyProcessed = productionInputs!=null?0:Math.max(0, (task.getTotalMessages() == null ? items.size() : task.getTotalMessages()) - items.size());
         Map<String, List<TaskItem>> byConversation = items.stream().collect(java.util.stream.Collectors.groupingBy(
                 item -> item.getConversationId() == null ? "legacy" : item.getConversationId(), LinkedHashMap::new, java.util.stream.Collectors.toList()));
         int concurrency = Math.min(Math.max(1, task.getConcurrencyLimit() == null ? 1 : task.getConcurrencyLimit()), Math.max(1, byConversation.size()));
@@ -226,7 +351,8 @@ public class InspectionExecutionService {
         try (ExecutorService workers = Executors.newFixedThreadPool(concurrency, Thread.ofPlatform().name("iqc-conversation-", 0).factory())) {
             List<Future<?>> futures = new ArrayList<>();
             for (List<TaskItem> conversationItems : byConversation.values()) {
-                futures.add(workers.submit(() -> processConversation(executionTask, executionId, ruleSnapshot, conversationItems)));
+                if(productionInputs!=null && conversationItems.stream().allMatch(item->List.of("SUCCEEDED","CANCELLED").contains(item.getStatus())))continue;
+                futures.add(workers.submit(() -> processConversation(executionTask, executionId, ruleSnapshot, conversationItems,evaluationInputs,productionInputs)));
             }
             for (Future<?> future : futures) {
                 try { future.get(); }
@@ -234,35 +360,22 @@ public class InspectionExecutionService {
                 catch (java.util.concurrent.ExecutionException exception) { throw new IllegalStateException("质检批次并发执行失败", exception.getCause()); }
             }
         }
-        task = taskMapper.selectById(taskId);
-        if (task == null || List.of("CANCELLED", "CANCEL_REQUESTED").contains(task.getStatus())) {
-            if (task != null && "CANCEL_REQUESTED".equals(task.getStatus())) {
-                task.setStatus("CANCELLED");
-                taskMapper.updateById(task);
-            }
-            execution.setStatus("CANCELLED"); executionMapper.updateById(execution); return task;
-        }
         // Batch commits update locked database rows, not the worker's original objects.
         // Aggregate committed progress so both legacy and item-route execution use the same source of truth.
         List<TaskItem> committedItems = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
                 .eq(TaskItem::getExecutionId, executionId).orderByAsc(TaskItem::getSequenceNo));
+        validateProductionCheckpoints(task,executionId,committedItems,productionInputs);
         int processed = previouslyProcessed + (int) committedItems.stream().filter(item -> List.of("SUCCEEDED", "FAILED", "CANCELLED").contains(item.getStatus())).count();
         int failed = (int) committedItems.stream().filter(item -> "FAILED".equals(item.getStatus())).count();
-        task.setProcessedMessages(processed); task.setFailedMessages(failed);
-        if ("PAUSE_REQUESTED".equals(task.getStatus())) {
-            task.setStatus("PAUSED"); taskMapper.updateById(task);
-            execution.setProcessedMessages(processed); execution.setFailedMessages(failed); execution.setStatus("PAUSED"); executionMapper.updateById(execution);
-            return task;
-        }
-        task.setStatus(failed > 0 ? "PARTIAL_FAILED" : "SUCCEEDED"); taskMapper.updateById(task);
-        execution.setProcessedMessages(processed); execution.setFailedMessages(failed); execution.setStatus(failed > 0 ? "PARTIAL_FAILED" : "SUCCEEDED"); executionMapper.updateById(execution);
-        return task;
+        return states().finish(taskId,executionId,processed,failed);
     }
 
     @Transactional
     public InspectionTask resume(String taskId) {
-        InspectionTask task = taskMapper.selectById(taskId);
+        String parentId=lockBulkParentForChild(taskId,true);
+        InspectionTask task = taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,taskId).last("FOR UPDATE"));
         if (task == null) throw IqcException.notFound("质检任务不存在: " + taskId);
+        if(!java.util.Objects.equals(parentId,task.getBulkParentTaskId()))throw IqcException.invalidState("分片归属已变化，请重试原恢复请求");
         if (!dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权恢复该质检任务");
         if (task.getCurrentExecutionId() == null) throw IqcException.invalidState("任务没有可恢复的执行实例");
         JsonNode snapshot = readSnapshot(task.getRuleSnapshotJson());
@@ -272,29 +385,89 @@ public class InspectionExecutionService {
         io.github.opensabre.iqc.scheme.SchemeDependencyResolver.validateJointTaskProjection(snapshot,
                 task.getLabelScopeSnapshotJson(), objectMapper);
         schemeDependencies.validateTaskDependencies(snapshot);
+        validatePipelineDependencies(task,snapshot);
+        var productionInputs=prepareProduction(task,snapshot);
+        prepareEvaluation(task,snapshot);
         List<TaskItem> previousItems = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery().eq(TaskItem::getExecutionId, task.getCurrentExecutionId()));
+        validateProductionCheckpoints(task,task.getCurrentExecutionId(),previousItems,productionInputs);
         List<TaskItem> unfinished = previousItems.stream().filter(item -> !List.of("SUCCEEDED", "CANCELLED").contains(item.getStatus())).toList();
-        int changed = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
-                .set(InspectionTask::getStatus, "QUEUED")
-                .set(InspectionTask::getPauseRequested, false)
-                .eq(InspectionTask::getId, taskId)
-                .eq(InspectionTask::getStatus, "PAUSED"));
+        if(task.getModelBudgetWaitCode()!=null){
+            if(!"PAUSED".equals(task.getStatus()))throw IqcException.invalidState("预算等待任务状态已变化");
+            var oldRun=executionMapper.selectOne(Wrappers.<TaskExecution>lambdaQuery().eq(TaskExecution::getId,task.getCurrentExecutionId()).eq(TaskExecution::getTaskId,taskId).last("FOR UPDATE"));
+            if(oldRun==null || !"PAUSED".equals(oldRun.getStatus()))throw IqcException.invalidState("预算等待轮次证据无效");
+            task.setStatus("QUEUED");task.setPauseRequested(false);task.setModelBudgetWaitCode(null);task.setModelBudgetWaitKey(null);
+            oldRun.setStatus("QUEUED");oldRun.setErrorMessage(null);
+            if(taskMapper.updateById(task)!=1 || executionMapper.update(null,Wrappers.<TaskExecution>lambdaUpdate().eq(TaskExecution::getId,oldRun.getId())
+                    .set(TaskExecution::getStatus,"QUEUED").set(TaskExecution::getErrorMessage,null))!=1)throw IqcException.invalidState("恢复预算等待任务失败");
+            return task;
+        }
+        Integer previousAttemptCount=task.getAttemptCount();
+        if(previousAttemptCount!=null && (previousAttemptCount<0 || previousAttemptCount==Integer.MAX_VALUE))
+            throw IqcException.invalidState("执行轮次计数无效或已达上限");
+        var resumeClaim=Wrappers.<InspectionTask>lambdaUpdate().set(InspectionTask::getStatus,"QUEUED")
+                .set(InspectionTask::getPauseRequested,false).eq(InspectionTask::getId,taskId).eq(InspectionTask::getStatus,"PAUSED")
+                .eq(InspectionTask::getCurrentExecutionId,task.getCurrentExecutionId());
+        if(previousAttemptCount==null)resumeClaim.isNull(InspectionTask::getAttemptCount);else resumeClaim.eq(InspectionTask::getAttemptCount,previousAttemptCount);
+        int changed=taskMapper.update(null,resumeClaim);
         if (changed != 1) throw IqcException.invalidState("只有已暂停任务可以恢复");
         int attempt = task.getAttemptCount() == null ? 1 : task.getAttemptCount() + 1;
         TaskExecution execution = new TaskExecution(); execution.setTaskId(taskId); execution.setAttemptNo(attempt); execution.setStatus("QUEUED");
         execution.setProcessedMessages(Math.max(0, (task.getTotalMessages() == null ? previousItems.size() : task.getTotalMessages()) - unfinished.size())); execution.setFailedMessages(0);
-        executionMapper.insert(execution);
+        if(executionMapper.insert(execution)!=1)throw IqcException.invalidState("恢复执行轮次保存失败");
         int sequence = 0;
-        for (TaskItem previous : unfinished) {
+        if(productionInputs!=null){
+            Map<String,TaskItem> previousByMessage=new LinkedHashMap<>();previousItems.forEach(item->previousByMessage.put(item.getMessageId(),item));
+            for(var messages:productionInputs.messages().values())for(var message:messages)
+                if(taskItemMapper.insert(productionCheckpoint(task,execution.getId(),message,++sequence,previousByMessage.get(message.getId())))!=1)
+                    throw IqcException.invalidState("生产恢复检查点保存失败");
+        }
+        for (TaskItem previous : productionInputs!=null?List.<TaskItem>of():unfinished) {
             TaskItem item = new TaskItem(); item.setTaskId(taskId); item.setExecutionId(execution.getId()); item.setMessageId(previous.getMessageId());
             item.setConversationId(previous.getConversationId()); item.setSequenceNo(++sequence); item.setStatus("PENDING"); item.setAttemptCount(previous.getAttemptCount() == null ? 0 : previous.getAttemptCount());
-            taskItemMapper.insert(item);
+            if(taskItemMapper.insert(item)!=1)throw IqcException.invalidState("恢复工作项保存失败");
         }
         task = taskMapper.selectById(taskId); task.setCurrentExecutionId(execution.getId()); task.setAttemptCount(attempt);
-        task.setProcessedMessages(execution.getProcessedMessages()); task.setFailedMessages(0); taskMapper.updateById(task); return task;
+        task.setProcessedMessages(execution.getProcessedMessages()); task.setFailedMessages(0);
+        task.setRetryNotBeforeUtc(null);task.setRetryError(null);
+        if(taskMapper.updateById(task)!=1)throw IqcException.invalidState("恢复执行轮次绑定失败");return task;
     }
 
-    private void processConversation(InspectionTask task, String executionId, JsonNode ruleSnapshot, List<TaskItem> items) {
+    private void processConversation(InspectionTask task, String executionId, JsonNode ruleSnapshot, List<TaskItem> items,
+            io.github.opensabre.iqc.quality.evaluation.PipelineEvaluationService.Prepared evaluationInputs,
+            io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Prepared productionInputs) {
+        if (evaluationInputs!=null) {
+            if(items.isEmpty()) return;
+            var current=taskMapper.selectById(task.getId());
+            if(current==null || !"RUNNING".equals(current.getStatus()) || !executionId.equals(current.getCurrentExecutionId())) return;
+            var pending=items.stream().filter(item->!List.of("SUCCEEDED","CANCELLED").contains(item.getStatus())).toList();
+            if(pending.isEmpty()) return;
+            String conversationId=items.getFirst().getConversationId();
+            var frozen=evaluationInputs.messages().get(conversationId);
+            if(frozen==null || frozen.isEmpty()) throw IqcException.invalidState("评测检查点不在冻结会话中");
+            var member=evaluationInputs.member(conversationId);
+            long evaluatedAt=System.nanoTime();
+            var evaluated=pipelineEvaluator.evaluate(task,evaluationInputs.release(),frozen,
+                    io.github.opensabre.iqc.pipeline.PipelineRuntime.Mode.EVALUATION,member.gold().businessContext());
+            evaluationService.materialize(task,executionId,ruleSnapshot,evaluationInputs,frozen,evaluated,pending,
+                    java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(Math.max(0,System.nanoTime()-evaluatedAt)));
+            return;
+        }
+        if (productionInputs!=null) {
+            if(items.isEmpty())return;
+            var current=taskMapper.selectById(task.getId());
+            if(current==null || !"RUNNING".equals(current.getStatus()) || !executionId.equals(current.getCurrentExecutionId()))return;
+            var pending=items.stream().filter(item->!List.of("SUCCEEDED","CANCELLED").contains(item.getStatus())).toList();
+            if(pending.isEmpty())return;
+            String conversationId=items.getFirst().getConversationId();
+            // A retry projects only unfinished items but always evaluates the original full frozen conversation.
+            var frozen=productionInputs.messages().get(conversationId);
+            if(frozen==null || frozen.isEmpty())throw IqcException.invalidState("生产检查点不在冻结会话中");
+            var release=pipelineAssets.taskRelease(ruleSnapshot);
+            var evaluated=pipelineEvaluator.evaluate(task,release,frozen,
+                    io.github.opensabre.iqc.pipeline.PipelineRuntime.Mode.PRODUCTION,productionInputs.businessContext(conversationId));
+            hierarchicalResultService.materializePipeline(task,executionId,ruleSnapshot,frozen,evaluated,pending,productionInputs);
+            return;
+        }
         Map<String, ConversationMessage> conversationMessagesById = new LinkedHashMap<>();
         for (TaskItem item : items) {
             ConversationMessage loaded = messageMapper.selectById(item.getMessageId());
@@ -303,8 +476,9 @@ public class InspectionExecutionService {
         List<ConversationMessage> conversationMessages = new ArrayList<>(conversationMessagesById.values());
         ConversationSpeakerRole.canonicalize(conversationMessages);
         boolean schemeTask = ruleSnapshot != null && ruleSnapshot.has("schemeSnapshot");
-        if (schemeTask && !conversationMessages.isEmpty()) {
-            io.github.opensabre.iqc.scheme.SchemeResultEvaluator.definition(ruleSnapshot, objectMapper);
+        boolean pipelineTask=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.isPipeline(ruleSnapshot);
+        if ((schemeTask || pipelineTask) && !conversationMessages.isEmpty()) {
+            if (schemeTask) io.github.opensabre.iqc.scheme.SchemeResultEvaluator.definition(ruleSnapshot, objectMapper);
             // Retries must evaluate conversation-scoped detectors with the complete conversation, not only failed messages.
             List<ConversationMessage> fullContext = messageMapper.selectList(Wrappers.<ConversationMessage>lambdaQuery()
                     .eq(ConversationMessage::getConversationId, conversationMessages.get(0).getConversationId())
@@ -313,6 +487,17 @@ public class InspectionExecutionService {
                 ConversationSpeakerRole.canonicalize(fullContext);
                 conversationMessages = fullContext;
             }
+        }
+        if (pipelineTask) {
+            var current=taskMapper.selectById(task.getId());
+            if(current==null || !"RUNNING".equals(current.getStatus()) || !executionId.equals(current.getCurrentExecutionId())) return;
+            var pending=items.stream().filter(item->!List.of("SUCCEEDED","CANCELLED").contains(item.getStatus())).toList();
+            if(!pending.isEmpty() && !conversationMessages.isEmpty()) {
+                var release=pipelineAssets.taskRelease(ruleSnapshot);
+                var evaluated=pipelineEvaluator.evaluate(task,release,conversationMessages);
+                hierarchicalResultService.materializePipeline(task,executionId,ruleSnapshot,conversationMessages,evaluated,pending);
+            }
+            return;
         }
         if (schemeTask && SchemeDefinition.ROUTED_TASK_SCHEMA.equals(ruleSnapshot.at("/schemeSnapshot/release/definition/schemaVersion").asText())) {
             var current = taskMapper.selectById(task.getId());
@@ -363,6 +548,8 @@ public class InspectionExecutionService {
                     usageCounterRecorder.record(new UsageRecord(usageRecordId + ":success", null, "iqc-platform", "INSPECTION_MESSAGE", item.getMessageId(), "QUALITY_CHECK", UsageOutcome.SUCCESS));
                 }
             } catch (RuntimeException exception) {
+                var budgetWait=io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException.budgetWait(exception);
+                if(budgetWait!=null)throw budgetWait;
                 item.setStatus("FAILED"); item.setErrorMessage(persistedErrorMessage(exception.getMessage()));
                 usageCounterRecorder.record(new UsageRecord(usageRecordId + ":failure", null, "iqc-platform", "INSPECTION_MESSAGE", item.getMessageId(), "QUALITY_CHECK", UsageOutcome.FAILURE));
             }
@@ -510,17 +697,9 @@ public class InspectionExecutionService {
             throw IqcException.accessDenied("无权查看该质检结果");
         }
         Map<String, Object> detail = new LinkedHashMap<>();
-        result.setReason(LlmTextSanitizer.sanitize(result.getReason()));
-        result.setEvidence(LlmTextSanitizer.sanitize(result.getEvidence()));
-        result.setEvidenceJson(LlmTextSanitizer.sanitize(result.getEvidenceJson()));
-        result.setFindingJson(LlmTextSanitizer.sanitize(result.getFindingJson()));
-        result.setSuggestionJson(LlmTextSanitizer.sanitize(result.getSuggestionJson()));
-        result.setRuleBreakdownJson(LlmTextSanitizer.sanitize(result.getRuleBreakdownJson()));
+        // Return source values to the owning REST projection. Pre-sanitizing here changes evidence
+        // string lengths and makes stored start/end coordinates point at the wrong characters.
         ConversationMessage message = messageMapper.selectById(result.getMessageId());
-        if (message != null) {
-            message.setContent(LlmTextSanitizer.sanitize(message.getContent()));
-            message.setRawLine(LlmTextSanitizer.sanitize(message.getRawLine()));
-        }
         detail.put("result", result);
         detail.put("message", message);
         detail.put("task", task);
@@ -941,6 +1120,13 @@ public class InspectionExecutionService {
             Map<String, List<ConversationMessage>> quotes,
             io.github.opensabre.iqc.scheme.SchemeDependencyResolver.DetectionContext context,
             List<ConversationMessage> inputs, InspectionResult upstream, int runIndex) {
+        return evaluateItemRouteStage(task,rules,quotes,context,inputs,upstream,runIndex,
+                modelCallContext(task,context.contextKey(),runIndex,inputs.isEmpty()?null:inputs.getFirst().getConversationId()));
+    }
+    private InspectionResult evaluateItemRouteStage(InspectionTask task,Map<String,JsonNode> rules,
+            Map<String,List<ConversationMessage>> quotes,io.github.opensabre.iqc.scheme.SchemeDependencyResolver.DetectionContext context,
+            List<ConversationMessage> inputs,InspectionResult upstream,int runIndex,
+            io.github.opensabre.iqc.result.llm.ModelCallContext callContext){
             JsonNode original = rules.get(context.ruleId());
             if (original == null) throw io.github.opensabre.iqc.governance.IqcException.invalidState("逐项冻结规则不存在");
             var rule = (ObjectNode) original.deepCopy(); rule.put("deduction", 0); rule.put("veto", false);
@@ -979,12 +1165,12 @@ public class InspectionExecutionService {
             for (var batch : batches) {
                 if ("CANDIDATE".equals(context.phase())) {
                     var decoded = ItemCandidateOutput.decode(objectMapper, llmQualityProvider.evaluateCandidates(batch, rule,
-                            readSnapshot(task.getAgentSnapshotJson()), recordId + ":" + batch.getFirst().getId()));
+                            readSnapshot(task.getAgentSnapshotJson()), recordId + ":" + batch.getFirst().getId(),callContext));
                     results.add(decoded.result()); decodedQuotes.addAll(decoded.quotes());
                 } else {
                     var anchor = "CONVERSATION".equals(context.inputScope()) ? applicable.getFirst() : batch.getFirst();
                     results.add(evaluateSingle(stageTask, anchor, rule, findings, batch,
-                            new LinkedHashMap<>(), new LinkedHashMap<>(), 0));
+                            new LinkedHashMap<>(), new LinkedHashMap<>(), 0,callContext));
                 }
             }
             var aggregate = aggregateItemStage(results, rule.path("labelFactTargets").isArray());
@@ -995,6 +1181,23 @@ public class InspectionExecutionService {
                 aggregate.setFindingJson(objectMapper.createObjectNode().put("contextKey", context.contextKey()).toString());
             }
             return aggregate;
+    }
+
+    /** Trusted Pipeline bridge reuses the same frozen-rule stage evaluator as the V2 routes. */
+    public InspectionResult evaluateFrozenPipelineNode(InspectionTask task, JsonNode rule, JsonNode agent,
+            List<ConversationMessage> inputs, InspectionResult upstream, String phase, String inputScope, String nodeId, int attempt) {
+        var stageTask = new InspectionTask(); org.springframework.beans.BeanUtils.copyProperties(task, stageTask);
+        stageTask.setAgentSnapshotJson(agent == null || agent.isNull() ? null : agent.toString());
+        stageTask.setId(task.getId()+":execution:"+task.getCurrentExecutionId());
+        var snapshot = (ObjectNode) readSnapshot(task.getRuleSnapshotJson()).deepCopy();
+        snapshot.set("executionStrategy", objectMapper.valueToTree(new io.github.opensabre.iqc.task.TaskExecutionStrategy(
+                "1.0", io.github.opensabre.iqc.task.TaskExecutionStrategy.Mode.INDEPENDENT)));
+        stageTask.setRuleSnapshotJson(snapshot.toString()); // transient adapter context, never persisted
+        var context = new io.github.opensabre.iqc.scheme.SchemeDependencyResolver.DetectionContext(nodeId,
+                rule.path("id").asText(), rule.path("versionNo").asInt(), inputScope, phase, null);
+        return evaluateItemRouteStage(stageTask, Map.of(context.ruleId(), rule), new LinkedHashMap<>(),
+                context, inputs, upstream, Math.max(0,attempt - 1),
+                modelCallContext(task,nodeId,Math.max(0,attempt-1),inputs.isEmpty()?null:inputs.getFirst().getConversationId()));
     }
 
     /** Projects only item terminal contexts into the existing independent business scoring engine. */
@@ -1096,12 +1299,40 @@ public class InspectionExecutionService {
                 : results.stream().anyMatch(result -> "NOT_EVALUATED".equals(result.getResultStatus())) ? "NOT_EVALUATED"
                 : results.stream().anyMatch(result -> "HIT".equals(result.getResultStatus())) ? "HIT" : "NOT_HIT";
         var aggregate = itemStageOutcome(status, "逐项检测阶段完成");
+        long calls=0,validOutputs=0;var fingerprints=objectMapper.createArrayNode();
+        for(var result:results) if(result.getDetectorMetricsJson()!=null) {
+            var measured=readSnapshot(result.getDetectorMetricsJson());
+            calls+=measured.path("logicalInvocations").asLong(); validOutputs+=measured.path("validOutputs").asLong();
+        }
+        for(var result:results)if(result.getDetectorMetricsJson()!=null){
+            var measured=readSnapshot(result.getDetectorMetricsJson());
+            if(measured.path("invocationFingerprints").isArray())measured.path("invocationFingerprints").forEach(fingerprints::add);
+        }
+        if(calls>0){var metrics=(ObjectNode)readSnapshot(structuredOutputMetrics(calls,validOutputs));
+            metrics.set("invocationFingerprints",fingerprints);
+            if(results.size()==1&&calls==1&&validOutputs==1&&List.of("HIT","NOT_HIT").contains(status)){
+                var single=readDetectorMetrics(results.getFirst().getDetectorMetricsJson()).get("reportedConfidence");
+                if(single!=null&&single.isNumber())metrics.set("reportedConfidence",single);
+            }
+            aggregate.setDetectorMetricsJson(metrics.toString());}
         var evidence = objectMapper.createArrayNode();
         results.forEach(result -> {
             var values = readSnapshot(result.getEvidenceJson());
             if (values != null && values.isArray()) values.forEach(evidence::add);
         });
         aggregate.setEvidenceJson(evidence.toString());
+        if (!labelFacts) {
+            var payload = objectMapper.createObjectNode().put("schemaVersion", "iqc-stage-observations-v1");
+            var observations = payload.putArray("observations");
+            for (var observed : results) {
+                var value = observations.addObject().put("messageId", observed.getMessageId())
+                        .put("ruleId", observed.getRuleId()).put("status", observed.getResultStatus())
+                        .put("reason", observed.getReason());
+                value.set("finding", readSnapshot(observed.getFindingJson()));
+                value.set("evidence", readSnapshot(observed.getEvidenceJson()));
+            }
+            aggregate.setFindingJson(payload.toString());
+        }
         if (labelFacts) {
             var payload = objectMapper.createObjectNode().put("schemaVersion", "iqc-rule-observations-v2");
             var observations = payload.putArray("observations");
@@ -1156,6 +1387,18 @@ public class InspectionExecutionService {
                                             JsonNode preRuleFindings, List<ConversationMessage> conversationMessages,
                                             Map<String, List<LlmQualityProvider.LlmEvaluation>> conversationLlmRuns,
                                             Map<String, String> conversationFactOwners, int runIndex) {
+        return evaluateSingle(task,message,rule,preRuleFindings,conversationMessages,conversationLlmRuns,conversationFactOwners,runIndex,
+                modelCallContext(task,null,runIndex,message.getConversationId()));
+    }
+    private io.github.opensabre.iqc.result.llm.ModelCallContext modelCallContext(InspectionTask task,String nodeId,int runIndex,String conversationId){
+        if(task.getId()==null || task.getCurrentExecutionId()==null || task.getCreatedBy()==null || conversationId==null)return null;
+        return new io.github.opensabre.iqc.result.llm.ModelCallContext(task.getId(),task.getCurrentExecutionId(),nodeId,runIndex,
+                task.getCreatedBy(),task.getOwnerGroupId(),conversationId,
+                io.github.opensabre.iqc.knowledge.KnowledgeTaskSnapshotService.executionContext(task,objectMapper));
+    }
+    private InspectionResult evaluateSingle(InspectionTask task,ConversationMessage message,JsonNode rule,JsonNode preRuleFindings,
+            List<ConversationMessage> conversationMessages,Map<String,List<LlmQualityProvider.LlmEvaluation>> conversationLlmRuns,
+            Map<String,String> conversationFactOwners,int runIndex,io.github.opensabre.iqc.result.llm.ModelCallContext callContext){
         InspectionResult result = new InspectionResult();
         result.setTaskId(task.getId()); result.setConversationId(message.getConversationId()); result.setMessageId(message.getId());
         result.setRuleId(rule == null ? null : rule.path("id").asText(null)); result.setSpeakerRole(message.getSpeakerRole());
@@ -1180,7 +1423,7 @@ public class InspectionExecutionService {
                 DlsEngine.Evaluation evaluation = DlsEngine.evaluate(compiledDls(expression), conversationMessages);
                 DlsEngine.Hit anchor = evaluation.evidence().isEmpty() ? null : evaluation.evidence().get(0);
                 JsonNode taskSnapshot = readSnapshot(task.getRuleSnapshotJson());
-                boolean schemeTask = taskSnapshot != null && taskSnapshot.has("schemeSnapshot");
+                boolean schemeTask = taskSnapshot != null && (taskSnapshot.has("schemeSnapshot") || taskSnapshot.has("pipelineSnapshot"));
                 // A V2 conversation match may be an absence condition with no positive message anchor.
                 boolean hit = evaluation.hit() && (schemeTask || anchor != null && java.util.Objects.equals(anchor.messageId(), message.getId()));
                 Match match = hit && anchor != null ? new Match(true, anchor.text(), anchor.start(), anchor.end()) : new Match(hit, null, -1, -1);
@@ -1202,6 +1445,7 @@ public class InspectionExecutionService {
                 return result;
             }
             if ("LLM".equalsIgnoreCase(ruleType)) {
+                result.setDetectorMetricsJson(structuredOutputMetrics(1,0));
                 String recordId = "inspection-message:" + task.getId() + ":" + message.getId() + ":rule:" + rule.path("id").asText("unknown");
                 boolean conversationFacts = rule.path("labelFactTargets").isArray();
                 boolean conversationEvaluation = conversationFacts || "CONVERSATION".equals(rule.path("inspectionScope").asText());
@@ -1216,15 +1460,18 @@ public class InspectionExecutionService {
                         int nextRun = priorRuns.size();
                         String conversationRecordId = "inspection-conversation:" + task.getId() + ":"
                                 + task.getCurrentExecutionId() + ":" + message.getConversationId() + ":rule:" + contextKey + ":run:" + nextRun;
-                        priorRuns.add(preRuleFindings == null ? llmQualityProvider.evaluateConversation(conversationMessages, rule,
-                                readSnapshot(task.getAgentSnapshotJson()), conversationRecordId)
-                                : llmQualityProvider.evaluateConversation(conversationMessages, rule,
-                                readSnapshot(task.getAgentSnapshotJson()), preRuleFindings, conversationRecordId));
+                        var measured=callContext==null?null:new io.github.opensabre.iqc.result.llm.ModelCallContext(callContext.taskId(),callContext.executionId(),
+                                callContext.nodeId(),callContext.nodeId()==null?nextRun:callContext.runIndex(),callContext.owner(),callContext.ownerGroupId(),callContext.conversationId(),callContext.knowledgeContext());
+                        priorRuns.add(llmQualityProvider.evaluateConversation(conversationMessages,rule,readSnapshot(task.getAgentSnapshotJson()),
+                                preRuleFindings,conversationRecordId,measured));
                     }
                     evaluation = priorRuns.get(runIndex);
-                } else evaluation = preRuleFindings == null
-                        ? llmQualityProvider.evaluate(message.getContent(), rule, readSnapshot(task.getAgentSnapshotJson()), recordId)
-                        : llmQualityProvider.evaluate(message.getContent(), rule, readSnapshot(task.getAgentSnapshotJson()), preRuleFindings, recordId);
+                } else evaluation=llmQualityProvider.evaluate(message.getContent(),rule,readSnapshot(task.getAgentSnapshotJson()),
+                        preRuleFindings,recordId,callContext);
+                var outputMetrics=(ObjectNode)readSnapshot(structuredOutputMetrics(1,evaluation.validStructuredOutput(objectMapper,conversationFacts)?1:0,evaluation.invocationFingerprint()));
+                var reportedConfidence=evaluation.reportedConfidence(objectMapper);
+                if(reportedConfidence!=null)outputMetrics.put("reportedConfidence",reportedConfidence);
+                result.setDetectorMetricsJson(outputMetrics.toString());
                 if (!evaluation.supported()) {
                     result.setResultStatus("ERROR"); result.setScore(0); result.setRiskLevel("HIGH"); result.setDeduction(0);
                     result.setReason(evaluation.reason()); result.setFindingJson("[]"); result.setEvidenceJson("[]"); result.setSuggestionJson("[]");
@@ -1278,6 +1525,19 @@ public class InspectionExecutionService {
             }
             return compiled;
         }
+    }
+    private JsonNode readDetectorMetrics(String body){
+        try{return io.github.opensabre.iqc.result.llm.LlmQualityProvider.readStructuredJson(objectMapper,body);}
+        catch(com.fasterxml.jackson.core.JsonProcessingException invalid){throw new IllegalStateException("Invalid detector metrics",invalid);}
+    }
+    private String structuredOutputMetrics(long calls,long valid,io.github.opensabre.iqc.result.llm.SnapshotChatModelRouter.InvocationFingerprint fingerprint){
+        var metrics=(ObjectNode)readSnapshot(structuredOutputMetrics(calls,valid));
+        var fingerprints=metrics.putArray("invocationFingerprints");if(fingerprint!=null)fingerprints.add(objectMapper.valueToTree(fingerprint));
+        return metrics.toString();
+    }
+    private String structuredOutputMetrics(long calls,long valid) {
+        return objectMapper.createObjectNode().put("schemaVersion","iqc-llm-structured-metrics-v1")
+                .put("logicalInvocations",calls).put("validOutputs",valid).put("invalidOrFailedOutputs",calls-valid).toString();
     }
 
     private InspectionResult notEvaluated(InspectionTask task, ConversationMessage message, JsonNode rule, String reason) {
@@ -1434,7 +1694,11 @@ public class InspectionExecutionService {
 
     private JsonNode readSnapshot(String snapshot) {
         if (snapshot == null || snapshot.isBlank()) return null;
-        try { return objectMapper.readTree(snapshot); }
+        try {
+            var tree=io.github.opensabre.iqc.pipelineasset.PipelineAssetService.readFrozenTree(objectMapper,snapshot);
+            return tree!=null&&tree.has("rolloutSnapshot")?objectMapper.reader()
+                    .with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readTree(snapshot):tree;
+        }
         catch (Exception exception) { throw new IllegalStateException("任务规则快照损坏", exception); }
     }
 

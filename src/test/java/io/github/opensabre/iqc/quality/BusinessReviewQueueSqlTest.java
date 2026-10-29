@@ -32,6 +32,7 @@ class BusinessReviewQueueSqlTest {
             sql.execute("INSERT INTO iqc_inspection_label_result VALUES ('l1','c1','house',2,'owned'),('l2','c2','house',2,'owned'),('l3','c3','house',2,'owned'),('l4','c4','house',2,'owned')");
             sql.execute("INSERT INTO iqc_result_review VALUES ('r1','BUSINESS','c1',NULL,1,'PENDING','本人原结果','other','2026-09-01 00:00:00'),('r2','BUSINESS','c2',NULL,1,'PENDING','同组结果','other','2026-09-02 00:00:00'),('r3','BUSINESS','c3',NULL,1,'PENDING','申请人不是权限依据','alice','2026-09-03 00:00:00'),('legacy','MESSAGE','c4',NULL,1,'PENDING','排除消息记录','alice','2026-09-04 00:00:00')");
             sql.execute("INSERT INTO iqc_result_review VALUES ('lr1','LABEL',NULL,'l1',1,'PENDING','本人旧结果','other','2026-09-05 00:00:00'),('lr2','LABEL',NULL,'l2',1,'PENDING','同组结果','other','2026-09-06 00:00:00'),('lr3','LABEL',NULL,'l3',1,'PENDING','外组申请人伪装','alice','2026-09-07 00:00:00'),('lr4','LABEL',NULL,'l4',1,'COMPLETED','本人当前结果','other','2026-09-08 00:00:00')");
+            sql.execute("ALTER TABLE iqc_result_review ADD reviewed_result_json clob");
             sql.execute("INSERT INTO iqc_task_execution VALUES ('e1','own',1),('e2','own',2)");
             sql.execute("UPDATE iqc_inspection_conversation_result SET execution_id = 'e1', created_time = '2030-01-01 00:00:00' WHERE id = 'c1'");
             sql.execute("UPDATE iqc_inspection_conversation_result SET execution_id = 'e2' WHERE id = 'c4'");
@@ -46,6 +47,7 @@ class BusinessReviewQueueSqlTest {
             var own = mapper.selectBusinessQueue(new Page<BusinessReviewQueueItem>(1, 1), "PENDING", null, false, "alice", null);
             assertThat(own.getTotal()).isEqualTo(1); assertThat(own.getRecords().getFirst().reviewId()).isEqualTo("r1");
             assertThat(own.getRecords().getFirst().currentResult()).isFalse();
+            assertThat(own.getRecords().getFirst().stage()).isEqualTo("INITIAL");
             var team = mapper.selectBusinessQueue(new Page<BusinessReviewQueueItem>(1, 1), "PENDING", null, false, "alice", "g1");
             assertThat(team.getTotal()).isEqualTo(2); assertThat(team.getRecords().getFirst().reviewId()).isEqualTo("r2");
             assertThat(team.getRecords().getFirst().currentResult()).isTrue();
@@ -54,6 +56,18 @@ class BusinessReviewQueueSqlTest {
             assertThat(mapper.selectBusinessQueue(new Page<BusinessReviewQueueItem>(1, 20), null, null, true, "alice", null).getTotal()).isEqualTo(3);
             assertThat(mapper.selectBusinessQueue(new Page<BusinessReviewQueueItem>(1, 20), "PENDING", "foreign", false, "alice", "g1").getTotal()).isZero();
             assertThat(mapper.selectBusinessQueue(new Page<BusinessReviewQueueItem>(1, 20), "COMPLETED", null, true, "alice", null).getTotal()).isZero();
+            try (var connection = source.getConnection(); var update = connection.prepareStatement("UPDATE iqc_result_review SET reviewed_result_json = ? WHERE id = 'r2'")) {
+                for (var entry : java.util.Map.of(
+                        "{\"schemaVersion\":\"iqc-review-workflow-v1\",\"stage\":\"SECOND_REVIEW\"}", "SECOND_REVIEW",
+                        "{\"schemaVersion\":\"iqc-review-workflow-v1\",\"stage\":\"ARBITRATION\"}", "ARBITRATION",
+                        "{broken", "INVALID", "{\"schemaVersion\":\"unknown\",\"stage\":\"SECOND_REVIEW\"}", "INVALID").entrySet()) {
+                    update.setString(1, entry.getKey()); update.executeUpdate();
+                    session.clearCache();
+                    var staged = mapper.selectBusinessQueue(new Page<BusinessReviewQueueItem>(1, 1), "PENDING", "team", false, "alice", "g1");
+                    assertThat(staged.getTotal()).isEqualTo(1);
+                    assertThat(staged.getRecords().getFirst().stage()).isEqualTo(entry.getValue());
+                }
+            }
             var labelOwn = mapper.selectLabelQueue(new Page<LabelReviewQueueItem>(1, 1), "PENDING", null, false, "alice", null);
             assertThat(labelOwn.getTotal()).isEqualTo(1);
             assertThat(labelOwn.getRecords().getFirst().getReviewId()).isEqualTo("lr1");
@@ -67,4 +81,20 @@ class BusinessReviewQueueSqlTest {
             assertThat(mapper.selectLabelQueue(new Page<LabelReviewQueueItem>(1, 20), "PENDING", "foreign", false, "alice", "g1").getTotal()).isZero();
         }
     }
+    @Test void projectedStageRoundTripsWithoutRetainingRawWorkflow() throws Exception {
+        var json = new com.fasterxml.jackson.databind.ObjectMapper();
+        String raw = "{\"schemaVersion\":\"iqc-review-workflow-v1\",\"stage\":\"ARBITRATION\",\"secret\":\"private-snapshot\"}";
+        var row = new BusinessReviewQueueItem("review","result","task","Task","conversation",3,"PENDING",
+                "reason","requester",null,"SUCCEEDED",true,"INITIAL",raw);
+        assertThat(row.stage()).isEqualTo("ARBITRATION");
+        assertThat(row.workflowMetadata()).isNull();
+        assertThat(row.toString()).doesNotContain("private-snapshot");
+        String wire = json.writeValueAsString(row);
+        assertThat(wire).doesNotContain("workflowMetadata","private-snapshot");
+        assertThat(json.readValue(wire,BusinessReviewQueueItem.class).stage()).isEqualTo("ARBITRATION");
+        var old = new BusinessReviewQueueItem("review","result","task","Task","conversation",1,"PENDING",
+                "reason","requester",null,"SUCCEEDED",true);
+        assertThat(old.stage()).isEqualTo("INITIAL");
+    }
+
 }

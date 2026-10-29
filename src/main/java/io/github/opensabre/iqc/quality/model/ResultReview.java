@@ -8,6 +8,12 @@ import lombok.EqualsAndHashCode;
 /** Human review that preserves the original AI decision and stores the effective conclusion separately. */
 @Data @TableName("iqc_result_review") @EqualsAndHashCode(callSuper = true)
 public class ResultReview extends BasePo {
+    @com.baomidou.mybatisplus.annotation.TableField(exist=false)
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private java.util.Map<String,Object> privacy;
+    @com.baomidou.mybatisplus.annotation.TableField(exist=false)
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private java.util.Map<String,Object> reviewPresentation;
     private String resultId;
     /** MESSAGE retains result_id; BUSINESS and LABEL use their dedicated source-result columns. */
     private String targetType = "MESSAGE";

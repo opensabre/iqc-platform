@@ -1,0 +1,61 @@
+# 当前交付缺口复核（2026-10-22）
+
+基线：后端58b22f0，前端abdd53f。完整I1–I7保持进行中，不以本表替代PRD逐项最终验收。
+
+输入为已经处理好的会话；ASR、转写生成、音频转换和说话人分离不属于当前工作。单租户部署复用组织范围。默认release v1未切换，精确v2已有实现与专项验证但不等于默认入口已启用。
+
+## 下一项功能交付：标签准确率
+
+PRD14.3要求业务层标签准确率。当前 `PipelineEvaluationService.report` 统计 GoldDecision.labels 数量，但 BusinessMetrics 构造仍固定 comparableLabels=0、labelAccuracy=null，前端也明确提示标签输出未接入。这是功能缺口，不是仅缺测试。
+
+复用路径：冻结 PipelineRelease.labelPolicy → FindingLabelPolicy.projectionBinding/bindingAddress → FindingLabelProjection.project，输入使用已校验持久化 actual.fusion。生产已有同一投影能力，不新增标签表、模型调用或第二套投影算法。
+
+实施前明确并写入Gold协议：标签键采用现有 bindingAddress 的 JSON Pointer 地址（labelId/valueCode转义），不按显示名猜测绑定。旧自由文本标签键没有可证对应关系时保持未测量，不补假阴性。标签值使用原精确JSON语义比较；KNOWN才可比，UNKNOWN/CONFLICT/ERROR/NOT_EVALUATED保留Gold分母但不作为可比值。
+
+验收须覆盖：正确/错误值、缺绑定和无标签政策、已知与未知状态、旧Gold键、精确数字/对象、完整Gold分母和重试继承，以及报告UI对可比数量/缺测的表达。不可将“可比准确率”冒称全量覆盖率；评测不得触发UPDATE_LABEL或其它业务动作。
+
+## 已有较强组合证据，但仍有边界
+
+| 能力 | 当前证据 | 尚不能据此宣称 |
+|---|---|---|
+| 模型一致性 | 真实Provider/Router构造指纹→原worker→隔离MySQL→真实MVC控制器，SQL重试继承排除；27项测试通过 | 真实供应商/网关账本/PDP/网络HTTP与浏览器整链通过 |
+| 一致性页面 | 真实浏览器注入受控身份/报告，四身份参数、缺测/排除展示、改参考身份清旧报告 | 页面已读取上述SQL后端，真实角色权限通过 |
+| 发布/复核回流 | 隔离SQL真实目录/Gold审核/数据集/worker/门禁/动作结算故障恢复/复核/回流回归拒绝 | 外部通知渠道、自动发现调度、全部角色和容量SLO通过 |
+| 人工修改率/置信度诊断 | 已实现专项及相应测试，见领域文档与根协作台账 | 完整业务层/模型层指标全部交付 |
+
+来源：`docs/iqc-model-consistency.md`、UI `docs/iqc-evaluation-ui.md`、`docs/iqc-prd-b-measured-publication-worker.md`、根目录 `IQC_PRD_COLLABORATION.md`。测试日志和XML各自绑定提交，不将不同分支/轮次通过数叠加为统一全量通过。
+
+## 仍需实施或逐项验证的范围
+
+- 模型层幻觉指标：当前源码未发现独立实现；先区分无来源引文、引用不匹配与业务事实错误，复用既有证据校验/Gold，不凭F1推导幻觉率。
+- 处理后会话完整率及系统层TPS/延迟/Token/GPU/单会话成本：已有部分报告/网关能力，须明确分母、测量范围和缺测；容量目标需实测，不用单元测试推断。
+- I4外部MQ、I5实际外部通知/工单/辅导/Webhook接收与幂等、I7真实身份/PDP与四角色页面、collector/监控及默认入口激活：迭代清单仍列待办；尚未逐项给出满足PRD的实际运行证据。
+- I1/I2/I6及其它既有功能仍须对照正式PRD验收；不能因为本轮优先处理指标而缩小原任务。
+
+以上后三项属于待核实/待验收集合，不据简单源码搜索判断整个能力不存在。新增基础设施或并行实现前，仍必须搜索拥有仓库、starter、共享服务和Wiki；framework/base-gateway修改需用户明确批准。本轮仅文档复核，不更改生产源码或部署状态。
+
+## 标签指标实施进展
+
+本轮在既有报告接入冻结标签投影：`LabelEvaluationMetrics`仅对规范绑定地址且KNOWN的合法标签值计数；正确数/可比数计算准确率，零可比保持null。无政策/目录、旧名称键、缺输出及未知状态保留Gold总数。回归样本须所有Gold标签均可比且正确才能通过，评测不调用业务动作。标签类型仍服从现有投影校验（不支持对象标签），没有扩展目录类型或切换默认release版本。
+
+验证：原66104 terminal1（新增夹具误用仅接受整数的DURATION_MONTHS），修为支持小数的PERCENTAGE后原11353 terminal0，`/tmp/iqc-b-label-metrics-final.log`。fresh XML：LabelEvaluationMetricsTest4、PipelineEvaluationReportTest20，共24项无失败/错误/跳过。首轮完成主源码编译；末轮testCompile+surerfire。测试覆盖纯标签计算和既有报告回归，不代表已补齐绑定标签的真实报告/SQL重试组合、真实PDP或浏览器整链。以上组合仍为下一验收项，完整I1–I7继续进行。
+
+### 标签报告组装验证补充（2026-10-23）
+
+在原PipelineEvaluationReportTest加入冻结BOOLEAN标签政策和规范Gold地址，使用实际evaluator/产物校验/报告组装验证：两标签一对一错accuracy=0.5且回归仅一条通过；缺一产物labelGold=2/comparable=1/accuracy=1、回归0.5且报告不完整；重试继承prior产物与当前产物都可比、准确率/回归为1、原sourceExecutionIds保留，读取报告不调用runtime。
+
+原41298 terminal1为新增缺产物场景Mockito嵌套设桩错误；拆开夹具创建后原51399 terminal0，`/tmp/iqc-b-label-report-final.log`，fresh XML纯标签4+报告23=27项无失败/错误/跳过。本轮是实际产物/领域报告组装，数据库读取与冻结输入准入仍隔离，不代表真实SQL标签继承或网络/PDP验证；这些仍待后续补齐。
+
+### 标签真实 SQL 继承验证（2026-10-23）
+
+既有IsolatedMysqlMeasuredPublicationIT模型场景接入真实FindingLabelFreezeService/LabelResolutionService与原标签mapper，已发布标签/规则绑定/BOOLEAN值定义为隔离SQL夹具；不mock目录解析或投影。真实Gold标注/独立审核/数据集冻结/worker产物落库：双样本首次第二条失败，report标签Gold=2、可比=1、accuracy=1；恢复adapter重试后Gold=2、可比=2、accuracy=1，首条source仍prior，当前执行SQL结果仅1行。原模型一致性与SQL/MVC组合断言仍通过。
+
+原6341终态0，`/tmp/iqc-b-label-sql.log`，fresh XML：隔离SQL2（94.309秒）+一致性计算5+报告23=30项无失败/错误/跳过；testCompile+surerfire及diff检查通过，专用127.0.0.1:34307脚本自动关闭。已发布标签等记录由测试初始化，未验证标签发布UI流程；scope/current grant/Agent资产validator/供应商ChatModel与网关账本仍受控，不外推真实PDP/供应商/浏览器网络链。纯标签4项沿上一轮证据，不叠加本轮数量。
+
+## 2026-10-25 自动候选挖掘的源码复核
+
+P2“自动候选样本挖掘”尚不能以已有候选动作完成替代：EvaluationCandidateActionAdapter.ready只在指定业务复核COMPLETED后放行，EvaluationCandidateActionService.create再核同一复核轮次；GoldSampleService.reviewedCandidate只接受iqc-reviewed-business-candidate-v1来源。它们已满足“人工确认误判→候选→独立Gold审核”的路径，不是对未复核结果自动发现候选。
+
+后续应扩原QualitySample候选池/冻结输入/Gold标注和原动作执行幂等，新增明确的待标注AI挖掘来源协议，保留原结果Hash、任务/执行/会话与组织范围、算法/配置版本和筛选原因；不得另建样本注册表，不能提前给出FALSE_POSITIVE/FALSE_NEGATIVE或自动批准Gold。现有已复核v1来源和历史反读必须保持。该项目前是实质功能缺口，仍待设计/实施与SQL/权限/重放验证，未据本轮文档视作交付。
+
+本文件前面的2026-10-22阶段状态不是全局最新功能缺口清单：之后已实现校准产物/来源授权/运行和身份绑定/留出门禁/成本级联/Benchmark调用费用与Token，固定提交与有限专项证据见根协作台账及相应正式文档。真实供应商、PDP、容量、自动挖掘及其余适用I1–I7仍未逐项完成。

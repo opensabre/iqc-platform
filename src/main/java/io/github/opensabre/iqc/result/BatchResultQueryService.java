@@ -66,6 +66,7 @@ public class BatchResultQueryService {
         if (taskId == null || taskId.isBlank()) throw IqcException.invalidArgument("业务导出必须选择一个质检任务");
         InspectionTask task = requireTask(taskId);
         JsonNode snapshot = exportJson(task.getRuleSnapshotJson());
+        if (snapshot.has("pipelineSnapshot")) return exportPipelineCsv(task, snapshot);
         var definition = SchemeResultEvaluator.definition(snapshot, objectMapper);
         if (definition == null) throw IqcException.invalidArgument("该任务不是业务方案任务，请使用消息观察导出");
         // This export has one row per check. A label-only scheme would otherwise return a misleading header-only file.
@@ -141,6 +142,92 @@ public class BatchResultQueryService {
         return csv.toString();
     }
 
+    /** Existing business export transport also serves Pipeline policies; machine facts are validated before serialization. */
+    private String exportPipelineCsv(InspectionTask task, JsonNode snapshot) {
+        try {
+            var marker = snapshot.path("pipelineSnapshot");
+            var release = objectMapper.treeToValue(marker.path("release"), io.github.opensabre.iqc.pipelineasset.PipelineRelease.class);
+            if (release == null || snapshot.has("schemeSnapshot") || !marker.path("contentHash").asText().equals(
+                    io.github.opensabre.iqc.pipelineasset.PipelineAssetService.hash(objectMapper.writeValueAsString(release))))
+                throw IqcException.invalidState("流水线导出快照摘要不一致");
+            if (release.items().isEmpty()) throw IqcException.invalidArgument("该流水线没有可导出的业务质检项");
+            var ids = exportConversationIds(task, objectMapper);
+            if ((long) ids.size() * release.items().size() > 50_000)
+                throw IqcException.invalidArgument("业务导出最多50000行，请缩小任务范围");
+            var csv = new StringBuilder("\uFEFF任务ID,流水线ID,发布版本,草稿修订,快照哈希,任务类型,会话ID,原始结果ID,执行实例,评分状态,会话最终分（勿按行求和）,评分政策版本,评分方式,质检项编码,质检项名称,判定,项目绑定规则ID,项目绑定规则版本,规则字段含义,计分贡献,一票否决,事实编码,事实状态,确定事实值JSON,选中事实ID,选中检测节点,项目证据消息ID,融合保留证据JSON（含未选中候选）\n");
+            if(release.scoring().advanced()!=null){int column=csv.indexOf("计分贡献");csv.replace(column,column+"计分贡献".length(),"配置贡献（未加权）");csv.setLength(csv.length()-1);csv.append(",整体原始分,整体等级,项目权重,加权基准贡献,额外调整贡献,评分适用匹配,评分状态,维度编码,维度状态,维度最终分\n");}
+            long bytes = csv.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+            for (String id : ids) {
+                var canonical = latestCanonical(task, id);
+                var items = new java.util.HashMap<String, SchemeResultEvaluator.ItemResult>();
+                var lines = new java.util.HashMap<String, InspectionScoring.Line>();
+                var facts = new java.util.HashMap<String, io.github.opensabre.iqc.fusion.FindingFusion.Result>();
+                InspectionScoring.Result score = null;
+                if (canonical != null) {
+                    var original = objectMapper.readValue(canonical.getBusinessItemResultsJson(),
+                            new com.fasterxml.jackson.core.type.TypeReference<List<SchemeResultEvaluator.ItemResult>>() { });
+                    var trace = objectMapper.readValue(canonical.getExecutionTraceJson(), io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation.class);
+                    var allowed = messageMapper.selectList(Wrappers.<ConversationMessage>lambdaQuery()
+                            .select(ConversationMessage::getId).eq(ConversationMessage::getConversationId, id)).stream()
+                            .map(ConversationMessage::getId).collect(Collectors.toSet());
+                    var checked = io.github.opensabre.iqc.quality.BusinessItemReviewEvaluator.evaluatePipeline(
+                            canonical.getId(), release, trace, original, List.of(), allowed,
+                            io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.validatedBusinessContext(task,snapshot,trace,id,objectMapper));
+                    score = checked.original().scoring();
+                    var saved = objectMapper.readValue(canonical.getScoringResultJson(), InspectionScoring.Result.class);
+                    if (!objectMapper.valueToTree(score).equals(objectMapper.valueToTree(saved))
+                            || !score.scoreStatus().name().equals(canonical.getScoreStatus())
+                            || (score.finalScore() == null ? canonical.getFinalScore() != null
+                            : canonical.getFinalScore() == null || score.finalScore().compareTo(canonical.getFinalScore()) != 0))
+                        throw IqcException.invalidState("流水线机器评分与导出结果不一致");
+                    checked.original().items().forEach(item -> items.put(item.itemCode(), item));
+                    score.lines().forEach(line -> lines.put(line.itemCode(), line));
+                    for (var fact : trace.fusion()) {
+                        if (fact.evidence().stream().anyMatch(evidence -> evidence.type() == io.github.opensabre.iqc.finding.Finding.EvidenceType.CONVERSATION
+                                && !allowed.contains(evidence.reference()))) throw IqcException.invalidState("融合证据不属于当前会话");
+                        facts.put(fact.code(), fact);
+                    }
+                }
+                for (var mapping : release.items()) {
+                    var item = items.get(mapping.itemCode()); var line = lines.get(mapping.itemCode());
+                    var fact = facts.get(mapping.findingCode());
+                    var selectedNodes = fact == null ? List.<String>of() : fact.rawFindings().stream()
+                            .filter(value -> fact.selectedIds().contains(value.id())).map(value -> value.source().nodeId()).distinct().toList();
+                    var cells = new Object[]{task.getId(), marker.path("pipelineId").asText(), marker.path("versionNo").asText(""),
+                            marker.path("draftRevision").asText(""), marker.path("contentHash").asText(), task.getTaskType(), id,
+                            canonical == null ? "" : canonical.getId(), canonical == null ? "" : canonical.getExecutionId(),
+                            score == null ? "PENDING" : score.scoreStatus(), score == null ? null : score.finalScore(),
+                            release.scoring().version(), release.scoring().mode(), mapping.itemCode(), item == null ? mapping.itemCode() : item.name(),
+                            item == null ? "NOT_EVALUATED" : item.status(), item == null ? "" : item.ruleId(), item == null ? "" : item.ruleVersionNo(),
+                            "冻结项目绑定；真实来源见选中检测节点及执行轨迹", line == null ? null : line.contribution(), line == null ? null : line.vetoTriggered(),
+                            mapping.findingCode(), fact == null ? "NOT_EVALUATED" : fact.state(),
+                            fact == null || fact.state() != io.github.opensabre.iqc.finding.Finding.State.KNOWN ? "" : objectMapper.writeValueAsString(fact.value()),
+                            fact == null ? "" : String.join(";", fact.selectedIds()), String.join(";", selectedNodes),
+                            item == null ? "" : objectMapper.writeValueAsString(item.matchedMessageIds()),
+                            fact == null ? "" : objectMapper.writeValueAsString(fact.evidence())};
+                    if(release.scoring().advanced()!=null) {
+                        var advanced=score==null?null:score.advanced();
+                        var weighted=advanced==null?null:advanced.lines().stream().filter(value->mapping.itemCode().equals(value.itemCode())).findFirst().orElse(null);
+                        var dimension=weighted==null || weighted.dimensionCode()==null?null:advanced.dimensions().stream().filter(value->weighted.dimensionCode().equals(value.code())).findFirst().orElse(null);
+                        var extended=new ArrayList<Object>(java.util.Arrays.asList(cells));
+                        extended.addAll(java.util.Arrays.asList(advanced==null?null:advanced.rawScore(),advanced==null?null:advanced.grade(),weighted==null?null:weighted.weight(),
+                                weighted==null?null:weighted.baseContribution(),weighted==null?null:weighted.adjustment(),weighted==null?null:weighted.applicability(),weighted==null?null:weighted.status(),
+                                weighted==null?null:weighted.dimensionCode(),dimension==null?null:dimension.scoreStatus(),dimension==null?null:dimension.finalScore()));
+                        cells=extended.toArray();
+                    }
+                    String row = java.util.Arrays.stream(cells).map(value -> InspectionExecutionService.row(value == null ? "" : value.toString()))
+                            .collect(Collectors.joining(",")) + "\n";
+                    bytes += row.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+                    if (bytes > 50L * 1024 * 1024) throw IqcException.invalidArgument("业务导出超过50MiB，请缩小任务范围");
+                    csv.append(row);
+                }
+            }
+            return csv.toString();
+        } catch (com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException ex) {
+            throw IqcException.invalidState("流水线导出事实或政策快照损坏");
+        }
+    }
+
     /** Strict, shared task scope for machine and review exports; corrupt JSON never falls back to another scope. */
     public static List<String> exportConversationIds(InspectionTask task, ObjectMapper mapper) {
         List<String> ids = new ArrayList<>();
@@ -177,27 +264,33 @@ public class BatchResultQueryService {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public IqcPage<BusinessConversationRow> businessPage(long current, long size, String taskId, String scoreStatus,
                                                        String riskLevel, BigDecimal minScore, BigDecimal maxScore) {
+        return businessPage(current,size,taskId,scoreStatus,riskLevel,minScore,maxScore,null);
+    }
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public IqcPage<BusinessConversationRow> businessPage(long current,long size,String taskId,String scoreStatus,
+            String riskLevel,BigDecimal minScore,BigDecimal maxScore,String parentTaskId) {
         long pageNo = Math.max(1, current), pageSize = Math.min(Math.max(1, size), 100);
         if (scoreStatus != null && !List.of("FINAL", "PENDING", "NOT_APPLICABLE").contains(scoreStatus)
-                || riskLevel != null && !List.of("HIGH", "MEDIUM", "LOW").contains(riskLevel)
+                || riskLevel != null && !List.of("NONE", "LOW", "MEDIUM", "HIGH", "CRITICAL", "UNKNOWN").contains(riskLevel)
                 || minScore != null && minScore.signum() < 0 || maxScore != null && maxScore.signum() < 0
                 || minScore != null && maxScore != null && minScore.compareTo(maxScore) > 0)
             throw IqcException.invalidArgument("业务结果筛选条件无效");
-        var query = Wrappers.<InspectionTask>lambdaQuery().select(InspectionTask::getId, InspectionTask::getName);
-        if (!dataScope.canViewAll()) {
-            String group = dataScope.groupId();
-            query.and(value -> value.eq(InspectionTask::getCreatedBy, dataScope.owner())
-                    .or(group != null, nested -> nested.eq(InspectionTask::getOwnerGroupId, group)));
+        if(parentTaskId!=null) {
+            if(!parentTaskId.matches("[A-Za-z0-9:_-]{1,64}") || taskId!=null&&!taskId.isBlank())
+                throw IqcException.invalidArgument("批次与单任务筛选不能混用");
+            var parent=taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,parentTaskId)
+                    .select(InspectionTask::getId,InspectionTask::getTaskType,InspectionTask::getCreatedBy,InspectionTask::getOwnerGroupId));
+            if(parent==null || !dataScope.canView(parent.getCreatedBy(),parent.getOwnerGroupId()))throw IqcException.accessDenied("无权查看批次结果");
+            if(!"PIPELINE_BULK".equals(parent.getTaskType()))throw IqcException.invalidArgument("结果筛选需要有效批次父任务");
         }
-        if (taskId != null && !taskId.isBlank()) query.eq(InspectionTask::getId, taskId);
-        List<InspectionTask> visibleTasks = taskMapper.selectList(query);
-        List<String> taskIds = visibleTasks.stream().map(InspectionTask::getId).toList();
-        if (taskIds.isEmpty()) return new IqcPage<>(List.of(), pageNo, pageSize, 0);
-        var page = canonicalResults.selectBusinessPage(new Page<>(pageNo, pageSize), taskIds,
-                scoreStatus, riskLevel, minScore, maxScore);
-        Map<String, String> names = new java.util.HashMap<>();
-        Map<String, String> taskNames = new java.util.HashMap<>();
-        visibleTasks.forEach(value -> taskNames.put(value.getId(), value.getName()));
+        boolean all=dataScope.canViewAll();String owner=dataScope.owner(),group=all?null:dataScope.groupId();
+        var page=canonicalResults.selectScopedBusinessPage(new Page<>(pageNo,pageSize),null,
+                taskId==null||taskId.isBlank()?null:taskId,parentTaskId,all,owner,group,scoreStatus,riskLevel,minScore,maxScore);
+        Map<String,String> names=new java.util.HashMap<>(),taskNames=new java.util.HashMap<>();
+        var pageTasks=page.getRecords().stream().map(ConversationInspectionResult::getTaskId).distinct().toList();
+        if(!pageTasks.isEmpty())taskMapper.selectList(Wrappers.<InspectionTask>lambdaQuery()
+                .select(InspectionTask::getId,InspectionTask::getName).in(InspectionTask::getId,pageTasks))
+                .forEach(value->taskNames.put(value.getId(),value.getName()));
         List<String> conversationIds = page.getRecords().stream().map(ConversationInspectionResult::getConversationId).distinct().toList();
         if (!conversationIds.isEmpty()) conversationMapper.selectBatchIds(conversationIds)
                 .forEach(value -> names.put(value.getId(), value.getSourceFileName()));
@@ -232,7 +325,7 @@ public class BatchResultQueryService {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public BatchResultSummary summary(String taskId) {
         InspectionTask task = requireTask(taskId);
-        boolean scheme = isScheme(task);
+        boolean scheme = isConversationPolicy(task);
         Map<String, Integer> attempts = scheme ? executionAttempts(taskId) : Map.of();
         List<InspectionResult> results = resultMapper.selectList(Wrappers.<InspectionResult>lambdaQuery()
                 .eq(InspectionResult::getTaskId, taskId).orderByAsc(InspectionResult::getCreatedTime));
@@ -264,8 +357,8 @@ public class BatchResultQueryService {
         List<InspectionResult> results = resultMapper.selectList(Wrappers.<InspectionResult>lambdaQuery()
                 .eq(InspectionResult::getTaskId, taskId).eq(InspectionResult::getConversationId, conversationId)
                 .orderByAsc(InspectionResult::getCreatedTime));
-        Map<String, Integer> attempts = isScheme(task) ? executionAttempts(taskId) : Map.of();
-        List<InspectionResult> visibleResults = isScheme(task)
+        Map<String, Integer> attempts = isConversationPolicy(task) ? executionAttempts(taskId) : Map.of();
+        List<InspectionResult> visibleResults = isConversationPolicy(task)
                 ? observationsFor(latestCanonical(task, conversationId), results, attempts) : results;
         return new ConversationResultDetail(conversation, task, conversationSummary(task, conversationId, conversation, visibleResults, attempts), messages, visibleResults);
     }
@@ -285,14 +378,15 @@ public class BatchResultQueryService {
         List<ConversationMessage> messages = messageMapper.selectList(Wrappers.<ConversationMessage>lambdaQuery()
                 .eq(ConversationMessage::getConversationId, conversationId).orderByAsc(ConversationMessage::getSequenceNo));
         return new ConversationResultDetail(conversation, task, conversationSummary(task, conversationId, conversation,
-                isScheme(task) ? visibleResults.stream().filter(result -> task.getId().equals(result.getTaskId())).toList() : visibleResults,
-                isScheme(task) ? executionAttempts(task.getId()) : Map.of()), messages, visibleResults);
+                isConversationPolicy(task) ? visibleResults.stream().filter(result -> task.getId().equals(result.getTaskId())).toList() : visibleResults,
+                isConversationPolicy(task) ? executionAttempts(task.getId()) : Map.of()), messages, visibleResults);
     }
 
     private InspectionTask requireTask(String taskId) {
         InspectionTask task = taskMapper.selectById(taskId);
         if (task == null) throw IqcException.notFound("质检任务不存在: " + taskId);
         if (!dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权查看该质检结果");
+        if("PIPELINE_EVALUATION".equals(task.getTaskType())) throw IqcException.invalidArgument("评测任务请使用评测结果与报告接口");
         return task;
     }
 
@@ -313,7 +407,7 @@ public class BatchResultQueryService {
 
     private ConversationResultSummary conversationSummary(InspectionTask task, String id, Conversation conversation,
                                                            List<InspectionResult> results, Map<String, Integer> attempts) {
-        if (isScheme(task)) {
+        if (isConversationPolicy(task)) {
             // Completed conversations are not re-run when another conversation is retried; keep their latest canonical decision.
             ConversationInspectionResult canonical = latestCanonical(task, id);
             List<InspectionResult> currentResults = observationsFor(canonical, results, attempts);
@@ -327,7 +421,7 @@ public class BatchResultQueryService {
             return new ConversationResultSummary(id, conversation == null ? null : conversation.getSourceFileName(),
                     conversation == null ? 0 : conversation.getMessageCount(), currentResults.size(),
                     canonical == null || !"FINAL".equals(canonical.getScoreStatus()) ? null : canonical.getFinalScore(), failures,
-                    canonical != null && "HIGH".equals(canonical.getRiskLevel()) ? 1 : 0,
+                    canonical != null && ("HIGH".equals(canonical.getRiskLevel()) || "CRITICAL".equals(canonical.getRiskLevel())) ? 1 : 0,
                     currentResults.stream().filter(item -> item.getResultStatus() != null && item.getResultStatus().endsWith("ERROR")).count(),
                     canonical == null ? "PENDING" : canonical.getScoreStatus());
         }
@@ -364,9 +458,10 @@ public class BatchResultQueryService {
         return List.copyOf(latestByMessage.values());
     }
 
-    private boolean isScheme(InspectionTask task) {
+    private boolean isConversationPolicy(InspectionTask task) {
         if (task.getRuleSnapshotJson() == null) return false;
-        try { return objectMapper.readTree(task.getRuleSnapshotJson()).has("schemeSnapshot"); }
+        try { var snapshot = objectMapper.readTree(task.getRuleSnapshotJson());
+            return snapshot.has("schemeSnapshot") || snapshot.has("pipelineSnapshot"); }
         catch (Exception exception) { throw IqcException.invalidState("任务规则快照损坏"); }
     }
 

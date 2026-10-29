@@ -1,0 +1,103 @@
+# RabbitMQ业务事件触发接入
+
+## 复用与范围
+
+I4补已有RabbitMQ的接收传输，输入仍是处理后的会话目标/文本消息，不执行ASR或转写。base-k8s已有RabbitMQ服务；Framework EDA提供本地异步分发和远程发布SPI，没有Rabbit接收器。IQC仅增加spring-rabbit（沿用BOM版本）和应用内监听适配，不改Framework，不增基础设施服务、Inbox/Task表、HTTP API或授权资源。直接库加条件配置避免AMQP Boot starter默认注册全局连接/健康检查。
+
+默认`iqc.trigger.rabbit.enabled=false`；关闭时连接、RabbitAdmin、队列声明、监听器均不注册，不依赖broker健康。启用示例见examples/iqc-rabbit-trigger.yml，需同时开启原iqc.trigger.enabled才能由原触发工作器物化和入队。仅接收提交不等于检测已执行/成功。
+
+## 固定身份与组织权限
+
+部署方配置source、负责人稳定userId/username、可选groupId、明确pipelineIds与eventTypes允许集合。默认owner范围；显式all=true仅与负责人当前已有all授权相交，不授予新权限。负责人是现有组织账号；每次投递用ScheduledActorAccessService.resolve重新读取当前账号/资源授权，组织撤权或组变动不能借用旧权限。消息不接受身份、角色、Bearer或权限声明。专用MessageConverter只返回原始字节，禁止Java对象反序列化；唯一解析路径是后续严格UTF-8及原JSON协议。允许的内容由严格TaskTriggerRequest协议决定，未知字段/重复键拒绝，保留现有精确数值解析。
+
+每条消息必须匹配配置source、eventType和pipelineId；pipeline发布版本仍走原资产授权。默认allow-content=false，仅已有会话/外部身份+inputRevision；开启后才允许现有ApiConversationInput，并额外要求原conversation:upload授权。retryPolicy同样要求原配置权限。内部archive-subscription来源不得使用。
+
+## 拓扑与发布契约
+
+- 主交换机`{queue}.exchange`，Direct且durable；routingKey为固定source。
+- 主队列`{queue}`，durable，不auto-delete；拒绝路由至`{queue}.dead.exchange`，routingKey=rejected。
+- 死信交换机与`{queue}.dead`队列均durable。只由专用iqcTriggerRabbitAdmin声明，不借用其它应用RabbitAdmin。若同名存量队列参数不同，先按部署流程迁移，不绕过broker参数一致性检查。
+- 发布body是原`iqc-task-trigger-v1` JSON，UTF-8，最多16MiB；推荐contentType=application/json、persistent delivery与publisher confirms，并确认路由成功。AMQP messageId不作为幂等身份，重投必须保留body source/eventId及全部载荷。
+- broker凭据使用部署secret的AMQP URI；AMQPS使用JDK默认受信任CA及主机名验证，可用JDK信任库配置私有CA。URI、凭据和消息正文不写应用日志；关闭Rabbit客户端/监听器的正文调试日志。
+
+## 提交、ACK与失败
+
+消费者固定1个、prefetch=1，MANUAL确认，同一投递channel操作。严格解析/配置允许集合/当前授权检查后，在收窄scope中调用原TaskTriggerService.accept接收路径。原REQUIRES_NEW事务提交并返回持久化taskId后才basicAck。
+
+幂等继续使用现有稳定负责人ID+source+eventId和payloadHash，同身份同载荷返回原任务，不重复创建；不同载荷拒绝。DB死锁/唯一竞争沿用最多3次事务尝试，每次事务开始重验授权证据时效。业务检测由原TaskTriggerDispatcher及队列工作器处理，不在监听线程执行、不新增第二套自动重试。
+
+解析、授权、允许集合或接收失败，basicReject(requeue=false)进入死信；没有热循环重投。应用依赖暂不可用也进入死信，修复后管理员经broker受控流程重投到原交换机/路由，保留原事件身份和载荷；不要更换eventId来掩盖冲突。死信payload可能包含内容，访问和保留沿用部署的受控broker策略。过期的新事件仍被原时效校验拒绝，已接收事件重复投递复用原任务。
+
+DB已提交但ACK/连接丢失，broker可能再次投递，由原幂等处理；不是跨DB/broker的分布式原子事务，不承诺exactly-once。持久队列不等于所有broker故障下零丢失，生产需匹配既有broker复制/死信策略及publisher确认。不会在应用异常日志打印失败body；低基数iqc.trigger.rabbit.deliveries计数仅区分accepted/rejected投递，不是唯一任务数，也不证明检测成功。
+
+## 验证边界
+
+A初次交付仅编译。初始独立验证清单（后续B证据见下节）：
+
+1. 关闭时无传输bean/网络连接/健康依赖，开启时配置缺失早拒绝；secret不进入toString/异常。
+2. 真实broker声明/绑定、MANUAL ACK晚于DB提交、提交失败死信、ACK丢失重投及同身份不同body拒绝。
+3. 固定身份/当前组织授权/撤权与分组收窄，source/pipeline/type/content/retryPolicy边界。
+4. 严格UTF-8/重复字段/未知字段/16MiB、SQL竞争、原WAITING_INPUT→原worker→任务产物，死信受控重投及过期边界。
+5. 与HTTP接收幂等/历史hash及内部archive-subscription兼容，其他RabbitAdmin存在时声明隔离。
+
+官方传输参考：[Spring AMQP手动确认](https://docs.spring.io/spring-amqp/reference/amqp/receiving-messages/async-returns.html)、[RabbitMQ消息确认](https://www.rabbitmq.com/tutorials/tutorial-two-spring-amqp)。正式验收以本提交实际broker和SQL行为为准，不能由参考文档或编译推断。
+
+## B接收边界与专用broker验证（2026-10-23）
+
+固定后端5f55e11，未修改生产接收器或默认开关。
+
+- RabbitTriggerConsumerTest 8项：使用真实TaskTriggerService.externalRequest严格解析与IqcDataScope收窄，验证acceptance返回后ACK、失败/无持久ID拒绝且不requeue、当前授权失败、未知/重复字段及内部来源、source/pipeline/type部署绑定、非法UTF-8/16MiB、交互身份不能被后台借用、ACK丢失异常不追加reject且scope清理。actors.resolve与持久接收、Channel为mock；这里证明方法返回顺序，不是实际DB提交时刻。
+- RabbitTriggerConfigurationTest 3项：缺开关/false时无传输、消费者或配置bean；错误配置与URI异常不含fixture凭据；六个durable声明与死信参数仅归专用RabbitAdmin。
+- RabbitTriggerBrokerIT 2项：仅在显式IQC_RABBIT_VALIDATION_PORT=35672时运行，使用实际生产连接工厂/拓扑声明、原消费者及真实AMQP Channel。独立随机队列验证publisher confirm、接受ACK后关闭重开无重投、非法UTF-8及acceptance失败进入死信且原body保留、模拟ACK发送丢失后关闭channel可重投同body，redelivered=true，随后ACK清空。通过basicGet交付给原消费者，不宣称已验证Spring监听容器回调配置。
+
+首次17526为新增断言的泛型编译错误；25543的16个非broker用例通过，broker2项因测试URI末尾`/`表示空vhost而未连接成功。改用`/%2f`明确默认`/` vhost后，原35288 terminal0，日志`/tmp/iqc-b-rabbit-broker-final.log`，fresh XML consumer8+configuration3+broker2+原ScheduledActorScope5=18项零失败/错误/跳过。首轮85789因修Mockito测试夹具主动停止130，不作成功证据。
+
+专用节点iqc_b_validation@localhost，配置/数据/日志在`/private/tmp/iqc-b-rabbit.gnovBK`；仅AMQP127.0.0.1:35672，分布式35673及独立EPMD34699，不使用已有broker。原54010节点、9133停止命令均terminal0，专用EPMD停止0，三个端口最终均ECONNREFUSED；随机队列/交换机由夹具清理。未迁移或连接共享SQL。
+
+传输成功仍不等于真实SQL幂等：当前broker测试中acceptance和组织解析为受控边界。同事件同body返回原持久任务、不同body冲突、实际REQUIRES_NEW提交后ACK、SQL竞争、Spring监听容器、内容/retryPolicy权限、WAITING_INPUT到worker产物及真实当前PDP仍须联合验证。不要把两次受控acceptance调用返回同一个fixture ID当作数据库幂等证明。无push/部署，默认enabled=false与v1不变，语音转换排除。
+
+### 独立 SQL 接收事务验证（B，2026-10-23）
+
+`IsolatedMysqlBrokerAcceptanceIT` 复用隔离 MySQL、原 InspectionTaskMapper、
+框架 PoMetaObjectHandler、真实 IqcDataScope 与 TaskTriggerService。三个测试确认：
+外层事务回滚后 REQUIRES_NEW 接收记录仍为 WAITING_INPUT 且负责人正确；同一请求重投
+返回原任务且不重新解析资产；同事件不同载荷不能覆盖原任务；缺当前授权或资产失败不留记录。
+
+原进程 34507 终态 0，日志 `/tmp/iqc-b-broker-acceptance-sql.log`，fresh Surefire XML
+3 项、零失败错误跳过。75 个迁移校验通过，版本 1.1.74；专用 34307 自动关闭、socket 已消失。
+发布资产为受控 fixture，目标会话尚不存在；本轮没有 AMQP Channel、Spring 监听容器、
+实际 PDP、目标物化或 worker。不能将独立 SQL 与前轮 broker 结果合称提交后 ACK 的联合验证。
+
+## 2026-10-23 灰度目标扩展
+
+同一consumer支持显式iqc-task-rollout-trigger-v1/rollout.pipelineId，原允许pipelineIds集合匹配统一目标ID，不从可空固定pipeline读取。当前组织授权额外要求既有rollout:task:create，其他发布协议/大小/原始字节/ACK与死信规则不变。分配在原接收事务冻结，重投/等待不跟随新策略，详见iqc-pipeline-rollout-tasks.md。原B broker/SQL证据属于旧固定目标原基线，不能外推新灰度路径已验证。
+### 消费者、真实 broker 与 SQL 联合验证（B，2026-10-23）
+
+`IsolatedMysqlBrokerAcceptanceIT.realBrokerLostAckRedeliversCommittedTaskAndConflictsGoToDeadLetter`
+使用原 Rabbit 连接工厂/持久拓扑、真实 Channel、原消费者及 TaskTriggerService/事务/Mapper。
+ACK 调用前通过无 Spring 事务的独立 JDBC 连接读取 WAITING_INPUT，随后模拟 ACK 发送失败。
+物理关闭通道后，真实 broker 重投同 body 且 redelivered=true；原接收路径返回唯一已存任务，
+不再解析发布资产。再次 ACK/物理重开后队列为空。同事件变更载荷进入原死信队列，原名称和任务保持。
+
+原 67110 testCompile+surerfire 终态 0，日志 `/tmp/iqc-b-broker-sql-joint.log`，fresh XML
+共 4 项、零失败错误跳过（包含前三项 SQL 回归）。随机队列/交换机清理完成；专用 MySQL 自动关闭，
+Rabbit 原 88884/stop 98255 均终态 0、独立 epmd 关闭，34307/35672/35673/34699 均 ECONNREFUSED。
+本轮 basicGet 交付原消费者，非 Spring 注解监听容器。当前授权/发布资产仍受控，目标尚不存在，
+不能外推实际 PDP、选数物化或 worker 全链，也不包含生产 broker 或语音转换。
+
+### Spring 注解监听容器与 SQL 联合验证（B，2026-10-23）
+
+新增 `annotationListenerAutomaticallyAcceptsDuplicatesAndDeadLettersConflicts`：加载原生产
+RabbitTriggerConfiguration/配置绑定/EnableRabbit 与 RabbitTriggerConsumer，而非手工交付或
+重新实现监听器。唯一运行中的容器经原持久拓扑自动接收；首次消息独立入库，同 body 再投
+不重查资产、不新增任务；冲突载荷被拒绝并进入死信，原任务名称保持。以消费者原 accepted/
+rejected 指标等待处理结束，停止容器后确认主队列为空，随机拓扑和上下文清理。
+
+原 52237 因测试方法引用误用 listener 包接口编译失败；改用 core.MessageListenerContainer
+后，原 80072 compiler:testCompile+surerfire 终态 0，日志
+`/tmp/iqc-b-rabbit-container-sql-final.log`，fresh XML 5 项零失败错误跳过，包含前轮 SQL/broker
+回归。专用 MySQL 自动关闭；Rabbit 原 46305/stop 18415 均终态 0、epmd 关闭，四个专用端口
+34307/35672/35673/34699 均 ECONNREFUSED。无生产修改。
+
+当前组织授权与发布资产仍为受控夹具，目标输入尚不存在。本轮证明注解发现、配置绑定、
+原消息转换/人工 ACK 与数据库接收能联合工作，不证明实际 PDP、目标物化/worker 或供应商链路。

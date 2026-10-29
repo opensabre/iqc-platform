@@ -124,7 +124,9 @@ public class QualityOperationsService {
 
     public List<QualitySample> samples(String type, String status) {
         var query = Wrappers.<QualitySample>lambdaQuery().eq(type != null && !type.isBlank(), QualitySample::getSampleType, upper(type))
-                .eq(status != null && !status.isBlank(), QualitySample::getStatus, upper(status)).orderByDesc(QualitySample::getCreatedTime);
+                .eq(status != null && !status.isBlank(), QualitySample::getStatus, upper(status))
+                .select(QualitySample.class, field -> !"goldDraftJson".equals(field.getProperty()))
+                .orderByDesc(QualitySample::getCreatedTime);
         if (!dataScope.canViewAll()) query.and(q -> q.eq(QualitySample::getCreatedBy, dataScope.owner())
                 .or(dataScope.groupId() != null, nested -> nested.eq(QualitySample::getOwnerGroupId, dataScope.groupId())));
         return sampleMapper.selectList(query);

@@ -1,0 +1,35 @@
+# 动作失败升级业务复核
+
+PRD 第12节要求可配置失败处理，现有ESCALATE_REVIEW目前只是冻结枚举。实施前检索原BusinessItemReviewService、ResultReviewMapper、CREATE_REVIEW适配与动作结算/后台分派：原复核模型已有请求标识、请求指纹、历史轮次及共享Task锁，能够承担升级产物，不创建第二复核表或通知。缺口是原request入口要求预先观察轮次，失败后台无法从已冻结动作凭空给出当前轮次。
+
+最小扩展原拥有服务的内部requestEscalation/lookupEscalation：稳定请求标识必须由后续失败动作来源派生；在原Task锁内选下一轮，既有PENDING不覆盖也不借作当前失败产物，返回等待；原稳定请求已存在时按原请求原因/来源/轮次指纹核对后返回，裁决完成后重试仍不会新开一轮。新建要求当前范围与review:create，旧产物核对不要求发送权限或当前EID。原因与目标均复用原验证，不修改机器结果或历史裁决。
+
+此拥有操作本身不证明动作真实失败，也不是开放HTTP接口。后续调用服务仍须核验原动作终态/冻结ESCALATE_REVIEW政策、实际来源/稳定负责人及当前权限；确认失败或重试耗尽才升级，UNKNOWN只保持待核对，不把失联当确认失败。后台发现、等待/重启恢复、来源绑定与界面尚未接入，不能声称失败策略已生效。新增入口未进行SQL并发/权限/运行验收，迁移71保留B离线转写占用。
+
+内部ActionFailureEscalationService首批核对真实FAILED/已确认失败回执、领取版本与token、原生产Task/EID/Result锁序、冻结策略/input及稳定身份范围；仅冻结ESCALATE_REVIEW且原条件MATCH时调用拥有服务。来源锁、动作锁和复核写入同一REQUIRES_NEW事务，拥有复核入口加入该事务，避免持有Task锁后另启事务自锁。固定复核令牌从原动作幂等键派生，不随观察版本/尝试/裁决变化；事务末尾再次检查当前授权，过期回滚。原FAILED/outcome/evidence及检测结果均不改写。
+
+当前只有内部服务，没有后台发现调用、等待进度或历史状态展示；旧EID/任务继续RUNNING、来源变化会由原验证拒绝，并不把它们冒充已升级。EXPIRED/阻塞等未尝试状态的失败政策仍需定义并实施，UNKNOWN不进入此升级服务。真实SQL并发/原权限/重启恢复验收仍待。
+
+## 后台发现复用与重启语义
+
+复用原iqc.actions.enabled关闭开关、后台稳定身份解析及原ActionDispatcher冻结ownerBound验证，不另建分派表或第二失败账本。原FAILED账本是持久待检查来源，固定100条ID递增页；进程内游标只减少重复扫描，既不证明完成也不授执行权，重启从头重复验证。扫描经过尾部后再次循环，因此暂时已有PENDING复核、授权不足或任务尚未结束的行仍会再检查，不会被永久游标跳过。每行独立事务失败不阻止后续行，原FAILED状态和回执不写回。
+
+已升级的复核请求以原稳定令牌持久防重，仍可能在后续循环中被读取；这是一份有界轮询实现，不声称百万级容量或避免所有重复读取。需要后续运行指标/历史展示来说明等待原因，旧EID、EXPIRED与阻塞政策仍待补齐。
+
+历史只读lookup首批：按原负责人/任务范围验证实际历史Task/EID/Result、原FAILED确认领取结算、完整冻结政策/input与触发条件，再以同一verifiedToken规则查询原复核请求及指纹。新旧EID不影响已创建产物证明，不要求发送grants、不会开轮或改原失败回执；未找到产物返回UNCONFIRMED，不冒充WAITING原因。入口当前内部使用，HTTP/角色菜单与界面尚未接入，亦未放宽原负责人查询为团队任意用户。后台新建仍沿原当前来源验证，旧EID如何新建复核尚待定义。
+
+## 只读HTTP接入缺口
+
+现有ActionExecutionController.history只展示原动作账本/尝试，不能证明已保存失败升级产物。扩展同一controller的GET /{actionExecutionId}/failure-review，独立iqc:action:failure-review:view；路径resultId与实际动作sourceResultId必须一致。复用原lookup历史来源/负责人范围和原复核持久请求证明，不接收客户端回执/结果ID或新建指令。组织01/900257已核对无占用，按原四只读角色授予查看，实际查询仍仅原负责人范围，不授创建或重试。HTTP/SQL/真实角色/浏览器验收仍待，未发现产物不推断等待原因。
+
+HTTP读取还复用原ScheduledActorAccessService.capture，在查询事务开始前解析当前账号稳定ID；查询服务核对该ID与冻结ownerBound，避免用户名复用被当作原负责人。当前解析不要求发送权限，也不在数据库锁内调用组织RPC；不新增身份模型或修改framework。
+
+## 失败升级令牌摘要修复与回归（2026-10-18）
+
+原verifiedToken在完整冻结来源和确认失败校验后，将`iqc-action-failure-review-v1:`加原动作幂等键的普通文本传给SelectorAssetService.hash；该入口要求JSON，导致正常升级在请求复核前抛摘要输入无效。最小修复保留原命名空间和源动作键，对同一UTF8字节直接SHA256，不改变Selector/政策JSON摘要、动作幂等身份、源匹配、权限、历史范围或失败回执。
+
+新增ActionFailureEscalationHashTest通过公开escalate/lookup入口验证同一稳定token、重复请求token不变、源动作未改写，以及stale观察/冻结输入篡改/撤权不请求Review。领域来源、复核服务和mapper隔离，原ActionEnqueueService.requireSame与policy条件/hash真实执行。此专项不证明数据库唯一性、真实角色或后台重启恢复。
+
+前两轮新增夹具分别因MyBatis重载断言歧义、Context遗漏必填scoreStatus而未到token分支；修正后16912为5项3通过/2错误，其中重复升级真实复现Selector摘要输入无效，另一项源对象日期序列化缺jsr310，补测试mapper模块。生产仅修token摘要，未放宽原领域约束。
+
+最终12991退出0，`/tmp/iqc-action-escalation-hash-final.log`；四份本轮新XML合计43项，0失败/错误/跳过。新增升级5项与原入队、来源幂等、历史查询回归通过。未进行数据库并发唯一性、真实复核持久化/角色/后台重启或新默认全套验收。

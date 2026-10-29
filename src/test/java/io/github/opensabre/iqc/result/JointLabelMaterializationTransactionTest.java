@@ -78,6 +78,7 @@ import static org.mockito.Mockito.when;
         "spring.datasource.username=sa",
         "spring.datasource.password=",
         "iqc.task.scheduler-enabled=false",
+        "iqc.task.worker-enabled=false",
         "opensabre.governance.dictionary.registration-enabled=false",
         "opensabre.governance.error-catalog.enabled=false",
         "opensabre.resource-registration.enabled=false",
@@ -128,6 +129,12 @@ class JointLabelMaterializationTransactionTest {
 
     @BeforeEach
     void createIsolatedResultTables() {
+        // Fresh base grants for the HTTP workflow; no sensitive grants are implied by authoring rights.
+        when(httpOrganization.currentActionAccess(anyString())).thenAnswer(invocation -> {
+            String user=invocation.getArgument(0);
+            return Result.success(new IqcOrganizationClient.SchedulerAccess("iqc-scheduler-access-v1",user,user,true,
+                    List.of("alice","bob").contains(user)?"g1":"g2",java.util.Set.of(),httpWorkflowResources(),java.time.Instant.now()));
+        });
         // Fast H2 fixture for the existing taxonomy; MySQL subclass uses the formal V1.1.24 tables.
         for (String table : List.of("iqc_label_rule_binding", "iqc_label_value_definition", "iqc_label",
                 "iqc_label_group", "iqc_label_category")) jdbc.execute("DROP TABLE IF EXISTS " + table);
@@ -198,6 +205,8 @@ class JointLabelMaterializationTransactionTest {
                 """);
         jdbc.execute("""
                 CREATE TABLE iqc_conversation (
+                  employee_department_id varchar(64), asr_status varchar(32), customer_level varchar(64),
+                  complaint boolean, business_fields_json clob,
                   id varchar(64) PRIMARY KEY, batch_no varchar(64), source_type varchar(32),
                   external_id varchar(128), employee_id varchar(128), employee_name varchar(128),
                   employee_group_id varchar(64), customer_external_id varchar(128), customer_name varchar(128),
@@ -205,16 +214,27 @@ class JointLabelMaterializationTransactionTest {
                   ended_time timestamp, business_type varchar(64), business_no varchar(128), tags_json clob,
                   source_file_name varchar(255), source_fingerprint varchar(128), message_count int,
                   error_count int, ignored_blank_lines int, status varchar(32), owner_group_id varchar(64),
+                  audio_sha256 varchar(64), audio_size_bytes bigint, audio_media_type varchar(128),
+                  audio_duration_ms bigint,
                   created_by varchar(128), created_time timestamp, updated_by varchar(128), updated_time timestamp)
                 """);
         jdbc.execute("""
                 CREATE TABLE iqc_conversation_message (
                   id varchar(64) PRIMARY KEY, conversation_id varchar(64), sequence_no int,
                   speaker_role varchar(32), relative_time time, content clob, raw_line clob, line_number int,
+                  start_ms bigint, end_ms bigint, confidence decimal(6,5),
                   created_by varchar(128), created_time timestamp, updated_by varchar(128), updated_time timestamp)
                 """);
         jdbc.execute("""
                 CREATE TABLE iqc_inspection_task (
+                  bulk_parent_task_id varchar(64), bulk_shard_no int, bulk_progress_json clob,
+                  retry_policy_json clob, retry_policy_hash varchar(128), automatic_retry_enabled boolean,
+                  retry_not_before_utc timestamp, retry_error varchar(128), event_subscription_id varchar(128),
+                  event_subscription_revision_id varchar(128), trigger_source varchar(128), trigger_event_id varchar(128),
+                  trigger_payload_hash varchar(128), trigger_request_hash varchar(128), trigger_request_json clob,
+                  trigger_retry_not_before_utc timestamp, trigger_error varchar(128), model_budget_wait_code varchar(128),
+                  model_budget_wait_key varchar(128),
+                  periodic_schedule_id varchar(64), periodic_revision_id varchar(64), planned_at_utc timestamp,
                   id varchar(64) PRIMARY KEY, conversation_id varchar(64), conversation_ids_json clob,
                   selection_filter_json clob, concurrency_limit int, scheduled_time timestamp,
                   name varchar(255), task_type varchar(32), agent_id varchar(64), rule_set_id varchar(64),
@@ -229,7 +249,7 @@ class JointLabelMaterializationTransactionTest {
         jdbc.execute("""
                 CREATE TABLE iqc_task_execution (
                   id varchar(64) PRIMARY KEY, task_id varchar(64), attempt_no int, status varchar(32),
-                  processed_messages int, failed_messages int, error_message varchar(1000),
+                  completed_at_utc timestamp, processed_messages int, failed_messages int, error_message varchar(1000),
                   created_by varchar(128), created_time timestamp, updated_by varchar(128), updated_time timestamp)
                 """);
         jdbc.execute("""
@@ -252,7 +272,7 @@ class JointLabelMaterializationTransactionTest {
                 CREATE TABLE iqc_inspection_conversation_result (
                   id varchar(64) PRIMARY KEY, task_id varchar(64), execution_id varchar(64), conversation_id varchar(64),
                   aggregation_mode varchar(16), result_status varchar(32), score int, final_score decimal(8,2),
-                  score_status varchar(32), scoring_result_json clob, business_item_results_json clob,
+                  score_status varchar(32), scoring_result_json clob, business_item_results_json clob, execution_trace_json clob,
                   risk_level varchar(32), deduction int, reason varchar(500),
                   created_by varchar(128), created_time timestamp, updated_by varchar(128), updated_time timestamp,
                   UNIQUE (execution_id, conversation_id))
@@ -277,6 +297,8 @@ class JointLabelMaterializationTransactionTest {
                   id varchar(64) PRIMARY KEY, conversation_result_id varchar(64), label_id varchar(64),
                   label_version_no int, value_code varchar(64), value_json clob, confidence decimal(5,4),
                   source_rule_result_id varchar(64), generation_source varchar(32),
+                  source_finding_code varchar(128), source_action_execution_id varchar(64),
+                  source_input_hash varchar(128), source_projection_hash varchar(128),
                   created_by varchar(128), created_time timestamp, updated_by varchar(128), updated_time timestamp,
                   UNIQUE (conversation_result_id, label_id, value_code))
                 """);
@@ -360,7 +382,7 @@ class JointLabelMaterializationTransactionTest {
                 results, mock(io.github.opensabre.iqc.label.LabelCandidateService.class),
                 mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class));
 
-        ReflectionTestUtils.invokeMethod(execution, "processConversation", task, "execution-integrated", snapshot, List.of(item));
+        ReflectionTestUtils.invokeMethod(execution, "processConversation", task, "execution-integrated", snapshot, List.of(item), null, null);
 
         assertThat(item.getStatus()).isEqualTo("SUCCEEDED");
         assertThat(count("iqc_inspection_result")).isEqualTo(1);
@@ -395,6 +417,13 @@ class JointLabelMaterializationTransactionTest {
                 new IqcOrganizationClient.OrganizationUser("eve", "Eve", "eve", "g2", "Group 2")));
         when(httpOrganization.getUserByUniqueId("alice")).thenReturn(Result.success(
                 new IqcOrganizationClient.OrganizationUser("alice", "Alice", "alice", "g1", "Group 1")));
+        // The sensitive read boundary uses fresh organization grants, not grants copied into a token.
+        when(httpOrganization.currentActionAccess(anyString())).thenAnswer(invocation -> {
+            String userId = invocation.getArgument(0);
+            return Result.success(new IqcOrganizationClient.SchedulerAccess("iqc-scheduler-access-v1",
+                    userId, userId, true, "alice".equals(userId) ? "g1" : "g2", java.util.Set.of(),
+                    httpWorkflowResources(), java.time.Instant.now()));
+        });
         when(httpRateLimiter.check(any())).thenReturn(new RateLimitDecision(
                 true, 60, 0, 60, null, "isolated-test"));
         jdbc.update("INSERT INTO iqc_label_category (id,name,code,status,version_no,created_by,owner_group_id) VALUES ('profile','画像','profile','PUBLISHED',1,'alice','g1')");
@@ -418,14 +447,15 @@ class JointLabelMaterializationTransactionTest {
 
         JsonNode created = httpData(http(alice, path, request));
         String taskId = created.path("id").asText();
+        assertThat(created.path("ruleSnapshotJson").isMissingNode() || created.path("ruleSnapshotJson").isNull()).isTrue();
         assertThat(taskId).startsWith("tr-");
         assertThat(created.path("createdBy").asText()).isEqualTo("alice");
         assertThat(created.path("ownerGroupId").asText()).isEqualTo("g1");
-        JsonNode frozen = mapper.readTree(created.path("ruleSnapshotJson").asText());
+        JsonNode frozen = mapper.readTree(taskMapper.selectById(taskId).getRuleSnapshotJson());
         assertThat(frozen.at("/schemeSnapshot/release/definition/schemaVersion").asText()).isEqualTo(SchemeDefinition.JOINT_TASK_SCHEMA);
         assertThat(frozen.at("/schemeSnapshot/contentHash").asText()).isEqualTo(
                 io.github.opensabre.iqc.scheme.InspectionSchemeService.contentHash(frozen.at("/schemeSnapshot/release").toString()));
-        assertThat(mapper.readTree(created.path("labelScopeSnapshotJson").asText()))
+        assertThat(mapper.readTree(taskMapper.selectById(taskId).getLabelScopeSnapshotJson()))
                 .isEqualTo(frozen.at("/schemeSnapshot/release/dependencies/labels"));
         assertThat(frozen.at("/schemeSnapshot/release/dependencies/labels/labels/0/groupName").asText()).isEqualTo("资产");
         assertThat(frozen.at("/schemeSnapshot/release/dependencies/labels/labels/0/categoryName").asText()).isEqualTo("画像");
@@ -448,6 +478,9 @@ class JointLabelMaterializationTransactionTest {
         assertThat(business.path("records").get(0).path("finalScore").decimalValue()).isEqualByComparingTo("90");
         JsonNode labels = httpData(http(alice, "/api/iqc/tasks/" + taskId + "/label-results", null));
         assertThat(labels).hasSize(1);
+        assertThat(labels.get(0).path("privacy").path("piiMasked").asBoolean()).isTrue();
+        assertThat(labels.get(0).path("privacy").path("canReadFull").asBoolean()).isFalse();
+        assertThat(labels.get(0).path("privacy").path("canReadPii").asBoolean()).isFalse();
         assertThat(labels.get(0).path("labelId").asText()).isEqualTo("house");
         assertThat(labels.get(0).path("labelName").asText()).isEqualTo("是否有房");
         assertThat(labels.get(0).path("labelPath").asText()).isEqualTo("画像 / 资产 / 是否有房");
@@ -479,6 +512,12 @@ class JointLabelMaterializationTransactionTest {
                     new IqcOrganizationClient.OrganizationUser(user, user, user, "g1", "Group 1")));
         when(httpRateLimiter.check(any())).thenReturn(new RateLimitDecision(true, 60, 0, 60, null, "isolated-test"));
         String alice = signedHttpIdentity("alice");
+        when(httpOrganization.currentActionAccess(anyString())).thenAnswer(invocation -> {
+            String user=invocation.getArgument(0);
+            return Result.success(new IqcOrganizationClient.SchedulerAccess("iqc-scheduler-access-v1",user,user,true,
+                    List.of("alice","bob").contains(user)?"g1":"g2",java.util.Set.of(),
+                    httpWorkflowResources(),java.time.Instant.now()));
+        });
         String bob = signedHttpIdentity("bob");
         String trialId = httpData(http(alice, "/api/iqc/schemes/scheme-1/trials",
                 "{\"expectedRevision\":1,\"conversationIds\":[\"conversation-1\"],\"requestId\":\"published_trial_01\"}")).path("id").asText();
@@ -499,8 +538,8 @@ class JointLabelMaterializationTransactionTest {
         String scheduledId = scheduled.path("id").asText();
         assertThat(scheduled.path("taskType").asText()).isEqualTo("SCHEDULED");
         assertThat(scheduled.path("status").asText()).isEqualTo("SCHEDULED");
-        assertThat(scheduled.path("conversationIdsJson").asText()).isEqualTo("[]");
-        JsonNode scheduledSnapshot = mapper.readTree(scheduled.path("ruleSnapshotJson").asText());
+        assertThat(taskMapper.selectById(scheduledId).getConversationIdsJson()).isEqualTo("[]");
+        JsonNode scheduledSnapshot = mapper.readTree(taskMapper.selectById(scheduledId).getRuleSnapshotJson());
         assertThat(scheduledSnapshot.path("schemeSnapshot").path("kind").asText()).isEqualTo("PUBLISHED");
         assertThat(scheduledSnapshot.path("schemeSnapshot").path("versionNo").asInt()).isEqualTo(1);
         assertThat(httpData(http(bob, path, scheduledRequest)).path("id").asText()).isEqualTo(scheduledId);
@@ -568,6 +607,12 @@ class JointLabelMaterializationTransactionTest {
             Thread.sleep(100);
         } while (System.nanoTime() < deadline);
         assertThat(completed.path("status").asText()).as(completed.toString()).isEqualTo("SUCCEEDED");
+    }
+
+    private static java.util.Set<String> httpWorkflowResources() {
+        return java.util.Set.of("iqc:result:view","iqc:result:business:view","iqc:task:view",
+                "iqc:task:detail:view","iqc:result:labels:view","iqc:scheme:view","iqc:scheme:publish",
+                "iqc:task:execute","iqc:task:create","iqc:scheme:trial:create","iqc:scheme:use");
     }
 
     private String signedHttpIdentity(String username) {
@@ -738,7 +783,7 @@ class JointLabelMaterializationTransactionTest {
             version.setConfigJson(agentConfig);
             when(agentVersions.selectOne(any())).thenReturn(version);
             if (twoConversations) {
-                when(llm.evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), anyString()))
+                when(llm.evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), anyString(), any()))
                         .thenAnswer(invocation -> {
                             List<ConversationMessage> context = invocation.getArgument(0);
                             return "message-2".equals(context.getFirst().getId())
@@ -746,7 +791,7 @@ class JointLabelMaterializationTransactionTest {
                                     : new io.github.opensabre.iqc.result.llm.LlmQualityProvider.LlmEvaluation(
                                             false, false, "受控模型不可用");
                         });
-            } else when(llm.evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), anyString()))
+            } else when(llm.evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), anyString(), any()))
                     .thenReturn(new io.github.opensabre.iqc.result.llm.LlmQualityProvider.LlmEvaluation(
                             false, false, "受控模型不可用"));
         }
@@ -820,7 +865,7 @@ class JointLabelMaterializationTransactionTest {
     void routeProcessCommitsActualResultsAndTaskItemsTogetherAndReplayIsIdempotent() throws Exception {
         var batch = newIsolatedRouteBatch();
         org.springframework.test.util.ReflectionTestUtils.invokeMethod(batch.harness().service(), "processConversation",
-                batch.task(), batch.task().getCurrentExecutionId(), batch.snapshot(), batch.items());
+                batch.task(), batch.task().getCurrentExecutionId(), batch.snapshot(), batch.items(), null, null);
         assertThat(count("iqc_inspection_conversation_result")).isEqualTo(1);
         assertThat(count("iqc_inspection_rule_result")).isEqualTo(1);
         assertThat(count("iqc_inspection_result")).isEqualTo(2);
@@ -836,7 +881,7 @@ class JointLabelMaterializationTransactionTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_inspection_result WHERE score IS NULL AND deduction=0", Integer.class)).isEqualTo(2);
         var completed = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery().eq(TaskItem::getExecutionId, batch.task().getCurrentExecutionId()));
         org.springframework.test.util.ReflectionTestUtils.invokeMethod(batch.harness().service(), "processConversation",
-                batch.task(), batch.task().getCurrentExecutionId(), batch.snapshot(), completed);
+                batch.task(), batch.task().getCurrentExecutionId(), batch.snapshot(), completed, null, null);
         assertThat(count("iqc_inspection_result")).isEqualTo(2);
         assertThat(count("iqc_inspection_conversation_result")).isEqualTo(1);
         verify(batch.harness().llm(), org.mockito.Mockito.never()).evaluate(anyString(), any(JsonNode.class), anyString());
@@ -986,7 +1031,7 @@ class JointLabelMaterializationTransactionTest {
         var candidate = mapper.createObjectNode().put("schemaVersion", "iqc-item-candidates-v1").put("outcome", "MATCH");
         candidate.putArray("quotes").addObject().put("messageId", "message-1").put("conversationId", "conversation-1")
                 .put("speakerRole", "customer").put("text", "没有房子");
-        when(harness.llm().evaluateCandidates(anyList(), any(JsonNode.class), any(JsonNode.class), anyString()))
+        when(harness.llm().evaluateCandidates(anyList(), any(JsonNode.class), any(JsonNode.class), anyString(), any()))
                 .thenReturn(new io.github.opensabre.iqc.result.llm.LlmQualityProvider.LlmEvaluation(true, true, "候选", candidate.toString()));
         var trial = harness.tasks().createSchemeTrial("scheme-1", 1, "允许变体", List.of("conversation-1"), selected);
         var snapshot = mapper.readTree(trial.getRuleSnapshotJson());
@@ -1001,7 +1046,7 @@ class JointLabelMaterializationTransactionTest {
         assertTrialItem(queued.getCurrentExecutionId(), "FAIL", "FINAL", "90");
         if ("local".equals(code)) org.mockito.Mockito.verifyNoInteractions(harness.llm());
         else {
-            verify(harness.llm(), org.mockito.Mockito.times(1)).evaluateCandidates(anyList(), any(JsonNode.class), any(JsonNode.class), anyString());
+            verify(harness.llm(), org.mockito.Mockito.times(1)).evaluateCandidates(anyList(), any(JsonNode.class), any(JsonNode.class), anyString(), any());
             org.mockito.Mockito.verifyNoMoreInteractions(harness.llm());
         }
         assertThatCode(selected.definition()::requireExecutable).doesNotThrowAnyException();
@@ -1031,7 +1076,7 @@ class JointLabelMaterializationTransactionTest {
         var candidate = mapper.createObjectNode().put("schemaVersion", "iqc-item-candidates-v1").put("outcome", "MATCH");
         candidate.putArray("quotes").addObject().put("messageId", "message-1").put("conversationId", "conversation-1")
                 .put("speakerRole", "customer").put("text", quote);
-        when(harness.llm().evaluateCandidates(anyList(), any(JsonNode.class), any(JsonNode.class), anyString()))
+        when(harness.llm().evaluateCandidates(anyList(), any(JsonNode.class), any(JsonNode.class), anyString(), any()))
                 .thenReturn(new io.github.opensabre.iqc.result.llm.LlmQualityProvider.LlmEvaluation(true, true, "候选", candidate.toString()));
         var trial = harness.tasks().createSchemeTrial("scheme-1", 1, "候选路线试跑", List.of("conversation-1"), release);
         var queued = harness.service().queue(trial.getId());
@@ -1043,8 +1088,8 @@ class JointLabelMaterializationTransactionTest {
         assertThat(count("iqc_inspection_label_result")).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_task_item WHERE execution_id=? AND status='SUCCEEDED' AND result_id IS NOT NULL",
                 Integer.class, queued.getCurrentExecutionId())).isEqualTo(2);
-        verify(harness.llm(), org.mockito.Mockito.times(1)).evaluateCandidates(anyList(), any(JsonNode.class), any(JsonNode.class), anyString());
-        verify(harness.llm(), org.mockito.Mockito.never()).evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), anyString());
+        verify(harness.llm(), org.mockito.Mockito.times(1)).evaluateCandidates(anyList(), any(JsonNode.class), any(JsonNode.class), anyString(), any());
+        verify(harness.llm(), org.mockito.Mockito.never()).evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), anyString(), any());
     }
 
     @org.junit.jupiter.params.ParameterizedTest
@@ -1069,8 +1114,8 @@ class JointLabelMaterializationTransactionTest {
         var release = new io.github.opensabre.iqc.scheme.InspectionSchemeService.ReleaseSnapshot(
                 "LLM 终态试跑", "terminal", null, "销售", definition, resolver.previewRoutes(definition));
         var output = new io.github.opensabre.iqc.result.llm.LlmQualityProvider.LlmEvaluation(true, modelHit, "受控终态");
-        when(harness.llm().evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), anyString())).thenReturn(output);
-        when(harness.llm().evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), any(JsonNode.class), anyString())).thenReturn(output);
+        when(harness.llm().evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), anyString(), any())).thenReturn(output);
+        when(harness.llm().evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), any(JsonNode.class), anyString(), any())).thenReturn(output);
         var trial = harness.tasks().createSchemeTrial("scheme-1", 1, "LLM 终态试跑", List.of("conversation-1"), release);
         var queued = harness.service().queue(trial.getId());
         var completed = harness.service().run(trial.getId(), queued.getCurrentExecutionId());
@@ -1080,9 +1125,9 @@ class JointLabelMaterializationTransactionTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_task_item WHERE execution_id=? AND status='SUCCEEDED' AND result_id IS NOT NULL",
                 Integer.class, queued.getCurrentExecutionId())).isEqualTo(2);
         verify(harness.llm(), org.mockito.Mockito.times(route == SchemeDefinition.Route.LLM_ONLY ? 1 : 0))
-                .evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), anyString());
+                .evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), anyString(), any());
         verify(harness.llm(), org.mockito.Mockito.times(route == SchemeDefinition.Route.RULE_THEN_LLM && localHit ? 1 : 0))
-                .evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), any(JsonNode.class), anyString());
+                .evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), any(JsonNode.class), anyString(), any());
         assertThat(count("iqc_inspection_label_result")).isZero();
     }
 
@@ -1099,7 +1144,7 @@ class JointLabelMaterializationTransactionTest {
         assertThat(first.getStatus()).isEqualTo("PENDING"); assertThat(first.getResultId()).isNull(); assertThat(first.getAttemptCount()).isZero();
         jdbc.update("UPDATE iqc_task_item SET status='PENDING' WHERE id=?", batch.items().get(1).getId());
         org.springframework.test.util.ReflectionTestUtils.invokeMethod(batch.harness().service(), "processConversation",
-                batch.task(), batch.task().getCurrentExecutionId(), batch.snapshot(), batch.items());
+                batch.task(), batch.task().getCurrentExecutionId(), batch.snapshot(), batch.items(), null, null);
         assertThat(count("iqc_inspection_result")).isEqualTo(2);
         assertThat(count("iqc_inspection_conversation_result")).isEqualTo(1);
     }
@@ -1122,7 +1167,7 @@ class JointLabelMaterializationTransactionTest {
         assertThat(failed.getStatus()).isEqualTo("PARTIAL_FAILED");
         assertThat(failed.getProcessedMessages()).isEqualTo(2); assertThat(failed.getFailedMessages()).isEqualTo(2);
         assertTrialItem(first.getCurrentExecutionId(), "ERROR", "PENDING", null);
-        when(harness.llm().evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), anyString()))
+        when(harness.llm().evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), anyString(), any()))
                 .thenReturn(new io.github.opensabre.iqc.result.llm.LlmQualityProvider.LlmEvaluation(true, false, "恢复后不违规"));
         var retry = harness.service().queue(trial.getId());
         assertThat(retry.getCurrentExecutionId()).isNotEqualTo(first.getCurrentExecutionId());
@@ -1136,7 +1181,7 @@ class JointLabelMaterializationTransactionTest {
                 Integer.class, first.getCurrentExecutionId())).isEqualTo(2);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_task_item WHERE execution_id=? AND status='SUCCEEDED' AND result_id IS NOT NULL",
                 Integer.class, retry.getCurrentExecutionId())).isEqualTo(2);
-        verify(harness.llm(), org.mockito.Mockito.times(2)).evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), anyString());
+        verify(harness.llm(), org.mockito.Mockito.times(2)).evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), anyString(), any());
     }
 
     @Test
@@ -1162,7 +1207,8 @@ class JointLabelMaterializationTransactionTest {
         assertThat(count("iqc_inspection_task")).isEqualTo(baselineTasks);
         var created = httpData(http(alice, path, request));
         String taskId = created.path("id").asText();
-        var snapshot = mapper.readTree(created.path("ruleSnapshotJson").asText());
+        assertThat(created.path("ruleSnapshotJson").isMissingNode() || created.path("ruleSnapshotJson").isNull()).isTrue();
+        var snapshot = mapper.readTree(taskMapper.selectById(taskId).getRuleSnapshotJson());
         assertThat(snapshot.at("/schemeSnapshot/release/definition/schemaVersion").asText()).isEqualTo(SchemeDefinition.ROUTED_TASK_SCHEMA);
         assertThat(snapshot.at("/schemeSnapshot/release/dependencies/itemExecutionPlan/items/0/route").asText()).isEqualTo("RULE_ONLY");
         assertThat(snapshot.at("/schemeSnapshot/contentHash").asText()).isEqualTo(
@@ -1207,7 +1253,8 @@ class JointLabelMaterializationTransactionTest {
         assertThat(count("iqc_inspection_task")).isEqualTo(baseline);
         var created = httpData(http(token, path, request));
         String taskId = created.path("id").asText();
-        var frozen = mapper.readTree(created.path("ruleSnapshotJson").asText());
+        assertThat(created.path("ruleSnapshotJson").isMissingNode() || created.path("ruleSnapshotJson").isNull()).isTrue();
+        var frozen = mapper.readTree(taskMapper.selectById(taskId).getRuleSnapshotJson());
         assertThat(frozen.at("/schemeSnapshot/selectedVariantCode").asText()).isEqualTo("standard");
         assertThat(frozen.at("/schemeSnapshot/release/selectedVariantCode").asText()).isEqualTo("standard");
         assertThat(frozen.at("/schemeSnapshot/release/definition/executionVariants/variants")).hasSize(2);
@@ -1275,13 +1322,13 @@ class JointLabelMaterializationTransactionTest {
         jdbc.update("UPDATE iqc_inspection_scheme SET draft_revision=2,draft_config_json=? WHERE id='scheme-1'",
                 mapper.writeValueAsString(new SchemeDefinition(SchemeDefinition.SCHEMA, original.items(), original.agent(), original.scoring())));
         assertThat(httpData(http(token, path, request)).path("id").asText()).isEqualTo(taskId);
-        assertThat(taskMapper.selectById(taskId).getRuleSnapshotJson()).isEqualTo(created.path("ruleSnapshotJson").asText());
+        assertThat(taskMapper.selectById(taskId).getRuleSnapshotJson()).isEqualTo(frozen.toString());
         String alternateRequest = request.replace("variant_http_trial_01", "variant_http_trial_02")
                 .replace("}", ",\"variantCode\":\"alternate\"}");
         // Restore the authoring version only to test a different request's explicit approved selection.
         jdbc.update("UPDATE iqc_inspection_scheme SET draft_revision=1,draft_config_json=? WHERE id='scheme-1'", mapper.writeValueAsString(draft));
         var alternate = httpData(http(token, path, alternateRequest));
-        assertThat(mapper.readTree(alternate.path("ruleSnapshotJson").asText()).at("/schemeSnapshot/selectedVariantCode").asText())
+        assertThat(mapper.readTree(taskMapper.selectById(alternate.path("id").asText()).getRuleSnapshotJson()).at("/schemeSnapshot/selectedVariantCode").asText())
                 .isEqualTo("alternate");
         assertThat(count("iqc_inspection_task")).isEqualTo(baseline + 2);
         httpData(http(token, "/api/iqc/tasks/" + taskId + "/run", "{}"));
@@ -1344,7 +1391,7 @@ class JointLabelMaterializationTransactionTest {
     @Test
     void explicitConversationCheckCreatesFreezesRunsAndScoresOnceWithoutInventedCitations() throws Exception {
         var harness = newDraftTrial(true, true, false, true, null, true);
-        when(harness.llm().evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), anyString()))
+        when(harness.llm().evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), anyString(), any()))
                 .thenReturn(new io.github.opensabre.iqc.result.llm.LlmQualityProvider.LlmEvaluation(true, true, "完整会话命中"));
         var frozen = mapper.readTree(harness.task().getRuleSnapshotJson());
         assertThat(frozen.at("/schemeSnapshot/release/definition/schemaVersion").asText()).isEqualTo(SchemeDefinition.SCOPED_TASK_SCHEMA);
@@ -1353,9 +1400,9 @@ class JointLabelMaterializationTransactionTest {
         var completed = harness.service().run(queued.getId(), queued.getCurrentExecutionId());
         assertThat(completed.getStatus()).isEqualTo("SUCCEEDED");
         var context = org.mockito.ArgumentCaptor.forClass(List.class);
-        verify(harness.llm()).evaluateConversation(context.capture(), any(JsonNode.class), any(JsonNode.class), anyString());
+        verify(harness.llm()).evaluateConversation(context.capture(), any(JsonNode.class), any(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), anyString(), any());
         assertThat(context.getValue()).hasSize(2);
-        verify(harness.llm(), org.mockito.Mockito.never()).evaluate(anyString(), any(JsonNode.class), any(JsonNode.class), anyString());
+        verify(harness.llm(), org.mockito.Mockito.never()).evaluate(anyString(), any(JsonNode.class), any(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), anyString(), any());
         assertThat(count("iqc_inspection_result")).isEqualTo(2);
         assertThat(count("iqc_inspection_conversation_result")).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT final_score FROM iqc_inspection_conversation_result", java.math.BigDecimal.class))
@@ -1632,7 +1679,7 @@ class JointLabelMaterializationTransactionTest {
         assertThat(partial.getStatus()).isEqualTo("PARTIAL_FAILED");
         assertThat(partial.getFailedMessages()).isEqualTo(1);
         assertTrialItem(first.getCurrentExecutionId(), "ERROR", "PENDING", null);
-        when(harness.llm().evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), anyString()))
+        when(harness.llm().evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), anyString(), any()))
                 .thenReturn(knownFalseHouse("message-1"));
 
         var retry = harness.service().queue(partial.getId());
@@ -1691,7 +1738,7 @@ class JointLabelMaterializationTransactionTest {
                 "SELECT value_json FROM iqc_inspection_label_result", String.class));
         assertThat(labelValue.path("status").asText()).isEqualTo("ERROR");
         assertThat(labelValue.has("value")).isFalse();
-        verify(harness.llm()).evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), anyString());
+        verify(harness.llm()).evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), anyString(), any());
     }
 
     @Test
@@ -1703,7 +1750,7 @@ class JointLabelMaterializationTransactionTest {
         var failed = harness.service().run(firstQueued.getId(), firstExecutionId);
         assertThat(failed.getStatus()).isEqualTo("PARTIAL_FAILED");
 
-        when(harness.llm().evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), anyString()))
+        when(harness.llm().evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), anyString(), any()))
                 .thenReturn(knownFalseHouse("message-1"));
         var secondQueued = harness.service().queue(failed.getId());
         String secondExecutionId = secondQueued.getCurrentExecutionId();
@@ -1770,7 +1817,7 @@ class JointLabelMaterializationTransactionTest {
                 WHERE execution_id = ? AND conversation_id = 'conversation-2'
                 """, String.class, firstExecutionId);
 
-        when(harness.llm().evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), anyString()))
+        when(harness.llm().evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), anyString(), any()))
                 .thenAnswer(invocation -> {
                     List<ConversationMessage> context = invocation.getArgument(0);
                     return knownFalseHouse(context.getFirst().getId());
@@ -1813,7 +1860,7 @@ class JointLabelMaterializationTransactionTest {
         var firstQueued = harness.service().queue(harness.task().getId());
         var partial = harness.service().run(firstQueued.getId(), firstQueued.getCurrentExecutionId());
         assertThat(partial.getStatus()).isEqualTo("PARTIAL_FAILED");
-        when(harness.llm().evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), anyString()))
+        when(harness.llm().evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), org.mockito.ArgumentMatchers.isNull(), anyString(), any()))
                 .thenAnswer(invocation -> {
                     List<ConversationMessage> context = invocation.getArgument(0);
                     return knownFalseHouse(context.getFirst().getId());

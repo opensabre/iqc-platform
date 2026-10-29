@@ -1,0 +1,9 @@
+# 候选来源与生产冻结输入摘要一致性
+
+生产PipelineConversationEvaluator.executionInput包含messages与businessContext。ProductionInputSnapshotService冻结消息只含id/会话/顺序/角色/内容/相对时间，归档消息额外包含rawLine/lineNumber/导入审计字段。旧ReviewSampleInputValidator只对归档messages散列，因此合法生产冻结结果无法通过候选来源摘要校验。失败用例通过实际executionInput构造上下文摘要，Maven34285 exit1：原有6项通过，新增上下文1项被拒绝，日志/private/tmp/iqc-b-candidate-input-red.log。
+
+修复复用ProductionInputSnapshotService.prepare验证原始productionInputs协议、内容摘要、会话清单和消息数；只比较归档消息与冻结消息的执行字段，随后以原冻结消息+原冻结businessContext重建执行摘要。仍须与原trace.inputHash严格相同。外来会话、已编辑文本、篡改冻结信封或即使更新信封摘要后修改上下文，都拒绝。
+
+BusinessReviewSampleService把核验后的执行摘要记入原候选lineage，并将冻结businessContext纳入contentSnapshot及其既有inputHash。不另建来源表/输入快照或修改生产trace；没有冻结快照的Route/旧Pipeline仍沿原三参数校验契约。GoldSampleService现有输入复制机制会保留候选元数据，不自动标注/审核/冻结为金标。
+
+定向ReviewSampleInputValidatorTest10+BusinessReviewSampleServiceTest7共17项exit0；包括合法上下文/归档元数据、篡改拒绝和旧协议兼容。完整默认回归11256 exit0：有效92份非IT报告773项0 failures/errors/skipped，报告全部刷新2026-10-10 18:52:29..18:55:51，排除已删除旧发现测试报告。日志/private/tmp/iqc-b-candidate-input-targeted.log及/private/tmp/iqc-b-candidate-input-full.log。候选服务既有测试部分依赖模拟存储/复核投影，不能证明实际ADD_TO_EVALUATION_CANDIDATE适配器落库，后续仍须实际人工裁决→候选SQL链。完整非实时语音PRD未完成。

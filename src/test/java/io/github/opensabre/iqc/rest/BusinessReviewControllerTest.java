@@ -14,7 +14,28 @@ class BusinessReviewControllerTest {
     private final BusinessItemReviewService business = mock(BusinessItemReviewService.class);
     private final BusinessQualityReportService reports = mock(BusinessQualityReportService.class);
     private final LabelResultReviewService labels = mock(LabelResultReviewService.class);
-    private final QualityOperationsController controller = new QualityOperationsController(legacy, business, reports, labels);
+    private final io.github.opensabre.iqc.privacy.SensitiveReadAccessService grants = mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
+    private final QualityOperationsController controller = new QualityOperationsController(legacy, business, reports, labels, null,
+            grants, new io.github.opensabre.iqc.privacy.ResultReadProjection(new com.fasterxml.jackson.databind.ObjectMapper()));
+    @org.junit.jupiter.api.BeforeEach void responseFixtures() {
+        // Controllers project stored review responses; routing mocks must return real domain rows.
+        var labelRow=new io.github.opensabre.iqc.quality.model.ResultReview();labelRow.setId("label-review");labelRow.setTargetType("LABEL");
+        var businessRow=new io.github.opensabre.iqc.quality.model.ResultReview();businessRow.setId("business-review");businessRow.setTargetType("BUSINESS");
+        var messageRow=new io.github.opensabre.iqc.quality.model.ResultReview();messageRow.setId("message-review");messageRow.setTargetType("MESSAGE");
+        when(labels.request(anyString(),anyInt(),anyString(),anyString())).thenReturn(labelRow);
+        when(labels.decide(anyString(),anyInt(),anyBoolean(),any(),anyString())).thenReturn(labelRow);
+        when(business.request(anyString(),anyInt(),anyString(),anyString())).thenReturn(businessRow);
+        when(business.request(anyString(),anyInt(),anyString(),anyString(),any(),any())).thenReturn(businessRow);
+        when(business.decide(anyString(),anyInt(),anyBoolean(),anyList(),any(),anyString())).thenReturn(businessRow);
+        when(legacy.requestReview(anyString(),any())).thenReturn(messageRow);
+        when(legacy.decideReview(anyString(),anyString(),anyString(),any(),anyString(),anyString())).thenReturn(messageRow);
+        when(grants.current(anySet())).thenReturn(new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access(
+                "test", true, true, false, java.time.Instant.now()));
+        when(labels.queue(any(), any(), anyInt(), anyInt())).thenReturn(new io.github.opensabre.iqc.shared.IqcPage<>(List.of(),2,10,0));
+        when(business.queue(any(), any(), anyInt(), anyInt())).thenReturn(new io.github.opensabre.iqc.shared.IqcPage<>(List.of(),2,10,0));
+        when(business.findingContext("result")).thenReturn(new BusinessItemReviewService.FindingContext(
+                "result","hash",false,"historical input absent",List.of(),new com.fasterxml.jackson.databind.ObjectMapper().createArrayNode()));
+    }
 
     @Test
     void labelReviewUsesDedicatedResultIdentityWithoutChangingLegacyContract() {
@@ -74,7 +95,7 @@ class BusinessReviewControllerTest {
         verify(business).request("result", 0, "request-token-1234", "申请");
         controller.reviews(null, "BUSINESS", "result", "HISTORY", null, 1, 20); verify(business).history("result");
         controller.decide("review", new QualityOperationsController.ReviewDecision("REJECTED", null, null, null, "退回", "BUSINESS", 1, List.of()));
-        verify(business).decide("review", 1, true, List.of(), "退回");
+        verify(business).decide("review", 1, true, List.of(), null, "退回");
         verifyNoInteractions(legacy);
     }
 
@@ -109,4 +130,27 @@ class BusinessReviewControllerTest {
         assertThatThrownBy(() -> controller.reviews(null, "MESSAGE", null, "QUEUE", null, 1, 20)).hasMessageContaining("只支持业务");
         assertThatThrownBy(() -> controller.reviews(null, "BUSINESS", "result", "QUEUE", null, 1, 20)).hasMessageContaining("不能指定");
     }
+    @Test void findingContextRequiresSingleBusinessResultAndUsesOriginalViewPermission() throws Exception {
+        controller.reviews(null,"BUSINESS","result","FINDING_CONTEXT",null,1,20);
+        verify(business).findingContext("result");
+        for(var target:List.of("MESSAGE","UNKNOWN"))
+            assertThatThrownBy(()->controller.reviews(null,target,"result","FINDING_CONTEXT",null,1,20)).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(()->controller.reviews(null,"BUSINESS",null,"FINDING_CONTEXT",null,1,20)).hasMessageContaining("单一业务结果");
+        assertThatThrownBy(()->controller.reviews("PENDING","BUSINESS","result","FINDING_CONTEXT",null,1,20)).hasMessageContaining("单一业务结果");
+        assertThatThrownBy(()->controller.reviews(null,"BUSINESS","result","FINDING_CONTEXT","task",1,20)).hasMessageContaining("单一业务结果");
+        var method=QualityOperationsController.class.getMethod("reviews",String.class,String.class,String.class,String.class,String.class,int.class,int.class);
+        assertThat(method.getAnnotation(io.github.opensabre.boot.annotations.ResourcePermission.class).code()).isEqualTo("iqc:review:view");
+        verifyNoInteractions(legacy);
+    }
+
+    @Test void stagedBusinessRequestsUseOriginalEndpointAndMessageRequestsRejectStageMetadata() {
+        var stage=io.github.opensabre.iqc.quality.BusinessItemReviewEvaluator.ReviewStage.SECOND_REVIEW;
+        controller.requestReview("result",new QualityOperationsController.ReviewRequest("申请二审","BUSINESS",1,"stage-request-1234",stage,"parent"));
+        verify(business).request("result",1,"stage-request-1234","申请二审",stage,"parent");
+        for(var target:java.util.Arrays.asList("MESSAGE",null))
+            assertThatThrownBy(()->controller.requestReview("message",new QualityOperationsController.ReviewRequest("申请",target,1,"stage-request-5678",stage,"parent")))
+                .hasMessageContaining("消息复核不接受业务阶段升级");
+        verifyNoInteractions(legacy);
+    }
+
 }

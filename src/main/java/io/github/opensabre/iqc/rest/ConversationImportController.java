@@ -9,7 +9,8 @@ import io.github.opensabre.governance.usage.UsageRecord;
 import io.github.opensabre.boot.annotations.ResourcePermission;
 import io.github.opensabre.iqc.conversation.ConversationParseResult;
 import io.github.opensabre.iqc.conversation.ConversationImportService;
-import io.github.opensabre.iqc.conversation.ConversationSpeakerRole;
+import io.github.opensabre.iqc.conversation.ApiConversationInput;
+import io.github.opensabre.iqc.conversation.ConversationApiIngestService;
 import io.github.opensabre.iqc.conversation.ConversationUploadProperties;
 import io.github.opensabre.iqc.conversation.TxtConversationParser;
 import io.github.opensabre.iqc.governance.IqcException;
@@ -27,8 +28,6 @@ import java.util.Locale;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.time.LocalTime;
-import io.github.opensabre.iqc.conversation.ConversationMessageDraft;
 import io.github.opensabre.iqc.conversation.ConversationMetadata;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -46,6 +45,8 @@ public class ConversationImportController {
     private final ConversationImportService importService;
     private final UsageCounterRecorder usageCounterRecorder;
     private final ConversationUploadProperties uploadProperties;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ConversationApiIngestService apiIngestService;
 
     public ConversationImportController(TxtConversationParser parser, ConversationImportService importService,
                                         UsageCounterRecorder usageCounterRecorder,
@@ -70,7 +71,7 @@ public class ConversationImportController {
 
     /** Imports several TXT files as one traceable business batch. */
     @PostMapping(value = "/batch-import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @ResourcePermission(code = "iqc:conversation:upload", name = "批量上传会话", type = "iqc", description = "批量上传并解析 txt 会话")
+    @ResourcePermission(code = "iqc:conversation:batch-upload", name = "批量上传会话", type = "iqc", description = "批量上传并解析 txt 会话")
     @Audit(operationType = OperationType.IMPORT, description = "批量导入 IQC txt 会话", module = "IQC_CONVERSATION", request = false)
     @RateLimit(sceneCode = "iqc-conversation-batch-import", maxCount = 10, period = 60)
     public Map<String, Object> importBatch(@RequestPart("files") List<MultipartFile> files,
@@ -97,7 +98,7 @@ public class ConversationImportController {
 
     /** Imports TXT entries from one ZIP archive as a single conversation batch. */
     @PostMapping(value = "/zip-import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @ResourcePermission(code = "iqc:conversation:upload", name = "ZIP 批量上传会话", type = "iqc", description = "从 ZIP 包批量导入 txt 会话")
+    @ResourcePermission(code = "iqc:conversation:zip-upload", name = "ZIP 批量上传会话", type = "iqc", description = "从 ZIP 包批量导入 txt 会话")
     @Audit(operationType = OperationType.IMPORT, description = "ZIP 批量导入 IQC 会话", module = "IQC_CONVERSATION", request = false)
     @RateLimit(sceneCode = "iqc-conversation-zip-import", maxCount = 10, period = 60)
     public Map<String, Object> importZip(@RequestPart("file") MultipartFile archive,
@@ -147,8 +148,8 @@ public class ConversationImportController {
 
     /** Accepts one conversation from an upstream system using a JSON contract. */
     @PostMapping(value = "/ingest", consumes = MediaType.APPLICATION_JSON_VALUE)
-    @ResourcePermission(code = "iqc:conversation:upload", name = "接口接入会话", type = "iqc", description = "通过接口传入单条会话")
-    @Audit(operationType = OperationType.CREATE, description = "接口接入 IQC 会话", module = "IQC_CONVERSATION")
+    @ResourcePermission(code = "iqc:conversation:ingest", name = "接口接入会话", type = "iqc", description = "通过接口传入单条会话")
+    @Audit(operationType = OperationType.CREATE, description = "接口接入 IQC 会话", module = "IQC_CONVERSATION", request = false, response = false)
     @RateLimit(sceneCode = "iqc-conversation-ingest", maxCount = 120, period = 60)
     public Map<String, Object> ingest(@RequestBody ConversationIngestRequest request) {
         return ingestOne(request, null);
@@ -156,8 +157,8 @@ public class ConversationImportController {
 
     /** Accepts several complete conversations while isolating validation failures per item. */
     @PostMapping(value = "/ingest-batch", consumes = MediaType.APPLICATION_JSON_VALUE)
-    @ResourcePermission(code = "iqc:conversation:upload", name = "批量接口接入会话", type = "iqc", description = "通过接口批量传入会话")
-    @Audit(operationType = OperationType.CREATE, description = "批量接口接入 IQC 会话", module = "IQC_CONVERSATION")
+    @ResourcePermission(code = "iqc:conversation:batch-ingest", name = "批量接口接入会话", type = "iqc", description = "通过接口批量传入会话")
+    @Audit(operationType = OperationType.CREATE, description = "批量接口接入 IQC 会话", module = "IQC_CONVERSATION", request = false, response = false)
     @RateLimit(sceneCode = "iqc-conversation-ingest-batch", maxCount = 30, period = 60)
     public Map<String, Object> ingestBatch(@RequestBody ConversationIngestBatchRequest request) {
         if (request == null || request.conversations() == null || request.conversations().isEmpty()) {
@@ -183,40 +184,13 @@ public class ConversationImportController {
     }
 
     private Map<String, Object> ingestOne(ConversationIngestRequest request, String batchNoOverride) {
-        if (request == null || request.messages() == null || request.messages().isEmpty()) {
-            throw IqcException.invalidArgument("messages 不能为空");
-        }
-        if (request.messages().size() > 5000) throw IqcException.invalidArgument("单个会话最多 5000 条消息");
-        List<ConversationMessageDraft> messages = new ArrayList<>();
-        StringBuilder canonical = new StringBuilder(request.externalId() == null ? "" : request.externalId());
-        for (int index = 0; index < request.messages().size(); index++) {
-            IngestMessage item = request.messages().get(index);
-            if (item == null || item.role() == null || item.role().isBlank() || item.content() == null || item.content().isBlank()) {
-                throw IqcException.invalidArgument("第 " + (index + 1) + " 条消息缺少 role 或 content");
-            }
-            LocalTime time;
-            try { time = item.time() == null || item.time().isBlank() ? LocalTime.MIDNIGHT.plusSeconds(index) : LocalTime.parse(item.time()); }
-            catch (RuntimeException exception) { throw IqcException.invalidArgument("第 " + (index + 1) + " 条消息 time 格式应为 HH:mm:ss"); }
-            canonical.append('|').append(item.role()).append('|').append(time).append('|').append(item.content());
-            messages.add(new ConversationMessageDraft(index + 1, ConversationSpeakerRole.canonical(item.role()), time, item.content().trim(), item.content(), index + 1));
-        }
-        ConversationMetadata metadata = request.metadata();
-        if (metadata != null) canonical.append('|').append(metadata.fingerprintPart());
-        String fingerprint = fileFingerprint(canonical.toString().getBytes(StandardCharsets.UTF_8));
-        String usageRecordId = "conversation-ingest:" + fingerprint;
-        usageCounterRecorder.record(new UsageRecord(usageRecordId + ":attempt", null, "iqc-platform", "CONVERSATION_API", fingerprint, "INGEST", UsageOutcome.ATTEMPT));
-        ConversationParseResult parsed = new ConversationParseResult(messages, List.of(), 0);
-        try {
-            var conversation = importService.persist(
-                    request.title() == null || request.title().isBlank() ? "API会话" : request.title().trim(),
-                    fingerprint, parsed, batchNoOverride == null ? request.batchNo() : batchNoOverride, "API", request.externalId(), metadata);
-            usageCounterRecorder.record(new UsageRecord(usageRecordId + ":success", null, "iqc-platform", "CONVERSATION_API", fingerprint, "INGEST", UsageOutcome.SUCCESS));
-            return Map.of("conversationId", conversation.getId(), "batchNo", conversation.getBatchNo() == null ? "" : conversation.getBatchNo(),
-                    "externalId", request.externalId() == null ? "" : request.externalId(), "messageCount", messages.size(), "status", conversation.getStatus());
-        } catch (RuntimeException exception) {
-            usageCounterRecorder.record(new UsageRecord(usageRecordId + ":failure", null, "iqc-platform", "CONVERSATION_API", fingerprint, "INGEST", UsageOutcome.FAILURE));
-            throw exception;
-        }
+        ApiConversationInput input=request==null?null:new ApiConversationInput(request.externalId(),request.batchNo(),request.title(),request.metadata(),
+                request.messages()==null?null:request.messages().stream().map(item->item==null?null:new ApiConversationInput.Message(item.time(),item.role(),item.content(),item.startMs(),item.endMs(),item.confidence())).toList());
+        // Existing direct controller callers retain their constructor; managed calls share the injected service.
+        var service=apiIngestService==null?new ConversationApiIngestService(importService,usageCounterRecorder):apiIngestService;
+        var conversation=service.ingest(input,batchNoOverride);
+        return Map.of("conversationId",conversation.getId(),"batchNo",conversation.getBatchNo()==null?"":conversation.getBatchNo(),
+                "externalId",request.externalId()==null?"":request.externalId(),"messageCount",request.messages().size(),"status",conversation.getStatus());
     }
 
     private Map<String, Object> importFile(MultipartFile file, String batchNo, ConversationMetadata metadata) throws IOException {
@@ -279,7 +253,29 @@ public class ConversationImportController {
                                             String customerExternalId, String customerName, String customerContactMasked,
                                             String channel, java.time.LocalDateTime startedTime, java.time.LocalDateTime endedTime,
                                             String businessType, String businessNo, List<String> tags,
-                                            List<IngestMessage> messages) {
+                                            List<IngestMessage> messages,
+                                            String asrStatus, String customerLevel, Boolean complaint,
+                                            Map<String, com.fasterxml.jackson.databind.JsonNode> businessFields, String employeeDepartmentId) {
+        public ConversationIngestRequest(String externalId, String batchNo, String title,
+                String employeeId, String employeeName, String employeeGroupId,
+                String customerExternalId, String customerName, String customerContactMasked,
+                String channel, java.time.LocalDateTime startedTime, java.time.LocalDateTime endedTime,
+                String businessType, String businessNo, List<String> tags, List<IngestMessage> messages,
+                String asrStatus, String customerLevel, Boolean complaint,
+                Map<String, com.fasterxml.jackson.databind.JsonNode> businessFields) {
+            this(externalId, batchNo, title, employeeId, employeeName, employeeGroupId, customerExternalId,
+                    customerName, customerContactMasked, channel, startedTime, endedTime, businessType,
+                    businessNo, tags, messages, asrStatus, customerLevel, complaint, businessFields, null);
+        }
+        public ConversationIngestRequest(String externalId, String batchNo, String title,
+                String employeeId, String employeeName, String employeeGroupId,
+                String customerExternalId, String customerName, String customerContactMasked,
+                String channel, java.time.LocalDateTime startedTime, java.time.LocalDateTime endedTime,
+                String businessType, String businessNo, List<String> tags, List<IngestMessage> messages) {
+            this(externalId, batchNo, title, employeeId, employeeName, employeeGroupId, customerExternalId,
+                    customerName, customerContactMasked, channel, startedTime, endedTime, businessType,
+                    businessNo, tags, messages, null, null, null, null);
+        }
         public ConversationIngestRequest(String externalId, String batchNo, String title, List<IngestMessage> messages) {
             this(externalId, batchNo, title, null, null, null, null, null, null, null,
                     null, null, null, null, List.of(), messages);
@@ -287,13 +283,16 @@ public class ConversationImportController {
 
         ConversationMetadata metadata() {
             return new ConversationMetadata(employeeId, employeeName, employeeGroupId, customerExternalId,
-                    customerName, customerContactMasked, channel, startedTime, endedTime, businessType, businessNo, tags);
+                    customerName, customerContactMasked, channel, startedTime, endedTime, businessType, businessNo, tags,
+                    asrStatus, customerLevel, complaint, businessFields, employeeDepartmentId);
         }
     }
 
     public record ConversationIngestBatchRequest(String batchNo, List<ConversationIngestRequest> conversations) { }
 
-    public record IngestMessage(String role, String time, String content) { }
+    public record IngestMessage(String role,String time,String content,@com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.conversation.ExactMillisecondsDeserializer.class) @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) Long startMs,@com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=io.github.opensabre.iqc.conversation.ExactMillisecondsDeserializer.class) @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) Long endMs,@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) java.math.BigDecimal confidence) {
+        public IngestMessage(String role,String time,String content){this(role,time,content,null,null,null);}
+    }
 
     private void recordOutcome(String objectId, UsageOutcome outcome) {
         usageCounterRecorder.record(new UsageRecord(

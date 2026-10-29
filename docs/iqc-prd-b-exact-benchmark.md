@@ -1,0 +1,11 @@
+# Exact Benchmark variable identity
+
+BenchmarkVariableComparator now selects fragment, invariant, release-projection and effective-prompt hashes from the two frozen releases' common protocol. v2 uses the existing SelectorAssetService exact canonicalizer; v1 keeps its historical hashes. Different release protocols are rejected explicitly, as their schema difference is outside the selected experiment variable. No fallback or current-configuration lookup is used.
+
+String-encoded Agent configJson is decoded with exact decimals only for v2, preserving its existing trailing-token rejection and size bound. Other single-variable validation stays intact. BenchmarkService's stored-task parser reuses readFrozenTree; currently its only consumer reads a requestHash string for idempotency, so that parser change is not claimed as a previously demonstrated numerical business failure.
+
+Original session26951 terminated exit1: three tests, two errors, log `/tmp/iqc-b-exact-benchmark-before.log`. Both v2 node configuration and string-encoded Agent MODEL temperature changed from0.900000000000000001 to0.900000000000000002, yet the actual comparator rejected them as no semantic change. The legacy/mixed-protocol fixture passed.
+
+Final session72400 terminated exit0, full main/test compilation, log `/tmp/iqc-b-exact-benchmark-terminal.log`. Five fresh reports31tests,zero failures/errors/skips: ExactBenchmarkProtocol3,SmallModelVariable5,SkillApiVariable4,EvaluationAdmission5,EvaluationReport14. New tests prove adjacent v2 decimals generate different variable digests, equivalent trailing-zero decimals do not count as changes, v1 retains prior behavior, mixed protocols are rejected, string-encoded model configuration stays exact, input release is unchanged and out-of-variable changes are rejected.
+
+Tests exercise the actual comparator and existing evaluation regressions. They do not prove a complete persisted Benchmark create/pair/report workflow or SQL transactions. The new RULE fixture is a comparator input, not a published executable pipeline. Public defaults remain v1 until Action copies/adapters/reconciliation, scheduling/event paths, actual persisted publish/worker/review/revision and A CUSTOM/privacy integration are complete. Full applicable PRD remains active; speech conversion is excluded.

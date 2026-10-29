@@ -31,7 +31,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /** Human label-value rounds reuse the review ledger without changing generated values or scores. */
-@Service @RequiredArgsConstructor
+@Service @RequiredArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
 public class LabelResultReviewService {
     private final ResultReviewMapper reviews;
     private final InspectionLabelResultMapper labels;
@@ -40,6 +40,13 @@ public class LabelResultReviewService {
     private final ConversationMessageMapper messages;
     private final IqcDataScope scope;
     private final ObjectMapper mapper;
+
+    private final org.springframework.beans.factory.ObjectProvider<FindingLabelReadService> findingReads;
+    public LabelResultReviewService(ResultReviewMapper reviews,InspectionLabelResultMapper labels,
+            ConversationInspectionResultMapper conversations,InspectionTaskMapper tasks,ConversationMessageMapper messages,
+            IqcDataScope scope,ObjectMapper mapper) {
+        this(reviews,labels,conversations,tasks,messages,scope,mapper,null);
+    }
 
     /** Lists label review rounds with task ownership applied in SQL before pagination. */
     @Transactional(readOnly = true)
@@ -68,9 +75,9 @@ public class LabelResultReviewService {
         if (taskIds.isEmpty()) return;
         var frozenByTask = new HashMap<String, JsonNode>();
         for (InspectionTask task : tasks.selectBatchIds(taskIds)) {
-            if (task.getLabelScopeSnapshotJson() == null) continue;
             try {
-                JsonNode frozen = mapper.readTree(task.getLabelScopeSnapshotJson());
+                JsonNode frozen=FindingLabelTaskDirectory.expected(task,mapper);
+                if(frozen==null && task.getLabelScopeSnapshotJson()!=null)frozen=mapper.readTree(task.getLabelScopeSnapshotJson());
                 if (frozen != null && "2.0".equals(frozen.path("schemaVersion").asText())
                         && frozen.path("labels").isArray()) frozenByTask.put(task.getId(), frozen);
             } catch (com.fasterxml.jackson.core.JsonProcessingException ignored) {
@@ -199,11 +206,19 @@ public class LabelResultReviewService {
                 groups.computeIfAbsent(row.getLabelResultId(), ignored -> new ArrayList<>()).add(row);
             }
         }
+        var findingRows=values.stream().filter(value->groups.containsKey(value.getId())
+                && LabelResultSourceValidator.FINDING.equals(value.getGenerationSource())).toList();
+        java.util.Map<String,FindingLabelProjection.Projection> findingProjections=java.util.Map.of();
+        if(!findingRows.isEmpty()) {
+            var reader=findingReads==null?null:findingReads.getIfAvailable();
+            if(reader==null)throw IqcException.invalidState("Finding标签读取服务不可用");
+            findingProjections=reader.readBatch(java.util.Map.of(task.getId(),task),conversationsById,findingRows);
+        }
         var overlays = new HashMap<String, ReviewOverlay>();
         var expectedConversationByMessage = new HashMap<String, String>();
         for (var entry : groups.entrySet()) {
             InspectionLabelResult value = byId.get(entry.getKey());
-            Context context = frozenContext(task, conversationsById.get(value.getConversationResultId()), value);
+            Context context = frozenContext(task, conversationsById.get(value.getConversationResultId()), value,findingProjections.get(value.getId()));
             List<ResultReview> rounds = entry.getValue().stream()
                     .sorted(Comparator.comparing(ResultReview::getReviewRevision,
                             Comparator.nullsFirst(Comparator.naturalOrder()))).toList();
@@ -315,11 +330,26 @@ public class LabelResultReviewService {
 
     /** Validates a supplied canonical row against its immutable task snapshot without additional identity reads. */
     private Context frozenContext(InspectionTask task, ConversationInspectionResult conversation, InspectionLabelResult label) {
+        return frozenContext(task,conversation,label,null);
+    }
+    private Context frozenContext(InspectionTask task,ConversationInspectionResult conversation,InspectionLabelResult label,
+            FindingLabelProjection.Projection verifiedFinding) {
+        if(label!=null)LabelResultSourceValidator.validate(label,mapper);
         if (task == null || conversation == null || label == null || !Objects.equals(task.getId(), conversation.getTaskId())
                 || !Objects.equals(conversation.getId(), label.getConversationResultId()))
             throw IqcException.invalidState("标签结果与任务会话归属不一致");
+        if(LabelResultSourceValidator.FINDING.equals(label.getGenerationSource())) {
+            var projection=verifiedFinding;
+            if(projection==null) {
+                var reader=findingReads==null?null:findingReads.getIfAvailable();
+                if(reader==null)throw IqcException.invalidState("Finding标签读取服务不可用");
+                projection=reader.read(task,conversation,label);
+            }
+            return new Context(task,conversation,label,mapper.valueToTree(projection),projection.binding().valueType());
+        }
         try {
-            JsonNode frozen = mapper.readTree(task.getLabelScopeSnapshotJson());
+            JsonNode frozen=FindingLabelTaskDirectory.expected(task,mapper);
+            if(frozen==null && task.getLabelScopeSnapshotJson()!=null)frozen=mapper.readTree(task.getLabelScopeSnapshotJson());
             if (frozen == null || !"2.0".equals(frozen.path("schemaVersion").asText()))
                 throw IqcException.invalidArgument("旧标签结果暂不支持值复核");
             JsonNode definition = null;

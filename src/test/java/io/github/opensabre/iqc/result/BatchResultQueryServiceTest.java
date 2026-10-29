@@ -40,6 +40,7 @@ class BatchResultQueryServiceTest {
 
     @BeforeEach
     void setup() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "batch-task-query"), InspectionTask.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "batch-query"), ConversationInspectionResult.class);
         task = new InspectionTask(); task.setId("t1"); task.setConversationId("c1"); task.setStatus("SUCCEEDED");
         task.setRuleSnapshotJson("{\"schemeSnapshot\":{}}"); task.setCurrentExecutionId("e2");
@@ -132,10 +133,13 @@ class BatchResultQueryServiceTest {
     }
 
     @Test
-    void businessPageDoesNotReadResultsWithoutAnyVisibleTask() {
-        when(tasks.selectList(any())).thenReturn(List.of());
-        assertThat(service.businessPage(0, 200, "hidden", null, null, null, null).total()).isZero();
-        verifyNoInteractions(canonical, results);
+    void businessPageAppliesScopeInSqlWithoutEnumeratingVisibleTaskIds() {
+        when(scope.owner()).thenReturn("owner");when(scope.groupId()).thenReturn("group");
+        when(canonical.selectScopedBusinessPage(any(),isNull(),eq("hidden"),isNull(),eq(false),eq("owner"),eq("group"),isNull(),isNull(),isNull(),isNull()))
+                .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<ConversationInspectionResult>(1,100));
+        assertThat(service.businessPage(0,200,"hidden",null,null,null,null).total()).isZero();
+        verify(tasks,never()).selectList(any());verifyNoInteractions(results);
+        verify(canonical).selectScopedBusinessPage(any(),isNull(),eq("hidden"),isNull(),eq(false),eq("owner"),eq("group"),isNull(),isNull(),isNull(),isNull());
     }
 
     @Test
@@ -145,6 +149,60 @@ class BatchResultQueryServiceTest {
         assertThatThrownBy(() -> service.businessPage(1, 20, null, null, null, BigDecimal.TEN, BigDecimal.ONE))
                 .hasMessageContaining("筛选条件");
         verifyNoInteractions(canonical);
+    }
+
+    @Test
+    void parentFilterRejectsInvalidOrMixedIdsBeforeReadingMetadata() {
+        for (String parent : List.of("", "bad id", "x".repeat(65))) {
+            assertThatThrownBy(() -> service.businessPage(1, 20, null, null, null, null, null, parent))
+                    .hasMessageContaining("筛选不能混用");
+        }
+        assertThatThrownBy(() -> service.businessPage(1, 20, "t1", null, null, null, null, "parent"))
+                .hasMessageContaining("筛选不能混用");
+        verify(tasks, never()).selectOne(any());
+        verifyNoInteractions(canonical);
+    }
+
+    @Test
+    void missingOrUnauthorizedParentIsRejectedBeforeResultQuery() {
+        assertThatThrownBy(() -> service.businessPage(1, 20, null, null, null, null, null, "parent"))
+                .hasMessageContaining("无权");
+        var parent = new InspectionTask(); parent.setTaskType("PIPELINE_BULK");
+        parent.setCreatedBy("foreign"); parent.setOwnerGroupId("foreign-group");
+        when(tasks.selectOne(any())).thenReturn(parent);
+        assertThatThrownBy(() -> service.businessPage(1, 20, null, null, null, null, null, "parent"))
+                .hasMessageContaining("无权");
+        verifyNoInteractions(canonical, conversations);
+    }
+
+    @Test
+    void visibleOrdinaryTaskCannotBeUsedAsBulkParent() {
+        when(tasks.selectOne(any())).thenReturn(task);
+        task.setTaskType("PIPELINE");
+        assertThatThrownBy(() -> service.businessPage(1, 20, null, null, null, null, null, "parent"))
+                .hasMessageContaining("有效批次父任务");
+        verifyNoInteractions(canonical, conversations);
+    }
+
+    @Test
+    void visibleParentStillPassesCurrentChildScopeAndClampsPageSize() {
+        task.setTaskType("PIPELINE_BULK");
+        when(tasks.selectOne(any())).thenReturn(task);
+        when(scope.owner()).thenReturn("owner");
+        when(scope.groupId()).thenReturn("group");
+        when(canonical.selectScopedBusinessPage(any(), isNull(), isNull(), eq("parent"), eq(false),
+                eq("owner"), eq("group"), isNull(), isNull(), isNull(), isNull()))
+                .thenAnswer(invocation -> {
+                    com.baomidou.mybatisplus.extension.plugins.pagination.Page<ConversationInspectionResult> page = invocation.getArgument(0);
+                    assertThat(page.getCurrent()).isEqualTo(1);
+                    assertThat(page.getSize()).isEqualTo(100);
+                    return page;
+                });
+        assertThat(service.businessPage(0, 1000, null, null, null, null, null, "parent").total()).isZero();
+        verify(canonical).selectScopedBusinessPage(any(), isNull(), isNull(), eq("parent"), eq(false),
+                eq("owner"), eq("group"), isNull(), isNull(), isNull(), isNull());
+        verify(tasks, never()).selectList(any());
+        verifyNoInteractions(conversations);
     }
 
     private void businessSnapshot() {

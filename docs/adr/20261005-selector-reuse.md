@@ -1,0 +1,11 @@
+# Selector 复用决策
+
+现有ConversationQueryService、InspectionTaskService.ScheduledFilter、createSampled、materializeDue已具备归属过滤、单次定时、固定数量抽样与任务选数快照；Framework/shared/Wiki没有独立会话条件树及分层选数能力。旧抽样在limit之后随机，不能用它声称全候选池均匀抽样。
+
+本批新增IQC领域内的SelectorDefinition/SelectionService，复用Conversation、生产ConversationInspectionResult/LabelResult和原Task.selectionFilterJson；不增加会话、选数执行、任务表。条件求值、相对时间解析和七种抽样集中在Selector，后续Cron/Event共用，不放引擎节点。Pipeline已发布任务入口增加可选selector，与显式IDs互斥。
+
+选数范围外层独立应用可信会话权限，风险/既有标签再应用任务权限。完整候选池上限20000，超限明确拒绝并要求缩小时间范围，绝不静默截断后报告全量计数/均匀随机。新上游字段沿用ConversationMetadata/Conversation列扩展V1.1.42，缺失ASR状态不推断成功。
+
+记录定义、服务器anchor、解析窗口、种子、候选/命中/抽样计数、分布、精确IDs、已选元数据与生产风险/标签来源ID。创建幂等请求先查首次选数结果，重复请求不随新会话重新选数。预览不保证随后数据不变，正式创建重新选数后永久冻结。
+
+独立Selector草稿/发布资产、Cron定义/实例、事件幂等和持久化worker仍属I4后续，不把本批payload定义当成资产中心已完成；没有数据库运行/容量验收。

@@ -1,0 +1,110 @@
+# IQC 跨节点事实融合协议
+
+本模块对应 PRD I2 的基础 Fusion，输入为 `finding.Finding`，输出为 `FindingFusion.Result`。它是纯函数，不调用模型、不修改原始事实、不评分、不生成标签、不写数据库。
+
+## 复用与职责
+
+已经检查 Wiki 服务地图、现有 `label/LabelFactEvaluator.java` 和新的 Finding 契约。现有 LabelFactEvaluator 负责冻结标签定义、说话人、规则映射和文本证据校验；不能替换为宽松的通用融合。Fusion 负责不同检测节点对同一稳定语义 code 的观测冲突，复用 Finding 的类型、状态和证据对象。没有新增标签表或重复结果表。
+
+## 冻结政策
+
+`FusionPolicy(id, version, method, nodePriority, overrideNodeByCode, confidenceCalibrationId, calibratedNodeIds, nodeWeights, custom)`（保留原7/8参构造） 必须作为方案依赖一起冻结。版本从 1 起；优先级数值越大越优先；未配置节点优先级为 0。
+
+| 方法 | 判定语义 |
+| --- | --- |
+| PRIORITY | 选最高优先级的全部观测；同级不同值为 CONFLICT，错误或未知不被低级阴性掩盖。 |
+| CONFIDENCE | 政策必须声明校准版本及已校准节点；任何未声明节点拒绝运行。最高校准置信度的全部观测共同判定；缺失置信度不做排序。 |
+| VOTING | 一节点一票，严格超过全部节点数一半才接受已知值。重复运行必须先汇总，不能增加同一节点权重；重复节点直接拒绝。 |
+| OVERRIDE | 每个 code 显式指定权威节点；指定节点没有观测时为 NOT_EVALUATED，不回退成 false。 |
+| WEIGHTED | 一节点一个观测，支持同一已知值的权重严格超过该code全部输入源权重一半才确定；未决观测计入分母但不投阴性票。 |
+
+政策中的校准标识是已经离线验证并写入版本快照的前置条件，不会替调用方校准模型自报置信度。生产接口应限制政策发布权限，并校验校准工件的真实性。本模块只实施契约检查。
+
+## 不完整与冲突
+
+KNOWN 包括显式 false，UNKNOWN/ERROR/NOT_EVALUATED 不对应阴性。相同 code 必须拥有相同类别和值类型，否则拒绝融合。选中观测的不同已知值或 CONFLICT 产生 CONFLICT；否则有 ERROR 保留 ERROR，有未知或部分未执行为 UNKNOWN，全部未执行为 NOT_EVALUATED。
+
+VOTING 无严格多数时，有不同已知值为 CONFLICT；否则保留不完整状态。跳过节点不得合成值；如政策需要它参与覆盖率或投票分母，执行器须提供显式 NOT_EVALUATED 观测。纯函数无法推测输入列表中不存在的节点。
+
+数值型比较按十进制数值比较，因此 1 与 1.0 视为同值；对象型按 JSON 结构比较。融合不计算跨引擎平均置信度，不默认严重程度为风险决策；输出 severity 是所选观测的最大级别，供下游政策解释。
+
+## 可追溯输出
+
+按首次出现的 code 排序；所有 rawFindings 原样保留。selectedIds 为参与最终判定的观测，rejectedIds 是其余观测，并不表示原始结果被删除。无多数投票和缺失置信度时，全部观测参与未决判断。所有来源的证据取并集，避免隐藏被拒绝来源的反证；相同证据 id 如内容不同直接拒绝，禁止静默覆盖。输出记录 explanation、policyId 和 policyVersion。返回列表和 JsonNode 均防御性复制。
+
+## 集成位置
+
+1. 节点执行成功或失败后，适配成 Finding；原始节点输出保持现有轨迹持久化。
+2. 同一会话的完整节点观测经 `FindingFusion.fuse(findings, frozenPolicy)` 融合。
+3. 决策层仅从 KNOWN 读取 typed value；其它状态进入待复核或不完整政策，不由融合层决定扣分、标签、动作。
+4. 在会话结果快照内保存冻结政策、输入事实和融合结果；避免只保存终值丢失反证。当前模块没有新增持久化，调用方需接入既有结果事务。
+5. 旧标签事实链保持其说话人和证据验证，再通过显式适配接入，不能把任意 Finding 自动视为合格标签事实。
+
+原Pipeline发布/生产/评测/政策重算与配置编辑器复用该函数，本批不增加平行端点或结果表。CUSTOM扩展及统一finalConfidence投影已有编码，独立验证按各批次边界继续。当前WEIGHTED仅编码/编译构建，独立行为与兼容验收见协作交接，不能据此认定完整I2完成。
+
+
+## WEIGHTED 精确权重（2026-10-20）
+
+PRD10.2明确要求WEIGHTED，原四种方法不能表达来源权重。因此扩展原policy/fuse，不创建第二套融合器。该方法选择已有观测值，不对数值事实做无业务口径的均值，也不把权重/支持率当作模型校准置信度。
+
+配置示例：`"method":"WEIGHTED", "nodeWeights":{"rule_main":"2","llm_aux":"1"}`。权重必须为十进制JSON字符串（不接受JSON数字/布尔/对象/数组），大于0、不超过1000000、最多12位小数，输入字符串最长32字符；不接受指数、正负号和前导零。节点ID非空、最长128且无控制字符，最多200项。服务器规范化尾随零后保存，例如1.00归一为1，旧非weighted配置不允许残留非空权重。
+
+PipelineRelease必须恰好配置全部节点的权重，未知/缺失节点在发布冻结前拒绝。纯函数按每个code的实际输入源计算分母；不存在于输入中的节点无法由纯函数凭空推断，执行器仍须输出预期跳过来源的显式NOT_EVALUATED。跨不同code不互相投票。
+
+同一code每节点最多一条观测，重复源拒绝，不能通过多次调用增重。对KNOWN且语义相同的值求支持权重S，对全部输入观测求权重T，以精确BigDecimal判断2*S > T，无浮点数和除法舍入。缺任一输入节点的权重立即拒绝。
+
+- true权重2、false权重1：接受true，保留false的原始事实及反证。
+- true权重0.1+0.2、false权重0.3：精确平票，不选任意一侧，返回CONFLICT。
+- true权重0.4、UNKNOWN权重0.6：UNKNOWN；将UNKNOWN当false属于错误实现。
+- true权重0.4、ERROR权重0.6：ERROR；全部未执行为NOT_EVALUATED。
+
+无严格多数时，不同已知值为CONFLICT，其余沿原incompleteState处理；全部原始Finding、selected/rejected与所有证据并集的原契约保留。结果解释记录精确支持/总权重及政策ID/版本，不新增不可解释的置信度。
+
+nodeWeights缺省或空时不序列化，新字段不应改变旧7参policy/历史快照的JSON/hash；该兼容约束需双代序列化/旧发布与重算专项证明。原方法判定路径保持，本批不改变原Result协议。UI复用原融合区域，字符串编辑与BigInt边界验证避免大数/小数静默舍入；切回其它方法时不发送残留权重。
+
+无新表/权限/框架改动，Root不自行编写/执行测试，不执行SQL/推送/部署。实际发布、生产/评测/重算、Benchmark五维与浏览器验收仍待独立验证。
+
+
+### 政策重算的缺失来源
+
+原生产执行器已为未产生观测的节点补NOT_EVALUATED。重算读取旧事实而不执行目标检测器，因此新增weighted目标节点可能不在原raw中。DecisionRevisionService仅对WEIGHTED复制原raw，并按目标冻结FindingDefinition为缺失的节点/code补透明NOT_EVALUATED（无value/置信度/证据、明确未重跑原因），再按原权重融合；未决权重不会从分母消失。原trace/原raw/原结果仍不写回，其它融合方式保持原重算路径。目标未给旧来源配置权重仍拒绝，不通过删旧事实来使新政策成功。
+
+## 最终校准置信度（PRD10.3）
+
+Result增加可空finalConfidence，精确BigDecimal，范围0..1。仅CONFIDENCE政策、最终KNOWN且选中观测均已声明校准并有confidence时输出所选置信度的最小值；该策略选中最高值的全部并列来源，因此其值相同，不做平均/独立性合并。校准版本及来源仍由原policy/raw保留，不新增模型调用。其它策略（包括WEIGHTED）、未决结果、人工改判结果为空，不用支持率冒充概率。
+
+保留原12参Result构造，旧JSON缺字段读取为空，null字段序列化省略。新增非空字段使新结果内容hash自然变化，不重写历史结果/发布快照。人工复核置信度门禁读取新字段前仍核对原始选中来源与冻结校准政策；字段与来源不一致则UNKNOWN；旧结果缺字段沿原来源推导，不导致历史门禁失效。HumanFindingReviewEvaluator继续用原构造产生空置信度且无机器选中来源，人工值不继承机器校准。字段存在不证明离线校准工件真实有效，仍须发布/校准验收。
+
+动作来源、人工复核和政策重算的历史完整性检查复用reproduce：仍从原raw+policy重新融合，只对旧记录未提供的finalConfidence保留字段缺省，其他字段继续完整比较；旧记录已有非空字段时不消除它，不一致仍拒绝。该兼容分支不改旧数据库内容，新生产/评测/目标政策重算继续使用fuse生成新字段。
+
+## CUSTOM：部署安装的纯融合扩展（2026-10-20）
+
+复用原fuse、结果/证据和发布/生产/评测/重算路径，新增FusionExtension SPI和不可变FusionExtensionRegistry，不借用有副作用的ActionAdapter或外部Skill执行，不新建表。复用与差异见ADR20261020-custom-fusion-extensions。
+
+### 绑定与目录
+
+FusionPolicy.custom仅CUSTOM可非空，绑定strategyId、正int版本、provider class原字节SHA256的implementationHash和字符串parameters；两代局部codec均拒绝未知字段、非整数/越界版本、非字符串参数，线格式四字段齐备。id为2..64字符的大写标识；hash为64位小写hex；最多64参数、key最多64且字母开头、字符串值最多512且无控制字符。旧7/8参构造不带custom，null省略保留旧JSON。
+
+GET /api/iqc/pipelines/fusion-strategies复用当前授权与no-store/nosniff，固定新资源iqc:pipeline:fusion:strategy:view；只回部署安装的id/version/hash/name/defaultParameters，不执行融合或加载客户端实现。原Controller缺授权组件仍拒绝。组织资源/按钮900270与V20261020_01迁移只提供只读目录权限，四个既有IQC角色可读，不授予创建/发布或系统ADMIN；当前只写脚本，未执行SQL。
+
+Registry默认安装UNANIMOUS v1，另外通过Java ServiceLoader加载随应用构建分发的实现（SPI资源名META-INF/services/io.github.opensabre.iqc.fusion.FusionExtension），至多64个版本。重复id/version拒绝；注册后无动态替换，无latest回退。require校验冻结class摘要、定义不变和参数。升级以新class/version并存，保留旧实现，否则原冻结任务拒绝执行。class摘要仅绑定provider本身字节，并非整个传递依赖/完整JVM沙箱证明；实现属于可信部署代码，必须纯函数、无模型/动作/外部I/O/时钟副作用。
+
+### 输出与实际算法
+
+插件接收不可变原Finding列表和冻结参数，返回Outcome(selectedIds,state,value,explanation)。公共层拒绝空/重复/未知原ID；KNOWN选中项必须全部KNOWN，NOT_EVALUATED不能选择已执行项，ERROR必须有真实ERROR来源。复用原Finding typed-value约束；ENUM的KNOWN值必须在选中已知来源中出现，避免绕过冻结语义目录；其它typed值可由已知来源派生。全部raw与证据并集照旧保留，严重度沿原选中来源最大值，finalConfidence为空。相同证据ID不同内容仍拒绝，不允许自造证据/分数/标签/动作。解释包含扩展id/版本/hash及有界算法原因。
+
+UNANIMOUS v1有真实实现：每个事实code内每来源节点一次观测，默认minimumSources='1'，允许参数仅minimumSources（1..200整数字符串）。所有输入均KNOWN且同值、来源数达标才KNOWN；原resolve保留CONFLICT/ERROR/全部NOT_EVALUATED/其它UNKNOWN；KNOWN但数量不足降为UNKNOWN。数值1与1.0沿原比较同值，显式false是合法值，不作多数投票或平均。minimumSources按事实code计算，不按整条流水线节点总数计算。
+
+CUSTOM目标政策重算也在原raw副本中按目标冻结定义补缺失来源NOT_EVALUATED；不重跑检测/模型，不写回原事实。WEIGHTED原缺失来源identity/原因不变，CUSTOM用独立custom-policy-unavailable-v1身份。原目标变更导致类型/类别不兼容仍拒绝，不伪造新增来源已知值。
+
+### 配置与证据边界
+
+原PipelineReleaseEditor增加CUSTOM选项，按目录明确选择id/version/hash，参数以JSON字符串对象编辑。刷新不替换已冻结绑定；未知/缺失版本提示并要求重新试跑/评测/发布，页面不自动升级。切回其它方法不发送残留custom或nodeWeights。发布后被冻结的CUSTOM仍由同一个fuse执行；失去目录读取权限不改已有原绑定，服务端始终校验部署可用性。
+
+后端原12690及最终29380 skipTests test-compile均terminal exit0；前端首轮63145 vue-tsc+Vite通过（2m4s），最终补当前绑定不可用提示的构建以协作台账为准。未新增/运行Root测试、共享SQL或部署。B须覆盖两codec/旧JSON、注册冲突与hash不符、真实一致同意/未知/false/不足来源、恶意输出/证据冲突、缺失来源重算原数据不变、目录fresh权限和角色迁移、前端精确选择/切换/刷新/卸载及完整发布/评测/重算实际路径。源码/构建不证明全PRD或可信插件纯度已验收。
+
+### 精确校准引用与私有任务系数
+
+FusionPolicy新增可选calibrationReferences，每条只含taskId/executionId/nodeId/contentHash，不携带系数。引用最多200条，按nodeId规范排序，节点唯一且须完整覆盖calibratedNodeIds，并保留非空confidenceCalibrationId作为策略标识；7/8/9参数旧构造器保留，空引用不进入JSON，旧摘要不变。引用本身不等于产物已独立验证或已执行校准。
+
+任务物化在原事务中，经当前iqc:evaluation:report:view和原来源任务组织范围校验后读取精确服务端产物；校准系数冻结为独立calibrationInputs信封（最多1MiB），共享流水线只保留引用。任务组与知识库及全部校准来源取交集。原任务信封核验负责人、检测图Hash、引用全集、原候选内容Hash/节点Hash与组不得放宽；拒绝未知字段、重复/尾随JSON以及小数计数截断，遵循原v1/v2数值协议。原LLM/SMALL_MODEL桥接已在向后续分支/融合发布结果前应用冻结系数，并在生产/评测/复核边界重算核验；缺乏支持的分箱保留null，旧无引用路径保持。独立验证、发布准入与实际模型绑定仍待完成。不得据此部署或声称校准整链完成。

@@ -29,4 +29,11 @@ public class InspectionResult extends BasePo {
     private String evidenceJson;
     private String suggestionJson;
     private String ruleBreakdownJson;
+    /** Transient detector diagnostics are persisted only inside immutable Pipeline node traces. */
+    @TableField(exist = false)
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String detectorMetricsJson;
+    /** Response-only disclosure status; never persisted with the canonical result. */
+    @TableField(exist = false)
+    private java.util.Map<String, Object> privacy;
 }

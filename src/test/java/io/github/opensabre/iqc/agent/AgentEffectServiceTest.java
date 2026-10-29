@@ -25,6 +25,7 @@ class AgentEffectServiceTest {
     @Mock QualityAgentMapper agentMapper;
     @Mock InspectionTaskMapper taskMapper;
     @Mock InspectionResultMapper resultMapper;
+    @Mock io.github.opensabre.iqc.shared.IqcDataScope scope;
 
     @BeforeEach
     void initializeMybatisLambdaMetadata() {
@@ -37,11 +38,12 @@ class AgentEffectServiceTest {
 
     @Test
     void aggregatesOnlyTasksUsingRequestedVersionSnapshot() {
+        when(scope.owner()).thenReturn("alice");
         when(agentMapper.selectById("agent-1")).thenReturn(new QualityAgent());
         when(taskMapper.selectList(any())).thenReturn(List.of(task("t1", 1), task("t2", 2)));
         when(resultMapper.selectList(any())).thenReturn(List.of(result("HIT", "HIGH", 60), result("NOT_HIT", "LOW", 100)));
 
-        AgentEffectService.AgentEffectReport report = new AgentEffectService(agentMapper, taskMapper, resultMapper, new ObjectMapper())
+        AgentEffectService.AgentEffectReport report = new AgentEffectService(agentMapper, taskMapper, resultMapper, new ObjectMapper(),scope)
                 .report("agent-1", 1);
 
         assertThat(report.taskCount()).isEqualTo(1);

@@ -1,0 +1,13 @@
+# Prompt 精确版本复用现有指令资产
+
+状态：已实施、专项验收待完成；2026-10-24。
+
+需求：PRD17要求Prompt独立版本和执行快照中的版本ID/Hash，PRD15支持Prompt V1/V2同Dataset比较。当前AgentConfiguration.systemPrompt随Agent版本冻结，缺少跨Agent复用的独立Prompt来源标识。
+
+复用检索：现有IqcSkill/IqcSkillVersion及IqcSkillService已提供独立指令正文版本、启停、历史与向前回滚；IqcSkillController已有版本读取和敏感投影，Agent与Pipeline已有不可变配置与来源验证。Framework和共享管理服务没有额外Prompt版本库。Skill的instructions可完整表达系统提示词，故本批直接绑定现有指令资产的精确版本；不新增Prompt表/版本表/API/通用资产抽象，也不更改Framework。指令的输入/输出Schema不是Prompt正文，不自动变成工具调用。
+
+Agent 3.0增加可选promptAsset={skillId,versionNo,contentHash?}。来源为明确的原Skill版本，保存时解析正文并生成固定域/ID/版本/正文摘要，提交审批时再次检查来源。原内嵌Prompt不变；有引用时正文必须与版本一致，可省略正文交由服务端解析。配置同时冻结实际systemPrompt和精确来源/Hash；Skill更新不自动改既有Agent，停用阻止新配置/新任务来源使用，历史解释依旧使用冻结正文。旧JSON空字段省略、旧Java构造保留。
+
+UI复用原指令库和历史端点，选择可读启用版本，绑定后正文只读；切回内嵌保留文字、移除来源。PROMPT单变量比较将新增来源作为同一Prompt变量的一部分，除Prompt外冻结不变量仍必须一致；正文未变仅换来源不制造有效Prompt实验。
+
+取舍：Prompt与Skill共享原指令资产的版本号和管理生命周期；Prompt用途是Agent配置中的显式绑定，不独立复制一套CRUD。KnowledgeBase需要另外核对拥有服务与语料版本，本决定不将指令文本当知识库，也不声称完整PRD17已完成。独立验证须覆盖旧JSON/hash、精确版本更新/停用、来源正文篡改、Pipeline/Benchmark/敏感投影与页面权限生命周期。

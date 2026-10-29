@@ -33,14 +33,22 @@ final class ItemRouteRunner {
         List<ConversationMessage> decode(InspectionResult candidate);
     }
 
-    record Stage(String contextKey, boolean executed, InspectionResult result) { }
+    record Stage(String contextKey, boolean executed, InspectionResult result,
+                 java.time.Instant startedAt, long durationNanos, String inputHash) {
+        Stage(String contextKey, boolean executed, InspectionResult result) {
+            this(contextKey, executed, result, null, 0, null);
+        }
+    }
     record Item(String itemCode, Stage applicability, Stage intermediate, Stage terminal, String adjudicatedStatus) {
         Item(String itemCode, Stage intermediate, Stage terminal) {
             this(itemCode, null, intermediate, terminal,
                     terminal == null || terminal.result() == null ? "NOT_EVALUATED" : terminal.result().getResultStatus());
         }
     }
-    record Run(List<Item> items, List<Stage> stages) { }
+    record Round(int runIndex, List<Stage> stages) { }
+    record Run(List<Item> items, List<Stage> stages, List<Round> rounds) {
+        Run(List<Item> items, List<Stage> stages) { this(items, stages, List.of()); }
+    }
 
     /** One invocation owns one conversation/run input; context results must never leak to another invocation. */
     static Run execute(SchemeDependencyResolver.RoutePlan plan, List<ConversationMessage> messages,
@@ -75,7 +83,8 @@ final class ItemRouteRunner {
                 aggregateItemTerminal(contexts.get(route.finalContextKey()), route.itemCode(), runs, votes,
                         confidenceThreshold), votes.status()));
         }
-        return new Run(List.copyOf(items), List.copyOf(aggregateStages.values()));
+        return new Run(List.copyOf(items), List.copyOf(aggregateStages.values()),
+                runs.stream().flatMap(run -> run.rounds().stream()).toList());
     }
 
     private static Run executeOnce(SchemeDependencyResolver.RoutePlan plan, List<ConversationMessage> messages,
@@ -123,11 +132,16 @@ final class ItemRouteRunner {
         // A route context blocked for every eligible consumer remains explicitly unexecuted in the trace.
         for (var context : contexts.values()) cached.computeIfAbsent(context.contextKey(),
                 ignored -> skipped(context, "NOT_EVALUATED", "适用条件未通过或未形成确定结论，本阶段未执行"));
-        return new Run(List.copyOf(items), cached.values().stream().map(ItemRouteRunner::copy).toList());
+        var stages = cached.values().stream().map(ItemRouteRunner::copy).toList();
+        return new Run(List.copyOf(items), stages, List.of(new Round(runIndex + 1, stages)));
     }
 
     private static Stage detect(SchemeDependencyResolver.DetectionContext context, List<ConversationMessage> inputs,
                                 InspectionResult upstream, Detector detector, int runIndex) {
+        var startedAt = java.time.Instant.now();
+        long startedNanos = System.nanoTime();
+        String inputHash = RouteExecutionTrace.inputHash(inputs);
+        InspectionResult detected;
         try {
             var ownedInputs = inputs.stream().map(source -> {
                 var input = new ConversationMessage(); BeanUtils.copyProperties(source, input); return input;
@@ -135,13 +149,18 @@ final class ItemRouteRunner {
             var result = detector.evaluate(context, ownedInputs, cloneResult(upstream), runIndex);
             if (result == null || result.getResultStatus() == null
                     || !List.of("HIT", "NOT_HIT", "ERROR", "REVIEW_REQUIRED", "NOT_EVALUATED").contains(result.getResultStatus()))
-                return new Stage(context.contextKey(), true, outcome(context, "REVIEW_REQUIRED", "检测阶段未返回明确结果"));
-            var owned = cloneResult(result); owned.setRuleId(context.ruleId()); owned.setDeduction(0);
-            return new Stage(context.contextKey(), true, owned);
+                detected = outcome(context, "REVIEW_REQUIRED", "检测阶段未返回明确结果");
+            else {
+                detected = cloneResult(result); detected.setRuleId(context.ruleId()); detected.setDeduction(0);
+            }
         } catch (RuntimeException exception) {
-            // Keep other business checks running; raw adapter exception text can contain credentials or model payloads.
-            return new Stage(context.contextKey(), true, outcome(context, "ERROR", "检测阶段执行失败"));
+            var budgetWait=io.github.opensabre.iqc.result.llm.gateway.GatewayAdmissionException.budgetWait(exception);
+            if(budgetWait!=null)throw budgetWait;
+            // Do not store adapter exception text: it can contain credentials or complete prompts.
+            detected = outcome(context, "ERROR", "检测阶段执行失败");
         }
+        return new Stage(context.contextKey(), true, detected, startedAt,
+                Math.max(0, System.nanoTime() - startedNanos), inputHash);
     }
 
     private static List<ConversationMessage> candidateInputs(InspectionResult candidate, List<ConversationMessage> messages,
@@ -314,7 +333,8 @@ final class ItemRouteRunner {
         var copy = new InspectionResult(); BeanUtils.copyProperties(original, copy); return copy;
     }
     private static Stage copy(Stage stage) {
-        return stage == null ? null : new Stage(stage.contextKey(), stage.executed(), cloneResult(stage.result()));
+        return stage == null ? null : new Stage(stage.contextKey(), stage.executed(), cloneResult(stage.result()),
+                stage.startedAt(), stage.durationNanos(), stage.inputHash());
     }
 
     private static Stage aggregate(String contextKey, List<Stage> rounds, BigDecimal confidenceThreshold) {

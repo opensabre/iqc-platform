@@ -21,7 +21,8 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 @EnableScheduling
 @EnableConfigurationProperties({LlmQualityProperties.class, ConversationUploadProperties.class})
 @EnableMethodCache(basePackages = "io.github.opensabre.iqc")
-@EnableFeignClients(clients = IqcOrganizationClient.class)
+@EnableFeignClients(clients = {IqcOrganizationClient.class,io.github.opensabre.iqc.shared.IqcModelMonitoringClient.class,
+        io.github.opensabre.iqc.shared.IqcNotificationClient.class})
 public class IqcPlatformApplication {
 
     public static void main(String[] args) {
@@ -41,6 +42,11 @@ public class IqcPlatformApplication {
 
     @Bean
     public ObjectMapper iqcObjectMapper() {
-        return new ObjectMapper();
+        // Preserve existing Date timestamp serialization and legacy JSON digests.
+        // Persisted scheduling protocols require textual Java time values.
+        var time = new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule();
+        time.addSerializer(java.time.Instant.class, com.fasterxml.jackson.databind.ser.std.ToStringSerializer.instance);
+        time.addSerializer(java.time.LocalDateTime.class, com.fasterxml.jackson.databind.ser.std.ToStringSerializer.instance);
+        return new ObjectMapper().registerModule(time);
     }
 }

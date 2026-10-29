@@ -1,0 +1,225 @@
+package io.github.opensabre.iqc.quality.evaluation;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.opensabre.iqc.governance.IqcException;
+import io.github.opensabre.iqc.pipelineasset.PipelineAssetService;
+import io.github.opensabre.iqc.pipelineasset.PipelineRelease;
+import java.util.ArrayList;
+import java.util.List;
+
+/** Compares additional semantic projections without altering either frozen release. */
+public final class BenchmarkVariableComparator {
+    private BenchmarkVariableComparator() { }
+    public enum Dimension { PROMPT, MODEL, SKILL, FUSION, PIPELINE }
+    public record Selection(Dimension dimension, String nodeId, Integer slot) { }
+    public record Comparison(Selection selection, List<String> allowedPaths, String invariantHash,
+            String baselineVariableHash, String candidateVariableHash, String baselineReleaseProjectionHash,
+            String candidateReleaseProjectionHash, String baselineEffectivePromptHash, String candidateEffectivePromptHash) {
+        public Comparison { allowedPaths = List.copyOf(allowedPaths); }
+    }
+    private record Projection(ObjectNode invariant, JsonNode variable, String prompt, List<String> paths) { }
+
+    public static Comparison compare(PipelineRelease baseline, PipelineRelease candidate, Selection selection, ObjectMapper mapper) {
+        if (baseline == null || candidate == null || selection == null || selection.dimension() == null || mapper == null)
+            throw invalid("Benchmark 两侧配置和变量声明不能为空");
+        // Both sides must use the same frozen identity protocol; do not silently upgrade old experiments.
+        if (!baseline.schemaVersion().equals(candidate.schemaVersion())) throw invalid("Benchmark 两侧冻结数值协议不一致");
+        boolean exact=PipelineRelease.EXACT_SCHEMA.equals(baseline.schemaVersion());
+        var left = project(baseline, selection, mapper);
+        var right = project(candidate, selection, mapper);
+        var paths=new java.util.ArrayList<>(left.paths());
+        boolean samePaths=left.paths().equals(right.paths());
+        if(!samePaths&&selection.dimension()==Dimension.PROMPT){
+            samePaths=left.paths().stream().filter(path->!path.endsWith("/promptAsset")).toList()
+                    .equals(right.paths().stream().filter(path->!path.endsWith("/promptAsset")).toList());
+            for(var path:right.paths())if(!paths.contains(path))paths.add(path);
+        }
+        if (!left.invariant().equals(right.invariant()) || !samePaths)
+            throw invalid("Benchmark 发现声明变量之外的配置变化");
+        String leftVariable = hash(left.variable(), mapper, exact), rightVariable = hash(right.variable(), mapper, exact);
+        if (leftVariable.equals(rightVariable)) throw invalid("Benchmark 变量没有实际语义变化");
+        String leftPrompt = left.prompt() == null ? null : hash(mapper.getNodeFactory().textNode(left.prompt()), mapper, exact);
+        String rightPrompt = right.prompt() == null ? null : hash(mapper.getNodeFactory().textNode(right.prompt()), mapper, exact);
+        if ((selection.dimension() == Dimension.PROMPT || selection.dimension() == Dimension.SKILL)
+                && leftPrompt!=null && leftPrompt.equals(rightPrompt)) throw invalid("Benchmark 变量未改变实际有效提示");
+        return new Comparison(selection, List.copyOf(paths), hash(left.invariant(), mapper, exact), leftVariable, rightVariable,
+                hash(releaseProjection(baseline,mapper), mapper, exact), hash(releaseProjection(candidate,mapper), mapper, exact), leftPrompt, rightPrompt);
+    }
+
+    private static Projection project(PipelineRelease release, Selection selection, ObjectMapper mapper) {
+        boolean exact=PipelineRelease.EXACT_SCHEMA.equals(release.schemaVersion());
+        ObjectNode root = releaseProjection(release,mapper);
+        ArrayNode nodes = (ArrayNode) root.path("pipeline").path("nodes");
+        // All configurations remain schema 3 and tool-free, including a composite PIPELINE variable.
+        for (JsonNode node : nodes) if ("LLM".equals(node.path("type").asText())) configuration(node, mapper, exact);
+        Dimension dimension = selection.dimension();
+        if (dimension == Dimension.FUSION || dimension == Dimension.PIPELINE) {
+            if (selection.nodeId() != null || selection.slot() != null) throw invalid("该变量维度不能指定节点或槽位");
+            String field = dimension == Dimension.FUSION ? "fusion" : "pipeline";
+            JsonNode variable = root.get(field).deepCopy(); root.put(field, "__BENCHMARK_VARIABLE__");
+            if(dimension==Dimension.FUSION) ((ObjectNode)variable).remove(List.of("id","version"));
+            if(dimension==Dimension.PIPELINE) {
+                // A node display-name edit alone does not change detection or orchestration.
+                for(JsonNode child:variable.path("nodes")) ((ObjectNode)child).remove("name");
+            }
+            return new Projection(root, variable, null, List.of("/" + field));
+        }
+        if (selection.nodeId() == null || selection.nodeId().isBlank()) throw invalid("必须指定单个变量节点");
+        int index = -1;
+        for (int i = 0; i < nodes.size(); i++) if (selection.nodeId().equals(nodes.get(i).path("nodeId").asText())) {
+            if (index >= 0) throw invalid("节点标识重复"); index = i;
+        }
+        if(index<0)throw invalid("变量节点不存在");
+        if(selection.dimension()==Dimension.SKILL && "SKILL_API".equals(nodes.get(index).path("type").asText()))return skillApiProjection(root,nodes,index,selection,mapper);
+        if(selection.dimension()==Dimension.MODEL && "SMALL_MODEL".equals(nodes.get(index).path("type").asText()))return smallModelProjection(root,nodes,index,selection,mapper);
+        if(!"LLM".equals(nodes.get(index).path("type").asText()))throw invalid("该变量维度不支持此节点类型");
+        ObjectNode node = (ObjectNode) nodes.get(index), config = (ObjectNode) node.get("config");
+        ObjectNode agent = (ObjectNode) config.get("agentSnapshot"), agentConfig = configuration(node, mapper, exact);
+        if(agentConfig.hasNonNull("promptAsset")){
+            var source=agentConfig.path("promptAsset");
+            if(!source.isObject()||source.size()!=3||!source.path("skillId").isTextual()
+                    ||!source.path("skillId").asText().matches("[A-Za-z0-9:_-]{1,64}")||!source.path("versionNo").isIntegralNumber()
+                    ||!source.path("versionNo").canConvertToInt()||source.path("versionNo").intValue()<1||!source.path("contentHash").isTextual())
+                throw invalid("Prompt版本来源无效");
+            var reference=new io.github.opensabre.iqc.agent.AgentConfiguration.PromptReference(source.path("skillId").asText(),source.path("versionNo").intValue(),source.path("contentHash").asText());
+            if(!reference.contentHash().equals(io.github.opensabre.iqc.agent.AgentConfiguration.promptHash(reference,agentConfig.path("systemPrompt").asText())))
+                throw invalid("Prompt正文与版本摘要不一致");
+        }
+        String prompt = effectivePrompt(agentConfig);
+        String prefix = "/pipeline/nodes/" + index + "/config/agentSnapshot/configJson";
+        List<String> paths = new ArrayList<>();
+        ObjectNode variable = mapper.createObjectNode();
+        switch (dimension) {
+            case PROMPT -> {
+                if (selection.slot() != null) throw invalid("PROMPT 不接受槽位");
+                variable.set("systemPrompt", agentConfig.get("systemPrompt"));
+                if(agentConfig.has("promptAsset")){variable.set("promptAsset",agentConfig.get("promptAsset"));agentConfig.remove("promptAsset");paths.add(prefix+"/promptAsset");}
+                agentConfig.put("systemPrompt", "__BENCHMARK_VARIABLE__"); paths.add(prefix + "/systemPrompt");
+            }
+            case MODEL -> {
+                if (selection.slot() != null && selection.slot() != 0) throw invalid("当前 MODEL 实验仅支持主模型");
+                if (agentConfig.path("fallbackModelProfileIds").size() > 0 || agentConfig.path("assetSnapshots").path("fallbackModels").size() > 0)
+                    throw invalid("缺少实际回退模型轨迹，MODEL 实验不能配置备用模型");
+                ObjectNode assets = (ObjectNode) agentConfig.get("assetSnapshots");
+                ObjectNode model = (ObjectNode) assets.path("primaryModel").deepCopy();
+                if (!agentConfig.path("primaryModelProfileId").asText().equals(model.path("id").asText())) throw invalid("主模型引用与冻结快照不一致");
+                // Version/display changes alone do not change model routing or call configuration.
+                model.remove(List.of("versionNo", "name", "code")); variable.set("primaryModel", model);
+                agentConfig.put("primaryModelProfileId", "__BENCHMARK_VARIABLE__"); assets.put("primaryModel", "__BENCHMARK_VARIABLE__");
+                paths.add(prefix + "/primaryModelProfileId"); paths.add(prefix + "/assetSnapshots/primaryModel");
+            }
+            case SKILL -> {
+                Integer slot = selection.slot(); JsonNode skills = agentConfig.path("assetSnapshots").path("skills"), ids = agentConfig.path("skillIds");
+                if (slot == null || slot < 0 || !skills.isArray() || !ids.isArray() || skills.size() != ids.size() || slot >= skills.size())
+                    throw invalid("SKILL 必须指定已冻结的单个有效槽位");
+                if (!ids.get(slot).asText().equals(skills.get(slot).path("id").asText())) throw invalid("Skill 引用与冻结快照不一致");
+                ObjectNode skill = (ObjectNode) skills.get(slot).deepCopy(); skill.remove("versionNo"); variable.set("skill", skill);
+                ((ArrayNode) ids).set(slot, mapper.getNodeFactory().textNode("__BENCHMARK_VARIABLE__"));
+                ((ArrayNode) skills).set(slot, mapper.getNodeFactory().textNode("__BENCHMARK_VARIABLE__"));
+                paths.add(prefix + "/skillIds/" + slot); paths.add(prefix + "/assetSnapshots/skills/" + slot);
+            }
+            default -> throw invalid("不支持的变量维度");
+        }
+        // Only this Agent's release metadata may move as the selected capability changes.
+        agent.remove(List.of("versionNo", "name", "code", "description", "createdBy", "createdTime", "updatedBy", "updatedTime"));
+        ((ObjectNode) config.path("agentReference")).remove("versionNo");
+        agent.set("configJson", agentConfig);
+        return new Projection(root, variable, prompt, paths);
+    }
+
+    /** One actual Skill request contract changes; its tool route and all other policies remain invariant. */
+    private static Projection skillApiProjection(ObjectNode root,ArrayNode nodes,int index,Selection selection,ObjectMapper mapper) {
+        if(selection.slot()!=null && selection.slot()!=0)throw invalid("独立Skill/API只有一个Skill引用，slot须为0或留空");
+        var node=nodes.get(index);var config=node.path("config");
+        try {io.github.opensabre.iqc.pipelinebridge.SkillApiDetectorEngine.validateConfiguration(node.path("version").asText(),config);}
+        catch(IllegalArgumentException invalidContract){throw invalid("独立Skill/API冻结协议无效");}
+        var reference=config.path("skillReference");var skill=config.path("skillSnapshot");var agent=config.path("agentReference");
+        if(!reference.isObject() || !reference.path("id").isTextual() || !reference.path("id").asText().equals(skill.path("id").asText())
+                || !reference.path("versionNo").isIntegralNumber() || !reference.path("versionNo").canConvertToInt()
+                || reference.path("versionNo").intValue()!=skill.path("versionNo").intValue()
+                || !agent.isObject() || !agent.path("id").isTextual() || agent.path("id").asText().isBlank()
+                || !agent.path("versionNo").isIntegralNumber() || !agent.path("versionNo").canConvertToInt() || agent.path("versionNo").intValue()<1)
+            throw invalid("独立Skill引用与冻结版本或Agent锚点不一致");
+        var variable=mapper.createObjectNode();variable.set("skill",skill.deepCopy());
+        ((ObjectNode)reference).put("id","__BENCHMARK_VARIABLE__");((ObjectNode)reference).put("versionNo","__BENCHMARK_VARIABLE__");
+        ((ObjectNode)config).put("skillSnapshot","__BENCHMARK_VARIABLE__");((ObjectNode)agent).put("versionNo","__BENCHMARK_ANCHOR__");
+        String prefix="/pipeline/nodes/"+index+"/config";
+        return new Projection(root,variable,null,List.of(prefix+"/skillReference/id",prefix+"/skillReference/versionNo",prefix+"/skillSnapshot",prefix+"/agentReference/versionNo"));
+    }
+
+    /** The selected frozen inference model changes, while its protocol and route remain invariant. */
+    private static Projection smallModelProjection(ObjectNode root,ArrayNode nodes,int index,Selection selection,ObjectMapper mapper) {
+        if(selection.slot()!=null && selection.slot()!=0)throw invalid("专用模型节点只有一个实际选中模型，slot须为0或留空");
+        var node=nodes.get(index);var config=node.path("config");
+        try {
+            io.github.opensabre.iqc.pipelinebridge.SmallModelContract.validateConfiguration(node.path("version").asText(),config,
+                    mapper.treeToValue(config.path("findingDefinition"),io.github.opensabre.iqc.finding.FindingDefinition.class));
+        } catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException invalidContract) {
+            throw invalid("专用模型冻结协议无效");
+        }
+        var reference=config.path("modelReference");var model=config.path("modelSnapshot");var agent=config.path("agentReference");
+        if(!reference.isObject() || !reference.path("id").isTextual() || !reference.path("id").asText().equals(model.path("id").asText())
+                || !reference.path("versionNo").isIntegralNumber() || !reference.path("versionNo").canConvertToInt()
+                || reference.path("versionNo").intValue()!=model.path("versionNo").intValue()
+                || !agent.isObject() || !agent.path("id").isTextual() || agent.path("id").asText().isBlank()
+                || !agent.path("versionNo").isIntegralNumber() || !agent.path("versionNo").canConvertToInt() || agent.path("versionNo").intValue()<1)
+            throw invalid("专用模型引用与冻结版本或Agent锚点不一致");
+        var variable=mapper.createObjectNode();variable.set("model",model.deepCopy());
+        ((ObjectNode)reference).put("id","__BENCHMARK_VARIABLE__");((ObjectNode)reference).put("versionNo","__BENCHMARK_VARIABLE__");
+        ((ObjectNode)config).put("modelSnapshot","__BENCHMARK_VARIABLE__");((ObjectNode)agent).put("versionNo","__BENCHMARK_ANCHOR__");
+        String prefix="/pipeline/nodes/"+index+"/config";
+        return new Projection(root,variable,null,List.of(prefix+"/modelReference/id",prefix+"/modelReference/versionNo",prefix+"/modelSnapshot",prefix+"/agentReference/versionNo"));
+    }
+
+    private static ObjectNode configuration(JsonNode node, ObjectMapper mapper, boolean exact) {
+        JsonNode raw = node.path("config").path("agentSnapshot").path("configJson");
+        JsonNode value;
+        try {
+            if (raw.isTextual()) {
+                if (raw.asText().length() > 1024 * 1024) throw invalid("智能体配置超出比较上限");
+                var reader=mapper.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+                if(exact) reader=reader.with(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
+                value = reader.readTree(raw.asText());
+            } else value = raw.deepCopy();
+        } catch (Exception ex) { throw invalid("智能体冻结配置不是有效 JSON"); }
+        if (!(value instanceof ObjectNode object) || !"3.0".equals(value.path("schemaVersion").asText())
+                || value.path("mcpServerIds").size() > 0 || value.path("mcpServers").size() > 0 || value.path("assetSnapshots").path("mcpServers").size() > 0)
+            throw invalid("Benchmark 仅支持 schema 3.0 且无 MCP 的冻结智能体");
+        if (!value.path("assetSnapshots").isObject() || !value.path("assetSnapshots").path("primaryModel").isObject()
+                || !value.path("systemPrompt").isTextual() || value.path("systemPrompt").asText().isBlank()) throw invalid("智能体冻结模型或提示缺失");
+        return object;
+    }
+    /** Mirrors the provider's schema 3 concatenation, rejecting rather than hiding truncation. */
+    private static String effectivePrompt(ObjectNode config) {
+        StringBuilder prompt = new StringBuilder(config.path("systemPrompt").asText().trim());
+        JsonNode skills = config.path("assetSnapshots").path("skills");
+        if (skills.isArray()) for (JsonNode skill : skills) {
+            String instructions = skill.path("instructions").asText("");
+            if (!instructions.isBlank()) prompt.append("\nSkill[").append(skill.path("name").asText("unnamed")).append("]:\n").append(instructions);
+        }
+        if (prompt.length() > 8000) throw invalid("Benchmark 节点提示会发生 8000 字符截断");
+        return prompt.toString();
+    }
+    private static String hash(JsonNode value, ObjectMapper mapper, boolean exact) {
+        try {
+            String body=mapper.writeValueAsString(value);
+            return exact ? io.github.opensabre.iqc.selector.SelectorAssetService.hash(body) : PipelineAssetService.hash(body);
+        }
+        catch (Exception ex) { throw invalid("Benchmark 配置摘要失败"); }
+    }
+    private static ObjectNode releaseProjection(PipelineRelease release,ObjectMapper mapper) {
+        ObjectNode root=mapper.valueToTree(release);
+        // This domain field is a Set; other arrays retain their meaningful order.
+        JsonNode calibrated=root.path("fusion").path("calibratedNodeIds");
+        if(calibrated.isArray()) {
+            var ids=new ArrayList<String>(); calibrated.forEach(id->ids.add(id.asText())); ids.sort(String::compareTo);
+            var sorted=mapper.createArrayNode(); ids.forEach(sorted::add);
+            ((ObjectNode)root.get("fusion")).set("calibratedNodeIds",sorted);
+        }
+        return root;
+    }
+    private static RuntimeException invalid(String message) { return IqcException.invalidArgument(message); }
+}

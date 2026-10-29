@@ -1,0 +1,19 @@
+# 离线音频后续接入边界
+
+原始需求来源：工作区IQC智能质检平台_PRD_V1.0.md第15节统一Conversation/Segment模型和双向时间定位、第18节敏感音频权限。离线音频仍在范围内，实时语音排除不影响离线转写。
+
+当前实现复用ConversationAudioService、ConversationAudioStorage、原ConversationMapper.bindAudio及ProductionInputSnapshotService v3。文件发布及数据库CAS是两个不同资源；现有已绑定会话在比对前发布新摘要文件，拒绝替换后可能留下未引用文件。下一步应在发布前比较已绑定身份，重复上传仍校验实际文件；CAS竞争或事务回滚的未引用文件不能盲删，因为摘要对象可能被其他会话使用。
+
+拥有应用现有TaskTriggerService、EventSubscriptionService已识别ASRCompleted并按asrStatus门控；这些属于消费能力，不证明存在转写执行器。搜索拥有应用及框架源码没有找到AudioTranscription/Whisper适配器。转写结果应通过原消息导入/修订校验进入ConversationMessage，并使用原稳定身份和任务触发幂等，不能另建转写会话、消息副本或把外部成功状态当作实际文本完整性证明。
+
+实际ASR接入尚须确定已有Model Gateway注册与供应商调用边界、可信说话人映射、毫秒端点/置信度校验、实际音频身份绑定、失败状态与完成事件一致性。历史生产快照必须保持原冻结输入，不能用后补转写或后补音频改写旧证据。当前PCM WAV播放器及局部测试不能代替ASR、其他编码或完整PRD验收。
+
+
+复用源码核对补充：`modelprofile/model/IqcModelProfile.java`已经保存provider/modelName/endpoint/secretRef及超时重试配置，`IqcModelProfileService`负责凭据加密；禁止为ASR另存明文密钥。`result/llm/gateway/ModelGateway.java`已有真实供应商调用边界、限次、并发预留、UNKNOWN与响应结算；其中Usage/指标以input/output/total/cache Token为主。ASR适配必须先核对音频秒数和供应商用量语义，缺失保持未知，不能把秒数填入Token或把缺失用量写零。复用Gateway还须核对其实际Context生产来源约束，不能用伪造质检任务身份绕过准入。
+
+
+历史复核/金标待补：`quality/BusinessReviewSampleService.java`目前按对齐字段选择candidate-input-v1/v2，冻结文本及时间坐标，但没有贯通生产Input.audio。后续必须从已验证的原生产manifest取得音频身份，而不是从当前Conversation行补齐。旧v1/v2没有音频身份时保持未知；后补音频不能改写历史证据。候选、金标、评测的协议/摘要及只读播放来源需一起验证，不能仅增加播放器URL声称历史回放成立。
+
+## 当前范围修订（用户明确，2026-10-13）
+
+质检输入为已经处理好的会话数据，不开展语音转换、ASR或音频解码扩展。此前记录中的这些待办不再作为当前交付门禁；现有音频附件能力保留为附加能力。继续验证处理后会话的选数、冻结输入、指标/规则/Session执行、发现与决策、动作、复核、评测及运行验收。已有时间坐标可用于指标；缺失坐标必须保持未知，不从文本推测补齐。

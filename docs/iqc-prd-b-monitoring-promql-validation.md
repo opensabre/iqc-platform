@@ -1,0 +1,31 @@
+# 固定监控查询真实引擎验证
+
+2026-10-26只读检查opensabre既有Prometheus容器，promtool版本3.13.3。IQC固定job/application查询UP=1；按正式名称复核iqc_model_gateway_active、iqc_task_persisted_state、iqc_pipeline_graph_active，当前成功空vector，无新指标样本。最初探查曾使用不存在的iqc_pipeline_node_active名称，随后按正式graph名称复核；不以初次结果判断节点采集。没有部署新版本或修改采集配置，不把UP视作新功能已采集。
+
+复用控制面独立固定工作树MonitoringQueryService.iqcModelHistory的六条查询：activeModelCalls/taskStates/taskCompletionTps/unmeasuredExecutions/taskMetricsHealth/taskMetricsAge。测试输入见validation/iqc-monitoring-promql.json，由当前源码中的六个queries.put字面量及原固定selector/production拼接生成，不修改base-gateway源码。
+
+通过SSH将本地JSON（YAML兼容）送入docker exec -i opensabre-prometheus /bin/promtool test rules /dev/stdin，不写远端文件、规则、配置。原46925 terminal0，/tmp/iqc-b-monitoring-promtool.log.exit=0，SUCCESS。两组共12条表达式检查：双实例共享任务快照7不是14；完成600轮/300=2不是4；历史未测量4不是8；真实调用在途2+3=5；健康min=0、年龄max=30；外应用及评测状态不污染生产；完全缺测保持空vector不制造0。
+
+这是实际PromQL求值引擎+受控时序，不是新应用版本真实scrape，也不证明所有24条查询、真实Feign/PDP或容量。当前线上新指标无样本的原因仍须核对部署版本/采集，不擅改服务。
+
+
+## 2026-10-29 现网只读采集复核
+
+SSH原62777 docker ps terminal0：IQC API容器4f664ad1f6d4运行10小时，管理端013f994713f7与组织79e7e84bb346运行3周；不从镜像ID推断源码提交。未部署、未更改采集配置/凭据或数据库。
+
+原13657查询现有Prometheus /api/v1/targets成功，七目标均up。原28391再次成功核对，IQC目标标签为application=iqc-platform、instance=iqc-platform:18080、job=opensabre-applications，lastScrape=2026-10-29T13:08:01.052829483Z、lastError为空；其余六目标up。
+
+原5086通过同一Prometheus实际执行 `count by (__name__) ({__name__=~"iqc_(task|pipeline|model).*",application="iqc-platform"})`，返回status=success、result为空（0个指标族）。该查询覆盖上文新增任务/流水线/模型指标名称前缀，目标标签核对排除本次application拼写不匹配。结论仅为查询时刻无匹配即时样本，不意味着任务计数为0，也不证明根因必然是旧镜像；条件启用、注册与运行配置尚需调查。不得把UP或历史promtool受控求值当新指标真实采集通过。
+
+完整24条固定查询、真实业务样本与时序仍未验收；后续应先核对当前部署版本和指标注册条件，准备可审阅的部署差异后再执行授权范围内动作。此复核全程只读。
+
+
+### 2026-10-29 部署内容只读定位
+
+原32536 docker inspect给出镜像精确digest `sha256:4f664ad1f6d4f1e45a2c721552bd98b3d6e896cccec87bb992fcaff3e8b250a5`、工作目录/app、java进程；目录为Jib的classes/resources/libs（第二个尝试BOOT-INF路径不存在，因此命令终态2，不能据此判类缺失）。随后原96410核对jib-main-class-file为io.github.opensabre.iqc.IqcPlatformApplication，find真实/app/classes未找到三个目标类；该命令最后的可选libs glob无匹配而终态2。
+
+最终原58829终态0：正确路径/app/classes/io/github/opensabre/iqc/IqcPlatformApplication.class存在，列出同包下task/result等目录，但先前原75739在该正确目录内明确检查的task/DurableInspectionWorker.class、pipelinebridge/PipelineConversationEvaluator.class、result/llm/gateway/ModelGateway.class均不存在。两候选git.properties未匹配提交标识，不能给出部署SHA或声称固定提交已部署。
+
+本地当前源码中ModelGateway构造注册iqc.model.gateway.active、PipelineConversationEvaluator构造注册iqc.pipeline.graph.active及线程池Gauge；DurableInspectionWorker在iqc.task.worker-enabled=true或缺省时注册任务观测。现网没有对应class意味着当前部署内容不能承担这些实现的实际采集验收，缺口首先在部署内容。尚未逐一调查其它指标、依赖jar或所有24条查询，也未尝试重启/热补丁/部署。应在确定包含数据库迁移与当前应用源的可审阅发布方案后再验证，不仅修改Prometheus标签。
+
+启动classpath进一步只读复核：原27698仅提取受限启动字段，java -cp @/app/jib-classpath-file及正式主类，无-jar；原64056读取该classpath文件，258项，非/app/libs/仅/app/resources与/app/classes，未出现名称含iqc的应用jar。没有观察到外部热补丁classpath；仍未扫描每个第三方jar的内容，定位不扩展为完整依赖审计。两命令均terminal0，无环境/其他启动参数输出。

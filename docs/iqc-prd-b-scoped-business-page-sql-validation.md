@@ -1,0 +1,24 @@
+# 批次结果范围与分页 SQL 验证
+
+生产基线：7071f5e，B 合入点 c8d93d5。质检输入为已处理会话；语音转换、ASR、音频解码和说话人分离不在本任务验收范围内。
+
+## 验证结果
+
+原会话 38045 已 terminal 0，`/tmp/iqc-b-scoped-page-sql.log.exit=0`。本机隔离 MySQL 34307、随机新 schema，Flyway 至 1.1.77，实际 MyBatis mapper 与 MySQL 分页插件：
+
+- IsolatedMysqlScopedBusinessPageIT：4 项，16.710s，零失败、错误、跳过。
+- BatchResultQueryServiceTest：15 项，6.207s，零失败、错误、跳过。
+
+真实 SQL 验证 owner OR group 范围、空组仅 owner、all 范围、父任务过滤、排除评估任务、count/跨页/空尾；最新 attempt 优先于时间，先排名后过滤风险/分数，不回退到旧轮次；旧显式 task IDs 入口复用排名且拒绝空范围。服务测试更新原枚举任务 ID 假设，验证直接传递 SQL 范围且不枚举全量可见任务。
+
+## 证据边界
+
+SQL 测试直接调用 mapper，父任务归属由夹具设置，不能证明 service/controller 父可见性、真实 PDP/组织传输或浏览器联调。未做百万数据、查询计划或 SLO 验证，也未覆盖所有同时间 ID 排序组合。无生产源码、framework、共享库、push 或部署变更；完整适用 I1–I7 仍在进行。
+
+## 父授权与 HTTP 契约增量
+
+基线 d495123。原会话 59581 terminal 0，`/tmp/iqc-b-parent-result-contract.log.exit=0`。BatchResultQueryServiceTest 19 项（9.315s）、InspectionResultControllerTest 3 项（10.700s）均零失败、错误、跳过。
+
+新增四项服务场景：非法父 ID/父子混用在 metadata 查询前拒绝；父不存在或不可见在结果读取前拒绝；可见普通任务不能冒充批次父；可见父仍使用当前 owner/group 子范围并限制页大小至 100，空页不读取任务名或会话。HTTP 测试改用实际八参数路由，参数化普通 task 与 parentTaskId，确认父过滤不丢失、原业务查看 grant、private/no-store 与 nosniff、标准 total 与 canonical 零分。
+
+这是 standalone MockMvc、受控权限服务和 mapper 测试；不证明远程 PDP、真实角色传输或生产运行状态。SQL 与服务/MVC 证据分别保留，不相加冒称端到端验收。

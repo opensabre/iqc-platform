@@ -30,6 +30,8 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class HierarchicalResultService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private io.github.opensabre.iqc.conversation.ProductionInputSnapshotService productionInputs;
     private final ConversationInspectionResultMapper conversationMapper;
     private final RuleInspectionResultMapper ruleMapper;
     private final InspectionEvidenceMapper evidenceMapper;
@@ -72,6 +74,61 @@ public class HierarchicalResultService {
             item.setAttemptCount((item.getAttemptCount() == null ? 0 : item.getAttemptCount()) + 1);
             item.setErrorMessage("FAILED".equals(item.getStatus()) ? "逐项检测阶段失败" : null);
             if (taskItemMapper.updateById(item) != 1) throw new IllegalStateException("逐项处理进度提交失败");
+        }
+        return conversation;
+    }
+
+    /** Atomically saves Pipeline facts/score with the existing task lease and message checkpoints. */
+    @Transactional
+    public ConversationInspectionResult materializePipeline(InspectionTask task, String executionId, JsonNode snapshot,
+            List<ConversationMessage> messages, io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation evaluated,
+            List<io.github.opensabre.iqc.task.model.TaskItem> batch) {
+        return materializePipeline(task,executionId,snapshot,messages,evaluated,batch,null);
+    }
+
+    @Transactional
+    public ConversationInspectionResult materializePipeline(InspectionTask task,String executionId,JsonNode snapshot,
+            List<ConversationMessage> messages,io.github.opensabre.iqc.pipelinebridge.PipelineConversationEvaluator.Evaluation evaluated,
+            List<io.github.opensabre.iqc.task.model.TaskItem> batch,
+            io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.Prepared verifiedInputs) {
+        var current=taskMapper.selectOne(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getId,task.getId()).last("FOR UPDATE"));
+        if(current==null || !"RUNNING".equals(current.getStatus()) || !executionId.equals(current.getCurrentExecutionId())) return null;
+        if(!java.util.Objects.equals(task.getRuleSnapshotJson(),current.getRuleSnapshotJson())) throw new IllegalStateException("流水线任务快照已变化");
+        if(io.github.opensabre.iqc.conversation.ProductionInputSnapshotService.hasSnapshot(snapshot)) {
+            if(productionInputs==null)throw new IllegalStateException("生产冻结输入校验未启用");
+            if(verifiedInputs==null)productionInputs.validateResult(task,snapshot,messages,evaluated);
+            else productionInputs.validateResult(task,snapshot,messages,evaluated,verifiedInputs);
+        }
+        String conversationId=messages.getFirst().getConversationId();
+        var conversation=conversationMapper.selectOne(Wrappers.<ConversationInspectionResult>lambdaQuery()
+                .eq(ConversationInspectionResult::getExecutionId,executionId).eq(ConversationInspectionResult::getConversationId,conversationId));
+        if(conversation!=null) return conversation;
+        conversation=new ConversationInspectionResult(); conversation.setTaskId(task.getId()); conversation.setExecutionId(executionId);
+        conversation.setConversationId(conversationId); conversation.setAggregationMode("PIPELINE"); conversation.setScore(null); conversation.setDeduction(0);
+        conversation.setFinalScore(evaluated.scoring().finalScore()); conversation.setScoreStatus(evaluated.scoring().scoreStatus().name());
+        conversation.setScoringResultJson(write(evaluated.scoring())); conversation.setBusinessItemResultsJson(write(evaluated.items()));
+        conversation.setExecutionTraceJson(write(evaluated)); conversation.setResultStatus(evaluated.scoring().conclusion().name());
+        conversation.setRiskLevel(evaluated.riskLevel()); conversation.setReason("已按流水线冻结事实融合与独立评分政策计算");
+        boolean failed=evaluated.run().status()==io.github.opensabre.iqc.pipeline.PipelineRuntime.Status.FAILED
+                || evaluated.run().status()==io.github.opensabre.iqc.pipeline.PipelineRuntime.Status.CANCELLED
+                || evaluated.items().stream().anyMatch(value->value.status()==io.github.opensabre.iqc.scoring.InspectionScoring.ItemStatus.ERROR);
+        if(failed) conversation.setResultStatus("ERROR");
+        if(conversationMapper.insert(conversation)!=1 || conversation.getId()==null) throw new IllegalStateException("流水线会话提交失败");
+        for(var requested:batch) {
+            var item=taskItemMapper.selectOne(Wrappers.<io.github.opensabre.iqc.task.model.TaskItem>lambdaQuery()
+                    .eq(io.github.opensabre.iqc.task.model.TaskItem::getId,requested.getId()).last("FOR UPDATE"));
+            if(item==null || !task.getId().equals(item.getTaskId()) || !executionId.equals(item.getExecutionId())
+                    || !conversationId.equals(item.getConversationId())) throw new IllegalStateException("流水线检查点归属无效");
+            if("SUCCEEDED".equals(item.getStatus()) || "CANCELLED".equals(item.getStatus())) continue;
+            var message=messages.stream().filter(value->value.getId().equals(item.getMessageId())).findFirst().orElseThrow();
+            var observation=new InspectionResult(); observation.setTaskId(task.getId()); observation.setExecutionId(executionId);
+            observation.setConversationId(conversationId); observation.setMessageId(message.getId()); observation.setSpeakerRole(message.getSpeakerRole());
+            observation.setScore(null); observation.setDeduction(0); observation.setResultStatus(failed?"ERROR":"NOT_EVALUATED");
+            observation.setReason("流水线业务终态由会话结果保存，消息行仅作执行进度"); observation.setEvidenceJson("[]");
+            if(observationMapper.insert(observation)!=1 || observation.getId()==null) throw new IllegalStateException("流水线消息检查点提交失败");
+            item.setResultId(observation.getId()); item.setStatus(failed?"FAILED":"SUCCEEDED");
+            item.setAttemptCount((item.getAttemptCount()==null?0:item.getAttemptCount())+1); item.setErrorMessage(failed?"流水线执行失败，可重试":null);
+            if(taskItemMapper.updateById(item)!=1) throw new IllegalStateException("流水线检查点进度提交失败");
         }
         return conversation;
     }
@@ -168,6 +225,8 @@ public class HierarchicalResultService {
                     .map(rule -> rule.path("riskLevel").asText("MEDIUM")).max(Comparator.comparingInt(this::riskOrder)).orElse("LOW"));
             conversation.setReason(incomplete ? "部分业务质检项尚未形成确定结论" : "已按方案版本中的独立评分政策计算");
         }
+        if (routed != null) conversation.setExecutionTraceJson(write(RouteExecutionTrace.build(
+                task, executionId, conversationId, snapshot, messages, routed.plan(), routed.run(), objectMapper)));
         conversationMapper.updateById(conversation);
         labelResultService.materialize(conversation, task.getLabelScopeSnapshotJson(), ruleResults, messages);
         return conversation;

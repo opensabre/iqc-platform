@@ -15,6 +15,7 @@ public class Conversation extends BasePo {
     private String employeeId;
     private String employeeName;
     private String employeeGroupId;
+    private String employeeDepartmentId;
     private String customerExternalId;
     private String customerName;
     private String customerContactMasked;
@@ -24,6 +25,10 @@ public class Conversation extends BasePo {
     private String businessType;
     private String businessNo;
     private String tagsJson;
+    private String asrStatus;
+    private String customerLevel;
+    private Boolean complaint;
+    private String businessFieldsJson;
     private String sourceFileName;
     private String sourceFingerprint;
     private Integer messageCount;
@@ -31,4 +36,12 @@ public class Conversation extends BasePo {
     private Integer ignoredBlankLines;
     private String status;
     private String ownerGroupId;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String audioSha256;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private Long audioSizeBytes;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String audioMediaType;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private Long audioDurationMs;
 }

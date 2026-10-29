@@ -1,0 +1,19 @@
+# 独立风险升级的证据边界
+
+PRD27.9要求高风险可定位Evidence。已复核FindingDefinition.validate对高严重度/要求证据的KNOWN事实校验、FrozenDetectorEngine对规则缺失/阈值的RULE_MATCH输入清单证明、FindingFusion对原始证据保留、人工事实改判对原Definition复用。独立RiskPolicy却可default HIGH或ALWAYS→HIGH，绕过事实证据约束。
+
+复用原RiskPolicy/资产freeze/首次任务物化及风险事件，不增加表、API、证据生成器或发布协议。新草稿/试跑/发布及首次生产/评测物化要求：默认只能非高风险；HIGH/CRITICAL规则必须保证匹配路径包含要求证据的KNOWN事实。同code所有生产者须要求证据，防止Fusion选择弱来源。FINDING_EQUALS、FINDING_STATE=KNOWN、直接NOT(FINDING_EQUALS)可作证据门；ALL至少一项保证、ANY每支保证；其它业务/标签/评分条件可组合，但不能单独无证据升级。沿原UNKNOWN三态，不伪造证据或改成未命中。
+
+只在新的配置/物化入口校验，已存在幂等请求先复用原任务；不改RiskPolicy.evaluate、不改旧版本JSON/Hash或历史读取。新重算须校验目标与实际融合证据，新人工事实投影及新HIGH/CRITICAL风险事件要求有已验证KNOWN事实的可定位证据；既有事件优先幂等复用，历史lookup不重写旧产物。原Engine/Fusion/人工改判的证据归属校验仍为依据，不能用一个客户端布尔声明替代。
+
+旧不合规发布/历史结果仍按原快照可读/重放；新建任务应拒绝并要求创建合规新版本，不原地修历史。静态门不能证明业务规则语义正确、所有Legacy消费都已升级或高风险召回，实际发布/物化/改判/重算/Action及历史幂等边界由B独立验证，不能凭编译宣布27.9全面验收。
+
+Fusion保留被拒绝来源的证据供冲突检查，因此新机器重算/风险事件必须有选中原始KNOWN来源的证据与有效融合证据对应，不能只用被拒绝候选的quote充当选中结论的依据。人工新增/保留证据沿原消息归属与FindingDefinition复核，不要求它原先被AI选中。低风险政策及无riskPolicy评测不额外解析原本不需解析的配置，原层次职责保持。
+
+## 证据与实际风险条件关联
+
+复核发现全局any证据不足：触发高风险的code A无证据，另一个不相关code B有选中证据，仍可能通过。新写入改为沿真实MATCH的最高风险级规则找证据路径；ALL/ANY只接受实际MATCH子条件中的已知事实证据，直接NOT等值仍须known；不能用HIGH规则证据支撑CRITICAL默认/无证据分支。无独立RiskPolicy时，只使用实际FAIL项目映射且severity等于最终risk的事实。机器仍要求选中原始来源证据，人工沿经验证有效引用。
+
+原RiskPolicy.evaluate与已有JSON/Hash不改。风险动作从已经校验的冻结inputSnapshot重读release，复用原Context不新增IO或来源表；旧事件仍在新建检查之前优先幂等复用。人工新写入仅高risk事实投影从原冻结输入取businessContext重新核验，历史read不加此新门。B需覆盖无关code救场、匹配/未匹配分支、HIGH与CRITICAL、兼容FAIL映射、旧幂等/回放及原AI不变。
+
+人工路径按事实代码区分来源：effective human decisions明确复核过（含已验证继承）的code可使用人工有效证据；未复核沿用code仍须AI选中来源证据，不能把复核B视作确认A，也不能用A被拒绝候选的quote为未确认A兜底。此证据选择只用于新产物校验，不改变事实、决策或历史格式。

@@ -15,6 +15,12 @@ public class ConversationMessage extends BasePo {
     private Integer sequenceNo;
     private String speakerRole;
     private LocalTime relativeTime;
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private Long startMs;
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private Long endMs;
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private java.math.BigDecimal confidence;
     private String content;
     private String rawLine;
     private Integer lineNumber;

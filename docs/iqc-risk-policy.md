@@ -1,0 +1,29 @@
+# 独立风险政策首批
+
+PRD 11.4要求组合Finding、score、label和业务字段。实施前核对原PipelineDecisionEvaluator.riskLevel、ActionPolicy.Condition/Context/Match、评分/标签目录、RiskEvent适配与组织授权；已有风险只是评分失败项目的最高事实严重度，没有独立冻结风险规则。复用原三态条件树及NONE/LOW/MEDIUM/HIGH/CRITICAL vocabulary，在PipelineRelease追加可选冻结政策，不新建风险分级表、事实副本或条件语言。
+
+首批组合Finding等值/状态、质检项状态、最终分数及ALL/ANY/NOT，拒绝读取尚未计算的风险等级和最终结果状态以避免循环；1到100条规则、总条件节点1000，各树沿原16层/100节点约束。匹配规则取最高等级及明确默认等级；若可能命中的未知规则会提高已确认等级，输出UNKNOWN，不把未知当未命中；已确认HIGH且未知LOW不改变最高等级。规则命中过程作为可选riskDecision保存在原执行Trace，沿原源证明重新计算核对。
+
+没有风险政策沿旧失败项目严重度投影，旧JSON省略新null字段，既有构造兼容。新风险不隐式依赖全会话分数FINAL；已确认红线可独立于其它待定评分触发已确认等级。风险条件本身若引用未知评分则继续UNKNOWN。标签/业务字段组合仍需原标签投影、主体归属及冻结业务上下文证明；不接活归档或伪造标签，也不以首批条件代替完整PRD完成。生产/评测/政策重算使用纯投影，不重发业务动作。首批代码已接原发布冻结、生产Evaluator、评测校验、动作来源证明与DecisionRevision；政策重算校验原风险并保存原/目标等级及规则轨迹，沿原projectionJson保留原事实。界面复用ActionConditionEditor及其有界校验，禁止风险/最终结果自引用；启用后需明确添加规则，不能用空规则隐式发布。真实运行/标签字段组合及复杂风险/复核与其余要求仍待，未新增运行测试/SQL/部署。
+
+## 标签和业务字段组合的实施边界
+
+原条件树缺少标签及业务字段叶子。新增LABEL_EQUALS/BUSINESS_EQUALS到同一条件协议，仅风险政策允许消费；普通动作发布继续拒绝，避免动作适配范围变更。标签code用两个JSON pointer段定位冻结labelId/valueCode，沿原FindingLabelPolicy.projectionBinding与FindingLabelProjection.project计算，不读取标签档案或动作回执；只比较已知投影。业务code是冻结businessContext内的非根JSON pointer；缺失/null/对象/数组不能冒充确定标量。复用原数值精确等值比较与三态组合，不添加语言/表/输入副本。生产来源校验从ProductionInputSnapshotService核验原上下文；评测从原Gold冻结输入；DecisionRevision从原生产输入及其摘要重算，保持原事实/输入不变。标签投影的主体角色仍沿原冻结标签声明和事实证据，不推断新的参与者归属。
+
+### 来源校验与界面
+
+LABEL_EQUALS仅引用已声明的标签值绑定，路径按JSON pointer转义`~`和`/`；保存/发布及历史冻结校验检查绑定存在。BUSINESS_EQUALS读取冻结对象里的标量，支持嵌套路径与数组定位；字段缺失/null/对象/数组本身为UNKNOWN，字符串/布尔/数值不互相强制转换。数值比较沿BigDecimal精确等值，NOT仍保留未知。条件指针非根、最多512字/16段，禁止空段/非法转义/控制字符。
+
+评测使用Gold快照businessContext并校验执行输入摘要；生产动作核对从原prepared input取上下文；重算复用ProductionInputSnapshotService公开messages与validateResult，核验原执行摘要后取上下文。没有原上下文的旧结果不读取当前档案，字段条件保持未知。原Context六参数构造、riskDecision/riskLevel三参数入口保留，默认空标签/空上下文。
+
+配置界面复用原条件编辑器与选择器数值保真检查；标签选项来自当前政策绑定，业务字段用冻结上下文路径。普通动作编辑器不提供新叶子，动作发布仍拒绝。无法在前端精确保存的JSON数值拒绝输入/加载编辑，暂不提供直接维护；不悄悄舍入，但完整高精度参数端到端保存/冻结/恢复及可视化维护仍是待办。同步修复原列表编辑入口只认可串行schema，允许重新打开已保存并行草稿。后台80224修正公开入口后的skipTests test-compile已terminal exit0，UI16016首轮build exit0，最终UI构建仍待终态；未新增运行测试/SQL/部署，不等于DB/API/浏览器验收。
+
+## 精确条件操作数实施前复用记录
+
+原Condition.value是JsonNode，流水线树与Hash保留旧浮点读取，直接增加全局BigDecimal配置会改变旧快照解释。复用原NumericPredicate/严格字符串解码，向同一Condition追加可选decimalOperand；只允许Finding/Label/Business等值及score阈值且value须null。64字符、38有效数字、18小数、非科学记数保持原规范。字符串进入原快照/Hash，计算时构造十进制操作数；不增加表/语言/保存副本或修改框架/全局Jackson。旧四参数构造与null字段省略保持原JSON。界面用文本输入和显式模式，复用阈值校验而不经浮点解析；完整HTTP/DB/浏览器验证仍待。
+
+### 精确参数代码链路
+
+同一Condition可提交`decimalOperand:"99.999999999999999999"`、`value:null`及原children。保存只有十进制文本和null，原流水线快照、动作政策快照、Task冻结及版本Hash均保留文本差异；恢复后operand()沿原NumericPredicate语法校验生成BigDecimal数值节点，原Finding/Label/Business等值和score阈值比较共用。不采用数值到字符串隐式转换；decimalOperand为JSON数字/空白/科学记数/超精度/超尺度或与value同时设置均拒绝。布尔、文本、状态、组条件不允许decimalOperand；未知来源/待定score仍UNKNOWN。
+
+原四参数Condition构造保留，新null字段省略，value()保留原数据，不序列化计算辅助operand()。界面明确启用精确数值输入，用文本传值，关闭/改变条件种类同步清除精确模式；原普通标量入口仍阻止舍入。原业务数值阈值界面与新条件复用同一十进制校验。旧含无法保真JSON数值的草稿仍受保护，需显式迁移到精确操作数后再维护，不能把格式兼容冒充历史数据恢复。61909后台离线skipTests test-compile已terminal exit0；48952前端构建仍在运行，真实HTTP/DB/浏览器/完整发布及源证明验证仍待。

@@ -27,7 +27,7 @@ public class IqcTemplateController {
     public List<IqcTemplateService.QualityTemplate> list() { return templateService.list(); }
 
     @PostMapping("/{id}/rules")
-    @ResourcePermission(code = "iqc:rule:manage", name = "从模板创建规则", type = "iqc", description = "从内置模板批量创建规则草稿")
+    @ResourcePermission(code = "iqc:template:materialize", name = "从模板创建规则", type = "iqc", description = "从内置模板批量创建规则草稿")
     @Audit(operationType = OperationType.CREATE, description = "从 IQC 模板批量创建规则", module = "IQC_TEMPLATE")
     @RateLimit(sceneCode = "iqc-template-materialize", maxCount = 10, period = 60)
     public IqcTemplateService.MaterializationResult materialize(@PathVariable String id) {

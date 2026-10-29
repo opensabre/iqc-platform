@@ -97,7 +97,12 @@ public class QualityRuleService {
         try {
             RuleMatcher.validate(ruleType, expression, objectMapper);
         } catch (IllegalArgumentException exception) {
-            throw IqcException.invalidArgument("规则表达式无效: " + exception.getMessage(), exception);
+            // Parser messages can contain the complete expression and reach both HTTP errors and audit metadata.
+            String location = exception instanceof java.util.regex.PatternSyntaxException regex && regex.getIndex() >= 0
+                    ? "（位置 " + regex.getIndex() + "）" : "";
+            String category = "STRUCTURED".equalsIgnoreCase(ruleType) || "COMPOSITE".equalsIgnoreCase(ruleType)
+                    ? "（结构化条件字段、操作符或 JSON 结构无效）" : "";
+            throw IqcException.invalidArgument("规则表达式无效" + category + location, exception);
         }
     }
 
@@ -162,5 +167,11 @@ public class QualityRuleService {
 
     public record TestMessage(String id, Integer sequenceNo, String speakerRole, String content) { }
     public record RuleTestResult(boolean matched, String resultStatus, String matchedText, String reason,
-                                 List<DlsEngine.Hit> evidence) { }
+                                 List<DlsEngine.Hit> evidence,
+                                 @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                                 java.util.Map<String,Object> privacy) {
+        public RuleTestResult(boolean matched,String resultStatus,String matchedText,String reason,List<DlsEngine.Hit> evidence){
+            this(matched,resultStatus,matchedText,reason,evidence,null);
+        }
+    }
 }

@@ -1,0 +1,23 @@
+# 数值事实业务映射
+
+实施前核对原PipelineDefinition.Condition/PipelineRuntime数字比较、PipelineRelease.ItemMapping、PipelineDecisionEvaluator、ActionPolicy FINDING_EQUALS、Selector/StructuredConditionMatcher及已有标签与评分政策。指标和Session计数已有NUMBER事实，原评分只接BOOLEAN；不能把NUMBER.booleanValue或0当成布尔命中，也不应在检测器直接扣分。复用原业务映射和条件Operator/十进制比较，在ItemMapping追加可选numericPredicate及appliesWhenNumericPredicate；不新增评分表、发现副本或比较语言。
+
+阈值为有界精确十进制字符串（38位精度、18位小数、64字符），复用EQUALS/NOT_EQUALS/GREATER_OR_EQUAL/LESS_OR_EQUAL并补严格GREATER_THAN/LESS_THAN。无谓词继续原BOOLEAN语义；有谓词必须NUMBER，比较结果按原hitMeaning映射PASS/FAIL。适用条件比较不满足为NOT_APPLICABLE，未知/冲突为REVIEW_REQUIRED、错误为ERROR、未执行为NOT_EVALUATED。原数值、单位、证据与严重度不改写；风险仍沿原失败项目严重度政策。
+
+可选字段为空省略，保留旧3/4参数构造及旧发布JSON。发布端核对冻结事实类型；生产、评测、复核及源证明沿原纯PipelineDecisionEvaluator，政策重算不得重新调用检测或动作。界面使用文本阈值，不经JS浮点转换。真正复杂评分/独立风险政策及完整运行验收仍保留待办。当前是实施前缺口记录，未新增运行测试/SQL/部署。
+
+## 编码进展
+
+原ItemMapping两个可选谓词已接入，严格阈值字符串解码拒绝JSON数值/布尔隐式转换；38位精度/18位小数/64字符上限。生产、评测、BusinessItemReviewEvaluator及ActionProductionSourceValidator/DecisionRevisionService均复用原PipelineDecisionEvaluator，不新建评分记录或事实副本。发布及执行可用性检查匹配冻结NUMBER/BOOLEAN类型，历史只读结构路径保持。前端阈值文本直接保存，不通过JSON.parse或Number转换。42291首轮后端编译与12196 vue-tsc/Vite均退出0；最后严格解码编译和真实来源/重算/评分/权限与浏览器验收待，未新增运行测试/SQL/部署。
+
+最终后端17518离线skipTests test-compile退出0，日志/tmp/iqc-numeric-decisions-wire-compile.log。原事实单位不变，阈值按原值单位比较，不进行秒/毫秒或比例/百分数自动换算。前端启用谓词后默认空阈值，必须显式输入；清空适用事实同步清除其谓词，避免隐藏的旧比较残留。最后UI构建及真实验收结果以交接为准。
+
+## B 真实处理后会话执行验证
+
+2026-10-13 合并ce01863后31193退出0：ProcessedConversationPipelineTest四项及ParallelPipelineRuntimeTest四项，共8项通过。实际Metric/Session、原并行Runtime、PipelineConversationEvaluator、FindingFusion及InspectionScoring运行；Task lease Mapper为替身。指标值100与阈值字符串100/99.999999999999999999比较分别产出PASS/FAIL及100/90分，原数值保持100；生产/评测事实和评分一致，声明参与者缺失保持UNKNOWN及PENDING。该结果不证明真实数据库发布/物化、供应商或浏览器验收。数值适用条件及纯政策重算的追加验证见下；真实DecisionRevision数据库/API与更多错误状态验收仍待。
+
+40798退出0，ProcessedConversationPipelineTest共7项通过：追加已知数值适用false保持NOT_APPLICABLE，坐标缺失导致适用UNKNOWN保持REVIEW_REQUIRED/PENDING，原业务事实仍KNOWN；Runtime关闭后复用原融合事实重新投影政策，原事实和原评分保持不变。7802合并后vue-tsc/Vite构建退出0，临时依赖链接已清理。这些测试不代表数据库事务或浏览器验收。
+
+### 默认MVC十进制字符串守卫（2026-10-20）
+
+原Jackson2 DecimalThresholdDeserializer保留；同一PipelineRelease增加HttpDecimalThresholdDeserializer供默认Jackson3请求的所有原精确字符串字段使用。NumericPredicate、Action条件decimalOperand、ReviewPolicy概率/区间与高级评分权重/调整/边界/等级不再依赖String默认强转。原词法/精度/范围由原领域构造校验。原98028编译通过；实际完整HTTP与历史/摘要行为仍待B独立验证，范围见iqc-pipeline-assets.md。

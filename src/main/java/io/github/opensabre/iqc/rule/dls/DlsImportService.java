@@ -85,7 +85,13 @@ public class DlsImportService {
     }
 
     public record ImportResult(String fileName, boolean preview, int sheetCount, long createdCount,
-                               long validCount, long skippedCount, long failedCount, List<ImportItem> items) { }
+                               long validCount, long skippedCount, long failedCount, List<ImportItem> items,
+                               @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                               java.util.Map<String,Object> privacy) {
+        public ImportResult(String fileName,boolean preview,int sheetCount,long createdCount,long validCount,long skippedCount,long failedCount,List<ImportItem> items){
+            this(fileName,preview,sheetCount,createdCount,validCount,skippedCount,failedCount,items,null);
+        }
+    }
     public record ImportItem(String sheetName, String ruleName, String ruleCode, String status, String ruleId,
                              int definitionCount, int executableRuleCount, List<String> warnings, String message) { }
 }

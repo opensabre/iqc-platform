@@ -17,7 +17,7 @@ class InspectionSchemeControllerTest {
     void ordinaryUseAndExpertPublicationHaveSeparatePermissions() throws Exception {
         assertThat(permission("templates", String.class, Integer.class)).isEqualTo("iqc:scheme:view");
         assertThat(permission("drafts")).isEqualTo("iqc:scheme:manage");
-        assertThat(permission("history", String.class, Integer.class)).isEqualTo("iqc:scheme:manage");
+        assertThat(permission("history", String.class, Integer.class)).isEqualTo("iqc:scheme:versions:view");
         assertThat(permission("task", String.class, int.class, InspectionSchemeController.TaskRequest.class)).isEqualTo("iqc:scheme:use");
         assertThat(permission("publish", String.class, InspectionSchemeController.PublishRequest.class)).isEqualTo("iqc:scheme:publish");
         assertThat(permission("trial", String.class, InspectionSchemeController.TrialRequest.class)).isEqualTo("iqc:scheme:trial:create");
@@ -25,7 +25,7 @@ class InspectionSchemeControllerTest {
                 .map(m -> m.getAnnotation(ResourcePermission.class)).filter(java.util.Objects::nonNull)
                 .map(ResourcePermission::code).toList();
         assertThat(codes).hasSize(10);
-        assertThat(codes.stream().distinct().toList()).hasSize(9); // History reuses expert maintenance authorization.
+        assertThat(codes.stream().distinct().toList()).hasSize(10); // Version history has its own resource identity.
     }
 
     @Test
@@ -33,7 +33,8 @@ class InspectionSchemeControllerTest {
         var schemes = mock(InspectionSchemeService.class);
         var gate = mock(SchemePublicationService.class);
         var tasks = mock(SchemeTaskService.class);
-        var controller = new InspectionSchemeController(schemes, gate, tasks);
+        var controller = controller(schemes, gate, tasks);
+        when(schemes.history("s1",7)).thenReturn(new InspectionSchemeService.VersionHistory(List.of(),null));
         controller.history("s1", 7);
         verify(schemes).history("s1", 7);
         verifyNoInteractions(gate, tasks);
@@ -43,7 +44,7 @@ class InspectionSchemeControllerTest {
     void publicationAlwaysUsesTrialGateAndAcknowledgement() {
         var schemes = mock(InspectionSchemeService.class);
         var gate = mock(SchemePublicationService.class);
-        var controller = new InspectionSchemeController(schemes, gate, mock(SchemeTaskService.class));
+        var controller = controller(schemes, gate, mock(SchemeTaskService.class));
         controller.publish("s1", new InspectionSchemeController.PublishRequest(2, "trial-1", true, null));
         verify(gate).publish("s1", 2, "trial-1", true);
         verifyNoInteractions(schemes);
@@ -53,7 +54,7 @@ class InspectionSchemeControllerTest {
     void availabilityReusesPublicationPermissionWithoutBypassingTheTrialGate() {
         var schemes = mock(InspectionSchemeService.class);
         var gate = mock(SchemePublicationService.class);
-        var controller = new InspectionSchemeController(schemes, gate, mock(SchemeTaskService.class));
+        var controller = controller(schemes, gate, mock(SchemeTaskService.class));
         controller.publish("s1", new InspectionSchemeController.PublishRequest(2, null, false, "DISABLE"));
         controller.publish("s1", new InspectionSchemeController.PublishRequest(3, null, false, "ENABLE"));
         verify(schemes).changeAvailability("s1", 2, false);
@@ -71,7 +72,7 @@ class InspectionSchemeControllerTest {
     void versionArchiveAndRestoreReusePublicationPermissionAndRequireOnlyAnExactVersion() throws Exception {
         var schemes = mock(InspectionSchemeService.class);
         var gate = mock(SchemePublicationService.class);
-        var controller = new InspectionSchemeController(schemes, gate, mock(SchemeTaskService.class));
+        var controller = controller(schemes, gate, mock(SchemeTaskService.class));
         controller.publish("s1", new InspectionSchemeController.PublishRequest(2, null, false, "ARCHIVE_VERSION", 1));
         controller.publish("s1", new InspectionSchemeController.PublishRequest(2, null, false, "RESTORE_VERSION", 1));
         verify(schemes).changeVersionArchive("s1", 2, 1, true);
@@ -113,7 +114,7 @@ class InspectionSchemeControllerTest {
     @Test
     void publishedTemplateTaskRejectsUnknownOverrideFieldsWithTheirNames() throws Exception {
         var tasks = mock(SchemeTaskService.class);
-        var controller = new InspectionSchemeController(mock(InspectionSchemeService.class),
+        var controller = controller(mock(InspectionSchemeService.class),
                 mock(SchemePublicationService.class), tasks);
         var request = new ObjectMapper().readValue("""
                 {"requestId":"request-1234567890","name":"任务","conversationIds":["c1"],
@@ -129,7 +130,7 @@ class InspectionSchemeControllerTest {
     @Test
     void trialPassesOptionalRetryIdentityWithoutChangingTheExistingPermission() {
         var gate = mock(SchemePublicationService.class);
-        var controller = new InspectionSchemeController(mock(InspectionSchemeService.class), gate, mock(SchemeTaskService.class));
+        var controller = controller(mock(InspectionSchemeService.class), gate, mock(SchemeTaskService.class));
         controller.trial("s1", new InspectionSchemeController.TrialRequest(2, List.of("c1"), "trial-request-1234567890"));
         verify(gate).trial("s1", 2, List.of("c1"), "trial-request-1234567890", null, null, null);
         controller.trial("s1", new InspectionSchemeController.TrialRequest(2, List.of("c1"), "trial-request-1234567890", "standard"));
@@ -140,6 +141,16 @@ class InspectionSchemeControllerTest {
                 new java.math.BigDecimal("0.80"));
     }
 
+    /** Protected entry points use current grants and a real response projection. */
+    private InspectionSchemeController controller(InspectionSchemeService schemes, SchemePublicationService publication, SchemeTaskService tasks) {
+        when(publication.publish(anyString(),anyInt(),anyString(),anyBoolean())).thenReturn(new io.github.opensabre.iqc.scheme.model.InspectionSchemeVersion());
+        when(schemes.changeVersionArchive(anyString(),anyInt(),anyInt(),anyBoolean())).thenReturn(new io.github.opensabre.iqc.scheme.model.InspectionSchemeVersion());
+        var grants=mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
+        when(grants.current(anySet())).thenReturn(new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test",false,false,false,java.time.Instant.now()));
+        return new InspectionSchemeController(schemes,publication,tasks,grants,
+                new io.github.opensabre.iqc.privacy.ResultReadProjection(new ObjectMapper()));
+    }
+
     private String permission(String method, Class<?>... types) throws Exception {
         return InspectionSchemeController.class.getMethod(method, types).getAnnotation(ResourcePermission.class).code();
     }
@@ -147,7 +158,7 @@ class InspectionSchemeControllerTest {
     @Test
     void templateTaskPassesOnlyTheAllowedVariantCodeForBatchAndSchedule() throws Exception {
         var tasks = mock(SchemeTaskService.class);
-        var controller = new InspectionSchemeController(mock(InspectionSchemeService.class), mock(SchemePublicationService.class), tasks);
+        var controller = controller(mock(InspectionSchemeService.class), mock(SchemePublicationService.class), tasks);
         var request = new ObjectMapper().readValue("""
                 {"requestId":"request-1234567890","name":"任务","conversationIds":["c1"],"concurrency":1,"variantCode":"standard"}
                 """, InspectionSchemeController.TaskRequest.class);

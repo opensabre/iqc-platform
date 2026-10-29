@@ -22,16 +22,16 @@ public class LabelCandidateController {
     public List<LabelCandidate> list(@RequestParam(required=false) String status) { return service.list(status); }
 
     @GetMapping("/{id}/similarities")
-    @ResourcePermission(code="iqc:label-candidate:view", name="查看候选相似标签", type="iqc", description="查询候选标签的相似正式标签")
+    @ResourcePermission(code="iqc:label-candidate:similarities:view", name="查看候选相似标签", type="iqc", description="查询候选标签的相似正式标签")
     public List<LabelCandidateService.Similarity> similarities(@PathVariable String id) { return service.similarities(id); }
 
     @PostMapping("/{id}/reject")
-    @ResourcePermission(code="iqc:label-candidate:review", name="审核候选标签", type="iqc", description="拒绝 AI 候选标签")
+    @ResourcePermission(code="iqc:label-candidate:reject", name="审核候选标签", type="iqc", description="拒绝 AI 候选标签")
     @Audit(operationType=OperationType.UPDATE, description="拒绝 IQC 候选标签", module="IQC_LABEL")
     public LabelCandidate reject(@PathVariable String id, @RequestBody ReviewRequest request) { return service.reject(id, request.comment()); }
 
     @PostMapping("/{id}/merge")
-    @ResourcePermission(code="iqc:label-candidate:review", name="审核候选标签", type="iqc", description="将候选合并到现有标签")
+    @ResourcePermission(code="iqc:label-candidate:merge", name="审核候选标签", type="iqc", description="将候选合并到现有标签")
     @Audit(operationType=OperationType.UPDATE, description="合并 IQC 候选标签", module="IQC_LABEL")
     public LabelCandidate merge(@PathVariable String id, @RequestBody ReviewRequest request) { return service.merge(id, request.labelId(), request.comment()); }
 

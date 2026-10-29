@@ -16,20 +16,26 @@ class InspectionTaskControllerTest {
     @Test
     void exposesScopedExecutionAttemptsForTheBusinessRunSelector() throws Exception {
         var service = mock(InspectionTaskService.class);
-        var controller = new InspectionTaskController(service, mock(UsageCounterRecorder.class));
+        var grants=mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
+        when(grants.current(java.util.Set.of("iqc:task:executions:view"))).thenReturn(new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test",false,false,false,java.time.Instant.now()));
+        var controller = new InspectionTaskController(service, mock(UsageCounterRecorder.class),grants,
+                new io.github.opensabre.iqc.privacy.ResultReadProjection(new ObjectMapper()));
         controller.executions("task-1");
 
         verify(service).executions("task-1");
         var method = InspectionTaskController.class.getMethod("executions", String.class);
         assertThat(method.getAnnotation(io.github.opensabre.boot.annotations.ResourcePermission.class).code())
-                .isEqualTo("iqc:task:view");
+                .isEqualTo("iqc:task:executions:view");
     }
 
     @Test
     void requestWithoutAgentPassesExplicitRuleOnlyStrategyToService() throws Exception {
         var service = mock(InspectionTaskService.class);
         var usage = mock(UsageCounterRecorder.class);
-        var controller = new InspectionTaskController(service, usage);
+        var grants = mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
+        when(grants.current(java.util.Set.of("iqc:task:create"))).thenReturn(new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test",false,false,false,java.time.Instant.now()));
+        var controller = new InspectionTaskController(service, usage, grants,
+                new io.github.opensabre.iqc.privacy.ResultReadProjection(new ObjectMapper()));
         var request = new ObjectMapper().readValue("""
                 {"taskType":"BATCH","conversationIds":["c1"],"ruleIds":["r1"],
                  "executionMode":"RULE_ONLY","concurrencyLimit":1}
@@ -37,7 +43,8 @@ class InspectionTaskControllerTest {
         InspectionTask task = new InspectionTask(); task.setId("t1");
         when(service.createConfigured(null, "BATCH", List.of("c1"), null, null, null, null,
                 null, null, List.of("r1"), 1, null, null, "RULE_ONLY")).thenReturn(task);
-        assertThat(controller.create(request)).isSameAs(task);
+        assertThat(controller.create(request)).isNotSameAs(task).extracting(InspectionTask::getId).isEqualTo("t1");
+        verify(grants).current(java.util.Set.of("iqc:task:create"));
         verify(usage).record(any());
     }
 

@@ -16,7 +16,71 @@ public class IqcDataScope {
     private final IqcOrganizationClient organizationClient;
     private final UserContextHolder userContext = UserContextHolder.getInstance();
 
+    private final ThreadLocal<io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved> scheduledActor=new ThreadLocal<>();
+
+    /** Domain-only synchronous scope boundary; caller must supply a fresh organization projection. */
+    public <T> T asScheduledActor(io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved actor,java.util.function.Supplier<T> callback) {
+        io.github.opensabre.iqc.schedule.ScheduledActorAccessService.requireBackground();
+        java.time.Instant now=java.time.Instant.now();
+        if(scheduledActor.get()!=null || actor==null || actor.owner()==null || actor.userId()==null || actor.checkedAt()==null
+                || actor.checkedAt().isBefore(now.minusSeconds(30)) || actor.checkedAt().isAfter(now.plusSeconds(5)))
+            throw new IllegalStateException("invalid or nested scheduled actor scope");
+        var original=new java.util.HashMap<>(userContext.getContext());
+        var context=new java.util.HashMap<String,String>();context.put(userContext.KEY_USERNAME,actor.owner());
+        context.put(userContext.KEY_USER_ID,actor.userId());context.put(userContext.KEY_ROLES,String.join(",",actor.roles()));
+        context.put(userContext.KEY_SCOPES,actor.all()?"iqc:result:all":"");
+        scheduledActor.set(actor);userContext.setContext(context);
+        try{return callback.get();}finally{scheduledActor.remove();if(original.isEmpty())userContext.clear();else userContext.setContext(original);}
+    }
+    /** Current-user synchronous scope; all organization comparisons occur before entering the callback transaction. */
+    public <T> T asCurrentActor(io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved actor,java.util.function.Supplier<T> callback) {
+        var now=java.time.Instant.now();
+        if(scheduledActor.get()!=null || actor==null || actor.checkedAt()==null || actor.userId()==null
+                || actor.roles()==null || actor.resourceCodes()==null || "system".equals(owner())
+                || !java.util.Objects.equals(owner(),actor.owner()) || canViewAll()!=actor.all()
+                || !java.util.Objects.equals(groupId(),actor.groupId())
+                || actor.checkedAt().isBefore(now.minusSeconds(30)) || actor.checkedAt().isAfter(now.plusSeconds(5)))
+            throw io.github.opensabre.iqc.governance.IqcException.accessDenied("当前负责人授权范围无效");
+        scheduledActor.set(actor);
+        try {return callback.get();} finally {scheduledActor.remove();}
+    }
+    /** Current identity stays authenticated; only this callback's data scope narrows to its original bound. */
+    public <T> T asCurrentActorBound(io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved current,
+            io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound original,java.util.function.Supplier<T> callback) {
+        if(current==null || original==null || !"iqc-schedule-owner-scope-v1".equals(original.schemaVersion())
+                || !java.util.Objects.equals(current.userId(),original.userId())
+                || !java.util.Objects.equals(current.owner(),original.owner()))
+            throw io.github.opensabre.iqc.governance.IqcException.accessDenied("当前账户不是原任务负责人");
+        var narrowed=new io.github.opensabre.iqc.schedule.ScheduledActorAccessService.Resolved(current.userId(),current.owner(),
+                current.all()&&original.all(),java.util.Objects.equals(current.groupId(),original.groupId())?current.groupId():null,
+                current.roles(),current.resourceCodes(),current.checkedAt());
+        return asCurrentActor(current,()->{
+            scheduledActor.set(narrowed);
+            return callback.get(); // asCurrentActor's finally removes the scope even on failure.
+        });
+    }
+    /** Local side-effect preflight using the existing scheduled actor, without network calls under locks. */
+    public void requireScheduledResources(Set<String> resources) {
+        var actor=scheduledActor.get();var now=java.time.Instant.now();
+        if(resources==null || resources.isEmpty() || actor==null || actor.checkedAt()==null
+                || actor.checkedAt().isBefore(now.minusSeconds(30)) || actor.checkedAt().isAfter(now.plusSeconds(5))
+                || actor.resourceCodes()==null || !actor.resourceCodes().containsAll(resources))
+            throw io.github.opensabre.iqc.governance.IqcException.accessDenied("后台业务操作缺少当前授权证据");
+    }
+    /** Reuses the owner-bound checks against the existing private scheduled projection. */
+    public void requireScheduledBound(io.github.opensabre.iqc.schedule.ScheduledActorAccessService.CreationBound bound) {
+        var actor=scheduledActor.get();
+        if(actor==null)throw io.github.opensabre.iqc.governance.IqcException.accessDenied("后台操作缺少当前负责人上下文");
+        io.github.opensabre.iqc.action.ActionEnqueueService.requireBound(bound,actor);
+    }
+    /** Stable account identity for routing; never replace it with mutable display names. */
+    public String actorUserId(){
+        var actor=scheduledActor.get();String id=actor==null?userContext.getUserId():actor.userId();
+        if(id==null||id.isBlank())throw io.github.opensabre.iqc.governance.IqcException.accessDenied("缺少稳定账户身份");
+        return id;
+    }
     public String owner() {
+        var actor=scheduledActor.get();if(actor!=null)return actor.owner();
         String username = userContext.getUsername();
         if (username != null && !username.isBlank()) return username;
         String userId = userContext.getUserId();
@@ -24,9 +88,16 @@ public class IqcDataScope {
     }
 
     public boolean canViewAll() {
+        var actor=scheduledActor.get();if(actor!=null)return actor.all();
         return effectiveRoles().stream().map(this::normalizeRole)
                         .anyMatch(role -> role.equals("ADMIN") || role.equals("SUPER_ADMIN"))
                 || effectiveScopes().contains("iqc:result:all");
+    }
+
+    /** Force publication needs trusted administrator roles, never a broad read scope. */
+    public boolean isIqcAdministrator() {
+        return effectiveRoles().stream().map(this::normalizeRole)
+                .anyMatch(role -> role.equals("IQC_ADMIN") || role.equals("SUPER_ADMIN"));
     }
 
     /** Uses the trusted internal context first, then the verified external JWT context. */
@@ -61,6 +132,7 @@ public class IqcDataScope {
     }
 
     public String groupId() {
+        var actor=scheduledActor.get();if(actor!=null)return actor.groupId();
         if (organizationClient == null) return null;
         String uniqueId = owner();
         try {

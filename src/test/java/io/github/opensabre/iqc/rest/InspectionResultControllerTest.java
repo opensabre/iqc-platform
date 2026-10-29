@@ -23,38 +23,56 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** HTTP contract tests for inspection result endpoints. */
 class InspectionResultControllerTest {
 
-    @Test
-    void businessResultEndpointReturnsConversationTotalAndCanonicalZeroScore() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullSource
+    @org.junit.jupiter.params.provider.ValueSource(strings = "parent-1")
+    void businessResultEndpointReturnsConversationTotalAndCanonicalZeroScore(String parentTaskId) throws Exception {
         var permission = InspectionResultController.class.getMethod("businessResults", long.class, long.class,
-                String.class, String.class, String.class, java.math.BigDecimal.class, java.math.BigDecimal.class)
+                String.class, String.class, String.class, java.math.BigDecimal.class, java.math.BigDecimal.class, String.class)
                 .getAnnotation(io.github.opensabre.boot.annotations.ResourcePermission.class);
         org.junit.jupiter.api.Assertions.assertEquals("iqc:result:business:view", permission.code());
         var batch = mock(BatchResultQueryService.class);
-        when(batch.businessPage(1, 1, "task-1", "FINAL", null, java.math.BigDecimal.ZERO, null))
+        when(batch.businessPage(1, 1, parentTaskId == null ? "task-1" : null, "FINAL", null, java.math.BigDecimal.ZERO, null, parentTaskId))
                 .thenReturn(new io.github.opensabre.iqc.shared.IqcPage<>(java.util.List.of(
                         new BatchResultQueryService.BusinessConversationRow("canonical", "task-1", "电话销售质检", "conversation-1",
                                 "sales.txt", "attempt-2", "FINAL", java.math.BigDecimal.ZERO, 2, 2, 0, "HIGH")), 1, 1, 2));
+        var sensitive = mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
+        when(sensitive.current(java.util.Set.of("iqc:result:business:view"))).thenReturn(
+                new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test",false,false,false,java.time.Instant.now()));
         var controller = new InspectionResultController(mock(InspectionExecutionService.class), mock(UsageCounterRecorder.class),
                 batch, mock(HierarchicalResultService.class), mock(LabelResultQueryService.class),
-                mock(LabelInsightExportService.class), mock(io.github.opensabre.iqc.quality.BusinessItemReviewService.class));
+                mock(LabelInsightExportService.class), mock(io.github.opensabre.iqc.quality.BusinessItemReviewService.class), sensitive,
+                new io.github.opensabre.iqc.privacy.ResultReadProjection(new com.fasterxml.jackson.databind.ObjectMapper()));
         var mvc = MockMvcBuilders.standaloneSetup(controller).setControllerAdvice(new RestResponseBodyAdvice()).build();
 
-        mvc.perform(get("/api/iqc/results/business").param("taskId", "task-1").param("size", "1")
-                        .param("scoreStatus", "FINAL").param("minScore", "0"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(2))
+        var request = get("/api/iqc/results/business").param("size", "1")
+                .param("scoreStatus", "FINAL").param("minScore", "0");
+        if (parentTaskId == null) request.param("taskId", "task-1");
+        else request.param("parentTaskId", parentTaskId);
+        mvc.perform(request)
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cache-Control","private, no-store"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("X-Content-Type-Options","nosniff"))
+                .andExpect(jsonPath("$.data.total").value(2))
                 .andExpect(jsonPath("$.data.records[0].finalScore").value(0))
                 .andExpect(jsonPath("$.data.records[0].taskName").value("电话销售质检"))
                 .andExpect(jsonPath("$.data.records[0].id").value("canonical"));
-        verify(batch).businessPage(1, 1, "task-1", "FINAL", null, java.math.BigDecimal.ZERO, null);
+        verify(sensitive).current(java.util.Set.of("iqc:result:business:view"));
+        verify(batch).businessPage(1, 1, parentTaskId == null ? "task-1" : null, "FINAL", null, java.math.BigDecimal.ZERO, null, parentTaskId);
     }
 
     @Test
     void returnsJsonNullWhenHierarchyHasNotBeenGenerated() throws Exception {
+        var sensitive = mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
+        when(sensitive.current(java.util.Set.of("iqc:result:hierarchy:view"))).thenReturn(
+                new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test", false, false, false, java.time.Instant.now()));
+        var batch = mock(BatchResultQueryService.class);
         InspectionResultController controller = new InspectionResultController(
                 mock(InspectionExecutionService.class), mock(UsageCounterRecorder.class),
-                mock(BatchResultQueryService.class), mock(HierarchicalResultService.class),
+                batch, mock(HierarchicalResultService.class),
                 mock(LabelResultQueryService.class), mock(LabelInsightExportService.class),
-                mock(io.github.opensabre.iqc.quality.BusinessItemReviewService.class));
+                mock(io.github.opensabre.iqc.quality.BusinessItemReviewService.class), sensitive,
+                new io.github.opensabre.iqc.privacy.ResultReadProjection(new com.fasterxml.jackson.databind.ObjectMapper()));
         MockMvc mvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new RestResponseBodyAdvice())
                 .build();

@@ -6,6 +6,7 @@ import io.github.opensabre.boot.annotations.ResourcePermission;
 import io.github.opensabre.governance.audit.annotations.Audit;
 import io.github.opensabre.governance.audit.annotations.OperationType;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -13,7 +14,17 @@ class InspectionResultExportTest {
     private final InspectionExecutionService execution = mock(InspectionExecutionService.class);
     private final BatchResultQueryService batch = mock(BatchResultQueryService.class);
     private final io.github.opensabre.iqc.quality.BusinessItemReviewService reviews = mock(io.github.opensabre.iqc.quality.BusinessItemReviewService.class);
-    private final InspectionResultController controller = new InspectionResultController(execution, null, batch, null, null, null, reviews);
+    private final io.github.opensabre.iqc.privacy.SensitiveReadAccessService sensitive = mock(io.github.opensabre.iqc.privacy.SensitiveReadAccessService.class);
+    private final io.github.opensabre.iqc.label.LabelInsightExportService labelExport = mock(io.github.opensabre.iqc.label.LabelInsightExportService.class);
+    private final InspectionResultController controller = new InspectionResultController(execution, null, batch, null, null, labelExport, reviews,
+            sensitive, new io.github.opensabre.iqc.privacy.ResultReadProjection(new com.fasterxml.jackson.databind.ObjectMapper()));
+
+    @BeforeEach
+    void authorizeSensitiveExport() {
+        var allowed=new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test",true,true,false,java.time.Instant.now());
+        when(sensitive.current(java.util.Set.of("iqc:result:export"))).thenReturn(allowed);
+        when(sensitive.current(java.util.Set.of("iqc:result:labels:export"))).thenReturn(allowed);
+    }
 
     @Test
     void sensitiveExportRoutesKeepExportPermissionAndAudit() throws Exception {
@@ -26,7 +37,7 @@ class InspectionResultExportTest {
             var permission = method.getAnnotation(ResourcePermission.class);
             var audit = method.getAnnotation(Audit.class);
             assertThat(permission).isNotNull();
-            assertThat(permission.code()).isEqualTo("iqc:result:export");
+            assertThat(permission.code()).isEqualTo(method.getName().equals("exportLabelResults") ? "iqc:result:labels:export" : "iqc:result:export");
             assertThat(audit).isNotNull();
             assertThat(audit.operationType()).isEqualTo(OperationType.EXPORT);
             assertThat(audit.module()).isEqualTo("IQC_RESULT");
@@ -40,6 +51,18 @@ class InspectionResultExportTest {
         assertThat(response.getHeaders().getFirst("Content-Disposition")).contains("iqc-business-results.csv");
         assertThat(new String(response.getBody(), java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("业务结果");
         verifyNoInteractions(execution);
+    }
+
+    @Test
+    void resultExportsRequireBothFullConversationAndPiiGrantsBeforeReading() {
+        var denied=new io.github.opensabre.iqc.privacy.SensitiveReadAccessService.Access("test",false,true,false,java.time.Instant.now());
+        when(sensitive.current(java.util.Set.of("iqc:result:export"))).thenReturn(denied);
+        when(sensitive.current(java.util.Set.of("iqc:result:labels:export"))).thenReturn(denied);
+        assertThatThrownBy(() -> controller.export("t1", null, null, null, null, null, null, null, null, "SCHEME", null))
+                .hasMessageContaining("完整会话");
+        assertThatThrownBy(() -> controller.exportLabelResults("t1"))
+                .hasMessageContaining("完整会话");
+        verifyNoInteractions(execution, batch, labelExport, reviews);
     }
 
     @Test

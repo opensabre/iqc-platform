@@ -22,6 +22,8 @@ public class ConversationInspectionResult extends BasePo {
     private String scoreStatus;
     private String scoringResultJson;
     private String businessItemResultsJson;
+    /** Immutable raw route rounds; absent for historical and legacy executions. */
+    private String executionTraceJson;
     private String riskLevel;
     private Integer deduction;
     private String reason;
