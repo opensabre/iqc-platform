@@ -18,3 +18,12 @@ SSH原62777 docker ps terminal0：IQC API容器4f664ad1f6d4运行10小时，管�
 原5086通过同一Prometheus实际执行 `count by (__name__) ({__name__=~"iqc_(task|pipeline|model).*",application="iqc-platform"})`，返回status=success、result为空（0个指标族）。该查询覆盖上文新增任务/流水线/模型指标名称前缀，目标标签核对排除本次application拼写不匹配。结论仅为查询时刻无匹配即时样本，不意味着任务计数为0，也不证明根因必然是旧镜像；条件启用、注册与运行配置尚需调查。不得把UP或历史promtool受控求值当新指标真实采集通过。
 
 完整24条固定查询、真实业务样本与时序仍未验收；后续应先核对当前部署版本和指标注册条件，准备可审阅的部署差异后再执行授权范围内动作。此复核全程只读。
+
+
+### 2026-10-29 部署内容只读定位
+
+原32536 docker inspect给出镜像精确digest `sha256:4f664ad1f6d4f1e45a2c721552bd98b3d6e896cccec87bb992fcaff3e8b250a5`、工作目录/app、java进程；目录为Jib的classes/resources/libs（第二个尝试BOOT-INF路径不存在，因此命令终态2，不能据此判类缺失）。随后原96410核对jib-main-class-file为io.github.opensabre.iqc.IqcPlatformApplication，find真实/app/classes未找到三个目标类；该命令最后的可选libs glob无匹配而终态2。
+
+最终原58829终态0：正确路径/app/classes/io/github/opensabre/iqc/IqcPlatformApplication.class存在，列出同包下task/result等目录，但先前原75739在该正确目录内明确检查的task/DurableInspectionWorker.class、pipelinebridge/PipelineConversationEvaluator.class、result/llm/gateway/ModelGateway.class均不存在。两候选git.properties未匹配提交标识，不能给出部署SHA或声称固定提交已部署。
+
+本地当前源码中ModelGateway构造注册iqc.model.gateway.active、PipelineConversationEvaluator构造注册iqc.pipeline.graph.active及线程池Gauge；DurableInspectionWorker在iqc.task.worker-enabled=true或缺省时注册任务观测。现网没有对应class意味着当前部署内容不能承担这些实现的实际采集验收，缺口首先在部署内容。尚未逐一调查其它指标、依赖jar或所有24条查询，也未尝试重启/热补丁/部署。应在确定包含数据库迁移与当前应用源的可审阅发布方案后再验证，不仅修改Prometheus标签。
