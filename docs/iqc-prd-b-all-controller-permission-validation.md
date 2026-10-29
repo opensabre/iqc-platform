@@ -15,3 +15,9 @@
 Controller 构造依赖使用受控 mock。全包注册不等同应用条件 Bean 激活，不运行真实登录、网关/PDP、业务成功写入或数据库资源注册 upsert；50 项拒绝检查不代表其余入口已经获得同等行为验证。组织七迁移/91 契约数据库证据另见组织仓库报告，不能拼接宣称端到端完成。
 
 真实五职责、跨群组、跨服务当前授权、任务页/菜单、业务 A–E、外部供应商、监控采集与百万容量等适用 I1–I7 继续推进。
+
+## 原始 RequestMappingInfo 完整性复核
+
+2026-10-29，基线0fcf6ef复用上述全包扫描，不重复搭建注册机制。增加对Spring原始getHandlerMethods的独立核对：所有IQC实际映射必须有非空、可注册的ResourcePermission和明确HTTP方法；按实际组合路径×方法展开，展开前后每个code只能出现一次。再逐项比较框架Set快照与原始(code,method,url)，防止只在已投影集合检查唯一性而漏掉丢失/折叠。三个受控@Controller反例（不进入生产RestController扫描）证明多路径共码、多HTTP方法共码、缺权限声明均被拒绝。
+
+原25943终态0，/tmp/iqc-b-raw-controller-registration-20261029.log.exit=0，离线mvn test-compile surefire:test使用同一本机ByteBuddy agent；EndpointPermissionSplitTest 55项/21.086s，QualityConfigControllerPermissionTest 1项/0.411s，失败/错误/跳过均0。实际仍42个Controller/242映射，91逐项契约与50精确拒绝回归保持。diff通过，无生产/framework/数据库改动。此结果没有证明真实条件Bean激活、资源upsert或登录网关/PDP，五职责与完整I1–I7仍待。

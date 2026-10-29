@@ -196,10 +196,57 @@ class EndpointPermissionSplitTest {
         var mapping=mvc.getDispatcherServlet().getWebApplicationContext().getBean(RequestMappingHandlerMapping.class);
         var handler=new MappingInfoHandler();ReflectionTestUtils.setField(handler,"requestMappingHandlerMapping",mapping);
         var snapshot=handler.getMappingInfo();
+        var rawResources=registeredResources(mapping);
+        assertEquals(rawResources.size(),snapshot.size(),"resource projection must not omit or collapse registered endpoints");
+        for(var row:snapshot)assertTrue(rawResources.contains(row.getCode()+"|"+row.getMethod()+"|"+row.getUrl()),row.toString());
         var grouped=snapshot.stream().collect(java.util.stream.Collectors.groupingBy(row->row.getCode()));
         for(var entry:grouped.entrySet())assertEquals(1,entry.getValue().size(),entry.getKey()+": "+entry.getValue());
         assertTrue(snapshot.size()>=91);
         System.out.println("IQC controller discovery="+discovered.size()+", resource mappings="+snapshot.size());
+    }
+    /** Check raw Spring registrations before the framework's Set projection can hide duplicates. */
+    private static List<String> registeredResources(RequestMappingHandlerMapping mapping){
+        var resources=new ArrayList<String>();var codes=new HashSet<String>();
+        mapping.getHandlerMethods().forEach((info,method)->{
+            if(!method.getBeanType().getPackageName().startsWith("io.github.opensabre.iqc"))return;
+            var permission=method.getMethodAnnotation(ResourcePermission.class);
+            assertNotNull(permission,"missing permission: "+method);
+            assertTrue(permission.register(),"unregistered IQC endpoint: "+method);
+            assertFalse(permission.code().isBlank(),"blank permission: "+method);
+            var methods=info.getMethodsCondition().getMethods();
+            assertFalse(methods.isEmpty(),"unbounded HTTP methods: "+method);
+            for(var path:info.getPatternValues())for(var verb:methods){
+                var endpoint=permission.code()+"|"+verb.name()+"|"+path;
+                assertTrue(codes.add(permission.code()),"one resource code has multiple registered endpoints: "+endpoint);
+                resources.add(endpoint);
+            }
+        });
+        return resources;
+    }
+    static Stream<Object> ambiguousRegistrations(){return Stream.of(new MultiplePaths(),new MultipleMethods(),new MissingPermission());}
+    @ParameterizedTest @MethodSource("ambiguousRegistrations")
+    void rawRegistrationCheckRejectsExpandedOrUndeclaredResources(Object controller){
+        var mvc=MockMvcBuilders.standaloneSetup(controller).build();
+        var mapping=mvc.getDispatcherServlet().getWebApplicationContext().getBean(RequestMappingHandlerMapping.class);
+        assertThrows(AssertionError.class,()->registeredResources(mapping));
+    }
+    @org.springframework.stereotype.Controller
+    @org.springframework.web.bind.annotation.RequestMapping("/permission-fixture")
+    static class MultiplePaths {
+        @org.springframework.web.bind.annotation.GetMapping({"/first","/second"})
+        @ResourcePermission(code="fixture:duplicate",name="fixture",type="iqc")
+        public void read(){}
+    }
+    @org.springframework.stereotype.Controller
+    static class MultipleMethods {
+        @org.springframework.web.bind.annotation.RequestMapping(path="/permission-fixture",method={org.springframework.web.bind.annotation.RequestMethod.GET,org.springframework.web.bind.annotation.RequestMethod.POST})
+        @ResourcePermission(code="fixture:duplicate",name="fixture",type="iqc")
+        public void read(){}
+    }
+    @org.springframework.stereotype.Controller
+    static class MissingPermission {
+        @org.springframework.web.bind.annotation.GetMapping("/permission-fixture")
+        public void read(){}
     }
     private static Object dependency(Class<?> type){
         if(type==String.class)return "fixture";
