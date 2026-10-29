@@ -27,3 +27,5 @@ SSH原62777 docker ps terminal0：IQC API容器4f664ad1f6d4运行10小时，管�
 最终原58829终态0：正确路径/app/classes/io/github/opensabre/iqc/IqcPlatformApplication.class存在，列出同包下task/result等目录，但先前原75739在该正确目录内明确检查的task/DurableInspectionWorker.class、pipelinebridge/PipelineConversationEvaluator.class、result/llm/gateway/ModelGateway.class均不存在。两候选git.properties未匹配提交标识，不能给出部署SHA或声称固定提交已部署。
 
 本地当前源码中ModelGateway构造注册iqc.model.gateway.active、PipelineConversationEvaluator构造注册iqc.pipeline.graph.active及线程池Gauge；DurableInspectionWorker在iqc.task.worker-enabled=true或缺省时注册任务观测。现网没有对应class意味着当前部署内容不能承担这些实现的实际采集验收，缺口首先在部署内容。尚未逐一调查其它指标、依赖jar或所有24条查询，也未尝试重启/热补丁/部署。应在确定包含数据库迁移与当前应用源的可审阅发布方案后再验证，不仅修改Prometheus标签。
+
+启动classpath进一步只读复核：原27698仅提取受限启动字段，java -cp @/app/jib-classpath-file及正式主类，无-jar；原64056读取该classpath文件，258项，非/app/libs/仅/app/resources与/app/classes，未出现名称含iqc的应用jar。没有观察到外部热补丁classpath；仍未扫描每个第三方jar的内容，定位不扩展为完整依赖审计。两命令均terminal0，无环境/其他启动参数输出。
