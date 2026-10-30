@@ -48,3 +48,5 @@ PRD27 的十条边界全部保留：Engine 不改最终分数/不直接建工单
 ## 发布和验证状态
 
 后端 PR17 固定头的[运行40901810573](https://github.com/opensabre/iqc-platform/actions/runs/40901810573)当前为 completed/success；源码头与本页基线一致。这证明该固定头对应流水线，不证明后续前端小 PR 已合流、应用已部署、五职责或 A–E 已验收。PR17 仍 open，本次不合并、不部署、不执行共享 SQL，不切默认 v2 或动作开关。
+
+百万容量后续按[分片、恢复与容量验收协议](iqc-million-capacity-validation-protocol.md)逐项取证；协议待执行，不据此关闭容量缺口。
