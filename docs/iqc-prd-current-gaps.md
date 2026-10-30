@@ -1,61 +1,50 @@
-# 当前交付缺口复核（2026-10-22）
+# 当前实施与验收缺口（2026-10-30）
 
-基线：后端58b22f0，前端abdd53f。完整I1–I7保持进行中，不以本表替代PRD逐项最终验收。
+本次复核后端 PR17 固定 `77993dd29938869969c9544696654e1785565fed` 的源码、正式领域文档和既有验证记录。前端集成基线为 `07321ff`，后续小 PR 仍分支待审；不能把各分支已有实现当作已合流或已部署。2026-10-22/25 的阶段缺口记录由本页当前状态替代，原记录仍可在 Git 历史中追溯。
 
-输入为已经处理好的会话；ASR、转写生成、音频转换和说话人分离不属于当前工作。单租户部署复用组织范围。默认release v1未切换，精确v2已有实现与专项验证但不等于默认入口已启用。
+范围保持正式 PRD V1.0 的全部适用 I1–I7：输入为已处理好的会话；排除实时语音、ASR/转写生成、音频解码与说话人分离生成，保留业务完成事件/API、消息时间及业务证据。单租户部署，沿用既有 owner/group/all 组织数据范围，不建设第二套租户或 RBAC 模型。完整目标仍在进行。
 
-## 下一项功能交付：标签准确率
+## 已有实现及其证据边界
 
-PRD14.3要求业务层标签准确率。当前 `PipelineEvaluationService.report` 统计 GoldDecision.labels 数量，但 BusinessMetrics 构造仍固定 comparableLabels=0、labelAccuracy=null，前端也明确提示标签输出未接入。这是功能缺口，不是仅缺测试。
+| 能力 | 当前实现与已有证据 | 仍须证明 |
+| --- | --- | --- |
+| 标签准确率 | 原冻结 FindingLabelPolicy → FindingLabelProjection → LabelEvaluationMetrics 已接报告；规范绑定地址、KNOWN 可比值、未知/缺产物分母、SQL 重试继承已有专项 | 实际角色、标签发布到评测的浏览器/后端整链；不能把可比准确率称全量标签覆盖率 |
+| 上游声明消息完整率 | 沿原 businessFields 清单、Gold/数据集冻结与 InputCompletenessMetrics；报告、SQL 来源冻结与历史 JSON/hash 兼容已有专项，见[完整率协议与验证](iqc-input-completeness.md) | 上游清单真实性、消息身份和语义完整性；数量相等只证明声明计数相等 |
+| 模型引用真实性 | 过滤前显式引用计数、最后轨迹聚合及报告/UI 已实现；有引擎与受控模型/SQL 专项，见[引用真实性](iqc-llm-citation-grounding.md) | 广义语义幻觉、真实供应商错误引用到 SQL 的完整链；不以引用合法或 Finding F1 推导幻觉率 |
+| 模型一致性 | 精确模型/声明部署身份、冻结输入及受控 Provider→worker→SQL→报告路径已有实现与专项，见[模型一致性](iqc-model-consistency.md) | 供应商不可变部署真实性、真实网关账本与角色网络链；缺部署仍必须保留分母并排除比较 |
+| 自动候选挖掘 v2 | 原 ADD_TO_EVALUATION_CANDIDATE 的版本2、MinedCandidateSelection/Lineage/Service 已实现；沿 QualitySample 保存 UNCLASSIFIED/CANDIDATE/UNLABELLED，不自动裁决误报/漏报或批准 Gold | 真实调度身份/PDP、实际配置启用及完整页面链；动作默认关闭不等于已实际自动挖掘 |
+| 批次执行 | 复用 Task/Execution 的持久分片、父子协调、恢复、停止与清理；已有分页物化、跨 JVM 互斥及真实 worker 恢复专项 | 百万规模、两套完整 scheduler 与活跃供应商调用并发、实际吞吐/延迟/费用；不得以约两万条分页夹具声称百万容量 |
+| 资源注册与精确授权码 | 原 Controller/组织模型内已拆分冲突端点；实际 42 Controller/242 映射、91 固定契约、50 精确拒绝及原始映射完整性已有专项，见[全 Controller 验证](iqc-prd-b-all-controller-permission-validation.md) | 实际条件 Bean、组织资源 upsert、五类职责登录、成功写与跨服务撤权；不能以唯一权限码或按钮显隐替代真实授权 |
 
-复用路径：冻结 PipelineRelease.labelPolicy → FindingLabelPolicy.projectionBinding/bindingAddress → FindingLabelProjection.project，输入使用已校验持久化 actual.fusion。生产已有同一投影能力，不新增标签表、模型调用或第二套投影算法。
+标签指标复核入口：[LabelEvaluationMetrics](../src/main/java/io/github/opensabre/iqc/quality/evaluation/LabelEvaluationMetrics.java)、[PipelineEvaluationService](../src/main/java/io/github/opensabre/iqc/quality/evaluation/PipelineEvaluationService.java)、[原 SQL 发布/评测场景](../src/test/java/io/github/opensabre/iqc/result/IsolatedMysqlMeasuredPublicationIT.java)。本次只读取既有源码和报告，未新增或执行测试。
 
-实施前明确并写入Gold协议：标签键采用现有 bindingAddress 的 JSON Pointer 地址（labelId/valueCode转义），不按显示名猜测绑定。旧自由文本标签键没有可证对应关系时保持未测量，不补假阴性。标签值使用原精确JSON语义比较；KNOWN才可比，UNKNOWN/CONFLICT/ERROR/NOT_EVALUATED保留Gold分母但不作为可比值。
+自动候选的当前范围见[筛选专项](iqc-prd-b-mining-selection-validation.md)、[生产者 SQL 与发现/并发验证](iqc-prd-b-mined-producer-sql-validation.md)、[Gold 消费与事务](iqc-prd-b-mined-candidate-gold-sql.md)。生产者已有真实 discovery/enqueue/claim/settlement、无命中零账本、并发单候选及故障重试专项；不能继续将它标为“只有人工复核候选、自动生产者尚未实现”。旧 v1 人工复核来源与 v2 待标注来源仍各自保留。
 
-验收须覆盖：正确/错误值、缺绑定和无标签政策、已知与未知状态、旧Gold键、精确数字/对象、完整Gold分母和重试继承，以及报告UI对可比数量/缺测的表达。不可将“可比准确率”冒称全量覆盖率；评测不得触发UPDATE_LABEL或其它业务动作。
+批次证据见[原子物化](iqc-prd-b-bulk-materialization-sql-validation.md)、[跨 JVM 与 worker 恢复](iqc-prd-b-bulk-jvm-restart-validation.md)。其中父认领互斥、强杀后恢复和受控组织范围均有明确口径，不扩大为两套完整生产调度器或百万运行证明。
 
-## 已有较强组合证据，但仍有边界
+## 下一阶段交付与验收
 
-| 能力 | 当前证据 | 尚不能据此宣称 |
-|---|---|---|
-| 模型一致性 | 真实Provider/Router构造指纹→原worker→隔离MySQL→真实MVC控制器，SQL重试继承排除；27项测试通过 | 真实供应商/网关账本/PDP/网络HTTP与浏览器整链通过 |
-| 一致性页面 | 真实浏览器注入受控身份/报告，四身份参数、缺测/排除展示、改参考身份清旧报告 | 页面已读取上述SQL后端，真实角色权限通过 |
-| 发布/复核回流 | 隔离SQL真实目录/Gold审核/数据集/worker/门禁/动作结算故障恢复/复核/回流回归拒绝 | 外部通知渠道、自动发现调度、全部角色和容量SLO通过 |
-| 人工修改率/置信度诊断 | 已实现专项及相应测试，见领域文档与根协作台账 | 完整业务层/模型层指标全部交付 |
+| 顺序 | 剩余工作 | 完成证据与约束 |
+| --- | --- | --- |
+| 1 | 前端小 PR 与各自回归合流，继续清理尚未覆盖的私有副本、确认、写后回读和入口权限 | 固定合流头的实际构建/完整 CI 与对应行为断言；逐项 PR 保持可审阅，不把不同分支测试数相加。详情、历史、快照、创建、执行分别使用原独立资源 |
+| 2 | 五类职责和当前组织授权整链 | 沿原角色配置表达质检管理员、业务管理员、质检员、模型工程师、系统管理员；证明网关/PDP、owner/group/all、同组/跨组、敏感副本、成功写与撤权。只读配置快照不代替登录；不创建账号或泛授 ADMIN/all 来通过验收，见[职责与只读基线](iqc-prd-five-duty-access-audit.md) |
+| 3 | 外部运行契约 | I4 实际 broker/归档完成事件、提交后 ACK/重投/死信；I5 通知、工单、辅导、Webhook 的真实接收/幂等/失败补偿；I6/I7 供应商超时、降级、Token/费用/部署身份。复用原适配器，受控接收方不称真实渠道通过 |
+| 4 | 指标语义与真实采集 | 广义语义幻觉仍需按正式 PRD 明确可审计的 Gold/来源分母并实施或补证；已有引用错误率仅保其窄口径。原 PromQL 清单须核验真实 scrape、应用版本/标签与授权；空向量或 promtool 夹具不等于指标已采集，见[监控复核](iqc-prd-b-monitoring-promql-validation.md) |
+| 5 | 容量与运行 SLO | 按 PRD23 以实际压测形成基线，证明百万数据规模、恢复/取消、并发、TPS/P95/资源/单会话成本；保留未测量项，不从小夹具或线程池配置推断容量 |
+| 6 | A–E 与十条研发边界的完整验收 | 固定源码、数据/金标、角色、配置与运行产物逐场景证明；功能源码、局部 SQL 或构建只覆盖其对应范围 |
 
-来源：`docs/iqc-model-consistency.md`、UI `docs/iqc-evaluation-ui.md`、`docs/iqc-prd-b-measured-publication-worker.md`、根目录 `IQC_PRD_COLLABORATION.md`。测试日志和XML各自绑定提交，不将不同分支/轮次通过数叠加为统一全量通过。
+这些是交付/验收集合，不能仅据一次文件搜索认定全部能力不存在。已有能力优先复用；新增存储、API、基础设施或公共抽象前仍执行工作区复用门禁。framework 源码变更仍须前置明确批准。
 
-## 仍需实施或逐项验证的范围
+## 场景与边界不能缩减
 
-- 模型层幻觉指标：当前源码未发现独立实现；先区分无来源引文、引用不匹配与业务事实错误，复用既有证据校验/Gold，不凭F1推导幻觉率。
-- 处理后会话完整率及系统层TPS/延迟/Token/GPU/单会话成本：已有部分报告/网关能力，须明确分母、测量范围和缺测；容量目标需实测，不用单元测试推断。
-- I4外部MQ、I5实际外部通知/工单/辅导/Webhook接收与幂等、I7真实身份/PDP与四角色页面、collector/监控及默认入口激活：迭代清单仍列待办；尚未逐项给出满足PRD的实际运行证据。
-- I1/I2/I6及其它既有功能仍须对照正式PRD验收；不能因为本轮优先处理指标而缩小原任务。
+- A：昨日销售会话 → Rule/Regex → SmallModel → 低置信度升级 LLM → Fusion → 评分 → 高风险复核。
+- B：已处理会话的 ConversationCompleted 事件 → Selector → 红线 → Short Circuit → CRITICAL → 告警与复核；排除语音流不等于排除该业务完成事件。
+- C：同一 Pipeline 输出合规、意图与情绪，Decision 分别产生分数和标签，不重复调用模型。
+- D：固定 Gold Dataset 对照实际模型版本，风险 Recall/F1/P95 门禁后发布。
+- E：人工纠正 → Candidate → 独立审核 → Regression Dataset → 下一版本必须通过原 Case。
 
-以上后三项属于待核实/待验收集合，不据简单源码搜索判断整个能力不存在。新增基础设施或并行实现前，仍必须搜索拥有仓库、starter、共享服务和Wiki；framework/base-gateway修改需用户明确批准。本轮仅文档复核，不更改生产源码或部署状态。
+PRD27 的十条边界全部保留：Engine 不改最终分数/不直接建工单；执行失败不同于未命中；Finding 有来源版本且 Fusion 保留原事实；发布版本不可原地修改；历史快照可还原；人工改判保留 AI 原值；高风险可定位 Evidence；评测复用生产 Pipeline/Engine。每条都需要与范围相符的实际证据，不能由整体 CI 绿色替代。
 
-## 标签指标实施进展
+## 发布和验证状态
 
-本轮在既有报告接入冻结标签投影：`LabelEvaluationMetrics`仅对规范绑定地址且KNOWN的合法标签值计数；正确数/可比数计算准确率，零可比保持null。无政策/目录、旧名称键、缺输出及未知状态保留Gold总数。回归样本须所有Gold标签均可比且正确才能通过，评测不调用业务动作。标签类型仍服从现有投影校验（不支持对象标签），没有扩展目录类型或切换默认release版本。
-
-验证：原66104 terminal1（新增夹具误用仅接受整数的DURATION_MONTHS），修为支持小数的PERCENTAGE后原11353 terminal0，`/tmp/iqc-b-label-metrics-final.log`。fresh XML：LabelEvaluationMetricsTest4、PipelineEvaluationReportTest20，共24项无失败/错误/跳过。首轮完成主源码编译；末轮testCompile+surerfire。测试覆盖纯标签计算和既有报告回归，不代表已补齐绑定标签的真实报告/SQL重试组合、真实PDP或浏览器整链。以上组合仍为下一验收项，完整I1–I7继续进行。
-
-### 标签报告组装验证补充（2026-10-23）
-
-在原PipelineEvaluationReportTest加入冻结BOOLEAN标签政策和规范Gold地址，使用实际evaluator/产物校验/报告组装验证：两标签一对一错accuracy=0.5且回归仅一条通过；缺一产物labelGold=2/comparable=1/accuracy=1、回归0.5且报告不完整；重试继承prior产物与当前产物都可比、准确率/回归为1、原sourceExecutionIds保留，读取报告不调用runtime。
-
-原41298 terminal1为新增缺产物场景Mockito嵌套设桩错误；拆开夹具创建后原51399 terminal0，`/tmp/iqc-b-label-report-final.log`，fresh XML纯标签4+报告23=27项无失败/错误/跳过。本轮是实际产物/领域报告组装，数据库读取与冻结输入准入仍隔离，不代表真实SQL标签继承或网络/PDP验证；这些仍待后续补齐。
-
-### 标签真实 SQL 继承验证（2026-10-23）
-
-既有IsolatedMysqlMeasuredPublicationIT模型场景接入真实FindingLabelFreezeService/LabelResolutionService与原标签mapper，已发布标签/规则绑定/BOOLEAN值定义为隔离SQL夹具；不mock目录解析或投影。真实Gold标注/独立审核/数据集冻结/worker产物落库：双样本首次第二条失败，report标签Gold=2、可比=1、accuracy=1；恢复adapter重试后Gold=2、可比=2、accuracy=1，首条source仍prior，当前执行SQL结果仅1行。原模型一致性与SQL/MVC组合断言仍通过。
-
-原6341终态0，`/tmp/iqc-b-label-sql.log`，fresh XML：隔离SQL2（94.309秒）+一致性计算5+报告23=30项无失败/错误/跳过；testCompile+surerfire及diff检查通过，专用127.0.0.1:34307脚本自动关闭。已发布标签等记录由测试初始化，未验证标签发布UI流程；scope/current grant/Agent资产validator/供应商ChatModel与网关账本仍受控，不外推真实PDP/供应商/浏览器网络链。纯标签4项沿上一轮证据，不叠加本轮数量。
-
-## 2026-10-25 自动候选挖掘的源码复核
-
-P2“自动候选样本挖掘”尚不能以已有候选动作完成替代：EvaluationCandidateActionAdapter.ready只在指定业务复核COMPLETED后放行，EvaluationCandidateActionService.create再核同一复核轮次；GoldSampleService.reviewedCandidate只接受iqc-reviewed-business-candidate-v1来源。它们已满足“人工确认误判→候选→独立Gold审核”的路径，不是对未复核结果自动发现候选。
-
-后续应扩原QualitySample候选池/冻结输入/Gold标注和原动作执行幂等，新增明确的待标注AI挖掘来源协议，保留原结果Hash、任务/执行/会话与组织范围、算法/配置版本和筛选原因；不得另建样本注册表，不能提前给出FALSE_POSITIVE/FALSE_NEGATIVE或自动批准Gold。现有已复核v1来源和历史反读必须保持。该项目前是实质功能缺口，仍待设计/实施与SQL/权限/重放验证，未据本轮文档视作交付。
-
-本文件前面的2026-10-22阶段状态不是全局最新功能缺口清单：之后已实现校准产物/来源授权/运行和身份绑定/留出门禁/成本级联/Benchmark调用费用与Token，固定提交与有限专项证据见根协作台账及相应正式文档。真实供应商、PDP、容量、自动挖掘及其余适用I1–I7仍未逐项完成。
+后端 PR17 固定头的[运行40901810573](https://github.com/opensabre/iqc-platform/actions/runs/40901810573)当前为 completed/success；源码头与本页基线一致。这证明该固定头对应流水线，不证明后续前端小 PR 已合流、应用已部署、五职责或 A–E 已验收。PR17 仍 open，本次不合并、不部署、不执行共享 SQL，不切默认 v2 或动作开关。
