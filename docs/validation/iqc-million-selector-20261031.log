@@ -1,0 +1,267 @@
+MILLION isolated datadir=/private/tmp/iqc-mysql-validation.gxEKxf
+MILLION source=907b94897ded12498324944aa5199ce94e3833c0
+MILLION environment java=21 cpus=4 maxHeap=1610612736 mysql=8.0.34
+MILLION index {Table=iqc_conversation, Non_unique=0, Key_name=PRIMARY, Seq_in_index=1, Column_name=id, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=0, Key_name=uk_iqc_conversation_fingerprint, Seq_in_index=1, Column_name=source_fingerprint, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=0, Key_name=uk_iqc_conversation_api_external, Seq_in_index=1, Column_name=source_type, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=0, Key_name=uk_iqc_conversation_api_external, Seq_in_index=2, Column_name=external_id, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=YES, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_conversation_owner_group, Seq_in_index=1, Column_name=owner_group_id, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=YES, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_conversation_scope_created, Seq_in_index=1, Column_name=owner_group_id, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=YES, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_conversation_scope_created, Seq_in_index=2, Column_name=created_time, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=YES, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_conversation_created, Seq_in_index=1, Column_name=created_time, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=YES, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_conversation_batch, Seq_in_index=1, Column_name=batch_no, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=YES, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_conversation_batch, Seq_in_index=2, Column_name=created_time, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=YES, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_conversation_employee, Seq_in_index=1, Column_name=employee_id, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=YES, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_conversation_employee, Seq_in_index=2, Column_name=started_time, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=YES, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_conversation_customer, Seq_in_index=1, Column_name=customer_external_id, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=YES, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_conversation_customer, Seq_in_index=2, Column_name=started_time, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=YES, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_conversation_channel, Seq_in_index=1, Column_name=channel, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=YES, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_conversation_channel, Seq_in_index=2, Column_name=started_time, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=YES, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_conversation_business, Seq_in_index=1, Column_name=business_type, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=YES, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_conversation_business, Seq_in_index=2, Column_name=business_no, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=YES, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_archive_completion, Seq_in_index=1, Column_name=status, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_archive_completion, Seq_in_index=2, Column_name=created_time, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=YES, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION index {Table=iqc_conversation, Non_unique=1, Key_name=idx_iqc_archive_completion, Seq_in_index=3, Column_name=id, Collation=A, Cardinality=0, Sub_part=null, Packed=null, Null=, Index_type=BTREE, Comment=, Index_comment=, Visible=YES, Expression=null}
+MILLION seed rows=1000000 controls=6 elapsedMs=229125
+MILLION plan mode=owner kind=undated page=1 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ?) AND created_time IS NULL) LIMIT 1
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=owner javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=ref, possible_keys=idx_iqc_conversation_created,idx_iqc_archive_completion, key=idx_iqc_conversation_created, key_len=6, ref=const, rows=1, filtered=5.0, Extra=Using index condition; Using where}
+MILLION plan mode=owner kind=keyset page=1 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ?) AND created_time < ?) ORDER BY id ASC LIMIT 1001
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=Thu Oct 01 08:00:00 CST 2026 javaType=java.util.Date jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=index, possible_keys=idx_iqc_conversation_created,idx_iqc_archive_completion, key=PRIMARY, key_len=258, ref=null, rows=2002, filtered=0.33, Extra=Using where}
+MILLION progress mode=owner pages=100 scanned=100000 selected=100000 elapsedMs=23969
+MILLION progress mode=owner pages=200 scanned=200000 selected=200000 elapsedMs=39853
+MILLION progress mode=owner pages=300 scanned=300000 selected=300000 elapsedMs=53894
+MILLION progress mode=owner pages=400 scanned=400000 selected=400000 elapsedMs=67156
+MILLION progress mode=owner pages=500 scanned=500000 selected=500000 elapsedMs=79083
+MILLION plan mode=owner kind=undated page=501 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ?) AND id > ? AND created_time IS NULL) LIMIT 1
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=m0499999 javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=range, possible_keys=PRIMARY,idx_iqc_conversation_created,idx_iqc_archive_completion, key=idx_iqc_conversation_created, key_len=264, ref=null, rows=1, filtered=5.0, Extra=Using index condition; Using where}
+MILLION plan mode=owner kind=keyset page=501 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ?) AND created_time < ? AND id > ?) ORDER BY id ASC LIMIT 1001
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=Thu Oct 01 08:00:00 CST 2026 javaType=java.util.Date jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL6 value=m0499999 javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=range, possible_keys=PRIMARY,idx_iqc_conversation_created,idx_iqc_archive_completion, key=PRIMARY, key_len=258, ref=null, rows=413245, filtered=0.33, Extra=Using where}
+MILLION progress mode=owner pages=600 scanned=600000 selected=600000 elapsedMs=91897
+MILLION progress mode=owner pages=700 scanned=700000 selected=700000 elapsedMs=104810
+MILLION progress mode=owner pages=800 scanned=800000 selected=800000 elapsedMs=120310
+MILLION progress mode=owner pages=900 scanned=900000 selected=900000 elapsedMs=133831
+MILLION plan mode=owner kind=undated page=1000 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ?) AND id > ? AND created_time IS NULL) LIMIT 1
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=m0998999 javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=range, possible_keys=PRIMARY,idx_iqc_conversation_created,idx_iqc_archive_completion, key=idx_iqc_conversation_created, key_len=264, ref=null, rows=1, filtered=5.0, Extra=Using index condition; Using where}
+MILLION plan mode=owner kind=keyset page=1000 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ?) AND created_time < ? AND id > ?) ORDER BY id ASC LIMIT 1001
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=Thu Oct 01 08:00:00 CST 2026 javaType=java.util.Date jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL6 value=m0998999 javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=range, possible_keys=PRIMARY,idx_iqc_conversation_created,idx_iqc_archive_completion, key=PRIMARY, key_len=258, ref=null, rows=1920, filtered=0.33, Extra=Using where}
+MILLION progress mode=owner pages=1000 scanned=1000000 selected=1000000 elapsedMs=147917
+MILLION query mode=owner kind=undated calls=1002 totalMs=9082 p95Ms=33 maxMs=295
+MILLION query mode=owner kind=keyset calls=1002 totalMs=10353 p95Ms=24 maxMs=131
+MILLION query mode=owner kind=io.github.opensabre.iqc.conversation.dao.ConversationMapper.selectCount calls=1001 totalMs=20378 p95Ms=30 maxMs=87
+MILLION query mode=owner kind=io.github.opensabre.iqc.conversation.dao.ConversationMapper.selectSelectorPayloadBytes calls=1001 totalMs=19559 p95Ms=28 maxMs=1311
+MILLION query mode=owner kind=io.github.opensabre.iqc.conversation.dao.ConversationMapper.selectList calls=1001 totalMs=51087 p95Ms=74 maxMs=2040
+MILLION result mode=owner pages=1001 scanned=1000001 selected=1000001 sha256=dde94030bcf026bb381738772463b4c7dee3e549c30c2bf614d2b043c1e1e499 elapsedMs=147958
+MILLION plan mode=group kind=undated page=1 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ? OR (owner_group_id = ?)) AND created_time IS NULL) LIMIT 1
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=no-owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=group javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=ref, possible_keys=idx_iqc_conversation_owner_group,idx_iqc_conversation_scope_created,idx_iqc_conversation_created,idx_iqc_archive_completion, key=idx_iqc_conversation_created, key_len=6, ref=const, rows=1, filtered=6.67, Extra=Using index condition; Using where}
+MILLION plan mode=group kind=keyset page=1 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ? OR (owner_group_id = ?)) AND created_time < ?) ORDER BY id ASC LIMIT 1001
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=no-owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=group javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL6 value=Thu Oct 01 08:00:00 CST 2026 javaType=java.util.Date jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=index, possible_keys=idx_iqc_conversation_owner_group,idx_iqc_conversation_scope_created,idx_iqc_conversation_created,idx_iqc_archive_completion, key=PRIMARY, key_len=258, ref=null, rows=2002, filtered=0.63, Extra=Using where}
+MILLION progress mode=group pages=100 scanned=100000 selected=100000 elapsedMs=22092
+MILLION progress mode=group pages=200 scanned=200000 selected=200000 elapsedMs=42718
+MILLION progress mode=group pages=300 scanned=300000 selected=300000 elapsedMs=60302
+MILLION progress mode=group pages=400 scanned=400000 selected=400000 elapsedMs=75226
+MILLION progress mode=group pages=500 scanned=500000 selected=500000 elapsedMs=90128
+MILLION plan mode=group kind=undated page=501 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ? OR (owner_group_id = ?)) AND id > ? AND created_time IS NULL) LIMIT 1
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=no-owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=group javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL6 value=m0499999 javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=range, possible_keys=PRIMARY,idx_iqc_conversation_owner_group,idx_iqc_conversation_scope_created,idx_iqc_conversation_created,idx_iqc_archive_completion, key=idx_iqc_conversation_created, key_len=264, ref=null, rows=1, filtered=6.67, Extra=Using index condition; Using where}
+MILLION plan mode=group kind=keyset page=501 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ? OR (owner_group_id = ?)) AND created_time < ? AND id > ?) ORDER BY id ASC LIMIT 1001
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=no-owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=group javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL6 value=Thu Oct 01 08:00:00 CST 2026 javaType=java.util.Date jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL7 value=m0499999 javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=range, possible_keys=PRIMARY,idx_iqc_conversation_owner_group,idx_iqc_conversation_scope_created,idx_iqc_conversation_created,idx_iqc_archive_completion, key=PRIMARY, key_len=258, ref=null, rows=413245, filtered=3.33, Extra=Using where}
+MILLION progress mode=group pages=600 scanned=600000 selected=600000 elapsedMs=105072
+MILLION progress mode=group pages=700 scanned=700000 selected=700000 elapsedMs=120788
+MILLION progress mode=group pages=800 scanned=800000 selected=800000 elapsedMs=133080
+MILLION progress mode=group pages=900 scanned=900000 selected=900000 elapsedMs=145335
+MILLION plan mode=group kind=undated page=1000 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ? OR (owner_group_id = ?)) AND id > ? AND created_time IS NULL) LIMIT 1
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=no-owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=group javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL6 value=m0998999 javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=range, possible_keys=PRIMARY,idx_iqc_conversation_owner_group,idx_iqc_conversation_scope_created,idx_iqc_conversation_created,idx_iqc_archive_completion, key=idx_iqc_conversation_created, key_len=264, ref=null, rows=1, filtered=6.67, Extra=Using index condition; Using where}
+MILLION plan mode=group kind=keyset page=1000 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ? OR (owner_group_id = ?)) AND created_time < ? AND id > ?) ORDER BY id ASC LIMIT 1001
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=no-owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=group javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL6 value=Thu Oct 01 08:00:00 CST 2026 javaType=java.util.Date jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL7 value=m0998999 javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=range, possible_keys=PRIMARY,idx_iqc_conversation_owner_group,idx_iqc_conversation_scope_created,idx_iqc_conversation_created,idx_iqc_archive_completion, key=PRIMARY, key_len=258, ref=null, rows=1920, filtered=3.33, Extra=Using where}
+MILLION progress mode=group pages=1000 scanned=1000000 selected=1000000 elapsedMs=159883
+MILLION query mode=group kind=undated calls=1002 totalMs=6836 p95Ms=21 maxMs=695
+MILLION query mode=group kind=keyset calls=1002 totalMs=8114 p95Ms=16 maxMs=186
+MILLION query mode=group kind=io.github.opensabre.iqc.conversation.dao.ConversationMapper.selectCount calls=1001 totalMs=28021 p95Ms=36 maxMs=1290
+MILLION query mode=group kind=io.github.opensabre.iqc.conversation.dao.ConversationMapper.selectSelectorPayloadBytes calls=1001 totalMs=24111 p95Ms=33 maxMs=216
+MILLION query mode=group kind=io.github.opensabre.iqc.conversation.dao.ConversationMapper.selectList calls=1001 totalMs=59730 p95Ms=78 maxMs=3499
+MILLION result mode=group pages=1001 scanned=1000001 selected=1000001 sha256=673e4546ccf1d01500ac1af14003a1fe715fe361f8be1250db0c1e4ee24abda1 elapsedMs=159998
+MILLION plan mode=all kind=undated page=1 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND created_time IS NULL) LIMIT 1
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=ref, possible_keys=idx_iqc_conversation_created,idx_iqc_archive_completion, key=idx_iqc_conversation_created, key_len=6, ref=const, rows=1, filtered=6.67, Extra=Using index condition; Using where}
+MILLION plan mode=all kind=keyset page=1 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND created_time < ?) ORDER BY id ASC LIMIT 1001
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=Thu Oct 01 08:00:00 CST 2026 javaType=java.util.Date jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=index, possible_keys=idx_iqc_conversation_created,idx_iqc_archive_completion, key=PRIMARY, key_len=258, ref=null, rows=2002, filtered=3.33, Extra=Using where}
+MILLION progress mode=all pages=100 scanned=100000 selected=100000 elapsedMs=12717
+MILLION progress mode=all pages=200 scanned=200000 selected=200000 elapsedMs=22860
+MILLION progress mode=all pages=300 scanned=300000 selected=300000 elapsedMs=33366
+MILLION progress mode=all pages=400 scanned=400000 selected=400000 elapsedMs=46324
+MILLION progress mode=all pages=500 scanned=500000 selected=500000 elapsedMs=57485
+MILLION plan mode=all kind=undated page=501 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND id > ? AND created_time IS NULL) LIMIT 1
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=m0499999 javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=range, possible_keys=PRIMARY,idx_iqc_conversation_created,idx_iqc_archive_completion, key=idx_iqc_conversation_created, key_len=264, ref=null, rows=1, filtered=6.67, Extra=Using index condition; Using where}
+MILLION plan mode=all kind=keyset page=501 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND created_time < ? AND id > ?) ORDER BY id ASC LIMIT 1001
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=Thu Oct 01 08:00:00 CST 2026 javaType=java.util.Date jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=m0499999 javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=range, possible_keys=PRIMARY,idx_iqc_conversation_created,idx_iqc_archive_completion, key=PRIMARY, key_len=258, ref=null, rows=413245, filtered=3.33, Extra=Using where}
+MILLION progress mode=all pages=600 scanned=600000 selected=600000 elapsedMs=68553
+MILLION progress mode=all pages=700 scanned=700000 selected=700000 elapsedMs=79092
+MILLION progress mode=all pages=800 scanned=800000 selected=800000 elapsedMs=90736
+MILLION progress mode=all pages=900 scanned=900000 selected=900000 elapsedMs=100391
+MILLION plan mode=all kind=undated page=1000 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND id > ? AND created_time IS NULL) LIMIT 1
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=m0998999 javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=range, possible_keys=PRIMARY,idx_iqc_conversation_created,idx_iqc_archive_completion, key=idx_iqc_conversation_created, key_len=264, ref=null, rows=1, filtered=6.67, Extra=Using index condition; Using where}
+MILLION plan mode=all kind=keyset page=1000 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND created_time < ? AND id > ?) ORDER BY id ASC LIMIT 1001
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=Thu Oct 01 08:00:00 CST 2026 javaType=java.util.Date jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=m0998999 javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=range, possible_keys=PRIMARY,idx_iqc_conversation_created,idx_iqc_archive_completion, key=PRIMARY, key_len=258, ref=null, rows=1920, filtered=3.33, Extra=Using where}
+MILLION progress mode=all pages=1000 scanned=1000000 selected=1000000 elapsedMs=110430
+MILLION query mode=all kind=undated calls=1002 totalMs=1539 p95Ms=2 maxMs=52
+MILLION query mode=all kind=keyset calls=1002 totalMs=4515 p95Ms=6 maxMs=191
+MILLION query mode=all kind=io.github.opensabre.iqc.conversation.dao.ConversationMapper.selectCount calls=1001 totalMs=17778 p95Ms=24 maxMs=37
+MILLION query mode=all kind=io.github.opensabre.iqc.conversation.dao.ConversationMapper.selectSelectorPayloadBytes calls=1001 totalMs=16179 p95Ms=22 maxMs=40
+MILLION query mode=all kind=io.github.opensabre.iqc.conversation.dao.ConversationMapper.selectList calls=1001 totalMs=45851 p95Ms=61 maxMs=1305
+MILLION result mode=all pages=1001 scanned=1000003 selected=1000003 sha256=4ede916be10a6a3a2406ec2cb3e6ffe3af69ef07767bf98712d4f7a78d3300a9 elapsedMs=110447
+MILLION plan mode=tail kind=undated page=1 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ? OR (owner_group_id = ?)) AND created_time IS NULL) LIMIT 1
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=group javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=ref, possible_keys=idx_iqc_conversation_owner_group,idx_iqc_conversation_scope_created,idx_iqc_conversation_created,idx_iqc_archive_completion, key=idx_iqc_conversation_created, key_len=6, ref=const, rows=1, filtered=6.67, Extra=Using index condition; Using where}
+MILLION plan mode=tail kind=keyset page=1 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ? OR (owner_group_id = ?)) AND created_time < ?) ORDER BY id ASC LIMIT 1001
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=group javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL6 value=Thu Oct 01 08:00:00 CST 2026 javaType=java.util.Date jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=index, possible_keys=idx_iqc_conversation_owner_group,idx_iqc_conversation_scope_created,idx_iqc_conversation_created,idx_iqc_archive_completion, key=PRIMARY, key_len=258, ref=null, rows=2002, filtered=0.63, Extra=Using where}
+MILLION progress mode=tail pages=100 scanned=100000 selected=0 elapsedMs=11679
+MILLION progress mode=tail pages=200 scanned=200000 selected=0 elapsedMs=22882
+MILLION progress mode=tail pages=300 scanned=300000 selected=0 elapsedMs=36711
+MILLION progress mode=tail pages=400 scanned=400000 selected=0 elapsedMs=47849
+MILLION progress mode=tail pages=500 scanned=500000 selected=0 elapsedMs=59083
+MILLION plan mode=tail kind=undated page=501 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ? OR (owner_group_id = ?)) AND id > ? AND created_time IS NULL) LIMIT 1
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=group javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL6 value=m0499999 javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=range, possible_keys=PRIMARY,idx_iqc_conversation_owner_group,idx_iqc_conversation_scope_created,idx_iqc_conversation_created,idx_iqc_archive_completion, key=idx_iqc_conversation_created, key_len=264, ref=null, rows=1, filtered=6.67, Extra=Using index condition; Using where}
+MILLION plan mode=tail kind=keyset page=501 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ? OR (owner_group_id = ?)) AND created_time < ? AND id > ?) ORDER BY id ASC LIMIT 1001
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=group javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL6 value=Thu Oct 01 08:00:00 CST 2026 javaType=java.util.Date jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL7 value=m0499999 javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=range, possible_keys=PRIMARY,idx_iqc_conversation_owner_group,idx_iqc_conversation_scope_created,idx_iqc_conversation_created,idx_iqc_archive_completion, key=PRIMARY, key_len=258, ref=null, rows=413245, filtered=3.33, Extra=Using where}
+MILLION progress mode=tail pages=600 scanned=600000 selected=0 elapsedMs=69772
+MILLION progress mode=tail pages=700 scanned=700000 selected=0 elapsedMs=82483
+MILLION progress mode=tail pages=800 scanned=800000 selected=0 elapsedMs=92962
+MILLION progress mode=tail pages=900 scanned=900000 selected=0 elapsedMs=103707
+MILLION plan mode=tail kind=undated page=1000 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ? OR (owner_group_id = ?)) AND id > ? AND created_time IS NULL) LIMIT 1
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=group javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL6 value=m0998999 javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=range, possible_keys=PRIMARY,idx_iqc_conversation_owner_group,idx_iqc_conversation_scope_created,idx_iqc_conversation_created,idx_iqc_archive_completion, key=idx_iqc_conversation_created, key_len=264, ref=null, rows=1, filtered=6.67, Extra=Using index condition; Using where}
+MILLION plan mode=tail kind=keyset page=1000 sql=SELECT   id   FROM iqc_conversation      WHERE  (status IN (?,?) AND message_count > ? AND (created_by = ? OR (owner_group_id = ?)) AND created_time < ? AND id > ?) ORDER BY id ASC LIMIT 1001
+MILLION parameter ew.paramNameValuePairs.MPGENVAL1 value=IMPORTED javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL2 value=IMPORTED_WITH_ERRORS javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL3 value=0 javaType=java.lang.Integer jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL4 value=owner javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL5 value=group javaType=java.lang.String jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL6 value=Thu Oct 01 08:00:00 CST 2026 javaType=java.util.Date jdbcType=null
+MILLION parameter ew.paramNameValuePairs.MPGENVAL7 value=m0998999 javaType=java.lang.String jdbcType=null
+MILLION explain {id=1, select_type=SIMPLE, table=iqc_conversation, partitions=null, type=range, possible_keys=PRIMARY,idx_iqc_conversation_owner_group,idx_iqc_conversation_scope_created,idx_iqc_conversation_created,idx_iqc_archive_completion, key=PRIMARY, key_len=258, ref=null, rows=1920, filtered=3.33, Extra=Using where}
+MILLION progress mode=tail pages=1000 scanned=1000000 selected=137 elapsedMs=114383
+MILLION query mode=tail kind=undated calls=1002 totalMs=1140 p95Ms=1 maxMs=12
+MILLION query mode=tail kind=keyset calls=1002 totalMs=4190 p95Ms=6 maxMs=18
+MILLION query mode=tail kind=io.github.opensabre.iqc.conversation.dao.ConversationMapper.selectCount calls=1001 totalMs=24872 p95Ms=32 maxMs=102
+MILLION query mode=tail kind=io.github.opensabre.iqc.conversation.dao.ConversationMapper.selectSelectorPayloadBytes calls=1001 totalMs=23142 p95Ms=29 maxMs=294
+MILLION query mode=tail kind=io.github.opensabre.iqc.conversation.dao.ConversationMapper.selectList calls=1001 totalMs=50626 p95Ms=65 maxMs=2045
+MILLION result mode=tail pages=1001 scanned=1000002 selected=139 sha256=553fbd3aa29d86333172657158818c1f5f2daafc2f9fd2a775b2b56273f884ba elapsedMs=114399

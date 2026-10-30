@@ -1,0 +1,52 @@
+{
+  "source_sha": "907b94897ded12498324944aa5199ce94e3833c0",
+  "local_session": 19121,
+  "exit_code": 0,
+  "junit": {
+    "tests": "1",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "804.972"
+  },
+  "seed_rows": 1000000,
+  "controls": 6,
+  "seed_elapsed_ms": 229125,
+  "results": [
+    {
+      "mode": "owner",
+      "pages": 1001,
+      "scanned": 1000001,
+      "selected": 1000001,
+      "sha256": "dde94030bcf026bb381738772463b4c7dee3e549c30c2bf614d2b043c1e1e499",
+      "elapsed_ms": 147958
+    },
+    {
+      "mode": "group",
+      "pages": 1001,
+      "scanned": 1000001,
+      "selected": 1000001,
+      "sha256": "673e4546ccf1d01500ac1af14003a1fe715fe361f8be1250db0c1e4ee24abda1",
+      "elapsed_ms": 159998
+    },
+    {
+      "mode": "all",
+      "pages": 1001,
+      "scanned": 1000003,
+      "selected": 1000003,
+      "sha256": "4ede916be10a6a3a2406ec2cb3e6ffe3af69ef07767bf98712d4f7a78d3300a9",
+      "elapsed_ms": 110447
+    },
+    {
+      "mode": "tail",
+      "pages": 1001,
+      "scanned": 1000002,
+      "selected": 139,
+      "sha256": "553fbd3aa29d86333172657158818c1f5f2daafc2f9fd2a775b2b56273f884ba",
+      "elapsed_ms": 114399
+    }
+  ],
+  "raw_log_sha256": "08a1014c7c02e0735b4b7fa033e121e822bcca3b24a755e2ca4edf9cc5643de0",
+  "query_trace_sha256": "b55fafc5c1d9794af08d8614c7bb3f91cff9c6dd088807d8c80253137d2f3d72",
+  "scope": "Controlled actor; metadata scanning only, not materialization, message bodies, full execution, PDP or production SLO"
+}
