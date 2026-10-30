@@ -58,6 +58,37 @@ jobs:
         run: mvn --batch-mode --no-transfer-progress -f opensabre-framework/pom.xml -DskipTests install
       - name: Run tests
         run: mvn --batch-mode --no-transfer-progress verify
+      - name: Run existing selector shard SQL tests in disposable MySQL
+        timeout-minutes: 10
+        shell: bash
+        env:
+          IQC_MYSQL_VALIDATION_DIR: /private/tmp/iqc-mysql-validation.ci-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          mysql_container="iqc-selector-sql-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            docker logs "$mysql_container" || true
+            docker rm -fv "$mysql_container" || true
+          }
+          trap cleanup EXIT
+          docker run --detach --name "$mysql_container" \
+            --label opensabre.validation=iqc-selector-sql \
+            --publish 127.0.0.1:34307:34307 \
+            --env MYSQL_ALLOW_EMPTY_PASSWORD=yes --env MYSQL_ROOT_HOST=% \
+            mysql:8.0 --port=34307 --datadir="$IQC_MYSQL_VALIDATION_DIR"
+          ready=0
+          for attempt in {1..60}; do
+            identity="$(docker exec "$mysql_container" mysql --protocol=TCP \
+              --host=127.0.0.1 --port=34307 --user=root --batch --skip-column-names \
+              --execute="SELECT CONCAT(@@port, ':', @@datadir)" 2>/dev/null || true)"
+            if [[ "$identity" == "34307:${IQC_MYSQL_VALIDATION_DIR}/" ]]; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          [[ "$ready" == 1 ]] || { echo "Disposable MySQL identity/readiness check failed" >&2; exit 1; }
+          mvn --batch-mode --no-transfer-progress -Dtest=IsolatedMysqlSelectorShardIT test
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v7.0.1
