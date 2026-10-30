@@ -571,3 +571,8 @@ UI 79f50b4 在原流水线动作编辑器支持显式 v1/v2、精确字符串阈
 ## 2026-10-30 尾期协作交付约定
 
 按用户最新要求，每项独立小特性完成后立即提正式小 PR，明确前置分支、固定源码与构建/专项范围，便于协作者逐项合并。测试/docs 跟随对应功能父项；各分支结果不累加为最终合流通过。当前实现与剩余验收以[当前缺口清单](iqc-prd-current-gaps.md)及各领域最新固定证据为准，历史“待实现”不用于重复开发已有能力。I1–I7、五类职责、实际运行、A–E、十条边界和容量要求保持，全部目标仍进行中。
+
+
+## 2026-10-30 后端小PR复用原CI
+
+后端唯一docker_publish workflow的pull_request目标过滤扩到main及review/iqc-*，使集成/父功能review目标复用原Maven Verify和共享隔离MySQL Flyway检查。原Redis、framework v1.1.4只读checkout/install、测试/迁移命令、制品和needs保持，未改framework源码、迁移校验或断言。push仍仅main与版本标签，镜像job仍严格仅push，PR不会发布后端镜像。各小PR按包含配置的实际合流快照与新PR事件核验，不追溯把旧PR变绿。Root只做YAML语法/diff检查，不写跑本地测试或主动dispatch；自动CI按准确head/run/job终态记录，不代替真实PDP、供应商、部署或完整I1–I7。
