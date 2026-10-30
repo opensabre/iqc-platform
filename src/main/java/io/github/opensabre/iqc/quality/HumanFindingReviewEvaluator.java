@@ -12,16 +12,45 @@ import java.util.*;
 /** Human projections over validated frozen fusion; no detector calls, writes or action execution. */
 public final class HumanFindingReviewEvaluator {
     private HumanFindingReviewEvaluator() { }
+    /** An explicit human assessment of a frozen model claim, separate from quote syntax and correctness. */
+    public enum SourceSupport { SUPPORTED, CONTRADICTED, INSUFFICIENT_SOURCE }
+    public record ClaimSourceSupport(String rawFindingId, SourceSupport verdict, List<String> evidenceIds,
+            List<String> messageIds, String reason) {
+        public ClaimSourceSupport {
+            if(rawFindingId==null||rawFindingId.isBlank()||rawFindingId.length()>256||verdict==null
+                    ||reason==null||reason.isBlank()||reason.trim().length()>1000)
+                throw new IllegalArgumentException("来源支持标注须指定模型事实、结论和原因");
+            evidenceIds=evidenceIds==null?List.of():List.copyOf(evidenceIds);
+            messageIds=messageIds==null?List.of():List.copyOf(messageIds);
+            if(evidenceIds.size()+messageIds.size()>100
+                    ||evidenceIds.stream().anyMatch(id->id.isBlank()||id.length()>256)
+                    ||messageIds.stream().anyMatch(id->id.isBlank()||id.length()>64)
+                    ||evidenceIds.stream().distinct().count()!=evidenceIds.size()
+                    ||messageIds.stream().distinct().count()!=messageIds.size()
+                    ||verdict!=SourceSupport.INSUFFICIENT_SOURCE&&evidenceIds.isEmpty()&&messageIds.isEmpty())
+                throw new IllegalArgumentException("来源支持标注须引用有界、唯一的来源；支持或矛盾结论不能缺少来源");
+            reason=reason.trim();
+        }
+    }
     /** Retaining an existing evidence ID and adding a frozen message are explicit separate operations. */
     public record Decision(String sourceResultId,String findingCode,String expectedFindingHash,
             Finding.State state,@com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=ExactValueDeserializer.class) JsonNode value,Finding.Severity severity,String reason,
             List<String> retainedEvidenceIds,List<String> addedMessageIds,
-            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String valueJson) {
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String valueJson,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
+            List<ClaimSourceSupport> sourceSupport) {
+        public Decision(String sourceResultId,String findingCode,String expectedFindingHash,Finding.State state,JsonNode value,
+                Finding.Severity severity,String reason,List<String> retainedEvidenceIds,List<String> addedMessageIds,String valueJson){
+            this(sourceResultId,findingCode,expectedFindingHash,state,value,severity,reason,retainedEvidenceIds,addedMessageIds,valueJson,List.of());
+        }
         public Decision(String sourceResultId,String findingCode,String expectedFindingHash,Finding.State state,JsonNode value,
                 Finding.Severity severity,String reason,List<String> retainedEvidenceIds,List<String> addedMessageIds){
-            this(sourceResultId,findingCode,expectedFindingHash,state,value,severity,reason,retainedEvidenceIds,addedMessageIds,null);
+            this(sourceResultId,findingCode,expectedFindingHash,state,value,severity,reason,retainedEvidenceIds,addedMessageIds,null,List.of());
         }
         public Decision {
+            sourceSupport=sourceSupport==null?List.of():List.copyOf(sourceSupport);
+            if(sourceSupport.size()>1000||sourceSupport.stream().map(ClaimSourceSupport::rawFindingId).distinct().count()!=sourceSupport.size())
+                throw new IllegalArgumentException("来源支持标注过多或重复");
             if(valueJson!=null){
                 if(value!=null&&!value.isNull()||valueJson.length()>100000)throw new IllegalArgumentException("人工事实值须使用单一且有界的JSON输入");
                 try{value=new ObjectMapper().readerFor(JsonNode.class)
@@ -118,6 +147,7 @@ public final class HumanFindingReviewEvaluator {
             var fact=facts.get(decision.findingCode());
             if(fact==null||!findingHash(fact,json).equals(decision.expectedFindingHash())||overrides.containsKey(fact.code()))
                 throw IqcException.invalidArgument("人工事实基准已变化、未知或重复");
+            validateSourceSupport(decision.sourceSupport(),fact,messages.keySet());
             if(decision.state()!=Finding.State.KNOWN&&decision.state()!=Finding.State.UNKNOWN
                     ||decision.severity()==null||decision.reason()==null||decision.reason().isBlank()||decision.reason().trim().length()>1000)
                 throw IqcException.invalidArgument("人工事实须明确已知或未知状态、严重度和原因");
@@ -151,9 +181,20 @@ public final class HumanFindingReviewEvaluator {
                     decision.reason().trim(),fact.policyId(),fact.policyVersion());
             overrides.put(fact.code(),reviewed);
             normalized.add(new Decision(sourceResultId,fact.code(),decision.expectedFindingHash(),decision.state(),decision.value(),
-                    decision.severity(),decision.reason().trim(),decision.retainedEvidenceIds(),decision.addedMessageIds()));
+                    decision.severity(),decision.reason().trim(),decision.retainedEvidenceIds(),decision.addedMessageIds(),null,decision.sourceSupport()));
         }
         return new Projection(original,original.stream().map(fact->overrides.getOrDefault(fact.code(),fact)).toList(),normalized);
+    }
+    private static void validateSourceSupport(List<ClaimSourceSupport> assessments,FindingFusion.Result fact,Set<String> messageIds) {
+        for(var assessment:assessments){
+            var targets=fact.rawFindings().stream().filter(raw->raw.id().equals(assessment.rawFindingId())).toList();
+            if(targets.size()!=1||targets.getFirst().state()!=Finding.State.KNOWN
+                    ||!"LLM".equals(targets.getFirst().source().engineType()))
+                throw IqcException.invalidArgument("来源支持标注须引用本冻结事实中的唯一已知LLM原始观察");
+            var evidenceIds=targets.getFirst().evidence().stream().map(Finding.Evidence::id).collect(java.util.stream.Collectors.toSet());
+            if(!evidenceIds.containsAll(assessment.evidenceIds())||!messageIds.containsAll(assessment.messageIds()))
+                throw IqcException.invalidArgument("来源支持标注不可引用其它观察证据或冻结会话外消息");
+        }
     }
     public record PolicyProjection(Projection findings,List<io.github.opensabre.iqc.scoring.InspectionScoring.Decision> items,
             io.github.opensabre.iqc.scoring.InspectionScoring.Result scoring,
