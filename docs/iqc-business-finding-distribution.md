@@ -57,3 +57,5 @@ Root原65065 test-compile终态0且/tmp/iqc-finding-distribution-compile.exit=0�
 原主集成完成候选/独立Gold/回流后，经原findingContext/request/decide追加两轮事实裁决：KNOWN数值由1000改为0且严重度HIGH→NONE，下一轮设UNKNOWN。读取原冻结上下文的expectedFindingHash与原证据，不mock投影或结果。待处理新轮期间报告仍取最新完成来源；相同完成命令重放返回原裁决；KNOWN改判后machine仍HIGH、reviewed为NONE，reviewChanges记录findingChanged；UNKNOWN来源仍可用但KNOWN与全部knownSeverityCounts为0，BOOL计数保持0。原机器trace/评分与之前冻结候选的内容/来源JSON均未改变。
 
 原51016 terminal0，/tmp/iqc-b-finding-override-sql.log.exit=0，fresh XML原主集成方法1项零失败错误跳过；隔离MySQL脚本身份核验后运行、结束关闭，无共享库。完整耗时以本轮XML为准。此项扩展原SQL/HTTP整链，不将1方法冒称全类重跑；scope/grant仍受控，实际PDP/五角色/浏览器与容量尚未证明。未改生产实现、未部署。
+
+原可选分布现扩展[模型事实来源支持摘要](iqc-model-claim-source-support-report.md)，明确仅KNOWN原始LLM声明的人工标注数量及覆盖率，不把任意值或未标注当作语义幻觉率。
