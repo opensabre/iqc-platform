@@ -140,7 +140,16 @@ public class BusinessQualityReportService {
     public record FactDistribution(String code,String valueType,int presentCount,int missingFindingCount,
             Map<String,Integer> states,Map<String,Integer> knownSeverityCounts,int trueCount,int falseCount) { }
     public record FindingSummary(int expectedResults,int sourceResults,int unavailableResults,List<FactDistribution> facts) { }
-    public record FindingDistribution(String schemaVersion,FindingSummary machine,FindingSummary reviewed) { }
+    public record ClaimSourceSupportSummary(String schemaVersion,String scope,String state,String knownClaims,
+            String annotatedClaims,String unannotatedClaims,String supportedClaims,String contradictedClaims,
+            String insufficientSourceClaims,BigDecimal annotationCoverage) { }
+    public record FindingDistribution(String schemaVersion,FindingSummary machine,FindingSummary reviewed,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            ClaimSourceSupportSummary sourceSupport) {
+        public FindingDistribution(String schemaVersion,FindingSummary machine,FindingSummary reviewed){
+            this(schemaVersion,machine,reviewed,null);
+        }
+    }
     public record Report(String scope, String runPolicy, int taskCount, int conversationCount, List<PolicyGroup> groups,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
             ActionMetrics actionMetrics,
@@ -293,14 +302,17 @@ public class BusinessQualityReportService {
             var completed = reviews.latest(result.getId(), true);
             var latest = reviews.latest(result.getId(), false);
             if (latest != null && "PENDING".equals(latest.getStatus())) group.pendingReview++;
+            BusinessItemReviewEvaluator.Projection completedProjection=null;
             if (completed == null) group.missingReview++;
             else {
                 var projection=reviews.validatedProjection(completed,result,selection.task());
+                completedProjection=projection;
                 var reviewed=projection.reviewed();group.addManualScores(projection);group.addReviewChanges(projection);
                 group.reviewed.add(reviewed.scoring());
                 group.addItems(reviewed, true);
                 if(group.reviewedFacts!=null)group.reviewedFacts.add(projection.findingReview()==null?machineData.findings():projection.findingReview().findings().reviewed());
             }
+            if(group.claimSupport!=null)group.claimSupport.add(machineData.findings(),completedProjection);
         }
         var reportGroups=new ArrayList<PolicyGroup>();var findingDistributions=new LinkedHashMap<String,FindingDistribution>();
         for(var group:groups.values()){
@@ -318,7 +330,7 @@ public class BusinessQualityReportService {
             }
             reportGroups.add(group.view(usage));
             if(group.machineFacts!=null)findingDistributions.put(group.selection.key(),new FindingDistribution("iqc-business-finding-distribution-v1",
-                    group.machineFacts.view(group.conversations),group.reviewedFacts.view(group.conversations)));
+                    group.machineFacts.view(group.conversations),group.reviewedFacts.view(group.conversations),group.claimSupport.view()));
         }
         return new Report("SELECTED_TASK_RUNS", runPolicy.name(), selected.size(), candidates.size(),List.copyOf(reportGroups),includeActionMetrics?actionMetrics(candidates):null,includeFindingDistribution?java.util.Collections.unmodifiableMap(findingDistributions):null);
     }
@@ -411,6 +423,7 @@ public class BusinessQualityReportService {
         final java.util.Set<String> executionIds = new java.util.LinkedHashSet<>();
         final Scores machine = new Scores(), reviewed = new Scores();
         final FactCounts machineFacts,reviewedFacts;
+        final ClaimSupportCounts claimSupport;
         final java.util.Map<String, ItemCounts> machineItems = new LinkedHashMap<>(), reviewedItems = new LinkedHashMap<>();
         int conversations, missingResult, missingReview, pendingReview;
         int manualApplied,manualStale,effectiveNumericCount;BigDecimal manualSum=BigDecimal.ZERO,effectiveSum=BigDecimal.ZERO;
@@ -464,6 +477,7 @@ public class BusinessQualityReportService {
             boolean supported=includeFindings&&selection.marker().has("pipelineId");
             machineFacts=supported?new FactCounts(selection.findingDefinitions()):null;
             reviewedFacts=supported?new FactCounts(selection.findingDefinitions()):null;
+            claimSupport=supported?new ClaimSupportCounts():null;
             selection.items().forEach(item -> {
                 machineItems.put(item.itemCode(), new ItemCounts());
                 reviewedItems.put(item.itemCode(), new ItemCounts());
@@ -486,6 +500,46 @@ public class BusinessQualityReportService {
                                 scoring == null ? null : scoring.points(), scoring != null && scoring.veto(),
                                 machineItems.get(item.itemCode()).view(), reviewedItems.get(item.itemCode()).view());
                     }).toList(),marker.has("pipelineId")?marker.path("pipelineId").asText():null,reviewChanges(),selection.rollout(),usage);
+        }
+    }
+    /** Explicit human support verdicts over frozen model claims, never inferred from values or quote validity. */
+    private static final class ClaimSupportCounts {
+        long known,supported,contradicted,insufficient;
+        void add(List<io.github.opensabre.iqc.fusion.FindingFusion.Result> facts,BusinessItemReviewEvaluator.Projection review){
+            var eligible=new LinkedHashMap<String,java.util.Set<String>>();long rowKnown=0;
+            for(var fact:facts){
+                var ids=new java.util.HashSet<String>();
+                for(var raw:fact.rawFindings())if(raw.state()==Finding.State.KNOWN&&"LLM".equals(raw.source().engineType())){
+                    if(!ids.add(raw.id()))throw IqcException.invalidState("来源支持统计的模型观察身份重复");
+                    rowKnown=Math.incrementExact(rowKnown);
+                }
+                eligible.put(fact.code(),ids);
+            }
+            long rowSupported=0,rowContradicted=0,rowInsufficient=0;
+            if(review!=null&&review.findingReview()!=null){
+                var seen=new java.util.HashSet<List<String>>();
+                for(var decision:review.findingReview().findings().decisions())for(var assessment:decision.sourceSupport()){
+                    var targets=eligible.get(decision.findingCode());
+                    if(targets==null||!targets.contains(assessment.rawFindingId())
+                            ||!seen.add(List.of(decision.findingCode(),assessment.rawFindingId())))
+                        throw IqcException.invalidState("来源支持统计标注与已验证模型观察不一致");
+                    switch(assessment.verdict()){
+                        case SUPPORTED -> rowSupported=Math.incrementExact(rowSupported);
+                        case CONTRADICTED -> rowContradicted=Math.incrementExact(rowContradicted);
+                        case INSUFFICIENT_SOURCE -> rowInsufficient=Math.incrementExact(rowInsufficient);
+                    }
+                }
+            }
+            known=Math.addExact(known,rowKnown);supported=Math.addExact(supported,rowSupported);
+            contradicted=Math.addExact(contradicted,rowContradicted);insufficient=Math.addExact(insufficient,rowInsufficient);
+        }
+        ClaimSourceSupportSummary view(){
+            long annotated=Math.addExact(Math.addExact(supported,contradicted),insufficient);
+            String state=known==0?"UNMEASURED":annotated==0?"UNANNOTATED":annotated==known?"COMPLETE":"PARTIAL";
+            return new ClaimSourceSupportSummary("iqc-model-claim-source-support-summary-v1",
+                    "KNOWN_RAW_LLM_FINDINGS_IN_SELECTED_RESULT_RUNS",state,Long.toString(known),Long.toString(annotated),
+                    Long.toString(Math.subtractExact(known,annotated)),Long.toString(supported),Long.toString(contradicted),Long.toString(insufficient),
+                    known==0?null:BigDecimal.valueOf(annotated).divide(BigDecimal.valueOf(known),6,RoundingMode.HALF_UP));
         }
     }
     /** Counts only metadata and BOOLEAN frequency; arbitrary finding values never enter the report. */
