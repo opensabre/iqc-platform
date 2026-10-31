@@ -39,9 +39,28 @@ public class BusinessItemReviewService {
     private final ObjectMapper mapper;
 
     public record FindingEvidence(String id,String type,String reference) { }
+    public record ModelClaim(String rawFindingId,String valueType,String valueJson,String reason,String nodeId,
+            String engineVersion,int runIndex,String inputHash,List<FindingEvidence> evidence) {
+        public ModelClaim { evidence=List.copyOf(evidence); }
+    }
     public record FindingEntry(String code,String valueType,String state,String valueJson,String severity,String expectedFindingHash,
             List<String> allowedValues,List<String> allowedEvidenceTypes,boolean evidenceRequired,List<FindingEvidence> evidence,
-            List<String> retainedEvidenceIds,List<String> addedMessageIds) { }
+            List<String> retainedEvidenceIds,List<String> addedMessageIds,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
+            List<ModelClaim> modelClaims,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
+            List<HumanFindingReviewEvaluator.ClaimSourceSupport> sourceSupport) {
+        public FindingEntry(String code,String valueType,String state,String valueJson,String severity,String expectedFindingHash,
+                List<String> allowedValues,List<String> allowedEvidenceTypes,boolean evidenceRequired,List<FindingEvidence> evidence,
+                List<String> retainedEvidenceIds,List<String> addedMessageIds){
+            this(code,valueType,state,valueJson,severity,expectedFindingHash,allowedValues,allowedEvidenceTypes,evidenceRequired,
+                    evidence,retainedEvidenceIds,addedMessageIds,List.of(),List.of());
+        }
+        public FindingEntry {
+            modelClaims=modelClaims==null?List.of():List.copyOf(modelClaims);
+            sourceSupport=sourceSupport==null?List.of():List.copyOf(sourceSupport);
+        }
+    }
     public record FindingContext(String sourceResultId,String sourceHash,boolean available,String message,List<FindingEntry> findings,
             com.fasterxml.jackson.databind.JsonNode messages) { }
     /** The existing review read permission and data scope apply; never acquires a mutation lock or captures current messages. */
@@ -75,12 +94,19 @@ public class BusinessItemReviewService {
             var entries=new java.util.ArrayList<FindingEntry>();
             for(var fact:trace.fusion()){
                 var definition=definitions.get(fact.code());var decision=effective.get(fact.code());
+                var claims=new java.util.ArrayList<ModelClaim>();
+                for(var raw:fact.rawFindings())if(raw.state()==io.github.opensabre.iqc.finding.Finding.State.KNOWN
+                        &&"LLM".equals(raw.source().engineType())){
+                    claims.add(new ModelClaim(raw.id(),raw.valueType().name(),mapper.writeValueAsString(raw.value()),raw.reason(),
+                            raw.source().nodeId(),raw.source().engineVersion(),raw.source().runIndex(),raw.source().inputHash(),
+                            raw.evidence().stream().map(item->new FindingEvidence(item.id(),item.type().name(),item.reference())).toList()));
+                }
                 entries.add(new FindingEntry(fact.code(),fact.valueType().name(),decision==null?fact.state().name():decision.state().name(),
                         mapper.writeValueAsString(decision==null?fact.value():decision.value()),decision==null?fact.severity().name():decision.severity().name(),
                         HumanFindingReviewEvaluator.findingHash(fact,mapper),definition.allowedValues(),definition.evidenceTypes().stream().map(Enum::name).toList(),
                         definition.evidenceRequired(),fact.evidence().stream().map(evidence->new FindingEvidence(evidence.id(),evidence.type().name(),evidence.reference())).toList(),
                         decision==null?fact.evidence().stream().map(io.github.opensabre.iqc.finding.Finding.Evidence::id).toList():decision.retainedEvidenceIds(),
-                        decision==null?List.of():decision.addedMessageIds()));
+                        decision==null?List.of():decision.addedMessageIds(),claims,decision==null?List.of():decision.sourceSupport()));
             }
             var messages=mapper.createArrayNode();for(var message:input.path("messages")){
                 var selected=mapper.createObjectNode();for(String field:List.of("id","sequenceNo","speakerRole","content"))selected.set(field,message.path(field));messages.add(selected);}
