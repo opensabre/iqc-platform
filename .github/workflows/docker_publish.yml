@@ -58,7 +58,7 @@ jobs:
         run: mvn --batch-mode --no-transfer-progress -f opensabre-framework/pom.xml -DskipTests install
       - name: Run tests
         run: mvn --batch-mode --no-transfer-progress verify
-      - name: Run existing selector shard SQL tests in disposable MySQL
+      - name: Run existing selector and claim source support SQL tests in disposable MySQL
         timeout-minutes: 10
         shell: bash
         env:
@@ -88,7 +88,7 @@ jobs:
             sleep 2
           done
           [[ "$ready" == 1 ]] || { echo "Disposable MySQL identity/readiness check failed" >&2; exit 1; }
-          mvn --batch-mode --no-transfer-progress -Dtest=IsolatedMysqlSelectorShardIT test
+          mvn --batch-mode --no-transfer-progress -Dtest=IsolatedMysqlSelectorShardIT,IsolatedMysqlClaimSourceSupportIT test
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v7.0.1

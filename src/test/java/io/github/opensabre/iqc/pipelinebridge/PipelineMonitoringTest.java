@@ -26,7 +26,11 @@ import static org.mockito.Mockito.*;
 
 /** Real runtime with deterministic adapters; task heartbeat is controlled, no provider or database. */
 class PipelineMonitoringTest {
-    static class TestRegistry extends SimpleMeterRegistry implements AutoCloseable { }
+    static class TestRegistry extends SimpleMeterRegistry implements AutoCloseable {
+        // Spring owns the production singleton; this fixture must keep gauge owners alive until assertions finish.
+        final List<PipelineConversationEvaluator> evaluators=new ArrayList<>();
+        @Override public void close(){try{super.close();}finally{evaluators.clear();}}
+    }
     final ObjectMapper json=new ObjectMapper().findAndRegisterModules();
     final InspectionTaskMapper tasks=mock(InspectionTaskMapper.class);
     @BeforeEach void setup(){
@@ -48,7 +52,9 @@ class PipelineMonitoringTest {
     }
     PipelineConversationEvaluator evaluator(PipelineRuntime runtime,MeterRegistry meters){
         ObjectProvider<MeterRegistry> provider=mock(ObjectProvider.class);when(provider.getIfAvailable()).thenReturn(meters);
-        return new PipelineConversationEvaluator(runtime,json,tasks,provider);
+        var evaluator=new PipelineConversationEvaluator(runtime,json,tasks,provider);
+        if(meters instanceof TestRegistry registry)registry.evaluators.add(evaluator);
+        return evaluator;
     }
     PipelineConversationEvaluator.Evaluation evaluate(PipelineConversationEvaluator evaluator,PipelineRelease release,PipelineRuntime.Mode mode){
         var task=new InspectionTask();task.setId("private-task");task.setCurrentExecutionId("private-execution");task.setStatus("RUNNING");
