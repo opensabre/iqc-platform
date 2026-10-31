@@ -27,3 +27,12 @@ rawFindingId 必须在该冻结融合事实的 rawFindings 中唯一存在，状
 报告/UI、Gold/独立审核接入、声明覆盖率和明确可审计分母仍待后续小 PR。不能将 CONTRADICTED/INSUFFICIENT_SOURCE 在未确定统计口径前直接合并为广义幻觉率，未标注更不能当作零；也不能用引用合法、Finding F1 或本标注协议宣布 PRD14.3 已完成。
 
 本批本地 `mvn --batch-mode --no-transfer-progress -DskipTests compile` 已实际 BUILD SUCCESS（54.037s）；日志 `/tmp/iqc-claim-source-support-compile-20261031.log`。未编写或运行本地应用测试，保留原弃用警告。
+
+
+## 原 Finding 上下文扩展
+
+原 FINDING_CONTEXT 响应每个 FindingEntry 增加可选 modelClaims 和 sourceSupport，供原编辑器读取当前可标注的原始模型声明与最近已完成复核的有效标注。仅选取冻结融合事实中的 KNOWN LLM rawFinding，包含 rawFindingId、精确 valueJson、reason、节点/版本/运行序号/inputHash 和该观察自己的证据 ID/type/reference。不会返回任意 provider 配置、请求头、模型密钥、校准数据或 Node metrics。空数组省略，原 FindingEntry 构造器保留。
+
+上下文仍先校验 task 数据范围、流水线/生产输入快照、原评测轨迹及上一轮不可变复核投影，不查询当前可变消息。原 ResultReadProjection 的 findingReviewContext 在缺完整会话/PII时清空整个 findings/messages，因此新增嵌套字段与原因受同一门禁保护；没有新读取入口或权限。此增量不是隐私或真实PDP验收结果，须由原HTTP隐私回归和B专项证明。
+
+上下文增量 `mvn --batch-mode --no-transfer-progress -DskipTests compile` 实际 BUILD SUCCESS（2:01），日志 `/tmp/iqc-claim-support-context-compile-20261031.log`；没有运行本地应用测试。
