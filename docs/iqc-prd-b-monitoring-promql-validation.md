@@ -29,3 +29,22 @@ SSH原62777 docker ps terminal0：IQC API容器4f664ad1f6d4运行10小时，管�
 本地当前源码中ModelGateway构造注册iqc.model.gateway.active、PipelineConversationEvaluator构造注册iqc.pipeline.graph.active及线程池Gauge；DurableInspectionWorker在iqc.task.worker-enabled=true或缺省时注册任务观测。现网没有对应class意味着当前部署内容不能承担这些实现的实际采集验收，缺口首先在部署内容。尚未逐一调查其它指标、依赖jar或所有24条查询，也未尝试重启/热补丁/部署。应在确定包含数据库迁移与当前应用源的可审阅发布方案后再验证，不仅修改Prometheus标签。
 
 启动classpath进一步只读复核：原27698仅提取受限启动字段，java -cp @/app/jib-classpath-file及正式主类，无-jar；原64056读取该classpath文件，258项，非/app/libs/仅/app/resources与/app/classes，未出现名称含iqc的应用jar。没有观察到外部热补丁classpath；仍未扫描每个第三方jar的内容，定位不扩展为完整依赖审计。两命令均terminal0，无环境/其他启动参数输出。
+
+
+## 2026-11-01 全部24条固定查询的引擎验证
+
+复用原 `validation/iqc-monitoring-promql.json`，沿控制面固定源码 `5baa1fdc4da8883f785201755c011b1a0f175952` 的 `iqcModelHistory` 扩齐原先未覆盖的18条查询。源码字面量、selector和原辅助函数展开后的24条表达式与源码SHA-256记录于 [source map](validation/iqc-monitoring-promql-source.json)；正向/缺测两组分别与该完整表达式集合逐条比对，无修改网关源码。
+
+四组共53条断言：24条多实例/隔离/正常计算，24条完全缺测保持空vector，一条全失败attempt且没有SUCCESS序列时成功率为0，四条零分母结果存在但不伪造为0的检查。模型覆盖TPS、UNKNOWN比率、P50/P95/P99、按kind Token、usage、admission及settlement；流水线覆盖PRODUCTION图吞吐/直方图/在途、节点attempt状态/成功率/延迟/未开始跳过，以及原含评测的共享线程池在途与排队。所有新增族均加入外应用干扰；有PRODUCTION约束的族同时加入EVALUATION干扰。原共享DB快照max、健康min、年龄max断言保留。
+
+原49414首轮exit1仅有五个浮点最后bit差异，例如0.1与0.10000000000000002；没有改查询或业务预期。按 [Prometheus官方规则测试格式](https://prometheus.io/docs/prometheus/latest/configuration/unit_testing_rules/) 设置 `fuzzy_compare=true`，仅容忍浮点尾bit差异，原35915同表达式/同输入/同预期复验exit0、SUCCESS。两轮日志分别保留 `/tmp/iqc-b-monitoring-promtool-expanded-20261101.log` 和 `...-expanded-fixed-20261101.log`，没有将首轮写成通过。
+
+复验命令：
+
+```sh
+ssh root@opensabre 'docker exec -i opensabre-prometheus /bin/promtool test rules /dev/stdin' < docs/validation/iqc-monitoring-promql.json
+```
+
+仅stdin传夹具给既有容器中的真实PromQL引擎，不写服务器规则、文件、配置，不执行部署或业务SQL。受控输入通过不证明候选应用实际scrape、PDP/Feign授权、真实provider或容量SLO；这些仍须按完整PRD独立验收。
+
+本轮版本读取原19618 exit0：promtool 3.13.3，revision `b273ae3adeb64ad630d65ef7f16440df95658410`，linux/amd64。夹具SHA-256：`a6910adbfd930766d84679e48a35f0a74650f4ab1b60d4be44634f614949b77f`。
