@@ -1,0 +1,30 @@
+{
+  "sourceCommit": "5baa1fdc4da8883f785201755c011b1a0f175952",
+  "sourceSha256": "d1920e6c555dcdadad2315b2ac2c2ffe9d19ef84adddd6755844bfd5b76726ac",
+  "queries": {
+    "activeModelCalls": "sum(iqc_model_gateway_active{application=\"iqc-platform\"})",
+    "invocationTps": "sum(rate(iqc_model_gateway_invocation_seconds_count{application=\"iqc-platform\"}[5m]))",
+    "unknownRatio": "sum(rate(iqc_model_gateway_invocation_seconds_count{application=\"iqc-platform\",outcome=\"UNKNOWN\"}[5m])) / sum(rate(iqc_model_gateway_invocation_seconds_count{application=\"iqc-platform\"}[5m]))",
+    "p50": "histogram_quantile(0.50, sum by (le) (rate(iqc_model_gateway_invocation_seconds_bucket{application=\"iqc-platform\"}[5m])))",
+    "p95": "histogram_quantile(0.95, sum by (le) (rate(iqc_model_gateway_invocation_seconds_bucket{application=\"iqc-platform\"}[5m])))",
+    "p99": "histogram_quantile(0.99, sum by (le) (rate(iqc_model_gateway_invocation_seconds_bucket{application=\"iqc-platform\"}[5m])))",
+    "reportedTokens": "sum by (kind) (rate(iqc_model_gateway_tokens_total{application=\"iqc-platform\"}[5m]))",
+    "usageCoverage": "sum by (status) (rate(iqc_model_gateway_usage_total{application=\"iqc-platform\"}[5m]))",
+    "admission": "sum by (stage,outcome) (rate(iqc_model_gateway_admission_total{application=\"iqc-platform\"}[5m]))",
+    "settlement": "sum by (outcome) (rate(iqc_model_gateway_settlement_total{application=\"iqc-platform\"}[5m]))",
+    "pipelineTps": "sum(rate(iqc_pipeline_graph_duration_seconds_count{application=\"iqc-platform\",mode=\"PRODUCTION\"}[5m]))",
+    "pipelineP95": "histogram_quantile(0.95, sum by (le) (rate(iqc_pipeline_graph_duration_seconds_bucket{application=\"iqc-platform\",mode=\"PRODUCTION\"}[5m])))",
+    "pipelineActive": "sum(iqc_pipeline_graph_active{application=\"iqc-platform\",mode=\"PRODUCTION\"})",
+    "nodeAttemptTps": "sum by (status) (rate(iqc_pipeline_node_observations_total{application=\"iqc-platform\",mode=\"PRODUCTION\",phase=\"ATTEMPT\"}[5m]))",
+    "nodeSuccessRatio": "(sum(rate(iqc_pipeline_node_observations_total{application=\"iqc-platform\",mode=\"PRODUCTION\",phase=\"ATTEMPT\",status=\"SUCCESS\"}[5m])) or (0 * sum(rate(iqc_pipeline_node_observations_total{application=\"iqc-platform\",mode=\"PRODUCTION\",phase=\"ATTEMPT\"}[5m])))) / sum(rate(iqc_pipeline_node_observations_total{application=\"iqc-platform\",mode=\"PRODUCTION\",phase=\"ATTEMPT\"}[5m]))",
+    "nodeP95": "histogram_quantile(0.95, sum by (le) (rate(iqc_pipeline_node_duration_seconds_bucket{application=\"iqc-platform\",mode=\"PRODUCTION\"}[5m])))",
+    "nodeSkippedTps": "sum(rate(iqc_pipeline_node_observations_total{application=\"iqc-platform\",mode=\"PRODUCTION\",phase=\"NOT_STARTED\",status=\"SKIPPED\"}[5m]))",
+    "nodeExecutorActive": "sum(iqc_pipeline_executor_active{application=\"iqc-platform\"})",
+    "nodeExecutorQueued": "sum(iqc_pipeline_executor_queued{application=\"iqc-platform\"})",
+    "taskStates": "max by (status) (iqc_task_persisted_state{application=\"iqc-platform\",mode=\"PRODUCTION\"})",
+    "taskCompletionTps": "max by (status) (iqc_task_execution_completed_window{application=\"iqc-platform\",mode=\"PRODUCTION\"}) / 300",
+    "unmeasuredExecutions": "max by (status) (iqc_task_execution_unmeasured{application=\"iqc-platform\",mode=\"PRODUCTION\"})",
+    "taskMetricsHealth": "min(iqc_task_metrics_sample_success{application=\"iqc-platform\"})",
+    "taskMetricsAge": "max(iqc_task_metrics_sample_age_seconds{application=\"iqc-platform\"})"
+  }
+}
