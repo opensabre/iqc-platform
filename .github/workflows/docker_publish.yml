@@ -23,6 +23,30 @@ jobs:
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
       service: iqc-platform
 
+  monitoring-queries:
+    name: Fixed IQC PromQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7.0.1
+      - name: Validate fixed monitoring queries
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --interactive --network none \
+            --entrypoint /bin/promtool prom/prometheus:v3.13.3 \
+            test rules /dev/stdin \
+            < docs/validation/iqc-monitoring-promql.json 2>&1 | tee promql-validation.log
+      - name: Upload monitoring query result
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: iqc-promql-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: promql-validation.log
+          if-no-files-found: warn
+          retention-days: 14
+
   test:
     name: Maven Verify
     runs-on: ubuntu-latest
@@ -103,7 +127,7 @@ jobs:
   build-and-push:
     name: Build and Push Image
     if: github.event_name == 'push'
-    needs: [test, database-migrations]
+    needs: [test, database-migrations, monitoring-queries]
     runs-on: ubuntu-latest
     env:
       REGISTRY_URL: "ccr.ccs.tencentyun.com/opensabre"
