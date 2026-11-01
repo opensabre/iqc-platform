@@ -24,3 +24,11 @@ Preserve the failed database before diagnosis. Obtain the actual failing 1000-ID
 After sufficient storage is available, retain the full million conversations and messages, 1000-input page size, original publication/materialization/recovery paths and all early/middle/tail crash assertions. Run the final uniqueness, frozen-body and hash assertions. Stage RSS samples are not peak memory, P95 latency or an SLO result.
 
 The test directly invokes original materialization service pages and uses original worker recovery ticks. It does not prove full million-task execution, two-worker mixed load, production PDP/provider behavior or complete PRD delivery. See [the capacity protocol](iqc-million-capacity-validation-protocol.md) for those separate gates.
+
+## Preserved-database target lookup diagnosis
+
+After the failed test and normal server shutdown, the retained dedicated database was started with `super_read_only` for diagnosis, then shut down again. No fixture seeding or materialization was repeated. The final checkpoint was 304,000 scanned / 303,999 selected, with 304 committed children and `scanComplete=false`; middle/tail crash and final completeness remain unproven.
+
+The next ID page contains exactly 1,000 targets, `million0303999` through `million0304998`. The original error-log SQL was rebound with these IDs and the original owner/group/status scope. `EXPLAIN FORMAT=JSON` on the preserved database reports `PRIMARY` / `range`, 1,000 estimated rows examined per scan, and `using_filesort=true`. See [the full diagnostic artifact](validation/iqc-million-failed-target-plan-20261101.json), including the original SQL and target hashes, indexes and checkpoint.
+
+This is a fresh EXPLAIN after restart, not a captured plan or temporary-file measurement at the time of failure. It provides no evidence of a current full-table target lookup or unbounded page. The actual errno 28 failure remains a capacity problem requiring sufficient disk and peak-space observation; no index hint, permission, ordering or limit change is justified by this evidence alone. At diagnosis, the retained data directory occupied 2,298,604KiB and free space was 1,130,045,440 bytes. These values are not peak-space requirements or proof that a rerun would fit.
