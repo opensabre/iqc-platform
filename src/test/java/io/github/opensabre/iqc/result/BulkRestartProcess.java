@@ -23,7 +23,7 @@ final class BulkRestartProcess implements AutoCloseable {
         String agent = Path.of(System.getProperty("user.home"), ".m2", "repository", "net", "bytebuddy",
                 "byte-buddy-agent", "1.18.10", "byte-buddy-agent-1.18.10.jar").toString();
         process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                "-javaagent:" + agent, "-Diqc.test.worker-schema="+IsolatedMysqlTaskExecutionStateIT.SCHEMA, "-cp", classpath, Main.class.getName(), command, parentId, executionId)
+                "-Xmx1024m", "-javaagent:" + agent, "-Diqc.test.worker-schema="+IsolatedMysqlTaskExecutionStateIT.SCHEMA, "-cp", classpath, Main.class.getName(), command, parentId, executionId)
                 .redirectErrorStream(true).start();
         output = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
     }
@@ -95,6 +95,21 @@ final class BulkRestartProcess implements AutoCloseable {
         } finally {pool.shutdown();}
     }
 
+    /** Stops after child writes but before the parent checkpoint; killing this JVM must roll back both. */
+    @org.apache.ibatis.plugin.Intercepts(@org.apache.ibatis.plugin.Signature(type=org.apache.ibatis.executor.Executor.class,
+            method="update",args={org.apache.ibatis.mapping.MappedStatement.class,Object.class}))
+    public static final class BeforeCheckpoint implements org.apache.ibatis.plugin.Interceptor {
+        @Override public Object intercept(org.apache.ibatis.plugin.Invocation invocation) throws Throwable {
+            var statement=(org.apache.ibatis.mapping.MappedStatement)invocation.getArgs()[0];
+            var sql=statement.getBoundSql(invocation.getArgs()[1]).getSql();
+            if(sql.contains("bulk_progress_json") && sql.stripLeading().startsWith("UPDATE")) {
+                System.out.println("BEFORE_CHECKPOINT:"+ProcessHandle.current().pid());System.out.flush();
+                System.in.read();
+            }
+            return invocation.proceed();
+        }
+    }
+
     /** Each invocation loads new production transaction proxies and database connections. */
     public static final class Main {
         public static void main(String[] args) throws Exception {
@@ -112,6 +127,22 @@ final class BulkRestartProcess implements AutoCloseable {
                 } else if ("recover-tick".equals(args[0])) {
                     discoverWithRealWorker(child,args[1],args[2]);
                     System.out.println("RESUMED:" + ProcessHandle.current().pid()); System.out.flush();
+                } else if (args[0].startsWith("materialize")) {
+                    io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(
+                            java.util.Map.of("user_name","annotator","user_id","user-annotator"));
+                    // The same production transaction proxy freezes each page. SQL is the restart handoff.
+                    if (args[0].equals("materialize-uncommitted")) {
+                        child.getBean(org.apache.ibatis.session.SqlSessionFactory.class).getConfiguration()
+                                .addInterceptor(new BeforeCheckpoint());
+                    }
+                    var materializer=child.getBean(io.github.opensabre.iqc.task.BulkTaskMaterializationService.class);
+                    while (true) {
+                        var step=materializer.materializeNext(args[1],args[2]);
+                        System.out.println("MATERIALIZED:"+step.progress().nextShardNo()+":"+step.progress().selectedConversations()+":"+step.progress().scanComplete());
+                        System.out.flush();
+                        if(step.progress().scanComplete())break;
+                        if(System.in.read()<0)throw new IllegalStateException("Materialization barrier was closed");
+                    }
                 } else throw new IllegalArgumentException("Unknown isolated command");
             }
         }
