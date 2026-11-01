@@ -48,3 +48,10 @@ ssh root@opensabre 'docker exec -i opensabre-prometheus /bin/promtool test rules
 仅stdin传夹具给既有容器中的真实PromQL引擎，不写服务器规则、文件、配置，不执行部署或业务SQL。受控输入通过不证明候选应用实际scrape、PDP/Feign授权、真实provider或容量SLO；这些仍须按完整PRD独立验收。
 
 本轮版本读取原19618 exit0：promtool 3.13.3，revision `b273ae3adeb64ad630d65ef7f16440df95658410`，linux/amd64。夹具SHA-256：`a6910adbfd930766d84679e48a35f0a74650f4ab1b60d4be44634f614949b77f`。
+
+
+## 持续验证入口
+
+原 `.github/workflows/docker_publish.yml` 新增独立 `Fixed IQC PromQL` job，使用与上述实际引擎相同的 `prom/prometheus:v3.13.3` 一次性运行原夹具，不启动监控服务或挂载服务器目录。`pipefail` 保留pull/解析/断言的失败退出码，原输出以artifact保留14天；不使用continue-on-error或自动重试。既有发布镜像job依赖此校验，PR仍不发布镜像。
+
+本地完成YAML/job结构、原53断言夹具一致性与Bash语法检查；新Docker执行方式及GitHub job须由此固定提交的实际自动CI证明，不以之前SSH容器内SUCCESS替代。实际scrape/PDP/provider/容量缺口不受此自动化入口改变。
