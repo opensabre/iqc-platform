@@ -123,13 +123,24 @@ public class QualityOperationsService {
     }
 
     public List<QualitySample> samples(String type, String status) {
+        return sampleMapper.selectList(sampleQuery(type, status));
+    }
+
+    public io.github.opensabre.iqc.shared.IqcPage<QualitySample> samples(String type, String status, long current, long size) {
+        if (current < 1 || current > Integer.MAX_VALUE || size < 1 || size > 100)
+            throw IqcException.invalidArgument("样本分页要求页码为1–2147483647、每页1–100条");
+        return io.github.opensabre.iqc.shared.IqcPage.from(sampleMapper.selectPage(
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(current, size), sampleQuery(type, status)));
+    }
+
+    private com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<QualitySample> sampleQuery(String type, String status) {
         var query = Wrappers.<QualitySample>lambdaQuery().eq(type != null && !type.isBlank(), QualitySample::getSampleType, upper(type))
                 .eq(status != null && !status.isBlank(), QualitySample::getStatus, upper(status))
                 .select(QualitySample.class, field -> !"goldDraftJson".equals(field.getProperty()))
-                .orderByDesc(QualitySample::getCreatedTime);
+                .orderByDesc(QualitySample::getCreatedTime).orderByAsc(QualitySample::getId);
         if (!dataScope.canViewAll()) query.and(q -> q.eq(QualitySample::getCreatedBy, dataScope.owner())
                 .or(dataScope.groupId() != null, nested -> nested.eq(QualitySample::getOwnerGroupId, dataScope.groupId())));
-        return sampleMapper.selectList(query);
+        return query;
     }
 
     /** Review-backed indicators; unreviewed AI output is not treated as ground truth. */
