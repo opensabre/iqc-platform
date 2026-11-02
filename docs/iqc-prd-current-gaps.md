@@ -1,6 +1,6 @@
-# 当前实施与验收缺口（2026-11-01）
+# 当前实施与验收缺口（2026-11-02）
 
-当前来源支持后端组合为 PR32 固定 `b751ed36f3a3e2c34808a17e4291a70c4afeda0e`，前端完整回归组合为 PR61 固定 `de81769ebaa5db47eb4e1dcb168dd441b29654b3`，两者自动 CI 均成功。容量修复组合 PR36 固定 `f09c8b7afb3faf62740f9e4e4ba922db09760260` 的常规测试和 Flyway 已通过，但 SQL 步骤在镜像拉取时失败，未运行 SQL；后续 PR37 固定 c8fcc65 的 CI41273958885 已实际通过 1933 常规测试、隔离 SQL 11 项及 Flyway；两次运行结论分开保留。以下区分源码交付、独立专项、同头组合 CI 与真实运行验收；分支组合不代表已合并到 main 或部署。历史阶段记录仍可在 Git 中追溯。
+当前后端候选为 PR52 固定 `f2043f213cef0f35b9dd36390f8bdd0055af9d41`，前端候选为 PR66 固定 `5ebdc3b8a4f4642395c342bedd0700a1134bb01c`。后端 PR48 的常规1936项、真实SQL13项、PromQL/Flyway均通过，后继同生产源码的PR50完整CI亦成功；PR52新增分页SQL自动门禁仍待本头终态。前端PR66同头74文件1055项、类型与生产构建通过。分支交付和CI不代表main已合并、已部署或真实职责/外部集成验收完成。原失败历史保留。
 
 范围保持正式 PRD V1.0 的全部适用 I1–I7：输入为已处理好的会话；排除实时语音、ASR/转写生成、音频解码与说话人分离生成，保留业务完成事件/API、消息时间及业务证据。单租户部署，沿用既有 owner/group/all 组织数据范围，不建设第二套租户或 RBAC 模型。完整目标仍在进行。
 
@@ -14,7 +14,7 @@
 | 模型引用真实性 | 过滤前显式引用计数、最后轨迹聚合及报告/UI 已实现；有引擎与受控模型/SQL 专项，见[引用真实性](iqc-llm-citation-grounding.md) | 广义语义幻觉、真实供应商错误引用到 SQL 的完整链；不以引用合法或 Finding F1 推导幻觉率 |
 | 模型一致性 | 精确模型/声明部署身份、冻结输入及受控 Provider→worker→SQL→报告路径已有实现与专项，见[模型一致性](iqc-model-consistency.md) | 供应商不可变部署真实性、真实网关账本与角色网络链；缺部署仍必须保留分母并排除比较 |
 | 自动候选挖掘 v2 | 原 ADD_TO_EVALUATION_CANDIDATE 的版本2、MinedCandidateSelection/Lineage/Service 已实现；沿 QualitySample 保存 UNCLASSIFIED/CANDIDATE/UNLABELLED，不自动裁决误报/漏报或批准 Gold | 真实调度身份/PDP、实际配置启用及完整页面链；动作默认关闭不等于已实际自动挖掘 |
-| 批次执行 | 原持久分片、恢复/停止/清理及跨 JVM 专项保持；[PR24 百万扫描报告](https://github.com/opensabre/iqc-platform/blob/bbec6e016ff23a3381dcaa5f0870905bb7ff9298/docs/iqc-million-selector-scan-validation.md)已有百万条合成元数据、owner/group/all/长零匹配尾段四轮生产扫描，各 1001 页，真实 SQL/参数/计划及完整计数证据 | 百万消息正文已在首轮实际写入，但首片物化因 TEXT 容量失败；修复后原专项仍在运行。实际分片物化、早中后强杀恢复、两个完整 worker 与普通任务混合负载、完整执行及真实吞吐/资源/成本/SLO；受控元数据扫描不等于完整容量验收，也不能再说当前证据仅两万夹具 |
+| 批次执行 | 原持久分片、恢复/停止/清理及跨 JVM 专项保持；[PR24 百万扫描报告](https://github.com/opensabre/iqc-platform/blob/bbec6e016ff23a3381dcaa5f0870905bb7ff9298/docs/iqc-million-selector-scan-validation.md)已有百万条合成元数据、owner/group/all/长零匹配尾段四轮生产扫描，各 1001 页，真实 SQL/参数/计划及完整计数证据 | 百万消息正文已实际写入；首轮TEXT容量失败修复后，第二轮在约30万会话处因磁盘临时文件耗尽终止。百万专项按用户要求暂缓，未称通过。实际分片物化、早中后强杀恢复、两个完整 worker 与普通任务混合负载、完整执行及真实吞吐/资源/成本/SLO；受控元数据扫描不等于完整容量验收，也不能再说当前证据仅两万夹具 |
 | 资源注册与精确授权码 | 原 Controller/组织模型内已拆分冲突端点；实际 42 Controller/242 映射、91 固定契约、50 精确拒绝及原始映射完整性已有专项，见[全 Controller 验证](iqc-prd-b-all-controller-permission-validation.md) | 实际条件 Bean、组织资源 upsert、五类职责登录、成功写与跨服务撤权；不能以唯一权限码或按钮显隐替代真实授权 |
 
 标签指标复核入口：[LabelEvaluationMetrics](../src/main/java/io/github/opensabre/iqc/quality/evaluation/LabelEvaluationMetrics.java)、[PipelineEvaluationService](../src/main/java/io/github/opensabre/iqc/quality/evaluation/PipelineEvaluationService.java)、[原 SQL 发布/评测场景](../src/test/java/io/github/opensabre/iqc/result/IsolatedMysqlMeasuredPublicationIT.java)。本次只读取既有源码和报告，未新增或执行测试。
@@ -30,6 +30,13 @@
 百万物化、强杀恢复、完整执行及对应容量/SLO 专项暂缓，保留既有成功阶段、失败证据及恢复归档，不作为当前功能建设的阻塞门禁，也不标为通过。功能开发继续保留普通回归、合法输入边界、组织权限和历史兼容要求；每个小特性及时独立 PR。
 
 当前先接入 [PR39 的合法输入快照修复](iqc-rule-snapshot-envelope-validation.md)：保留 16MiB 输入 guard，将原 rule_snapshot_json 扩为 LONGTEXT，以容纳输入之外的原任务外层。B 实际 SQL 两项通过，新装、1.1.78 升级及重复迁移已验证；当前完整后端组合的自动 CI 另行核对。随后继续按业务功能闭环核对剩余实现，真实环境联调与容量验收分开记录。
+
+## 当前功能增量与证据
+
+- 候选池及数据集选择器已增加分页、类型/状态筛选及跨页名称/精确ID查找，复用原接口/owner-group-all/隐私投影；旧数组及Java入口兼容。见[功能协议](iqc-candidate-pagination.md)。
+- 后端控制器4项及真实MockMvc绑定3项分别交付PR49/50；PR51的真实MySQL1项验证过滤/total/稳定分页/空页，scope受控；PR52把该IT接入现有SQL门禁，本头CI尚待，不外推真实PDP。
+- 前端PR64修复原分页mock适配，PR65增加严格API协议14项，PR66补跨页搜索及请求代次；完整同头CI1055项通过，不外推浏览器与真实网关权限链。
+- 16MiB合法输入外层快照修复及退避夹具已接入PR48并实际执行SQL13项通过。固定等待替换为持久化期限等待，不改生产政策；不把此前未复现的取整假设当已证明根因。
 
 ## 下一阶段交付与验收
 
@@ -72,4 +79,4 @@ PRD27 的十条边界全部保留：Engine 不改最终分数/不直接建工单
 
 后端PR17及PR23–28在前次只读核查时仍open；此为历史状态，不把分支交付当远端合并。运行验收前置参见[当次现场只读快照](iqc-runtime-readonly-baseline-20261031.md)：候选与当次运行镜像/迁移不属同一快照，该历史观察不能代替最新候选部署或业务验收。本次不合并、不部署、不执行共享SQL，不切默认v2或动作开关。
 
-百万容量协议已有扫描切片实测；首轮实际百万会话及百万消息导入后，首个 1000 会话子任务因 selection_filter_json 的 TEXT 容量失败，尚未到强杀检查点。PR35 的 V1.1.78 将原两列扩为 MEDIUMTEXT NULL，三项独立 SQL 由红转绿，保留 8MiB/1000 契约及历史 null/中文。PR36 接入同一迁移与原回归并增加 CI 显式执行，其 SQL 因镜像拉取失败未执行，PR37 后续组合验证尚待；修复后的百万原专项固定 0149d32ff8ca9ee0bb670db944a8e415e62bcb90 正在运行，不能先称物化/恢复通过。完整执行及资源/成本测量继续，邻近 rule_snapshot_json 与 16MiB 输入包边界仍需单独证明。来源支持报告不自动成为Gold真值或完整幻觉率。上述新增证据没有缩减全部适用I1–I7、A–E和十条边界。
+百万容量协议已有扫描切片实测；首轮实际百万会话及百万消息导入后，首个 1000 会话子任务因 selection_filter_json 的 TEXT 容量失败，尚未到强杀检查点。PR35 的 V1.1.78 将原两列扩为 MEDIUMTEXT NULL，三项独立 SQL 由红转绿，保留 8MiB/1000 契约及历史 null/中文。PR36 接入同一迁移与原回归并增加 CI 显式执行，其 SQL 因镜像拉取失败未执行，后续PR37及PR48已有实际组合SQL成功。修复后的百万原专项固定0149d32在未提交回滚及早段恢复后因磁盘errno28终止，未完成中尾与最终完整性；原数据库已完整校验归档，百万专项暂缓。完整执行及资源/成本测量继续，邻近 rule_snapshot_json 与16MiB输入包的合法边界已由PR39修复并在PR48实际回归通过。来源支持报告不自动成为Gold真值或完整幻觉率。上述新增证据没有缩减全部适用I1–I7、A–E和十条边界。
