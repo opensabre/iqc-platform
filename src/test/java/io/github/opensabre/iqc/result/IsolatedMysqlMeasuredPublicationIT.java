@@ -1135,7 +1135,15 @@ class IsolatedMysqlMeasuredPublicationIT {
             when(scope.asScheduledActor(any(),any())).thenAnswer(call -> ((java.util.function.Supplier<?>)call.getArgument(1)).get());
             io.github.opensabre.common.core.util.UserContextHolder.getInstance().setContext(Map.of());
             try {
-                Thread.sleep(1100); // Real one-second policy backoff, without rewriting failure timestamps.
+                // Match the dispatcher's persisted deadline, including DATETIME precision, without changing evidence.
+                var failedExecution=context.getBean(SqlSessionTemplate.class).getMapper(TaskExecutionMapper.class).selectById(firstChildEid);
+                Instant retryAt=failedExecution.getUpdatedTime().toInstant().plusSeconds(1);
+                Instant deadline=Instant.now().plusSeconds(3);
+                assertFalse(retryAt.isAfter(deadline),"Persisted retry deadline unexpectedly far ahead: "+retryAt);
+                while(Instant.now().isBefore(retryAt)) {
+                    assertTrue(Instant.now().isBefore(deadline),"Timed out waiting for persisted retry deadline: "+retryAt);
+                    Thread.sleep(10);
+                }
                 new io.github.opensabre.iqc.task.retry.AutomaticRetryDispatcher(retries,actors,scope,
                         context.getBean(io.github.opensabre.iqc.schedule.TriggerAttemptService.class)).tick();
                 retry=mapper.selectById(childId);assertEquals("QUEUED",retry.getStatus(),retry.getRetryError());
