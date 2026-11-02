@@ -112,7 +112,7 @@ jobs:
             sleep 2
           done
           [[ "$ready" == 1 ]] || { echo "Disposable MySQL identity/readiness check failed" >&2; exit 1; }
-          mvn --batch-mode --no-transfer-progress -Dtest=IsolatedMysqlSelectorShardIT,IsolatedMysqlClaimSourceSupportIT,IsolatedMysqlTaskSnapshotCapacityIT,IsolatedMysqlRuleSnapshotEnvelopeIT test
+          mvn --batch-mode --no-transfer-progress -Dtest=IsolatedMysqlSelectorShardIT,IsolatedMysqlClaimSourceSupportIT,IsolatedMysqlTaskSnapshotCapacityIT,IsolatedMysqlRuleSnapshotEnvelopeIT,IsolatedMysqlCandidatePaginationIT test
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v7.0.1
