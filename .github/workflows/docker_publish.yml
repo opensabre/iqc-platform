@@ -122,7 +122,7 @@ jobs:
             --publish 127.0.0.1:35672:5672 rabbitmq:4.1
           broker_ready=0
           for attempt in {1..60}; do
-            if docker exec "$rabbit_container" rabbitmq-diagnostics -q check_port_connectivity; then
+            if docker exec --user rabbitmq "$rabbit_container" rabbitmq-diagnostics -q check_port_connectivity; then
               broker_ready=1
               break
             fi
