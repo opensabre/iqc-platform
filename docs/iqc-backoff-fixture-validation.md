@@ -1,0 +1,9 @@
+# Measured-publication retry fixture deadline
+
+The PR43/44/45 disposable-MySQL runs reached the original `WAITING_BACKOFF` assertion before the envelope assertions. Ordinary tests passed; those SQL runs remain failed evidence.
+
+The shared fixture previously slept 1,100ms from its current position. Production derives eligibility from the mapped execution `updated_time` plus the one-second policy. The fixture now waits for that same persisted deadline, with a three-second upper bound and 10ms checks. It does not rewrite timestamps, relax the policy, retry the dispatcher, or remove any queue, generation, frozen snapshot, result or trigger-ledger assertions. Unexpected deadlines fail explicitly rather than hiding a timezone error. Production and migrations are unchanged.
+
+Two independent local diagnostic runs on MySQL 8.0.34 with Java 21/UTC completed successfully (the first envelope report: two tests, 133.8s). The first observed mapped failure 04:57:37Z and current time 04:57:37.033841Z; the second observed mapped 05:02:42Z and current time 05:02:44.927573Z. The second aligned execution after the half-second boundary, but its already-queued execution timestamp preceded that alignment. Neither run reproduced the CI failure or establishes its exact timing cause. Temporary sampling and alignment have been removed.
+
+Fixed-source SQL verification: original session 6698 exited 0 against a new isolated MySQL 8.0.34 (`/private/tmp/iqc-mysql-validation.ZmVFo1`), Java 21/UTC. Both envelope tests passed: 2 tests, 0 failures/errors/skips, 171.2s. Actual accepted input 16,777,200 bytes, task envelope 16,779,560 bytes, 512 messages; oversized input rejected. Upgrade and second-migrate checks passed. Log: `/tmp/iqc-b-backoff-fixed-20261102.log`. Remote CI: pending. The final regression must exercise the real shared measured-publication path and both envelope tests; a green ordinary suite alone is insufficient.
