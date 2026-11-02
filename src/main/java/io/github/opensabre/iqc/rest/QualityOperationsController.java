@@ -198,13 +198,18 @@ public class QualityOperationsController {
     @ResourcePermission(code="iqc:sample:view", name="查看质检样本", type="iqc", description="查询质检样本库")
     @Audit(operationType=OperationType.QUERY, description="读取 IQC 样本列表", module="IQC_PRIVACY", request=false, response=false)
     public Object samples(@RequestParam(required=false) String type, @RequestParam(required=false) String status,
-                          @RequestParam(required=false) Long current, @RequestParam(required=false) Long size) {
-        if (current == null && size == null) return samples(type, status);
+                          @RequestParam(required=false) Long current, @RequestParam(required=false) Long size,
+                          @RequestParam(required=false) String keyword) {
+        if (current == null && size == null && keyword == null) return samples(type, status);
         var access = responseAccess("iqc:sample:view");
         if (current == null || size == null) throw IqcException.invalidArgument("样本分页必须同时提供current和size");
-        var page = service.samples(type, status, current, size);
+        var page = service.samples(type, status, current, size, keyword);
         return new io.github.opensabre.iqc.shared.IqcPage<>(resultProjection.samples(page.records(), access),
                 page.current(), page.size(), page.total());
+    }
+
+    public Object samples(String type, String status, Long current, Long size) {
+        return samples(type, status, current, size, null);
     }
 
     /** Original direct-call and unpaged HTTP contract. */

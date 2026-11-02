@@ -127,19 +127,32 @@ public class QualityOperationsService {
     }
 
     public io.github.opensabre.iqc.shared.IqcPage<QualitySample> samples(String type, String status, long current, long size) {
+        return samples(type, status, current, size, null);
+    }
+
+    public io.github.opensabre.iqc.shared.IqcPage<QualitySample> samples(String type, String status, long current, long size, String keyword) {
         if (current < 1 || current > Integer.MAX_VALUE || size < 1 || size > 100)
             throw IqcException.invalidArgument("样本分页要求页码为1–2147483647、每页1–100条");
+        if (keyword != null && keyword.length() > 128) throw IqcException.invalidArgument("样本查找关键词最多128字");
         return io.github.opensabre.iqc.shared.IqcPage.from(sampleMapper.selectPage(
-                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(current, size), sampleQuery(type, status)));
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(current, size), sampleQuery(type, status, keyword)));
     }
 
     private com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<QualitySample> sampleQuery(String type, String status) {
+        return sampleQuery(type, status, null);
+    }
+
+    private com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<QualitySample> sampleQuery(String type, String status, String keyword) {
         var query = Wrappers.<QualitySample>lambdaQuery().eq(type != null && !type.isBlank(), QualitySample::getSampleType, upper(type))
                 .eq(status != null && !status.isBlank(), QualitySample::getStatus, upper(status))
                 .select(QualitySample.class, field -> !"goldDraftJson".equals(field.getProperty()))
                 .orderByDesc(QualitySample::getCreatedTime).orderByAsc(QualitySample::getId);
         if (!dataScope.canViewAll()) query.and(q -> q.eq(QualitySample::getCreatedBy, dataScope.owner())
                 .or(dataScope.groupId() != null, nested -> nested.eq(QualitySample::getOwnerGroupId, dataScope.groupId())));
+        if (keyword != null && !keyword.isBlank()) {
+            String term = keyword.strip();
+            query.and(q -> q.like(QualitySample::getName, term).or().eq(QualitySample::getId, term));
+        }
         return query;
     }
 
