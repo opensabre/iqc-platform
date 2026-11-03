@@ -101,3 +101,18 @@ rejected 指标等待处理结束，停止容器后确认主队列为空，随�
 
 当前组织授权与发布资产仍为受控夹具，目标输入尚不存在。本轮证明注解发现、配置绑定、
 原消息转换/人工 ACK 与数据库接收能联合工作，不证明实际 PDP、目标物化/worker 或供应商链路。
+
+### 自动隔离回归门禁（2026-11-02）
+
+原 Maven CI 的隔离 SQL 步骤追加 RabbitTriggerBrokerIT 和
+IsolatedMysqlBrokerAcceptanceIT；显式设置 IQC_RABBIT_VALIDATION_PORT=35672，
+避免 broker 用例因未开启条件而跳过。沿用原 MySQL datadir/端口身份校验，
+新增每次 run/attempt 独立的 RabbitMQ 4.1 容器，只绑定 runner 的
+127.0.0.1:35672，等待 broker 端口检查成功后执行原测试。专用临时容器
+允许测试 guest 从宿主桥接连接，不使用生产凭据；EXIT 无论成功失败均
+输出两服务日志并删除其容器与临时卷。
+
+本改动不新增测试实现、不改变应用默认开关，也不执行百万容量专项。
+本地仅校验 YAML 与提取后 Bash 语法；自动联合测试结果以本提交 CI 为准，
+不能用历史实跑代替。组织授权、资产仍是受控边界，实际 PDP、目标物化、
+worker 和供应商整链继续单独验收。

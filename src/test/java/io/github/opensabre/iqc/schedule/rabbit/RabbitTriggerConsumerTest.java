@@ -50,4 +50,33 @@ class RabbitTriggerConsumerTest {
     @Test void malformedUtf8AndOversizeBodyNeverReachJsonParser() throws Exception {consumer.receive(message(new byte[]{(byte)0xc3,0x28}),channel);consumer.receive(message(new byte[16*1024*1024+1]),channel);verifyNoInteractions(triggers,actors);verify(channel,times(2)).basicReject(7,false);}
     @Test void userContextCannotBeBorrowedByBackgroundConsumer() throws Exception {UserContextHolder.getInstance().setContext(Map.of("user_name","interactive","user_id","interactive-id"));deliver(payload());verifyNoInteractions(triggers,actors);verify(channel).basicReject(7,false);assertThat(UserContextHolder.getInstance().getUsername()).isEqualTo("interactive");}
     @Test void lostAcknowledgementPropagatesWithoutRejectingCommittedAcceptance() throws Exception {doThrow(new java.io.IOException("ack lost")).when(channel).basicAck(7,false);assertThatThrownBy(()->deliver(payload())).isInstanceOf(java.io.IOException.class);verify(triggers).receiveFromBroker(any(),any(),any());verify(channel,never()).basicReject(anyLong(),anyBoolean());assertThat(scope.owner()).isEqualTo("system");}
+    /** Rollout events must use the deployment allowlist and request their extra current grant. */
+    @Test void rolloutUsesUnifiedTargetAndRequiresCurrentRolloutGrant() throws Exception {
+        String body=payload().replace("iqc-task-trigger-v1","iqc-task-rollout-trigger-v1")
+                .replace("\"pipeline\":{\"pipelineId\":\"pipeline\",\"versionNo\":1}","\"rollout\":{\"pipelineId\":\"pipeline\"}");
+        Set<String> grants=Set.of("iqc:pipeline:task:create","iqc:task:execute","iqc:trigger:receive","iqc:pipeline:rollout:task:create");
+        when(actors.resolve(eq(properties.bound()),eq(grants))).thenReturn(new ScheduledActorAccessService.Resolved(
+                "owner-id","owner",false,"group",Set.of(),grants,Instant.now()));
+        deliver(body);
+        verify(actors).resolve(eq(properties.bound()),eq(grants));
+        verify(triggers).receiveFromBroker(argThat(r->r.usesRollout() && r.pipeline()==null && r.targetPipelineId().equals("pipeline")),eq(properties.bound()),any());
+        verify(channel).basicAck(7,false);
+        reset(channel);clearInvocations(actors,triggers);
+        deliver(body.replace("\"pipelineId\":\"pipeline\"","\"pipelineId\":\"foreign\""));
+        verifyNoInteractions(actors);verify(triggers,never()).receiveFromBroker(any(),any(),any());
+        verify(channel).basicReject(7,false);verify(channel,never()).basicAck(anyLong(),anyBoolean());
+        assertThat(scope.owner()).isEqualTo("system");
+    }
+    @Test void revokedRolloutGrantPreventsAcceptanceAndAcknowledgement() throws Exception {
+        String body=payload().replace("iqc-task-trigger-v1","iqc-task-rollout-trigger-v1")
+                .replace("\"pipeline\":{\"pipelineId\":\"pipeline\",\"versionNo\":1}","\"rollout\":{\"pipelineId\":\"pipeline\"}");
+        when(actors.resolve(any(),argThat(g->g!=null && g.contains("iqc:pipeline:rollout:task:create"))))
+                .thenThrow(new IllegalStateException("rollout grant revoked"));
+        deliver(body);
+        verify(actors).resolve(eq(properties.bound()),argThat(g->g.contains("iqc:pipeline:rollout:task:create")));
+        verify(triggers,never()).receiveFromBroker(any(),any(),any());
+        verify(channel).basicReject(7,false);verify(channel,never()).basicAck(anyLong(),anyBoolean());
+        assertThat(scope.owner()).isEqualTo("system");
+    }
+
 }

@@ -82,15 +82,19 @@ jobs:
         run: mvn --batch-mode --no-transfer-progress -f opensabre-framework/pom.xml -DskipTests install
       - name: Run tests
         run: mvn --batch-mode --no-transfer-progress verify
-      - name: Run existing selector, claim and task capacity SQL tests in disposable MySQL
+      - name: Run SQL and Rabbit acceptance tests in disposable services
         timeout-minutes: 10
         shell: bash
         env:
+          IQC_RABBIT_VALIDATION_PORT: "35672"
           IQC_MYSQL_VALIDATION_DIR: /private/tmp/iqc-mysql-validation.ci-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
           mysql_container="iqc-selector-sql-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rabbit_container="iqc-broker-sql-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup() {
+            docker logs "$rabbit_container" || true
+            docker rm -fv "$rabbit_container" || true
             docker logs "$mysql_container" || true
             docker rm -fv "$mysql_container" || true
           }
@@ -112,7 +116,20 @@ jobs:
             sleep 2
           done
           [[ "$ready" == 1 ]] || { echo "Disposable MySQL identity/readiness check failed" >&2; exit 1; }
-          mvn --batch-mode --no-transfer-progress -Dtest=IsolatedMysqlSelectorShardIT,IsolatedMysqlClaimSourceSupportIT,IsolatedMysqlTaskSnapshotCapacityIT,IsolatedMysqlRuleSnapshotEnvelopeIT,IsolatedMysqlCandidatePaginationIT test
+          docker run --detach --name "$rabbit_container" \
+            --label opensabre.validation=iqc-broker-sql \
+            --env RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS="-rabbit loopback_users []" \
+            --publish 127.0.0.1:35672:5672 rabbitmq:4.1
+          broker_ready=0
+          for attempt in {1..60}; do
+            if docker exec --user rabbitmq "$rabbit_container" rabbitmq-diagnostics -q check_port_connectivity; then
+              broker_ready=1
+              break
+            fi
+            sleep 2
+          done
+          [[ "$broker_ready" == 1 ]] || { echo "Disposable RabbitMQ readiness check failed" >&2; exit 1; }
+          mvn --batch-mode --no-transfer-progress -Dtest=IsolatedMysqlSelectorShardIT,IsolatedMysqlClaimSourceSupportIT,IsolatedMysqlTaskSnapshotCapacityIT,IsolatedMysqlRuleSnapshotEnvelopeIT,IsolatedMysqlCandidatePaginationIT,IsolatedMysqlBrokerAcceptanceIT,RabbitTriggerBrokerIT test
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v7.0.1
