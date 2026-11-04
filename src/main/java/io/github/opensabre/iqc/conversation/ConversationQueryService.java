@@ -43,20 +43,84 @@ public class ConversationQueryService {
                                       String channel, String businessNo, String fileName,
                                       LocalDateTime startedFrom, LocalDateTime startedTo) {
         Page<Conversation> page = new Page<>(Math.max(1, current), Math.min(Math.max(1, size), 100));
-        var query = Wrappers.<Conversation>lambdaQuery().orderByDesc(Conversation::getCreatedTime);
-        query.eq(hasText(employeeId), Conversation::getEmployeeId, trim(employeeId))
-                .eq(hasText(customerExternalId), Conversation::getCustomerExternalId, trim(customerExternalId))
-                .eq(hasText(channel), Conversation::getChannel, normalizeChannel(channel))
-                .eq(hasText(businessNo), Conversation::getBusinessNo, trim(businessNo))
-                .like(hasText(fileName), Conversation::getSourceFileName, trim(fileName))
-                .ge(startedFrom != null, Conversation::getStartedTime, startedFrom)
-                .le(startedTo != null, Conversation::getStartedTime, startedTo);
-        if (!dataScope.canViewAll()) {
-            String groupId = dataScope.groupId();
-            query.and(q -> q.eq(Conversation::getCreatedBy, dataScope.owner())
-                    .or(groupId != null, nested -> nested.eq(Conversation::getOwnerGroupId, groupId)));
-        }
+        var query = filteredQuery(new io.github.opensabre.iqc.task.TaskDataSelection.Filter(
+                fileName, employeeId, customerExternalId, channel, businessNo, startedFrom, startedTo), false)
+                .orderByDesc(Conversation::getCreatedTime).orderByDesc(Conversation::getId);
         return IqcPage.from(conversationMapper.selectPage(page, query));
+    }
+
+    /** Previews data only: never creates a task, locks a final selection, or calls a detector. */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true,
+            isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public SelectionPreview preview(io.github.opensabre.iqc.task.TaskDataSelection selection, long current, long size) {
+        if (selection == null || selection.mode() == io.github.opensabre.iqc.task.TaskDataSelection.Mode.BATCH)
+            throw IqcException.invalidArgument("模拟执行请选择随机抽样或条件筛选");
+        if (selection.mode() == io.github.opensabre.iqc.task.TaskDataSelection.Mode.FILTER) {
+            Page<Conversation> page = new Page<>(Math.max(1, current), Math.min(Math.max(1, size), 100));
+            var query = filteredQuery(selection.filter(), true).orderByAsc(Conversation::getId);
+            conversationMapper.selectPage(page, query);
+            return new SelectionPreview(selection.mode().name(), page.getTotal(), page.getTotal(), null, IqcPage.from(page));
+        }
+        String seed = selection.sampleSeed() == null ? java.util.UUID.randomUUID().toString() : selection.sampleSeed();
+        // A bounded heap samples the entire authorized range, rather than the first query LIMIT.
+        var ranking = java.util.Comparator.<Conversation, String>comparing(row -> sampleKey(seed, row.getId()))
+                .thenComparing(Conversation::getId);
+        var sample = new java.util.PriorityQueue<Conversation>(selection.sampleSize(), ranking.reversed());
+        long total = 0;
+        String cursor = null;
+        // Resolve permission scope once per scan. All pages share the database's read-only snapshot.
+        boolean all = dataScope.canViewAll();
+        String owner = dataScope.owner(), group = dataScope.groupId();
+        while (true) {
+            var query = filteredQuery(selection.filter(), true, all, owner, group)
+                    .gt(cursor != null, Conversation::getId, cursor).orderByAsc(Conversation::getId).last("LIMIT 500");
+            List<Conversation> rows = conversationMapper.selectList(query);
+            for (Conversation row : rows) {
+                total++;
+                if (sample.size() < selection.sampleSize()) sample.add(row);
+                else if (ranking.compare(row, sample.peek()) < 0) { sample.poll(); sample.add(row); }
+            }
+            if (rows.size() < 500) break;
+            String next = rows.getLast().getId();
+            if (next.equals(cursor)) throw IqcException.invalidState("会话分页游标未前进");
+            cursor = next;
+        }
+        List<Conversation> records = sample.stream().sorted(ranking).toList();
+        // Return the complete (at most 1000) sample once: UI pagination cannot silently resample it.
+        return new SelectionPreview("RANDOM", total, records.size(), seed,
+                new IqcPage<>(records, 1, selection.sampleSize(), records.size()));
+    }
+
+    /** Counts are separate: matching population is not the number of sampled records. */
+    public record SelectionPreview(String mode, long matchedTotal, long selectedTotal, String sampleSeed,
+                                   IqcPage<Conversation> conversations) { }
+
+    private com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Conversation> filteredQuery(
+            io.github.opensabre.iqc.task.TaskDataSelection.Filter filter, boolean eligibleOnly) {
+        return filteredQuery(filter, eligibleOnly, dataScope.canViewAll(), dataScope.owner(), dataScope.groupId());
+    }
+
+    private com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Conversation> filteredQuery(
+            io.github.opensabre.iqc.task.TaskDataSelection.Filter filter, boolean eligibleOnly,
+            boolean all, String owner, String group) {
+        var query = Wrappers.<Conversation>lambdaQuery();
+        if (filter != null) query.like(filter.fileName() != null, Conversation::getSourceFileName, filter.fileName())
+                .eq(filter.employeeId() != null, Conversation::getEmployeeId, filter.employeeId())
+                .eq(filter.customerExternalId() != null, Conversation::getCustomerExternalId, filter.customerExternalId())
+                .eq(filter.channel() != null, Conversation::getChannel, filter.channel())
+                .eq(filter.businessNo() != null, Conversation::getBusinessNo, filter.businessNo())
+                .ge(filter.startedFrom() != null, Conversation::getStartedTime, filter.startedFrom())
+                .le(filter.startedTo() != null, Conversation::getStartedTime, filter.startedTo());
+        if (eligibleOnly) query.eq(Conversation::getStatus, "IMPORTED").gt(Conversation::getMessageCount, 0);
+        if (!all) query.and(q -> q.eq(Conversation::getCreatedBy, owner)
+                .or(group != null, nested -> nested.eq(Conversation::getOwnerGroupId, group)));
+        return query;
+    }
+
+    private String sampleKey(String seed, String id) {
+        try { return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest((seed + ":" + id).getBytes(java.nio.charset.StandardCharsets.UTF_8))); }
+        catch (java.security.NoSuchAlgorithmException exception) { throw new IllegalStateException(exception); }
     }
 
     private boolean hasText(String value) { return value != null && !value.isBlank(); }
