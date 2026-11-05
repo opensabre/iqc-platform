@@ -110,6 +110,7 @@ class JointLabelMaterializationTransactionTest {
     @Autowired private ConversationMessageMapper messages;
     @Autowired private ConversationMapper conversations;
     @Autowired private InspectionTaskService taskService;
+    @Autowired private InspectionExecutionService runtimeQueue;
     @Autowired private InspectionResultMapper observations;
     @Autowired private ConversationInspectionResultMapper canonicalResults;
     @Autowired private InspectionLabelResultMapper persistedLabels;
@@ -283,6 +284,45 @@ class JointLabelMaterializationTransactionTest {
     }
 
     @Test
+    void emptyRuntimeSelectionRollsBackTheRealQueueClaim() {
+        var task = runtimeSelectionTask("FILTER");
+        assertThatThrownBy(() -> runtimeQueue.queue(task.getId())).hasMessageContaining("NO_DATA");
+        var stored = taskMapper.selectById(task.getId());
+        assertThat(stored.getStatus()).isEqualTo("CREATED");
+        assertThat(stored.getCurrentExecutionId()).isNull();
+        assertThat(count("iqc_task_execution")).isZero();
+        assertThat(count("iqc_task_item")).isZero();
+    }
+
+    @Test
+    void runtimeSampleQueuesDataAddedAfterCreationAndPersistsItsActualList() {
+        var task = runtimeSelectionTask("RANDOM");
+        jdbc.update("INSERT INTO iqc_conversation (id,message_count,status,created_by) VALUES ('runtime-conversation',1,'IMPORTED','system')");
+        insertFixtureMessage("runtime-message", "runtime-conversation", 1, "customer", "退款进度");
+        var queued = runtimeQueue.queue(task.getId());
+        assertThat(queued.getStatus()).isEqualTo("QUEUED");
+        assertThat(queued.getTotalMessages()).isEqualTo(1);
+        var stored = taskMapper.selectById(task.getId());
+        assertThat(stored.getConversationIdsJson()).contains("runtime-conversation");
+        assertThat(stored.getSelectionFilterJson()).contains("runtimeSeed", "resolvedAt");
+        assertThat(count("iqc_task_execution")).isEqualTo(1);
+        assertThat(count("iqc_task_item")).isEqualTo(1);
+    }
+
+    private InspectionTask runtimeSelectionTask(String mode) {
+        var task = new InspectionTask();
+        task.setId("runtime-selection"); task.setName("执行时取数"); task.setTaskType("BATCH");
+        task.setStatus("CREATED"); task.setConversationIdsJson("[]"); task.setRuleSnapshotJson("[]");
+        task.setAttemptCount(0); task.setTotalMessages(0); task.setProcessedMessages(0); task.setFailedMessages(0);
+        task.setConcurrencyLimit(1);
+        task.setSelectionFilterJson("{\"schemaVersion\":\"iqc-data-selection-v1\",\"selection\":{\"mode\":\"" + mode
+                + "\"" + ("RANDOM".equals(mode) ? ",\"sampleSize\":100" : "") + "}}");
+        taskMapper.insert(task);
+        jdbc.update("UPDATE iqc_inspection_task SET created_by='system' WHERE id=?", task.getId());
+        return task;
+    }
+
+    @Test
     void materializesOneCanonicalResultAndDoesNotDuplicateItOnSameExecutionRetry() {
         var task = task();
         var first = results.materialize(task, "execution-1", snapshot(), List.of(message()), List.of(observation()));
@@ -354,7 +394,7 @@ class JointLabelMaterializationTransactionTest {
         var tasks = mock(InspectionTaskMapper.class);
         var llm = mock(io.github.opensabre.iqc.result.llm.LlmQualityProvider.class);
         when(tasks.selectById(task.getId())).thenReturn(task);
-        var execution = new InspectionExecutionService(tasks, mock(ConversationMapper.class), messages, observations,
+        var execution = new InspectionExecutionService(tasks, org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), messages, observations,
                 mapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class),
                 mock(io.github.opensabre.iqc.shared.IqcDataScope.class), llm, mock(UsageCounterRecorder.class),
                 results, mock(io.github.opensabre.iqc.label.LabelCandidateService.class),
@@ -755,7 +795,7 @@ class JointLabelMaterializationTransactionTest {
                 agents, agentVersions, mapper,
                 mock(io.github.opensabre.iqc.agent.AgentAssetReferenceValidator.class), schemeMapper,
                 labelResolver);
-        var service = new InspectionExecutionService(taskMapper, mock(ConversationMapper.class), messages, observations,
+        var service = new InspectionExecutionService(taskMapper, org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), messages, observations,
                 mapper, executionMapper, taskItemMapper, scope,
                 llm, mock(UsageCounterRecorder.class), results,
                 mock(io.github.opensabre.iqc.label.LabelCandidateService.class), dependencies);

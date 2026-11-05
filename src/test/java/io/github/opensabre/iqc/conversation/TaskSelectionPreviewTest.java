@@ -64,5 +64,15 @@ class TaskSelectionPreviewTest {
         verifyNoInteractions(mapper);
     }
 
+    @Test void runtimeFilterIncludesEveryPageRatherThanTruncatingAtBatchLimit() {
+        var first = new ArrayList<Conversation>(); var second = new ArrayList<Conversation>();
+        for (int i = 0; i < 500; i++) { first.add(row(String.format("%04d", i))); second.add(row(String.format("%04d", i + 500))); }
+        when(mapper.selectList(any())).thenReturn(first, second, List.of(row("1000")));
+        var rows = service.resolveForExecution(new TaskDataSelection(TaskDataSelection.Mode.FILTER, null, null, null, null));
+        assertThat(rows).hasSize(1001);
+        assertThat(rows.getLast().getId()).isEqualTo("1000");
+        verify(mapper, times(3)).selectList(any());
+    }
+
     private Conversation row(String id) { Conversation row = new Conversation(); row.setId(id); return row; }
 }

@@ -91,6 +91,27 @@ public class ConversationQueryService {
                 new IqcPage<>(records, 1, selection.sampleSize(), records.size()));
     }
 
+    /** Resolves all eligible input rows at execution, sharing the preview filter and random sampler. */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public List<Conversation> resolveForExecution(io.github.opensabre.iqc.task.TaskDataSelection selection) {
+        if (selection.mode() == io.github.opensabre.iqc.task.TaskDataSelection.Mode.RANDOM)
+            return preview(selection, 1, selection.sampleSize()).conversations().records();
+        if (selection.mode() != io.github.opensabre.iqc.task.TaskDataSelection.Mode.FILTER)
+            throw IqcException.invalidArgument("批量名单无需动态取数");
+        var selected = new java.util.ArrayList<Conversation>();
+        boolean all = dataScope.canViewAll(); String owner = dataScope.owner(), group = dataScope.groupId();
+        String cursor = null;
+        while (true) {
+            var rows = conversationMapper.selectList(filteredQuery(selection.filter(), true, all, owner, group)
+                    .gt(cursor != null, Conversation::getId, cursor).orderByAsc(Conversation::getId).last("LIMIT 500"));
+            selected.addAll(rows);
+            if (rows.size() < 500) return List.copyOf(selected);
+            String next = rows.getLast().getId();
+            if (next.equals(cursor)) throw IqcException.invalidState("会话分页游标未前进");
+            cursor = next;
+        }
+    }
+
     /** Counts are separate: matching population is not the number of sampled records. */
     public record SelectionPreview(String mode, long matchedTotal, long selectedTotal, String sampleSeed,
                                    IqcPage<Conversation> conversations) { }
