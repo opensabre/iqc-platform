@@ -51,6 +51,20 @@ public class InspectionTaskService {
                                            String agentId, String ruleSetId, List<String> ruleIds, Integer concurrency,
                                            LabelResolutionService.LabelSelection labels, LabelExecutionOptions options,
                                            String executionMode) {
+        return createConfigured(name, taskType, conversationIds, filter, scheduledTime, sampleSize, seed,
+                agentId, ruleSetId, ruleIds, concurrency, labels, options, executionMode, null);
+    }
+
+    /** New selection definitions are frozen at creation; dynamic inputs are resolved only at execution. */
+    @Transactional
+    public InspectionTask createConfigured(String name, String taskType, List<String> conversationIds,
+                                           ScheduledFilter filter, LocalDateTime scheduledTime, Integer sampleSize, String seed,
+                                           String agentId, String ruleSetId, List<String> ruleIds, Integer concurrency,
+                                           LabelResolutionService.LabelSelection labels, LabelExecutionOptions options,
+                                           String executionMode, TaskDataSelection selection) {
+        if (selection != null && (taskType != null || (conversationIds != null && !conversationIds.isEmpty()) || filter != null || scheduledTime != null
+                || sampleSize != null || seed != null || selection.sampleSeed() != null))
+            throw IqcException.invalidArgument("新数据选择不能同时指定旧取数参数或预览种子");
         LabelResolutionService.ResolvedSelection resolved = labels == null ? null : labelResolutionService.resolve(labels);
         List<String> effectiveRules = ruleIds;
         String effectiveSet = ruleSetId;
@@ -62,7 +76,28 @@ public class InspectionTaskService {
             effectiveSet = null;
         }
         InspectionTask task;
-        if ("SCHEDULED".equalsIgnoreCase(taskType))
+        if (selection != null) {
+            if (selection.mode() == TaskDataSelection.Mode.BATCH) {
+                task = createBatch(name, selection.conversationIds(), agentId, effectiveSet, effectiveRules, concurrency, executionMode);
+                for (String id : selection.conversationIds()) {
+                    Conversation conversation = conversationMapper.selectById(id);
+                    if (conversation == null || !"IMPORTED".equals(conversation.getStatus()) || conversation.getMessageCount() == null || conversation.getMessageCount() < 1)
+                        throw IqcException.invalidArgument("只能选择已处理且有消息的会话");
+                }
+            } else {
+                int workers = concurrency == null ? 1 : concurrency;
+                if (workers < 1 || workers > 32) throw IqcException.invalidArgument("并发数必须在 1 到 32 之间");
+                task = new InspectionTask();
+                task.setName(name == null || name.isBlank() ? "会话任务" : name.trim());
+                task.setTaskType("BATCH"); task.setConversationIdsJson("[]"); task.setConcurrencyLimit(workers);
+                snapshotAgentAndRules(task, agentId, effectiveSet, effectiveRules, executionMode);
+                task.setStatus("CREATED"); task.setTotalMessages(0); task.setProcessedMessages(0);
+                task.setFailedMessages(0); task.setAttemptCount(0); task.setOwnerGroupId(dataScope.groupId());
+                taskMapper.insert(task);
+            }
+            task.setSelectionFilterJson(writeSnapshot(Map.of("schemaVersion", "iqc-data-selection-v1", "selection", selection)));
+            taskMapper.updateById(task);
+        } else if ("SCHEDULED".equalsIgnoreCase(taskType))
             task = createScheduled(name, filter, scheduledTime, agentId, effectiveSet, effectiveRules, concurrency, executionMode);
         else if ("SAMPLE".equalsIgnoreCase(taskType))
             task = createSampled(name, filter, sampleSize == null ? 100 : sampleSize, seed, agentId, effectiveSet, effectiveRules, concurrency, executionMode);
