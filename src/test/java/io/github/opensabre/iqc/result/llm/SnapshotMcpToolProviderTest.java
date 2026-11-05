@@ -70,6 +70,18 @@ class SnapshotMcpToolProviderTest {
         verify(client, never()).initialize();
     }
 
+    @Test
+    void discoveryClosesConnectionEvenWhenToolListingFails() throws Exception {
+        McpSyncClient client = mock(McpSyncClient.class);
+        when(client.listTools()).thenThrow(new IllegalStateException("offline"));
+        var provider = new SnapshotMcpToolProvider(objectMapper, reference -> "token") {
+            @Override protected McpSyncClient createClient(JsonNode server) { return client; }
+        };
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> provider.discover(objectMapper.createObjectNode()))
+                .hasMessageContaining("offline");
+        verify(client).initialize(); verify(client).close();
+    }
+
     private JsonNode snapshot(String mode) throws Exception {
         return objectMapper.readTree("""
                 {"configJson":{"schemaVersion":"2.0","mode":"%s","assetSnapshots":{"mcpServers":[{

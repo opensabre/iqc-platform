@@ -91,7 +91,7 @@ public class QualityAgentService {
         QualityAgent agent = requireAgent(agentId);
         ensureNoOpenVersion(agentId);
         int next = versions(agentId).stream().map(QualityAgentVersion::getVersionNo).filter(java.util.Objects::nonNull).max(Integer::compareTo).orElse(0) + 1;
-        QualityAgentVersion version = new QualityAgentVersion(); version.setAgentId(agentId); version.setVersionNo(next); version.setName(normalize(name, agent.getName())); version.setCode(normalize(code, agent.getCode())); version.setDescription(description == null ? agent.getDescription() : description); version.setConfigJson(configJson == null ? agent.getConfigJson() : normalizeConfiguration(configJson)); version.setStatus("DRAFT"); versionMapper.insert(version);
+        QualityAgentVersion version = new QualityAgentVersion(); version.setAgentId(agentId); version.setVersionNo(next); version.setName(normalize(name, agent.getName())); version.setCode(normalize(code, agent.getCode())); version.setDescription(description == null ? agent.getDescription() : description); version.setConfigJson(normalizeConfiguration(configJson == null ? agent.getConfigJson() : configJson)); version.setStatus("DRAFT"); versionMapper.insert(version);
         agent.setStatus("DRAFT"); mapper.updateById(agent);
         return version;
     }
@@ -107,7 +107,7 @@ public class QualityAgentService {
         int next = versions(agentId).stream().map(QualityAgentVersion::getVersionNo).filter(java.util.Objects::nonNull).max(Integer::compareTo).orElse(0) + 1;
         QualityAgentVersion rollback = new QualityAgentVersion();
         rollback.setAgentId(agentId); rollback.setVersionNo(next); rollback.setName(source.getName()); rollback.setCode(source.getCode());
-        rollback.setDescription(source.getDescription()); rollback.setConfigJson(source.getConfigJson()); rollback.setStatus("DRAFT");
+        rollback.setDescription(source.getDescription()); rollback.setConfigJson(normalizeConfiguration(source.getConfigJson())); rollback.setStatus("DRAFT");
         versionMapper.insert(rollback);
         agent.setStatus("DRAFT"); mapper.updateById(agent);
         return rollback;
@@ -163,9 +163,11 @@ public class QualityAgentService {
         try {
             AgentConfiguration configuration = value == null || value.isBlank()
                     ? AgentConfiguration.defaults() : objectMapper.readValue(value, AgentConfiguration.class);
+            if (!AgentConfiguration.CAPABILITY_SCHEMA.equals(configuration.schemaVersion()))
+                throw IqcException.invalidArgument("新建智能体及新版本只支持纯大模型能力，请移除规则和执行模式配置");
             configuration = configuration.validated();
             assetReferenceValidator.validate(configuration);
-            return objectMapper.writeValueAsString(configuration);
+            return objectMapper.writeValueAsString(configuration.withSnapshots(null));
         } catch (IqcException exception) {
             throw exception;
         } catch (Exception exception) {

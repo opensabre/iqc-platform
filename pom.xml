@@ -20,6 +20,9 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <spring-ai.version>2.0.0</spring-ai.version>
+        <!-- Model clients load additional classes; reserve native memory within the 1 GiB container. -->
+        <jib.jvm.max-ram-percentage>45</jib.jvm.max-ram-percentage>
+        <jib.jvm.max-metaspace-size>256m</jib.jvm.max-metaspace-size>
     </properties>
 
     <dependencyManagement>

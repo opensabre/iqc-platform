@@ -59,6 +59,16 @@ public class SnapshotMcpToolProvider {
         }
     }
 
+    /** Management discovery uses the same transport/authentication and closes its connection. */
+    public List<DiscoveredTool> discover(JsonNode server) {
+        try (McpSyncClient client = createClient(server)) {
+            client.initialize();
+            return client.listTools().tools().stream()
+                    .map(tool -> new DiscoveredTool(tool.name(), tool.description())).toList();
+        }
+    }
+    public record DiscoveredTool(String name, String description) { }
+
     protected McpSyncClient createClient(JsonNode server) {
         Duration timeout = Duration.ofSeconds(Math.max(1, server.path("timeoutSeconds").asInt(30)));
         McpClientTransport transport = transport(server, timeout);
