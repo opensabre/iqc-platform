@@ -17,7 +17,7 @@ import static io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.*
 
 /** Resolves task-owned engine references once; execution consumes only the frozen server-owned plan. */
 @Service
-public final class TaskEnginePlanService {
+public class TaskEnginePlanService {
     private final QualityRuleMapper rules;
     private final QualityAgentMapper agents;
     private final ObjectMapper mapper;
