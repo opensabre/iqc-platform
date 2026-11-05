@@ -15,7 +15,7 @@ import static io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.O
 
 /** Freezes result policy only after matching all engine targets and existing published label value definitions. */
 @Service
-public final class TaskResultProcessingService {
+public class TaskResultProcessingService {
     private final LabelResolutionService labels;
     private final ObjectMapper mapper;
     public TaskResultProcessingService(LabelResolutionService labels, ObjectMapper mapper) { this.labels = labels; this.mapper = mapper; }
