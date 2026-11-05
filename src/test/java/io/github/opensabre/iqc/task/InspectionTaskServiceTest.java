@@ -61,7 +61,7 @@ class InspectionTaskServiceTest {
     private final LabelResolutionService labelResolution = mock(LabelResolutionService.class);
     private final io.github.opensabre.iqc.conversation.ConversationQueryService selectionQuery = mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class);
     private final InspectionExecutionService executionService = new InspectionExecutionService(taskMapper, selectionQuery, conversationMapper, messageMapper, resultMapper,
-            new ObjectMapper(), executionMapper, taskItemMapper, dataScope, mock(io.github.opensabre.iqc.result.llm.LlmQualityProvider.class), mock(UsageCounterRecorder.class), mock(io.github.opensabre.iqc.result.HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class));
+            new ObjectMapper(), executionMapper, taskItemMapper, dataScope, mock(io.github.opensabre.iqc.result.llm.LlmQualityProvider.class), mock(UsageCounterRecorder.class), mock(io.github.opensabre.iqc.result.HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
     private final InspectionTaskService taskService = new InspectionTaskService(taskMapper, conversationMapper, agentMapper, ruleMapper, ruleSetService,
             new ObjectMapper(), executionMapper, dataScope, labelResolution);
 

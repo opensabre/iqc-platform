@@ -39,7 +39,7 @@ class SchemeExecutionGuardTest {
     private final SchemeDependencyResolver guard = mock(SchemeDependencyResolver.class);
     private final InspectionExecutionService service = new InspectionExecutionService(tasks, org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), messages,
             results, new ObjectMapper(), executions, items, scope, llm, mock(UsageCounterRecorder.class),
-            mock(HierarchicalResultService.class), mock(LabelCandidateService.class), guard);
+            mock(HierarchicalResultService.class), mock(LabelCandidateService.class), guard, org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
     private InspectionTask task;
 
     @BeforeEach

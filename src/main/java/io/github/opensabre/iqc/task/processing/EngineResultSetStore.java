@@ -15,7 +15,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class EngineResultSetStore {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
-    public EngineResultSetStore(JdbcTemplate jdbc, ObjectMapper mapper) { this.jdbc = jdbc; this.mapper = mapper; }
+    public EngineResultSetStore(JdbcTemplate jdbc, ObjectMapper mapper) {
+        this.jdbc = jdbc;
+        // Checkpoints contain Instant fields; keep their codec independent of the application's legacy JSON mapper.
+        this.mapper = mapper.copy().registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
+    }
 
     /** Internal execution lookup; callers must authorize the owning task before exposing this payload. */
     public Optional<EngineExecutionResultSet> find(String executionId, String conversationId) {

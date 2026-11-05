@@ -76,27 +76,11 @@ public class InspectionTaskService {
             effectiveSet = null;
         }
         InspectionTask task;
+        String snapshotSet = effectiveSet;
+        List<String> snapshotRules = effectiveRules;
         if (selection != null) {
-            if (selection.mode() == TaskDataSelection.Mode.BATCH) {
-                task = createBatch(name, selection.conversationIds(), agentId, effectiveSet, effectiveRules, concurrency, executionMode);
-                for (String id : selection.conversationIds()) {
-                    Conversation conversation = conversationMapper.selectById(id);
-                    if (conversation == null || !"IMPORTED".equals(conversation.getStatus()) || conversation.getMessageCount() == null || conversation.getMessageCount() < 1)
-                        throw IqcException.invalidArgument("只能选择已处理且有消息的会话");
-                }
-            } else {
-                int workers = concurrency == null ? 1 : concurrency;
-                if (workers < 1 || workers > 32) throw IqcException.invalidArgument("并发数必须在 1 到 32 之间");
-                task = new InspectionTask();
-                task.setName(name == null || name.isBlank() ? "会话任务" : name.trim());
-                task.setTaskType("BATCH"); task.setConversationIdsJson("[]"); task.setConcurrencyLimit(workers);
-                snapshotAgentAndRules(task, agentId, effectiveSet, effectiveRules, executionMode);
-                task.setStatus("CREATED"); task.setTotalMessages(0); task.setProcessedMessages(0);
-                task.setFailedMessages(0); task.setAttemptCount(0); task.setOwnerGroupId(dataScope.groupId());
-                taskMapper.insert(task);
-            }
-            task.setSelectionFilterJson(writeSnapshot(Map.of("schemaVersion", "iqc-data-selection-v1", "selection", selection)));
-            taskMapper.updateById(task);
+            task = createSelected(name, selection, concurrency,
+                    value -> snapshotAgentAndRules(value, agentId, snapshotSet, snapshotRules, executionMode));
         } else if ("SCHEDULED".equalsIgnoreCase(taskType))
             task = createScheduled(name, filter, scheduledTime, agentId, effectiveSet, effectiveRules, concurrency, executionMode);
         else if ("SAMPLE".equalsIgnoreCase(taskType))
@@ -105,6 +89,47 @@ public class InspectionTaskService {
             task = createBatch(name, conversationIds, agentId, effectiveSet, effectiveRules, concurrency, executionMode);
         else throw IqcException.invalidArgument("不支持的任务类型: " + taskType);
         return resolved == null ? task : applyLabelConfiguration(task, resolved, options);
+    }
+
+    /** Internal creation path: only a server-resolved snapshot may enter this method. */
+    @Transactional
+    public InspectionTask createWithProcessing(String name, TaskDataSelection selection, Integer concurrency,
+                                               TaskWizardSnapshot snapshot) {
+        return createSelected(name, selection, concurrency, task -> {
+            task.setRuleSnapshotJson(writeSnapshot(snapshot));
+            task.setRuleIdsJson(writeSnapshot(snapshot.enginePlan().engines().stream()
+                    .map(engine -> engine.configuration().path("ruleId").asText()).distinct().toList()));
+            var labels = snapshot.resultProcessing().labelSnapshot();
+            task.setLabelScopeSnapshotJson(labels.isNull() ? null : writeSnapshot(labels));
+            task.setRunCount(1); task.setQueuePriority(0L); task.setPauseRequested(false); task.setCancelRequested(false);
+        });
+    }
+
+    /** Reuses batch validation and task persistence for both old and prototype business configurations. */
+    private InspectionTask createSelected(String name, TaskDataSelection selection, Integer concurrency,
+                                          java.util.function.Consumer<InspectionTask> snapshot) {
+        InspectionTask task;
+        if (selection.mode() == TaskDataSelection.Mode.BATCH) {
+            for (String id : selection.conversationIds()) {
+                Conversation conversation = conversationMapper.selectById(id);
+                if (conversation == null || !"IMPORTED".equals(conversation.getStatus()) || conversation.getMessageCount() == null || conversation.getMessageCount() < 1)
+                    throw IqcException.invalidArgument("只能选择已处理且有消息的会话");
+            }
+            task = createBatchWithSnapshot(name, selection.conversationIds(), concurrency, snapshot);
+        } else {
+            int workers = concurrency == null ? 1 : concurrency;
+            if (workers < 1 || workers > 32) throw IqcException.invalidArgument("并发数必须在 1 到 32 之间");
+            task = new InspectionTask();
+            task.setName(name == null || name.isBlank() ? "会话任务" : name.trim());
+            task.setTaskType("BATCH"); task.setConversationIdsJson("[]"); task.setConcurrencyLimit(workers);
+            snapshot.accept(task);
+            task.setStatus("CREATED"); task.setTotalMessages(0); task.setProcessedMessages(0);
+            task.setFailedMessages(0); task.setAttemptCount(0); task.setOwnerGroupId(dataScope.groupId());
+            taskMapper.insert(task);
+        }
+        task.setSelectionFilterJson(writeSnapshot(Map.of("schemaVersion", "iqc-data-selection-v1", "selection", selection)));
+        taskMapper.updateById(task);
+        return task;
     }
 
     /** Creates a batch whose business label selection is resolved server-side into the existing rule snapshot. */

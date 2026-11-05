@@ -70,6 +70,7 @@ public class InspectionExecutionService {
     private final HierarchicalResultService hierarchicalResultService;
     private final LabelCandidateService labelCandidateService;
     private final io.github.opensabre.iqc.scheme.SchemeDependencyResolver schemeDependencies;
+    private final io.github.opensabre.iqc.task.TaskWizardRuntime wizardRuntime;
     private final Map<String, DlsEngine.Compiled> dlsCompileCache = Collections.synchronizedMap(
             new LinkedHashMap<>(32, 0.75f, true) {
                 @Override protected boolean removeEldestEntry(Map.Entry<String, DlsEngine.Compiled> eldest) {
@@ -334,6 +335,16 @@ public class InspectionExecutionService {
     }
 
     private void processConversation(InspectionTask task, String executionId, JsonNode ruleSnapshot, List<TaskItem> items) {
+        if (ruleSnapshot != null && io.github.opensabre.iqc.task.TaskWizardSnapshot.SCHEMA.equals(ruleSnapshot.path("schemaVersion").asText())) {
+            try {
+                wizardRuntime.execute(task, executionId, objectMapper.treeToValue(ruleSnapshot,
+                        io.github.opensabre.iqc.task.TaskWizardSnapshot.class), items);
+            } catch (com.fasterxml.jackson.core.JsonProcessingException invalid) {
+                throw new IllegalArgumentException("任务执行快照无效", invalid);
+            }
+            return;
+        }
+
         Map<String, ConversationMessage> conversationMessagesById = new LinkedHashMap<>();
         for (TaskItem item : items) {
             ConversationMessage loaded = messageMapper.selectById(item.getMessageId());

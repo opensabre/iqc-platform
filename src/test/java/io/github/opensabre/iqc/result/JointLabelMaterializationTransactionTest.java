@@ -309,6 +309,48 @@ class JointLabelMaterializationTransactionTest {
         assertThat(count("iqc_task_item")).isEqualTo(1);
     }
 
+    @Autowired private io.github.opensabre.iqc.task.TaskWizardService wizardTasks;
+    @Autowired private io.github.opensabre.iqc.task.processing.EngineResultSetStore wizardStore;
+
+    @Test
+    void wizardTaskCreatesQueuesExecutesAndStoresRealScoreAndEngineEvidence() throws Exception {
+        jdbc.execute("CREATE TABLE IF NOT EXISTS iqc_engine_execution_result_set (id varchar(64) PRIMARY KEY,task_id varchar(64),execution_id varchar(64),conversation_id varchar(64),payload clob,revision int,created_time timestamp,updated_time timestamp,UNIQUE(execution_id,conversation_id))");
+        jdbc.update("DELETE FROM iqc_engine_execution_result_set");
+        jdbc.update("INSERT INTO iqc_conversation (id,message_count,status,created_by) VALUES ('wizard-conversation',1,'IMPORTED','system')");
+        insertFixtureMessage("wizard-message", "wizard-conversation", 1, "customer", "申请退款");
+        var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("wizard-rule");
+        rule.setName("退款识别"); rule.setCode("wizard-regex"); rule.setRuleType("REGEX");
+        rule.setStatus("PUBLISHED"); rule.setVersionNo(1); rule.setExpression("退款"); rule.setTargetRole("all");
+        ruleMapper.insert(rule);
+        var engines = mapper.readValue("""
+                {"schemaVersion":"iqc-task-processing-v1","inspection":{"engines":[
+                  {"id":"first","type":"REGEX","parameters":{"targetId":"check","ruleId":"wizard-rule"}},
+                  {"id":"second","type":"REGEX","parameters":{"targetId":"check","ruleId":"wizard-rule"}}]}}
+                """, io.github.opensabre.iqc.task.TaskProcessingConfiguration.class);
+        var processing = mapper.readValue("""
+                {"schemaVersion":"iqc-task-result-processing-v1","inspection":{
+                  "scoring":{"version":"iqc-score-v2","mode":"DEDUCTION","baseScore":100,"passingScore":80,
+                    "items":[{"itemCode":"check","points":10,"veto":false}]},"aggregation":"REQUIRE_AGREEMENT",
+                  "checks":[{"targetId":"check","engines":[{"engineInstanceId":"first","onHit":"FAIL","onMiss":"PASS"},
+                    {"engineInstanceId":"second","onHit":"FAIL","onMiss":"PASS"}]}]}}
+                """, io.github.opensabre.iqc.task.processing.TaskResultProcessingConfiguration.class);
+        var selection = new io.github.opensabre.iqc.task.TaskDataSelection(io.github.opensabre.iqc.task.TaskDataSelection.Mode.BATCH,
+                List.of("wizard-conversation"), null, null, null);
+        var task = wizardTasks.create("按原型执行", selection, engines, processing, 1);
+        var queued = runtimeQueue.queue(task.getId());
+        runtimeQueue.run(queued.getId(), queued.getCurrentExecutionId());
+        var finished = taskMapper.selectById(task.getId());
+        assertThat(finished.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(finished.getProcessedMessages()).isEqualTo(1);
+        var result = canonicalResults.selectForTaskExecutionConversation(task.getId(), finished.getCurrentExecutionId(), "wizard-conversation");
+        assertThat(result.getScoreStatus()).isEqualTo("FINAL");
+        assertThat(result.getFinalScore()).isEqualByComparingTo("90");
+        var retained = wizardStore.find(finished.getCurrentExecutionId(), "wizard-conversation").orElseThrow();
+        assertThat(retained.engines()).hasSize(2);
+        assertThat(retained.engines().getFirst().evidence().getFirst().quote()).isEqualTo("退款");
+        assertThat(mapper.readTree(result.getBusinessItemResultsJson()).path("sourceEngineResultIds").size()).isEqualTo(2);
+    }
+
     private InspectionTask runtimeSelectionTask(String mode) {
         var task = new InspectionTask();
         task.setId("runtime-selection"); task.setName("执行时取数"); task.setTaskType("BATCH");
@@ -398,7 +440,7 @@ class JointLabelMaterializationTransactionTest {
                 mapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class),
                 mock(io.github.opensabre.iqc.shared.IqcDataScope.class), llm, mock(UsageCounterRecorder.class),
                 results, mock(io.github.opensabre.iqc.label.LabelCandidateService.class),
-                mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class));
+                mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
 
         ReflectionTestUtils.invokeMethod(execution, "processConversation", task, "execution-integrated", snapshot, List.of(item));
 
@@ -798,7 +840,7 @@ class JointLabelMaterializationTransactionTest {
         var service = new InspectionExecutionService(taskMapper, org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), messages, observations,
                 mapper, executionMapper, taskItemMapper, scope,
                 llm, mock(UsageCounterRecorder.class), results,
-                mock(io.github.opensabre.iqc.label.LabelCandidateService.class), dependencies);
+                mock(io.github.opensabre.iqc.label.LabelCandidateService.class), dependencies, org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
         return new TrialHarness(task, service, llm, release, tasks, labelResolver);
     }
 
