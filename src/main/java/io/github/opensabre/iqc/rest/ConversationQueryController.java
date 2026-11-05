@@ -33,6 +33,16 @@ public class ConversationQueryController {
         return service.page(current, size, employeeId, customerExternalId, channel, businessNo, fileName, startedFrom, startedTo);
     }
 
+    /** Returns real, authorized selection preview rows without creating or executing a task. */
+    @PostMapping("/selection-preview")
+    @ResourcePermission(code = "iqc:conversation:view", name = "模拟会话数据筛选", type = "iqc", description = "预览条件或随机抽样的会话列表")
+    @RateLimit(sceneCode = "iqc-conversation-selection-preview", maxCount = 20, period = 60)
+    public ConversationQueryService.SelectionPreview preview(
+            @RequestBody io.github.opensabre.iqc.task.TaskDataSelection selection,
+            @RequestParam(defaultValue = "1") long current, @RequestParam(defaultValue = "10") long size) {
+        return service.preview(selection, current, size);
+    }
+
     @GetMapping("/{id}")
     @ResourcePermission(code = "iqc:conversation:view", name = "查看会话详情", type = "iqc", description = "查看会话详情")
     public Map<String, Object> detail(@PathVariable String id) { return service.detail(id); }

@@ -20,7 +20,7 @@ class EngineResultSetStoreTest {
         ds.setURL("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1");
         var jdbc = new JdbcTemplate(ds);
         jdbc.execute(Files.readString(Path.of("src/main/resources/db/migration/mysql/ddl/V1.1.33__ddl_add_engine_execution_result_set.sql")));
-        var mapper = new ObjectMapper().findAndRegisterModules();
+        var mapper = new ObjectMapper();
         var store = new EngineResultSetStore(jdbc, mapper);
         var tx = new TransactionTemplate(new DataSourceTransactionManager(ds));
         var now = Instant.parse("2026-11-05T00:00:00Z");
