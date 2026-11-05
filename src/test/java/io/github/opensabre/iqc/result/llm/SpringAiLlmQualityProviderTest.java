@@ -21,6 +21,49 @@ import static org.mockito.Mockito.when;
 class SpringAiLlmQualityProviderTest {
 
     @Test
+    void tracedConversationRetainsMalformedAndSuccessfulResponsesExactly() throws Exception {
+        var model = mock(ChatModel.class);
+        String malformed = "  not-json\n";
+        String successful = "```json\n{\"hit\":true,\"reason\":\"匹配\"}\n```";
+        when(model.call(any(Prompt.class))).thenReturn(response(malformed), response(successful));
+        var properties = new LlmQualityProperties(); properties.setModel("test-model"); properties.setMaxAttempts(2);
+        var provider = new SpringAiLlmQualityProvider(model, null, new ObjectMapper(),
+                mock(GovernanceRateLimiter.class), mock(UsageCounterRecorder.class), properties);
+        var captured = new java.util.ArrayList<String>();
+        var result = provider.evaluateConversationTraced(List.of(message()),
+                new ObjectMapper().readTree("{\"id\":\"r1\"}"), null, "trace-success", captured::add);
+        assertThat(captured).containsExactly(malformed, successful);
+        assertThat(result.supported()).isTrue();
+        assertThat(result.hit()).isTrue();
+        verify(model, org.mockito.Mockito.times(2)).call(any(Prompt.class));
+    }
+
+    @Test
+    void tracedConversationRetainsMalformedOutputWhenAllAttemptsFail() throws Exception {
+        var model = mock(ChatModel.class);
+        when(model.call(any(Prompt.class))).thenReturn(response("{bad}"));
+        var properties = new LlmQualityProperties(); properties.setModel("test-model"); properties.setMaxAttempts(1);
+        var provider = new SpringAiLlmQualityProvider(model, null, new ObjectMapper(),
+                mock(GovernanceRateLimiter.class), mock(UsageCounterRecorder.class), properties);
+        var captured = new java.util.ArrayList<String>();
+        var result = provider.evaluateConversationTraced(List.of(message()),
+                new ObjectMapper().readTree("{\"id\":\"r1\"}"), null, "trace-failure", captured::add);
+        assertThat(result.supported()).isFalse();
+        assertThat(captured).containsExactly("{bad}");
+    }
+
+    private static ChatResponse response(String text) {
+        return new ChatResponse(List.of(new Generation(new AssistantMessage(text))));
+    }
+
+    private static io.github.opensabre.iqc.conversation.model.ConversationMessage message() {
+        var message = new io.github.opensabre.iqc.conversation.model.ConversationMessage();
+        message.setId("m1"); message.setConversationId("c1"); message.setSequenceNo(1);
+        message.setSpeakerRole("CUSTOMER"); message.setContent("申请退款");
+        return message;
+    }
+
+    @Test
     void capabilitySchemaReadsOnlyPublishedSkillInstructions() throws Exception {
         var provider = new SpringAiLlmQualityProvider(mock(ChatModel.class), null, new ObjectMapper(),
                 mock(GovernanceRateLimiter.class), mock(UsageCounterRecorder.class), new LlmQualityProperties());

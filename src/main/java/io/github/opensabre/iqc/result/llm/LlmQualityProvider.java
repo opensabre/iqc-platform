@@ -21,6 +21,14 @@ public interface LlmQualityProvider {
         return new LlmEvaluation(false, false, "当前模型适配器不支持会话级质检");
     }
 
+    /** Records each original model response before parsing, including unsuccessful retry responses. */
+    default LlmEvaluation evaluateConversationTraced(
+            java.util.List<io.github.opensabre.iqc.conversation.model.ConversationMessage> messages,
+            JsonNode rule, JsonNode agentSnapshot, String recordId,
+            java.util.function.Consumer<String> rawResponse) {
+        return new LlmEvaluation(false, false, "当前模型适配器不支持原始响应记录");
+    }
+
     default LlmEvaluation evaluate(String content, JsonNode rule) {
         return evaluate(content, rule, null);
     }
