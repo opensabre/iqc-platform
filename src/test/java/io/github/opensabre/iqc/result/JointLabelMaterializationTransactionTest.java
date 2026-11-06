@@ -363,7 +363,16 @@ class JointLabelMaterializationTransactionTest {
                 """, io.github.opensabre.iqc.task.processing.TaskResultProcessingConfiguration.class);
         var selection = new io.github.opensabre.iqc.task.TaskDataSelection(io.github.opensabre.iqc.task.TaskDataSelection.Mode.BATCH,
                 List.of("wizard-conversation"), null, null, null);
-        var task = wizardTasks.create("按原型执行", selection, engines, processing, 1);
+        when(httpOrganization.getUserByUniqueId("system")).thenReturn(Result.success(
+                new IqcOrganizationClient.OrganizationUser("system", "System", "system", null, null)));
+        when(httpRateLimiter.check(any())).thenReturn(new RateLimitDecision(true, 60, 0, 60, null, "isolated-test"));
+        var createBody = mapper.createObjectNode().put("name", "按原型执行").put("concurrencyLimit", 1);
+        createBody.set("dataSelection", mapper.valueToTree(selection));
+        createBody.set("processingConfiguration", mapper.valueToTree(engines));
+        createBody.set("resultProcessing", mapper.valueToTree(processing));
+        var created = httpData(http(signedHttpIdentity("system"), "/api/iqc/tasks", mapper.writeValueAsString(createBody)));
+        assertThat(created.path("id").asText()).isNotBlank();
+        var task = taskMapper.selectById(created.path("id").asText());
         var queued = runtimeQueue.queue(task.getId());
         runtimeQueue.run(queued.getId(), queued.getCurrentExecutionId());
         var finished = taskMapper.selectById(task.getId());

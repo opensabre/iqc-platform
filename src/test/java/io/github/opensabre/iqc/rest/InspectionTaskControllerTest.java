@@ -16,7 +16,7 @@ class InspectionTaskControllerTest {
     @Test
     void exposesScopedExecutionAttemptsForTheBusinessRunSelector() throws Exception {
         var service = mock(InspectionTaskService.class);
-        var controller = new InspectionTaskController(service, mock(UsageCounterRecorder.class), mock(io.github.opensabre.iqc.task.TaskWizardService.class));
+        var controller = new InspectionTaskController(service, mock(UsageCounterRecorder.class), mock(io.github.opensabre.iqc.task.TaskWizardService.class), new com.fasterxml.jackson.databind.ObjectMapper());
         controller.executions("task-1");
 
         verify(service).executions("task-1");
@@ -29,7 +29,7 @@ class InspectionTaskControllerTest {
     void requestWithoutAgentPassesExplicitRuleOnlyStrategyToService() throws Exception {
         var service = mock(InspectionTaskService.class);
         var usage = mock(UsageCounterRecorder.class);
-        var controller = new InspectionTaskController(service, usage, mock(io.github.opensabre.iqc.task.TaskWizardService.class));
+        var controller = new InspectionTaskController(service, usage, mock(io.github.opensabre.iqc.task.TaskWizardService.class), new com.fasterxml.jackson.databind.ObjectMapper());
         var request = new ObjectMapper().readValue("""
                 {"taskType":"BATCH","conversationIds":["c1"],"ruleIds":["r1"],
                  "executionMode":"RULE_ONLY","concurrencyLimit":1}
@@ -52,7 +52,7 @@ class InspectionTaskControllerTest {
     void prototypePayloadUsesWizardCreationInsteadOfLegacyRuleLabelPath() throws Exception {
         var legacy = mock(InspectionTaskService.class);
         var wizard = mock(io.github.opensabre.iqc.task.TaskWizardService.class);
-        var controller = new InspectionTaskController(legacy, mock(UsageCounterRecorder.class), wizard);
+        var controller = new InspectionTaskController(legacy, mock(UsageCounterRecorder.class), wizard, new com.fasterxml.jackson.databind.ObjectMapper());
         var request = new ObjectMapper().readValue("""
                 {"name":"新任务","dataSelection":{"mode":"BATCH","conversationIds":["c1"]},
                  "processingConfiguration":{"schemaVersion":"iqc-task-processing-v1","labeling":{"engines":[
