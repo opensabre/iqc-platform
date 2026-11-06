@@ -38,6 +38,7 @@ public class HierarchicalResultService {
     private final io.github.opensabre.iqc.task.dao.InspectionTaskMapper taskMapper;
     private final io.github.opensabre.iqc.result.dao.InspectionResultMapper observationMapper;
     private final io.github.opensabre.iqc.task.dao.TaskItemMapper taskItemMapper;
+    private final io.github.opensabre.iqc.task.processing.EngineResultSetStore engineResults;
 
     /** Commits conversation facts, message observation projections and work progress atomically under the task lock. */
     @Transactional
@@ -406,8 +407,21 @@ public class HierarchicalResultService {
     }
 
     /** Returns the canonical conversation decision with rule decisions and message evidence. */
+    @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public ResultHierarchy hierarchy(String taskId, String conversationId) {
-        ConversationInspectionResult conversation = conversationMapper.selectLatestForTaskConversation(taskId, conversationId);
+        return hierarchy(taskId, conversationId, null);
+    }
+
+    /** Internal query: the controller authorizes the task and conversation before exposing evidence. */
+    @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public ResultHierarchy hierarchy(String taskId, String conversationId, String executionId) {
+        InspectionTask task = taskMapper.selectById(taskId);
+        JsonNode snapshot = task == null ? null : readResultJson(task.getRuleSnapshotJson());
+        if (snapshot != null && io.github.opensabre.iqc.task.TaskWizardSnapshot.SCHEMA.equals(snapshot.path("schemaVersion").asText()))
+            return wizardHierarchy(task, conversationId, executionId, snapshot);
+        ConversationInspectionResult conversation = executionId == null
+                ? conversationMapper.selectLatestForTaskConversation(taskId, conversationId)
+                : conversationMapper.selectForTaskExecutionConversation(taskId, executionId, conversationId);
         if (conversation == null) return null;
         List<RuleInspectionResult> rules = ruleMapper.selectList(Wrappers.<RuleInspectionResult>lambdaQuery()
                 .eq(RuleInspectionResult::getConversationResultId, conversation.getId()));
@@ -415,6 +429,48 @@ public class HierarchicalResultService {
         for (RuleInspectionResult rule : rules) evidence.put(rule.getId(), evidenceMapper.selectList(Wrappers.<InspectionEvidence>lambdaQuery()
                 .eq(InspectionEvidence::getRuleResultId, rule.getId()).orderByAsc(InspectionEvidence::getSequenceNo)));
         return new ResultHierarchy(conversation, rules, evidence);
+    }
+
+    private ResultHierarchy wizardHierarchy(InspectionTask task, String conversationId, String requestedExecution,
+                                             JsonNode snapshot) {
+        String execution = requestedExecution == null ? task.getCurrentExecutionId() : requestedExecution;
+        var raw = execution == null ? java.util.Optional.<io.github.opensabre.iqc.task.processing.EngineExecutionResultSet>empty()
+                : engineResults.find(execution, conversationId);
+        ConversationInspectionResult conversation = execution == null ? null
+                : conversationMapper.selectForTaskExecutionConversation(task.getId(), execution, conversationId);
+        // A retry may only rerun other conversations; identify this conversation's actual source execution.
+        if (requestedExecution == null && raw.isEmpty() && conversation == null) {
+            conversation = conversationMapper.selectLatestForTaskConversation(task.getId(), conversationId);
+            if (conversation != null) {
+                execution = conversation.getExecutionId();
+                raw = engineResults.find(execution, conversationId);
+            }
+        }
+        if (raw.isEmpty()) {
+            if (conversation != null) throw io.github.opensabre.iqc.governance.IqcException.invalidState("引擎证据缺失");
+            return null;
+        }
+        var source = raw.orElseThrow();
+        if (!task.getId().equals(source.taskId()) || !conversationId.equals(source.conversationId())
+                || !java.util.Objects.equals(execution, source.executionId()) || !snapshot.equals(source.taskConfiguration()))
+            throw io.github.opensabre.iqc.governance.IqcException.invalidState("引擎证据与任务快照不一致");
+        JsonNode processed = null;
+        if (conversation != null) {
+            processed = readResultJson(conversation.getBusinessItemResultsJson());
+            var references = objectMapper.valueToTree(source.engines().stream().map(
+                    io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.EngineResult::engineResultId).toList());
+            if (processed == null || !source.resultSetId().equals(processed.path("sourceResultSetId").asText())
+                    || !references.equals(processed.path("sourceEngineResultIds"))
+                    || !"iqc-task-processed-results-v1".equals(processed.path("output").path("schemaVersion").asText()))
+                throw io.github.opensabre.iqc.governance.IqcException.invalidState("处理结果与引擎证据不一致");
+        }
+        return new ResultHierarchy(conversation, List.of(), Map.of(), execution, engineResults.toJson(source), processed);
+    }
+
+    private JsonNode readResultJson(String value) {
+        if (value == null) return null;
+        try { return objectMapper.readTree(value); }
+        catch (Exception exception) { throw io.github.opensabre.iqc.governance.IqcException.invalidState("任务结果快照损坏"); }
     }
 
     private List<JsonNode> rules(JsonNode snapshot) {
@@ -428,5 +484,11 @@ public class HierarchicalResultService {
     private int riskOrder(String risk) { return switch (risk == null ? "" : risk.toUpperCase()) { case "HIGH" -> 3; case "MEDIUM" -> 2; default -> 1; }; }
     private record ResultSlice(String status, InspectionResult result) { }
     public record ResultHierarchy(ConversationInspectionResult conversation, List<RuleInspectionResult> rules,
-                                  Map<String, List<InspectionEvidence>> evidenceByRuleResult) { }
+                                  Map<String, List<InspectionEvidence>> evidenceByRuleResult,
+                                  String executionId, JsonNode engineResultSet, JsonNode processedResult) {
+        public ResultHierarchy(ConversationInspectionResult conversation, List<RuleInspectionResult> rules,
+                               Map<String, List<InspectionEvidence>> evidenceByRuleResult) {
+            this(conversation, rules, evidenceByRuleResult, conversation.getExecutionId(), null, null);
+        }
+    }
 }

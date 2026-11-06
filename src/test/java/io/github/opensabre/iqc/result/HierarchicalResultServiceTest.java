@@ -126,7 +126,7 @@ class HierarchicalResultServiceTest {
     private final io.github.opensabre.iqc.task.dao.InspectionTaskMapper tasks = mock(io.github.opensabre.iqc.task.dao.InspectionTaskMapper.class);
     private final io.github.opensabre.iqc.result.dao.InspectionResultMapper observations = mock(io.github.opensabre.iqc.result.dao.InspectionResultMapper.class);
     private final io.github.opensabre.iqc.task.dao.TaskItemMapper taskItems = mock(io.github.opensabre.iqc.task.dao.TaskItemMapper.class);
-    private final HierarchicalResultService service = new HierarchicalResultService(conversations, rules, evidence, objectMapper, labelResults, tasks, observations, taskItems);
+    private final HierarchicalResultService service = new HierarchicalResultService(conversations, rules, evidence, objectMapper, labelResults, tasks, observations, taskItems, mock(io.github.opensabre.iqc.task.processing.EngineResultSetStore.class));
 
     @BeforeEach
     void initializeMybatisMetadata() {
@@ -296,7 +296,7 @@ class HierarchicalResultServiceTest {
     void qualityScoreAndExplicitNegativeLabelUseTheSameCanonicalDetection() throws Exception {
         var labelMapper = mock(io.github.opensabre.iqc.label.dao.InspectionLabelResultMapper.class);
         var labels = new LabelResultService(labelMapper, objectMapper);
-        var integrated = new HierarchicalResultService(conversations, rules, evidence, objectMapper, labels, tasks, observations, taskItems);
+        var integrated = new HierarchicalResultService(conversations, rules, evidence, objectMapper, labels, tasks, observations, taskItems, mock(io.github.opensabre.iqc.task.processing.EngineResultSetStore.class));
         when(conversations.insert(any(ConversationInspectionResult.class))).thenAnswer(invocation -> {
             ((ConversationInspectionResult) invocation.getArgument(0)).setId("canonical-1"); return 1;
         });
@@ -359,7 +359,7 @@ class HierarchicalResultServiceTest {
     void missingApplicableMessageKeepsLabelRuleAndFactIncomplete() throws Exception {
         var labelMapper = mock(io.github.opensabre.iqc.label.dao.InspectionLabelResultMapper.class);
         var integrated = new HierarchicalResultService(conversations, rules, evidence, objectMapper,
-                new LabelResultService(labelMapper, objectMapper), tasks, observations, taskItems);
+                new LabelResultService(labelMapper, objectMapper), tasks, observations, taskItems, mock(io.github.opensabre.iqc.task.processing.EngineResultSetStore.class));
         when(conversations.insert(any(ConversationInspectionResult.class))).thenAnswer(invocation -> {
             ((ConversationInspectionResult) invocation.getArgument(0)).setId("incomplete-conversation"); return 1;
         });
@@ -431,7 +431,7 @@ class HierarchicalResultServiceTest {
     void failedLabelDetectionWithoutFindingKeepsCompletedQualityScore() throws Exception {
         var labelMapper = mock(io.github.opensabre.iqc.label.dao.InspectionLabelResultMapper.class);
         var integrated = new HierarchicalResultService(conversations, rules, evidence, objectMapper,
-                new LabelResultService(labelMapper, objectMapper), tasks, observations, taskItems);
+                new LabelResultService(labelMapper, objectMapper), tasks, observations, taskItems, mock(io.github.opensabre.iqc.task.processing.EngineResultSetStore.class));
         when(conversations.insert(any(ConversationInspectionResult.class))).thenAnswer(invocation -> {
             ((ConversationInspectionResult) invocation.getArgument(0)).setId("canonical-error"); return 1;
         });

@@ -53,6 +53,11 @@ public class EngineResultSetStore {
         if (updated != 1) throw new IllegalStateException("结果集被其他执行者更新，请重新加载后恢复");
     }
 
+    /** Serializes evidence with the same isolated time-aware codec used by checkpoints. */
+    public com.fasterxml.jackson.databind.JsonNode toJson(EngineExecutionResultSet value) {
+        return mapper.valueToTree(value);
+    }
+
     private String encode(EngineExecutionResultSet value) {
         try { return mapper.writeValueAsString(value); }
         catch (JsonProcessingException failure) { throw new IllegalArgumentException("引擎结果集无法序列化", failure); }

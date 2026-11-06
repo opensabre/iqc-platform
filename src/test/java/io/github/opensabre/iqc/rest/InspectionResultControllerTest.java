@@ -24,6 +24,25 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class InspectionResultControllerTest {
 
     @Test
+    void historicalEvidenceQueryAuthorizesConversationBeforeReadingRecords() {
+        var batch = mock(BatchResultQueryService.class);
+        var hierarchy = mock(HierarchicalResultService.class);
+        var controller = new InspectionResultController(mock(InspectionExecutionService.class), mock(UsageCounterRecorder.class),
+                batch, hierarchy, mock(LabelResultQueryService.class), mock(LabelInsightExportService.class),
+                mock(io.github.opensabre.iqc.quality.BusinessItemReviewService.class));
+        controller.resultHierarchy("t1", "c1", "old");
+        var order = org.mockito.Mockito.inOrder(batch, hierarchy);
+        order.verify(batch).conversationDetail("t1", "c1");
+        order.verify(hierarchy).hierarchy("t1", "c1", "old");
+        org.mockito.Mockito.reset(hierarchy);
+        when(batch.conversationDetail("t1", "c1"))
+                .thenThrow(io.github.opensabre.iqc.governance.IqcException.accessDenied("无权查看"));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.resultHierarchy("t1", "c1", "old"))
+                .hasMessageContaining("无权查看");
+        org.mockito.Mockito.verifyNoInteractions(hierarchy);
+    }
+
+    @Test
     void businessResultEndpointReturnsConversationTotalAndCanonicalZeroScore() throws Exception {
         var permission = InspectionResultController.class.getMethod("businessResults", long.class, long.class,
                 String.class, String.class, String.class, java.math.BigDecimal.class, java.math.BigDecimal.class)

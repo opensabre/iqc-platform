@@ -136,9 +136,11 @@ public class InspectionResultController {
 
     @GetMapping("/tasks/{id}/conversations/{conversationId}/result-hierarchy")
     @ResourcePermission(code = "iqc:result:view", name = "查看分层质检结果", type = "iqc", description = "按会话、规则和消息证据查询质检结果")
-    public Optional<HierarchicalResultService.ResultHierarchy> resultHierarchy(@PathVariable String id, @PathVariable String conversationId) {
+    public Optional<HierarchicalResultService.ResultHierarchy> resultHierarchy(@PathVariable String id, @PathVariable String conversationId,
+            @RequestParam(required = false) String executionId) {
         batchResultQueryService.conversationDetail(id, conversationId);
-        return Optional.ofNullable(hierarchicalResultService.hierarchy(id, conversationId));
+        return Optional.ofNullable(executionId == null ? hierarchicalResultService.hierarchy(id, conversationId)
+                : hierarchicalResultService.hierarchy(id, conversationId, executionId));
     }
 
     @GetMapping("/conversations/{conversationId}/result-detail")
