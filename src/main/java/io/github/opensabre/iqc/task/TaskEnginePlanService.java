@@ -48,7 +48,7 @@ public class TaskEnginePlanService {
         for (var engine : operation.engines()) {
             JsonNode parameters = engine.parameters();
             Set<String> allowed = engine.type() == TaskProcessingConfiguration.EngineType.LLM
-                    ? Set.of("targetId", "ruleId", "agentId") : Set.of("targetId", "ruleId");
+                    ? Set.of("targetId", "ruleId", "agentId", "prompt", "temperature", "timeoutSeconds") : Set.of("targetId", "ruleId");
             parameters.fieldNames().forEachRemaining(key -> {
                 if (!allowed.contains(key)) throw IqcException.invalidArgument("不支持的引擎参数: " + key);
             });
@@ -76,7 +76,29 @@ public class TaskEnginePlanService {
                 } catch (com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException invalid) {
                     throw IqcException.invalidArgument("大模型配置无效");
                 }
-                configuration.put("agentId", agentId).set("agentSnapshot", mapper.valueToTree(agent));
+                var agentSnapshot = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.valueToTree(agent);
+                var overrides = mapper.createObjectNode();
+                if (parameters.has("prompt")) {
+                    JsonNode prompt = parameters.get("prompt");
+                    if (!prompt.isTextual() || prompt.asText().isBlank() || prompt.asText().trim().length() > 8000)
+                        throw IqcException.invalidArgument("任务提示词需为 1 到 8000 个字符");
+                    overrides.put("prompt", prompt.asText().trim());
+                }
+                if (parameters.has("temperature")) {
+                    JsonNode temperature = parameters.get("temperature");
+                    if (!temperature.isNumber() || !Double.isFinite(temperature.asDouble())
+                            || temperature.asDouble() < 0 || temperature.asDouble() > 1)
+                        throw IqcException.invalidArgument("任务温度需在 0 到 1 之间");
+                    overrides.set("temperature", temperature);
+                }
+                if (parameters.has("timeoutSeconds")) {
+                    JsonNode timeout = parameters.get("timeoutSeconds");
+                    if (!timeout.isIntegralNumber() || !timeout.canConvertToInt() || timeout.asInt() < 1 || timeout.asInt() > 120)
+                        throw IqcException.invalidArgument("任务超时需为 1 到 120 秒的整数");
+                    overrides.set("timeoutSeconds", timeout);
+                }
+                if (!overrides.isEmpty()) agentSnapshot.set("taskOverrides", overrides);
+                configuration.put("agentId", agentId).set("agentSnapshot", agentSnapshot);
             } else {
                 configuration.put("expression", rule.getExpression());
                 if (engine.type() == TaskProcessingConfiguration.EngineType.REGEX

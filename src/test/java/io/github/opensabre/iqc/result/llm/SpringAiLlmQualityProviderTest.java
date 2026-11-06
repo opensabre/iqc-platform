@@ -90,6 +90,7 @@ class SpringAiLlmQualityProviderTest {
                 rateLimiter, recorder, properties);
 
         var agent = new ObjectMapper().readTree("{\"configJson\":\"{\\\"systemPrompt\\\":\\\"重点检查返现承诺\\\"}\"}");
+        ((com.fasterxml.jackson.databind.node.ObjectNode) agent).putObject("taskOverrides").put("prompt", "检查本次退款流程");
         var evaluation = provider.evaluate("联系 13812345678 返现",
                 new ObjectMapper().readTree("{\"id\":\"r-1\"}"), agent, "record-1");
 
@@ -100,6 +101,7 @@ class SpringAiLlmQualityProviderTest {
         verify(chatModel).call(promptCaptor.capture());
         assertThat(promptCaptor.getValue().getContents()).contains("[手机号]").doesNotContain("13812345678");
         assertThat(promptCaptor.getValue().getSystemMessage().getText()).contains("重点检查返现承诺");
+        assertThat(promptCaptor.getValue().getSystemMessage().getText()).contains("检查本次退款流程");
         verify(recorder, org.mockito.Mockito.times(2)).record(any());
     }
 

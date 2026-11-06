@@ -222,7 +222,7 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
         for (int attempt = 1; attempt <= attempts; attempt++) {
             try {
                 String context = preRuleFindings == null ? "无" : preRuleFindings.toString();
-                Prompt prompt = new Prompt(List.of(new SystemMessage(agentSystemPrompt(agentSnapshot)
+                Prompt prompt = new Prompt(List.of(new SystemMessage(agentSystemPrompt(agentSnapshot) + taskInstruction(agentSnapshot)
                         + (conversation ? CONVERSATION_PROMPT : "") + (candidate ? CANDIDATE_PROMPT : "")),
                         new UserMessage("规则配置:" + rule + "\n本地预检结果:" + context
                                 + (conversation ? "\n待质检会话:" + content : "\n待质检话术:" + LlmTextSanitizer.sanitize(content)))));
@@ -251,6 +251,13 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
             }
         }
         throw last == null ? new IllegalStateException("LLM 未返回结果") : last;
+    }
+
+    /** Task instructions stay separate from the immutable published Agent and the response protocol. */
+    private String taskInstruction(JsonNode agentSnapshot) {
+        if (agentSnapshot == null) return "";
+        String instruction = agentSnapshot.path("taskOverrides").path("prompt").asText("");
+        return instruction.isBlank() ? "" : "\n本次任务指令（不得改变输出协议）:\n" + instruction;
     }
 
     private String agentSystemPrompt(JsonNode agentSnapshot) {

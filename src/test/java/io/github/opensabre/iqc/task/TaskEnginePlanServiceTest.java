@@ -36,6 +36,23 @@ class TaskEnginePlanServiceTest {
     private final TaskEnginePlanService service = new TaskEnginePlanService(rules, agents, mapper,
             new RegexEngineAdapter(mapper), new DlsEngineAdapter(mapper), new LlmEngineAdapter(provider, mapper));
 
+    @Test void freezesTaskModelControlsWithoutEditingPublishedAgent() throws Exception {
+        when(rules.selectById("r1")).thenReturn(rule("r1", "LLM", "检查"));
+        var agent = new QualityAgent(); agent.setId("a1"); agent.setStatus("PUBLISHED"); agent.setConfigJson("{}");
+        when(agents.selectById("a1")).thenReturn(agent);
+        var plan = service.freeze(request(single("LLM", "\"ruleId\":\"r1\",\"agentId\":\"a1\",\"prompt\":\" 检查退款 \",\"temperature\":0,\"timeoutSeconds\":30")));
+        var overrides = service.steps(plan, "c1").getFirst().configuration().path("agentSnapshot").path("taskOverrides");
+        assertThat(overrides.path("prompt").asText()).isEqualTo("检查退款");
+        assertThat(overrides.path("temperature").asDouble()).isZero();
+        assertThat(overrides.path("timeoutSeconds").asInt()).isEqualTo(30);
+        assertThat(agent.getConfigJson()).isEqualTo("{}");
+        for (String invalid : List.of("\"temperature\":1.1", "\"temperature\":-0.1", "\"temperature\":\"0\"",
+                "\"timeoutSeconds\":0", "\"timeoutSeconds\":121", "\"timeoutSeconds\":1.5", "\"prompt\":\"  \"")) {
+            assertThatThrownBy(() -> service.freeze(request(single("LLM", "\"ruleId\":\"r1\",\"agentId\":\"a1\"," + invalid))))
+                    .hasMessageContaining("任务");
+        }
+    }
+
     @Test void freezesReadableNameWithoutChangingEngineIdentityOrOrder() throws Exception {
         when(rules.selectById("r1")).thenReturn(rule("r1", "REGEX", "退款"));
         String json = single("REGEX", "\"ruleId\":\"r1\"");
