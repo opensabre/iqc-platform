@@ -40,6 +40,7 @@ class BatchResultQueryServiceTest {
 
     @BeforeEach
     void setup() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "batch-task-query"), InspectionTask.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "batch-query"), ConversationInspectionResult.class);
         task = new InspectionTask(); task.setId("t1"); task.setConversationId("c1"); task.setStatus("SUCCEEDED");
         task.setRuleSnapshotJson("{\"schemeSnapshot\":{}}"); task.setCurrentExecutionId("e2");
@@ -53,6 +54,49 @@ class BatchResultQueryServiceTest {
         var raw = new InspectionResult(); raw.setConversationId("c1"); raw.setExecutionId("e1"); raw.setResultStatus("HIT"); raw.setScore(100);
         raw.setMessageId("m1");
         when(results.selectList(any())).thenReturn(List.of(raw));
+    }
+
+    @Test
+    void wizardCorruptProcessedOutputFailsInsteadOfFallingBackToLegacyScores() {
+        task.setRuleSnapshotJson("{\"schemaVersion\":\"iqc-task-wizard-v1\"}");
+        var decision = new ConversationInspectionResult(); decision.setScoreStatus("FINAL");
+        decision.setBusinessItemResultsJson("[]");
+        when(canonical.selectLatestForTaskConversation("t1", "c1")).thenReturn(decision);
+        assertThatThrownBy(() -> service.summary("t1")).hasMessageContaining("任务处理结果损坏");
+    }
+
+    @Test
+    void wizardSummaryUsesProcessorScoreAndIgnoresLegacyObservations() {
+        task.setRuleSnapshotJson("{\"schemaVersion\":\"iqc-task-wizard-v1\"}");
+        var decision = new ConversationInspectionResult();
+        decision.setScoreStatus("FINAL"); decision.setFinalScore(BigDecimal.valueOf(90));
+        decision.setBusinessItemResultsJson("""
+                {"output":{"schemaVersion":"iqc-task-processed-results-v1",
+                "inspectionItems":[{"status":"KNOWN","value":"FAIL"},{"status":"CONFLICT"}],
+                "labels":[{"status":"ERROR"}]}}
+                """);
+        when(canonical.selectLatestForTaskConversation("t1", "c1")).thenReturn(decision);
+        var summary = service.summary("t1");
+        assertThat(summary.averageScore()).isEqualByComparingTo("90");
+        assertThat(summary.hitCount()).isEqualTo(1);
+        assertThat(summary.highRiskCount()).isZero();
+        var row = summary.conversations().getFirst();
+        assertThat(row.resultCount()).isEqualTo(3);
+        assertThat(row.errorCount()).isEqualTo(1);
+    }
+
+    @Test
+    void wizardWithoutFinalScoreDoesNotReportZeroOrLegacyScore() {
+        task.setRuleSnapshotJson("{\"schemaVersion\":\"iqc-task-wizard-v1\"}");
+        assertThat(service.summary("t1").averageScore()).isNull();
+        assertThat(service.summary("t1").conversations().getFirst().scoreStatus()).isEqualTo("PENDING");
+        var decision = new ConversationInspectionResult(); decision.setScoreStatus("NOT_APPLICABLE");
+        decision.setBusinessItemResultsJson("""
+                {"output":{"schemaVersion":"iqc-task-processed-results-v1","labels":[{"status":"KNOWN","value":false}]}}
+                """);
+        when(canonical.selectLatestForTaskConversation("t1", "c1")).thenReturn(decision);
+        assertThat(service.summary("t1").averageScore()).isNull();
+        assertThat(service.summary("t1").conversations().getFirst().resultCount()).isEqualTo(1);
     }
 
     @Test
