@@ -20,12 +20,15 @@ import io.github.opensabre.iqc.label.LabelResolutionService;
 @RestController
 @RequestMapping("/api/iqc/tasks")
 public class InspectionTaskController {
+    private final com.fasterxml.jackson.databind.ObjectMapper mapper;
     private final InspectionTaskService taskService;
     private final UsageCounterRecorder usageCounterRecorder;
     private final io.github.opensabre.iqc.task.TaskWizardService wizardService;
 
     public InspectionTaskController(InspectionTaskService taskService, UsageCounterRecorder usageCounterRecorder,
-                                    io.github.opensabre.iqc.task.TaskWizardService wizardService) {
+                                    io.github.opensabre.iqc.task.TaskWizardService wizardService,
+                                    com.fasterxml.jackson.databind.ObjectMapper mapper) {
+        this.mapper = mapper;
         this.taskService = taskService;
         this.usageCounterRecorder = usageCounterRecorder;
         this.wizardService = wizardService;
@@ -59,7 +62,22 @@ public class InspectionTaskController {
     @ResourcePermission(code = "iqc:task:create", name = "创建质检任务", type = "iqc", description = "创建质检任务")
     @Audit(operationType = OperationType.CREATE, description = "创建 IQC 质检任务", module = "IQC_TASK")
     @RateLimit(sceneCode = "iqc-task-create", maxCount = 20, period = 60)
-    public InspectionTask create(@RequestBody CreateTaskRequest request) {
+    public InspectionTask createFromJson(
+            @io.swagger.v3.oas.annotations.parameters.RequestBody(content = @io.swagger.v3.oas.annotations.media.Content(
+                    schema = @io.swagger.v3.oas.annotations.media.Schema(implementation = CreateTaskRequest.class)))
+            @RequestBody String body) {
+        // Decode the domain JSON nodes with the application's existing persistence mapper.
+        final CreateTaskRequest request;
+        try { request = mapper.readValue(body, CreateTaskRequest.class); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException invalid) {
+            throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("任务创建参数无效");
+        }
+        if (request == null) throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("任务创建参数不能为空");
+        return create(request);
+    }
+
+    /** Shared typed entry keeps legacy and wizard task validation identical for HTTP and internal callers. */
+    public InspectionTask create(CreateTaskRequest request) {
         if (request.dataSelection() != null && request.scheduledTime() != null)
             throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("新数据选择暂不支持计划执行时间");
         if (request.processingConfiguration() != null || request.resultProcessing() != null) {
