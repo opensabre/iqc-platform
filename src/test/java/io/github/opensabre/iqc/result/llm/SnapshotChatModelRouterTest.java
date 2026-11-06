@@ -10,6 +10,32 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class SnapshotChatModelRouterTest {
+    @Test void appliesTaskControlsToEveryModelCopyAndKeepsPublishedValues() throws Exception {
+        var mapper = new ObjectMapper();
+        var router = new SnapshotChatModelRouter(mock(ChatModel.class), mapper, mock(SecretReferenceResolver.class));
+        var model = mapper.readTree("{\"temperature\":0.8,\"timeoutSeconds\":60}");
+        var snapshot = mapper.readTree("{\"taskOverrides\":{\"temperature\":0,\"timeoutSeconds\":12}}");
+        var copy = router.taskModel(model, snapshot);
+        assertThat(copy.path("temperature").asDouble()).isZero();
+        assertThat(copy.path("timeoutSeconds").asInt()).isEqualTo(12);
+        assertThat(model.path("temperature").asDouble()).isEqualTo(0.8);
+        assertThat(model.path("timeoutSeconds").asInt()).isEqualTo(60);
+    }
+
+    @Test void defaultOpenAiTransportUsesCopiedTimeoutAndTemperature() throws Exception {
+        var mapper = new ObjectMapper();
+        var original = org.springframework.ai.openai.OpenAiChatModel.builder().options(
+                org.springframework.ai.openai.OpenAiChatOptions.builder().apiKey("test-only").model("test-model")
+                        .temperature(0.8).timeout(java.time.Duration.ofSeconds(60)).build()).build();
+        var router = new SnapshotChatModelRouter(original, mapper, mock(SecretReferenceResolver.class));
+        var snapshot = mapper.readTree("{\"taskOverrides\":{\"temperature\":0,\"timeoutSeconds\":12}}");
+        var configured = (org.springframework.ai.openai.OpenAiChatModel) router.taskDefault(snapshot);
+        assertThat(configured.getOptions().getTimeout()).isEqualTo(java.time.Duration.ofSeconds(12));
+        assertThat(configured.getOptions().getTemperature()).isZero();
+        assertThat(original.getOptions().getTimeout()).isEqualTo(java.time.Duration.ofSeconds(60));
+        assertThat(original.getOptions().getTemperature()).isEqualTo(0.8);
+    }
+
     @Test
     void capabilityAgentNeverFallsBackToUnconfiguredDeploymentDefault() throws Exception {
         ChatModel defaultModel = mock(ChatModel.class);
