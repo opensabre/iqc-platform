@@ -233,6 +233,7 @@ public class BatchResultQueryService {
     public BatchResultSummary summary(String taskId) {
         InspectionTask task = requireTask(taskId);
         boolean scheme = isScheme(task);
+        boolean canonicalScores = scheme || isWizard(task);
         Map<String, Integer> attempts = scheme ? executionAttempts(taskId) : Map.of();
         List<InspectionResult> results = resultMapper.selectList(Wrappers.<InspectionResult>lambdaQuery()
                 .eq(InspectionResult::getTaskId, taskId).orderByAsc(InspectionResult::getCreatedTime));
@@ -246,9 +247,9 @@ public class BatchResultQueryService {
             conversations.add(conversationSummary(task, conversationId, conversation, conversationResults, attempts));
         }
         return new BatchResultSummary(taskId, task.getStatus(), conversations.size(), task.getTotalMessages(),
-                task.getProcessedMessages(), task.getFailedMessages(), scheme ? averageFinalScores(conversations) : averageScore(results),
-                scheme ? conversations.stream().mapToLong(ConversationResultSummary::hitCount).sum() : count(results, "HIT"),
-                scheme ? conversations.stream().mapToLong(ConversationResultSummary::highRiskCount).sum() : countRisk(results, "HIGH"), conversations);
+                task.getProcessedMessages(), task.getFailedMessages(), canonicalScores ? averageFinalScores(conversations) : averageScore(results),
+                canonicalScores ? conversations.stream().mapToLong(ConversationResultSummary::hitCount).sum() : count(results, "HIT"),
+                canonicalScores ? conversations.stream().mapToLong(ConversationResultSummary::highRiskCount).sum() : countRisk(results, "HIGH"), conversations);
     }
 
     /** Returns all messages and their detailed findings for one conversation in the batch. */
@@ -313,6 +314,7 @@ public class BatchResultQueryService {
 
     private ConversationResultSummary conversationSummary(InspectionTask task, String id, Conversation conversation,
                                                            List<InspectionResult> results, Map<String, Integer> attempts) {
+        if (isWizard(task)) return wizardSummary(task, id, conversation);
         if (isScheme(task)) {
             // Completed conversations are not re-run when another conversation is retried; keep their latest canonical decision.
             ConversationInspectionResult canonical = latestCanonical(task, id);
@@ -362,6 +364,39 @@ public class BatchResultQueryService {
                     (previous, candidate) -> recency.compare(previous, candidate) < 0 ? candidate : previous);
         }
         return List.copyOf(latestByMessage.values());
+    }
+
+    /** Wizard tasks store processor output, independently of legacy message observations. */
+    private ConversationResultSummary wizardSummary(InspectionTask task, String id, Conversation conversation) {
+        ConversationInspectionResult canonical = latestCanonical(task, id);
+        int count = 0;
+        long failures = 0, errors = 0;
+        if (canonical != null) {
+            JsonNode output = exportJson(canonical.getBusinessItemResultsJson()).path("output");
+            if (!"iqc-task-processed-results-v1".equals(output.path("schemaVersion").asText()))
+                throw IqcException.invalidState("任务处理结果损坏");
+            for (String section : List.of("inspectionItems", "labels")) {
+                JsonNode items = output.path(section);
+                if (items.isMissingNode()) continue;
+                if (!items.isArray()) throw IqcException.invalidState("任务处理结果损坏");
+                for (JsonNode item : items) {
+                    count++;
+                    if ("inspectionItems".equals(section) && "KNOWN".equals(item.path("status").asText())
+                            && "FAIL".equals(item.path("value").asText())) failures++;
+                    if ("ERROR".equals(item.path("status").asText())) errors++;
+                }
+            }
+        }
+        return new ConversationResultSummary(id, conversation == null ? null : conversation.getSourceFileName(),
+                conversation == null ? 0 : conversation.getMessageCount(), count,
+                canonical != null && "FINAL".equals(canonical.getScoreStatus()) ? canonical.getFinalScore() : null,
+                failures, 0, errors, canonical == null ? "PENDING" : canonical.getScoreStatus());
+    }
+
+    private boolean isWizard(InspectionTask task) {
+        if (task.getRuleSnapshotJson() == null) return false;
+        return io.github.opensabre.iqc.task.TaskWizardSnapshot.SCHEMA.equals(
+                exportJson(task.getRuleSnapshotJson()).path("schemaVersion").asText());
     }
 
     private boolean isScheme(InspectionTask task) {
