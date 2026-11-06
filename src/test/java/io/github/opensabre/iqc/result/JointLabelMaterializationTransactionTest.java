@@ -420,6 +420,13 @@ class JointLabelMaterializationTransactionTest {
         assertThat(detail.path("executionId").asText()).isEqualTo(finished.getCurrentExecutionId());
         assertThat(detail.path("processedResult")).isEqualTo(processed);
         assertThat(detail.path("engineResultSet").path("engines").size()).isEqualTo(3);
+        var business = httpData(http(identity, "/api/iqc/results/business?taskId=" + task.getId(), null));
+        assertThat(business.path("total").asInt()).isEqualTo(1);
+        var businessRow = business.path("records").get(0);
+        assertThat(businessRow.path("finalScore").decimalValue()).isEqualByComparingTo("90");
+        assertThat(businessRow.path("itemCount").asInt()).isEqualTo(2);
+        assertThat(businessRow.path("failureCount").asInt()).isEqualTo(1);
+        assertThat(businessRow.path("executionId").asText()).isEqualTo(finished.getCurrentExecutionId());
     }
 
     private InspectionTask runtimeSelectionTask(String mode) {

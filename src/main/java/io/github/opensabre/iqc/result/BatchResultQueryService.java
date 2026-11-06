@@ -207,6 +207,13 @@ public class BatchResultQueryService {
                 InspectionScoring.ScoreStatus status = InspectionScoring.ScoreStatus.valueOf(value.getScoreStatus());
                 if (status == InspectionScoring.ScoreStatus.FINAL && value.getFinalScore() == null)
                     throw new IllegalArgumentException();
+                if ("TASK_PROCESSOR".equals(value.getAggregationMode())) {
+                    var counts = processorCounts(value);
+                    return new BusinessConversationRow(value.getId(), value.getTaskId(), taskNames.get(value.getTaskId()),
+                            value.getConversationId(), names.get(value.getConversationId()), value.getExecutionId(),
+                            value.getScoreStatus(), status == InspectionScoring.ScoreStatus.FINAL ? value.getFinalScore() : null,
+                            counts.items(), counts.failures(), counts.errors(), null);
+                }
                 JsonNode outcomes = objectMapper.readTree(value.getBusinessItemResultsJson());
                 if (outcomes == null || !outcomes.isArray()) throw new IllegalArgumentException();
                 for (JsonNode item : outcomes) {
@@ -369,29 +376,37 @@ public class BatchResultQueryService {
     /** Wizard tasks store processor output, independently of legacy message observations. */
     private ConversationResultSummary wizardSummary(InspectionTask task, String id, Conversation conversation) {
         ConversationInspectionResult canonical = latestCanonical(task, id);
-        int count = 0;
-        long failures = 0, errors = 0;
-        if (canonical != null) {
-            JsonNode output = exportJson(canonical.getBusinessItemResultsJson()).path("output");
-            if (!"iqc-task-processed-results-v1".equals(output.path("schemaVersion").asText()))
-                throw IqcException.invalidState("任务处理结果损坏");
-            for (String section : List.of("inspectionItems", "labels")) {
-                JsonNode items = output.path(section);
-                if (items.isMissingNode()) continue;
-                if (!items.isArray()) throw IqcException.invalidState("任务处理结果损坏");
-                for (JsonNode item : items) {
-                    count++;
-                    if ("inspectionItems".equals(section) && "KNOWN".equals(item.path("status").asText())
-                            && "FAIL".equals(item.path("value").asText())) failures++;
-                    if ("ERROR".equals(item.path("status").asText())) errors++;
-                }
+        var counts = canonical == null ? new ProcessorCounts(0, 0, 0) : processorCounts(canonical);
+        return new ConversationResultSummary(id, conversation == null ? null : conversation.getSourceFileName(),
+                conversation == null ? 0 : conversation.getMessageCount(), counts.items(),
+                canonical != null && "FINAL".equals(canonical.getScoreStatus()) ? canonical.getFinalScore() : null,
+                counts.failures(), 0, counts.errors(), canonical == null ? "PENDING" : canonical.getScoreStatus());
+    }
+
+    /** Both result views count explicit processor targets, never individual engine votes. */
+    private ProcessorCounts processorCounts(ConversationInspectionResult canonical) {
+        JsonNode output = exportJson(canonical.getBusinessItemResultsJson()).path("output");
+        if (!"iqc-task-processed-results-v1".equals(output.path("schemaVersion").asText()))
+            throw IqcException.invalidState("任务处理结果损坏");
+        int count = 0, failures = 0, errors = 0;
+        for (String section : List.of("inspectionItems", "labels")) {
+            JsonNode items = output.path(section);
+            if (items.isMissingNode()) continue;
+            if (!items.isArray()) throw IqcException.invalidState("任务处理结果损坏");
+            for (JsonNode item : items) {
+                String state = item.path("status").asText();
+                if (!List.of("KNOWN", "CONFLICT", "UNKNOWN", "ERROR").contains(state))
+                    throw IqcException.invalidState("任务处理结果状态损坏");
+                count++;
+                if ("inspectionItems".equals(section) && "KNOWN".equals(state)
+                        && "FAIL".equals(item.path("value").asText())) failures++;
+                if ("ERROR".equals(state)) errors++;
             }
         }
-        return new ConversationResultSummary(id, conversation == null ? null : conversation.getSourceFileName(),
-                conversation == null ? 0 : conversation.getMessageCount(), count,
-                canonical != null && "FINAL".equals(canonical.getScoreStatus()) ? canonical.getFinalScore() : null,
-                failures, 0, errors, canonical == null ? "PENDING" : canonical.getScoreStatus());
+        return new ProcessorCounts(count, failures, errors);
     }
+
+    private record ProcessorCounts(int items, int failures, int errors) { }
 
     private boolean isWizard(InspectionTask task) {
         if (task.getRuleSnapshotJson() == null) return false;

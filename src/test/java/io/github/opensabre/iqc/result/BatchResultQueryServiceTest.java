@@ -176,6 +176,71 @@ class BatchResultQueryServiceTest {
     }
 
     @Test
+    void businessPageSupportsProcessorResultsAlongsideLegacyResults() {
+        var wizard = businessRow("TASK_PROCESSOR", "FINAL", """
+                {"output":{"schemaVersion":"iqc-task-processed-results-v1",
+                "inspectionItems":[{"status":"KNOWN","value":"FAIL"},{"status":"CONFLICT"}],
+                "labels":[{"status":"KNOWN","value":false},{"status":"ERROR"}]}}
+                """);
+        wizard.setFinalScore(BigDecimal.ZERO);
+        var legacy = businessRow("RULE", "FINAL", "[{\"status\":\"FAIL\"}]");
+        legacy.setFinalScore(BigDecimal.TEN);
+        stubBusinessRows(List.of(wizard, legacy));
+        var page = service.businessPage(1, 20, "t1", null, null, null, null);
+        assertThat(page.total()).isEqualTo(2);
+        var row = page.records().getFirst();
+        assertThat(row.finalScore()).isEqualByComparingTo("0");
+        assertThat(row.itemCount()).isEqualTo(4);
+        assertThat(row.failureCount()).isEqualTo(1);
+        assertThat(row.errorCount()).isEqualTo(1);
+        assertThat(row.riskLevel()).isNull();
+        assertThat(page.records().getLast().finalScore()).isEqualByComparingTo("10");
+        verifyNoInteractions(results);
+    }
+
+    @Test
+    void businessPageDoesNotInventScoresForPendingOrLabelOnlyTasks() {
+        var pending = businessRow("TASK_PROCESSOR", "PENDING", """
+                {"output":{"schemaVersion":"iqc-task-processed-results-v1",
+                "inspectionItems":[{"status":"ERROR"}],"labels":[]}}
+                """);
+        var labelOnly = businessRow("TASK_PROCESSOR", "NOT_APPLICABLE", """
+                {"output":{"schemaVersion":"iqc-task-processed-results-v1",
+                "labels":[{"status":"KNOWN","value":false}]}}
+                """);
+        stubBusinessRows(List.of(pending, labelOnly));
+        var rows = service.businessPage(1, 20, "t1", null, null, null, null).records();
+        assertThat(rows).allMatch(row -> row.finalScore() == null);
+        assertThat(rows.getLast().itemCount()).isEqualTo(1);
+        assertThat(rows.getLast().failureCount()).isZero();
+    }
+
+    @Test
+    void businessPageRejectsCorruptProcessorOutput() {
+        for (String payload : List.of("[]", "{\"output\":{\"schemaVersion\":\"old\"}}",
+                "{\"output\":{\"schemaVersion\":\"iqc-task-processed-results-v1\",\"labels\":[{\"status\":\"invented\"}]}}")) {
+            stubBusinessRows(List.of(businessRow("TASK_PROCESSOR", "PENDING", payload)));
+            assertThatThrownBy(() -> service.businessPage(1, 20, "t1", null, null, null, null))
+                    .hasMessageContaining("结果损坏");
+        }
+    }
+
+    private ConversationInspectionResult businessRow(String mode, String status, String output) {
+        var result = new ConversationInspectionResult();
+        result.setTaskId("t1"); result.setConversationId("c1"); result.setExecutionId("e2");
+        result.setAggregationMode(mode); result.setScoreStatus(status); result.setBusinessItemResultsJson(output);
+        return result;
+    }
+
+    private void stubBusinessRows(List<ConversationInspectionResult> rows) {
+        when(tasks.selectList(any())).thenReturn(List.of(task));
+        var page = new com.baomidou.mybatisplus.extension.plugins.pagination.Page<ConversationInspectionResult>(1, 20, rows.size());
+        page.setRecords(rows);
+        when(canonical.selectBusinessPage(any(), any(), any(), any(), any(), any())).thenReturn(page);
+        when(conversations.selectBatchIds(any())).thenReturn(List.of());
+    }
+
+    @Test
     void businessPageDoesNotReadResultsWithoutAnyVisibleTask() {
         when(tasks.selectList(any())).thenReturn(List.of());
         assertThat(service.businessPage(0, 200, "hidden", null, null, null, null).total()).isZero();
