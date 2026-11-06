@@ -36,6 +36,28 @@ class TaskEnginePlanServiceTest {
     private final TaskEnginePlanService service = new TaskEnginePlanService(rules, agents, mapper,
             new RegexEngineAdapter(mapper), new DlsEngineAdapter(mapper), new LlmEngineAdapter(provider, mapper));
 
+    @Test void freezesReadableNameWithoutChangingEngineIdentityOrOrder() throws Exception {
+        when(rules.selectById("r1")).thenReturn(rule("r1", "REGEX", "退款"));
+        String json = single("REGEX", "\"ruleId\":\"r1\"");
+        var request = request(json.replace("\"id\":\"engine1\"", "\"id\":\"engine1\",\"name\":\"  退款用语检查  \""));
+        var plan = service.freeze(request);
+        var step = service.steps(plan, "c1").getFirst();
+        assertThat(plan.engines().getFirst().instanceId()).isEqualTo("engine1");
+        assertThat(plan.engines().getFirst().sequence()).isEqualTo(1);
+        assertThat(step.configuration().path("engineName").asText()).isEqualTo("退款用语检查");
+        var roundTrip = mapper.readValue(mapper.writeValueAsString(plan), TaskEnginePlanService.FrozenPlan.class);
+        assertThat(roundTrip).isEqualTo(plan);
+        assertThat(service.freeze(request(json)).engines().getFirst().configuration().path("engineName").asText()).isEqualTo("engine1");
+    }
+
+    @Test void rejectsBlankAndOversizedExplicitNames() {
+        var parameters = mapper.createObjectNode();
+        assertThatThrownBy(() -> new TaskProcessingConfiguration.Engine("engine1", TaskProcessingConfiguration.EngineType.REGEX, parameters, "  "))
+                .hasMessageContaining("引擎名称");
+        assertThatThrownBy(() -> new TaskProcessingConfiguration.Engine("engine1", TaskProcessingConfiguration.EngineType.REGEX, parameters, "a".repeat(81)))
+                .hasMessageContaining("引擎名称");
+    }
+
     @Test void executesIndependentOrdersAndKeepsConflictingEngineResultsFromFrozenSnapshots() throws Exception {
         var regex = rule("r1", "REGEX", "退款");
         var llm = rule("r2", "LLM", "识别退款");

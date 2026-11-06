@@ -34,14 +34,19 @@ public record TaskProcessingConfiguration(String schemaVersion, Processing inspe
     }
 
     /** Parameter trees are copied on both boundaries so callers cannot mutate a frozen task configuration. */
-    public record Engine(String id, EngineType type, JsonNode parameters) {
+    public record Engine(String id, EngineType type, JsonNode parameters, String name) {
         public Engine {
             if (id == null || !id.matches("[A-Za-z][A-Za-z0-9_-]{0,63}") || type == null)
                 throw IqcException.invalidArgument("引擎标识或类型无效");
+            name = name == null ? id : name.trim();
+            if (name.isBlank() || name.length() > 80)
+                throw IqcException.invalidArgument("引擎名称需为 1 到 80 个字符");
             if (parameters == null || !parameters.isObject())
                 throw IqcException.invalidArgument("引擎参数必须为对象");
             parameters = parameters.deepCopy();
         }
+        /** Older clients omitted names; preserve their stable instance identity as the display fallback. */
+        public Engine(String id, EngineType type, JsonNode parameters) { this(id, type, parameters, null); }
         @Override public JsonNode parameters() { return parameters.deepCopy(); }
     }
 }
