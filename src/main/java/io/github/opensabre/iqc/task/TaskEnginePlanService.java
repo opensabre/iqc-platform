@@ -60,7 +60,8 @@ public class TaskEnginePlanService {
             if (!engine.type().name().equals(rule.getRuleType()))
                 throw IqcException.invalidArgument("引擎类型与规则类型不一致: " + ruleId);
             RuleMatcher.validate(rule.getRuleType(), rule.getExpression(), mapper);
-            var configuration = mapper.createObjectNode().put("targetId", target).put("ruleId", ruleId);
+            var configuration = mapper.createObjectNode().put("targetId", target).put("ruleId", ruleId)
+                    .put("engineName", engine.name());
             configuration.set("rule", mapper.valueToTree(rule));
             if (engine.type() == TaskProcessingConfiguration.EngineType.LLM) {
                 String agentId = text(parameters, "agentId");
