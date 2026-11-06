@@ -312,8 +312,26 @@ class JointLabelMaterializationTransactionTest {
     @Autowired private io.github.opensabre.iqc.task.TaskWizardService wizardTasks;
     @Autowired private io.github.opensabre.iqc.task.processing.EngineResultSetStore wizardStore;
 
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean private io.github.opensabre.iqc.task.processing.RegexEngineAdapter wizardRegex;
+
     @Test
     void wizardTaskCreatesQueuesExecutesAndStoresRealScoreAndEngineEvidence() throws Exception {
+        verifyWizardExecution(false);
+    }
+
+    @Test
+    void wizardFailureContinuesLabelingAndRetryReusesFrozenInputAndSuccessfulEvidence() throws Exception {
+        verifyWizardExecution(true);
+    }
+
+    private void verifyWizardExecution(boolean failFirstEngine) throws Exception {
+        var failOnce = new java.util.concurrent.atomic.AtomicBoolean(failFirstEngine);
+        org.mockito.Mockito.doAnswer(call -> {
+            com.fasterxml.jackson.databind.JsonNode configuration = call.getArgument(1);
+            if ("可重试".equals(configuration.path("engineName").asText()) && failOnce.getAndSet(false))
+                throw new IllegalStateException("isolated engine failure");
+            return call.callRealMethod();
+        }).when(wizardRegex).execute(any(), any());
         jdbc.execute("CREATE TABLE IF NOT EXISTS iqc_engine_execution_result_set (id varchar(64) PRIMARY KEY,task_id varchar(64),execution_id varchar(64),conversation_id varchar(64),payload clob,revision int,created_time timestamp,updated_time timestamp,UNIQUE(execution_id,conversation_id))");
         jdbc.update("DELETE FROM iqc_engine_execution_result_set");
         jdbc.update("INSERT INTO iqc_conversation (id,message_count,status,created_by) VALUES ('wizard-conversation',1,'IMPORTED','system')");
@@ -322,17 +340,26 @@ class JointLabelMaterializationTransactionTest {
         rule.setName("退款识别"); rule.setCode("wizard-regex"); rule.setRuleType("REGEX");
         rule.setStatus("PUBLISHED"); rule.setVersionNo(1); rule.setExpression("退款"); rule.setTargetRole("all");
         ruleMapper.insert(rule);
+        jdbc.update("INSERT INTO iqc_label_category (id,name,code,status,version_no,created_by) VALUES ('wizard-category','标签','wizard-category','PUBLISHED',1,'system')");
+        jdbc.update("INSERT INTO iqc_label_group (id,category_id,name,code,status,version_no,allow_auto_expand,created_by) VALUES ('wizard-group','wizard-category','标签组','wizard-group','PUBLISHED',1,false,'system')");
+        jdbc.update("INSERT INTO iqc_label (id,group_id,name,code,target_role,weight,status,version_no,created_by) VALUES ('wizard-label','wizard-group','退款标签','wizard-label','customer',1,'PUBLISHED',1,'system')");
+        jdbc.update("INSERT INTO iqc_label_rule_binding (id,label_id,rule_id,rule_version_no,binding_role,display_order) VALUES ('wizard-binding','wizard-label','wizard-rule',1,'PRIMARY',0)");
+        jdbc.update("INSERT INTO iqc_label_value_definition (id,label_id,value_code,value_type,display_order,config_json) VALUES ('wizard-value','wizard-label','refund','BOOLEAN',0,'{}')");
         var engines = mapper.readValue("""
                 {"schemaVersion":"iqc-task-processing-v1","inspection":{"engines":[
-                  {"id":"first","type":"REGEX","parameters":{"targetId":"check","ruleId":"wizard-rule"}},
-                  {"id":"second","type":"REGEX","parameters":{"targetId":"check","ruleId":"wizard-rule"}}]}}
+                  {"id":"first","name":"可重试","type":"REGEX","parameters":{"targetId":"check","ruleId":"wizard-rule"}},
+                  {"id":"second","type":"REGEX","parameters":{"targetId":"check","ruleId":"wizard-rule"}}]},
+                  "labeling":{"engines":[{"id":"label-engine","type":"REGEX",
+                    "parameters":{"targetId":"wizard-label","ruleId":"wizard-rule"}}]}}
                 """, io.github.opensabre.iqc.task.TaskProcessingConfiguration.class);
         var processing = mapper.readValue("""
                 {"schemaVersion":"iqc-task-result-processing-v1","inspection":{
                   "scoring":{"version":"iqc-score-v2","mode":"DEDUCTION","baseScore":100,"passingScore":80,
                     "items":[{"itemCode":"check","points":10,"veto":false}]},"aggregation":"REQUIRE_AGREEMENT",
                   "checks":[{"targetId":"check","engines":[{"engineInstanceId":"first","onHit":"FAIL","onMiss":"PASS"},
-                    {"engineInstanceId":"second","onHit":"FAIL","onMiss":"PASS"}]}]}}
+                    {"engineInstanceId":"second","onHit":"FAIL","onMiss":"PASS"}]}]},
+                  "labeling":[{"targetId":"wizard-label","valueCode":"refund","valueType":"BOOLEAN",
+                    "aggregation":"REQUIRE_AGREEMENT","engines":[{"engineInstanceId":"label-engine","onHit":false,"onMiss":true}]}]}
                 """, io.github.opensabre.iqc.task.processing.TaskResultProcessingConfiguration.class);
         var selection = new io.github.opensabre.iqc.task.TaskDataSelection(io.github.opensabre.iqc.task.TaskDataSelection.Mode.BATCH,
                 List.of("wizard-conversation"), null, null, null);
@@ -340,15 +367,59 @@ class JointLabelMaterializationTransactionTest {
         var queued = runtimeQueue.queue(task.getId());
         runtimeQueue.run(queued.getId(), queued.getCurrentExecutionId());
         var finished = taskMapper.selectById(task.getId());
+        if (failFirstEngine) {
+            assertThat(finished.getStatus()).isEqualTo("PARTIAL_FAILED");
+            var failedExecution = finished.getCurrentExecutionId();
+            var failed = wizardStore.find(failedExecution, "wizard-conversation").orElseThrow();
+            assertThat(failed.engines()).hasSize(3);
+            assertThat(failed.engines().getFirst().failure().code()).isEqualTo("ENGINE_EXCEPTION");
+            assertThat(failed.engines().subList(1, 3)).allMatch(engine -> engine.status().name().equals("SUCCEEDED"));
+            var partial = canonicalResults.selectForTaskExecutionConversation(task.getId(), failedExecution, "wizard-conversation");
+            assertThat(partial.getScoreStatus()).isEqualTo("PENDING");
+            assertThat(partial.getFinalScore()).isNull();
+            assertThat(mapper.readTree(partial.getBusinessItemResultsJson()).path("output").path("labels").get(0).path("value").booleanValue()).isFalse();
+            // Retry must use the original input and frozen rule, even after source edits.
+            jdbc.update("UPDATE iqc_conversation_message SET content='不再包含关键词' WHERE id='wizard-message'");
+            jdbc.update("UPDATE iqc_quality_rule SET expression='不存在的关键词' WHERE id='wizard-rule'");
+            var retry = runtimeQueue.queue(task.getId());
+            runtimeQueue.run(task.getId(), retry.getCurrentExecutionId());
+            finished = taskMapper.selectById(task.getId());
+            var retried = wizardStore.find(finished.getCurrentExecutionId(), "wizard-conversation").orElseThrow();
+            assertThat(retried.input()).isEqualTo(failed.input());
+            assertThat(retried.engines().stream().filter(engine -> !engine.engineInstanceId().equals("first"))
+                    .map(engine -> engine.engineResultId()).toList())
+                    .containsExactlyElementsOf(failed.engines().subList(1, 3).stream().map(engine -> engine.engineResultId()).toList());
+            assertThat(retried.engines().stream().filter(engine -> engine.engineInstanceId().equals("first")).findFirst().orElseThrow().engineResultId())
+                    .isNotEqualTo(failed.engines().getFirst().engineResultId());
+            assertThat(wizardStore.find(failedExecution, "wizard-conversation").orElseThrow()).isEqualTo(failed);
+        }
         assertThat(finished.getStatus()).isEqualTo("SUCCEEDED");
         assertThat(finished.getProcessedMessages()).isEqualTo(1);
         var result = canonicalResults.selectForTaskExecutionConversation(task.getId(), finished.getCurrentExecutionId(), "wizard-conversation");
         assertThat(result.getScoreStatus()).isEqualTo("FINAL");
         assertThat(result.getFinalScore()).isEqualByComparingTo("90");
         var retained = wizardStore.find(finished.getCurrentExecutionId(), "wizard-conversation").orElseThrow();
-        assertThat(retained.engines()).hasSize(2);
+        assertThat(retained.engines()).hasSize(3);
         assertThat(retained.engines().getFirst().evidence().getFirst().quote()).isEqualTo("退款");
-        assertThat(mapper.readTree(result.getBusinessItemResultsJson()).path("sourceEngineResultIds").size()).isEqualTo(2);
+        var processed = mapper.readTree(result.getBusinessItemResultsJson());
+        assertThat(processed.path("sourceEngineResultIds").size()).isEqualTo(3);
+        var label = processed.path("output").path("labels").get(0);
+        assertThat(label.path("status").asText()).isEqualTo("KNOWN");
+        assertThat(label.path("value").isBoolean()).isTrue();
+        assertThat(label.path("value").booleanValue()).isFalse();
+        var hierarchy = results.hierarchy(task.getId(), "wizard-conversation", finished.getCurrentExecutionId());
+        assertThat(hierarchy.executionId()).isEqualTo(finished.getCurrentExecutionId());
+        assertThat(hierarchy.processedResult()).isEqualTo(processed);
+        assertThat(hierarchy.engineResultSet().path("engines").size()).isEqualTo(3);
+        when(httpOrganization.getUserByUniqueId("system")).thenReturn(Result.success(
+                new IqcOrganizationClient.OrganizationUser("system", "System", "system", null, null)));
+        when(httpRateLimiter.check(any())).thenReturn(new RateLimitDecision(true, 60, 0, 60, null, "isolated-test"));
+        var identity = signedHttpIdentity("system");
+        var detail = httpData(http(identity, "/api/iqc/tasks/" + task.getId()
+                + "/conversations/wizard-conversation/result-hierarchy?executionId=" + finished.getCurrentExecutionId(), null));
+        assertThat(detail.path("executionId").asText()).isEqualTo(finished.getCurrentExecutionId());
+        assertThat(detail.path("processedResult")).isEqualTo(processed);
+        assertThat(detail.path("engineResultSet").path("engines").size()).isEqualTo(3);
     }
 
     private InspectionTask runtimeSelectionTask(String mode) {
