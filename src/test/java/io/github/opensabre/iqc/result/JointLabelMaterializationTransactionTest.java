@@ -324,7 +324,16 @@ class JointLabelMaterializationTransactionTest {
         verifyWizardExecution(true);
     }
 
+    @Test
+    void wizardLabelOnlyHttpExecutionRetainsFalseEvidenceWithoutInspectionScore() throws Exception {
+        verifyWizardExecution(false, true);
+    }
+
     private void verifyWizardExecution(boolean failFirstEngine) throws Exception {
+        verifyWizardExecution(failFirstEngine, false);
+    }
+
+    private void verifyWizardExecution(boolean failFirstEngine, boolean labelOnly) throws Exception {
         var failOnce = new java.util.concurrent.atomic.AtomicBoolean(failFirstEngine);
         org.mockito.Mockito.doAnswer(call -> {
             com.fasterxml.jackson.databind.JsonNode configuration = call.getArgument(1);
@@ -370,11 +379,21 @@ class JointLabelMaterializationTransactionTest {
         createBody.set("dataSelection", mapper.valueToTree(selection));
         createBody.set("processingConfiguration", mapper.valueToTree(engines));
         createBody.set("resultProcessing", mapper.valueToTree(processing));
+        if (labelOnly) {
+            ((com.fasterxml.jackson.databind.node.ObjectNode) createBody.path("processingConfiguration")).remove("inspection");
+            ((com.fasterxml.jackson.databind.node.ObjectNode) createBody.path("resultProcessing")).remove("inspection");
+        }
         var created = httpData(http(signedHttpIdentity("system"), "/api/iqc/tasks", mapper.writeValueAsString(createBody)));
         assertThat(created.path("id").asText()).isNotBlank();
         var task = taskMapper.selectById(created.path("id").asText());
-        var queued = runtimeQueue.queue(task.getId());
-        runtimeQueue.run(queued.getId(), queued.getCurrentExecutionId());
+        if (labelOnly) {
+            var identity = signedHttpIdentity("system");
+            httpData(http(identity, "/api/iqc/tasks/" + task.getId() + "/run", "{}"));
+            awaitHttpTask(identity, task.getId());
+        } else {
+            var queued = runtimeQueue.queue(task.getId());
+            runtimeQueue.run(queued.getId(), queued.getCurrentExecutionId());
+        }
         var finished = taskMapper.selectById(task.getId());
         if (failFirstEngine) {
             assertThat(finished.getStatus()).isEqualTo("PARTIAL_FAILED");
@@ -405,13 +424,20 @@ class JointLabelMaterializationTransactionTest {
         assertThat(finished.getStatus()).isEqualTo("SUCCEEDED");
         assertThat(finished.getProcessedMessages()).isEqualTo(1);
         var result = canonicalResults.selectForTaskExecutionConversation(task.getId(), finished.getCurrentExecutionId(), "wizard-conversation");
-        assertThat(result.getScoreStatus()).isEqualTo("FINAL");
-        assertThat(result.getFinalScore()).isEqualByComparingTo("90");
+        if (labelOnly) {
+            assertThat(result.getScoreStatus()).isEqualTo("NOT_APPLICABLE");
+            assertThat(result.getScore()).isNull();
+            assertThat(result.getFinalScore()).isNull();
+        } else {
+            assertThat(result.getScoreStatus()).isEqualTo("FINAL");
+            assertThat(result.getFinalScore()).isEqualByComparingTo("90");
+        }
+        int expectedEngineCount = labelOnly ? 1 : 3;
         var retained = wizardStore.find(finished.getCurrentExecutionId(), "wizard-conversation").orElseThrow();
-        assertThat(retained.engines()).hasSize(3);
+        assertThat(retained.engines()).hasSize(expectedEngineCount);
         assertThat(retained.engines().getFirst().evidence().getFirst().quote()).isEqualTo("退款");
         var processed = mapper.readTree(result.getBusinessItemResultsJson());
-        assertThat(processed.path("sourceEngineResultIds").size()).isEqualTo(3);
+        assertThat(processed.path("sourceEngineResultIds").size()).isEqualTo(expectedEngineCount);
         var label = processed.path("output").path("labels").get(0);
         assertThat(label.path("status").asText()).isEqualTo("KNOWN");
         assertThat(label.path("value").isBoolean()).isTrue();
@@ -419,7 +445,7 @@ class JointLabelMaterializationTransactionTest {
         var hierarchy = results.hierarchy(task.getId(), "wizard-conversation", finished.getCurrentExecutionId());
         assertThat(hierarchy.executionId()).isEqualTo(finished.getCurrentExecutionId());
         assertThat(hierarchy.processedResult()).isEqualTo(processed);
-        assertThat(hierarchy.engineResultSet().path("engines").size()).isEqualTo(3);
+        assertThat(hierarchy.engineResultSet().path("engines").size()).isEqualTo(expectedEngineCount);
         when(httpOrganization.getUserByUniqueId("system")).thenReturn(Result.success(
                 new IqcOrganizationClient.OrganizationUser("system", "System", "system", null, null)));
         when(httpRateLimiter.check(any())).thenReturn(new RateLimitDecision(true, 60, 0, 60, null, "isolated-test"));
@@ -428,13 +454,14 @@ class JointLabelMaterializationTransactionTest {
                 + "/conversations/wizard-conversation/result-hierarchy?executionId=" + finished.getCurrentExecutionId(), null));
         assertThat(detail.path("executionId").asText()).isEqualTo(finished.getCurrentExecutionId());
         assertThat(detail.path("processedResult")).isEqualTo(processed);
-        assertThat(detail.path("engineResultSet").path("engines").size()).isEqualTo(3);
+        assertThat(detail.path("engineResultSet").path("engines").size()).isEqualTo(expectedEngineCount);
         var business = httpData(http(identity, "/api/iqc/results/business?taskId=" + task.getId(), null));
         assertThat(business.path("total").asInt()).isEqualTo(1);
         var businessRow = business.path("records").get(0);
-        assertThat(businessRow.path("finalScore").decimalValue()).isEqualByComparingTo("90");
-        assertThat(businessRow.path("itemCount").asInt()).isEqualTo(2);
-        assertThat(businessRow.path("failureCount").asInt()).isEqualTo(1);
+        if (labelOnly) assertThat(businessRow.path("finalScore").isNull()).isTrue();
+        else assertThat(businessRow.path("finalScore").decimalValue()).isEqualByComparingTo("90");
+        assertThat(businessRow.path("itemCount").asInt()).isEqualTo(labelOnly ? 1 : 2);
+        assertThat(businessRow.path("failureCount").asInt()).isEqualTo(labelOnly ? 0 : 1);
         assertThat(businessRow.path("executionId").asText()).isEqualTo(finished.getCurrentExecutionId());
     }
 
