@@ -59,8 +59,9 @@ class InspectionTaskServiceTest {
     private final TaskItemMapper taskItemMapper = mock(TaskItemMapper.class);
     private final IqcDataScope dataScope = mock(IqcDataScope.class);
     private final LabelResolutionService labelResolution = mock(LabelResolutionService.class);
-    private final InspectionExecutionService executionService = new InspectionExecutionService(taskMapper, conversationMapper, messageMapper, resultMapper,
-            new ObjectMapper(), executionMapper, taskItemMapper, dataScope, mock(io.github.opensabre.iqc.result.llm.LlmQualityProvider.class), mock(UsageCounterRecorder.class), mock(io.github.opensabre.iqc.result.HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class));
+    private final io.github.opensabre.iqc.conversation.ConversationQueryService selectionQuery = mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class);
+    private final InspectionExecutionService executionService = new InspectionExecutionService(taskMapper, selectionQuery, conversationMapper, messageMapper, resultMapper,
+            new ObjectMapper(), executionMapper, taskItemMapper, dataScope, mock(io.github.opensabre.iqc.result.llm.LlmQualityProvider.class), mock(UsageCounterRecorder.class), mock(io.github.opensabre.iqc.result.HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
     private final InspectionTaskService taskService = new InspectionTaskService(taskMapper, conversationMapper, agentMapper, ruleMapper, ruleSetService,
             new ObjectMapper(), executionMapper, dataScope, labelResolution);
 
@@ -639,6 +640,67 @@ class InspectionTaskServiceTest {
         version.setContentHash(java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
                 .digest(version.getSnapshotJson().getBytes(java.nio.charset.StandardCharsets.UTF_8))));
         return version;
+    }
+
+    @Test
+    void dynamicSelectionCreationStoresOnlyCriteriaAndDoesNotReadMatchingData() {
+        var rule = new io.github.opensabre.iqc.rule.model.QualityRule();
+        rule.setId("rule-1"); rule.setStatus("PUBLISHED"); rule.setRuleType("REGEX"); rule.setExpression("退款");
+        when(ruleMapper.selectById("rule-1")).thenReturn(rule);
+        var selection = new TaskDataSelection(TaskDataSelection.Mode.RANDOM, List.of(), null, 100, null);
+        var created = taskService.createConfigured("runtime sample", null, List.of(), null, null, null, null,
+                null, null, List.of("rule-1"), 1, null, null, "RULE_ONLY", selection);
+        assertThat(created.getStatus()).isEqualTo("CREATED");
+        assertThat(created.getConversationIdsJson()).isEqualTo("[]");
+        assertThat(created.getTotalMessages()).isZero();
+        assertThat(created.getSelectionFilterJson()).contains("iqc-data-selection-v1", "RANDOM");
+        org.mockito.Mockito.verifyNoInteractions(conversationMapper, selectionQuery);
+    }
+
+    @Test
+    void runtimeSampleUsesAvailableRowsAndRetryDoesNotSampleAgain() {
+        var dynamic = task("CREATED"); dynamic.setCurrentExecutionId(null); dynamic.setAttemptCount(0);
+        dynamic.setConversationId(null); dynamic.setConversationIdsJson("[]");
+        dynamic.setSelectionFilterJson("{\"schemaVersion\":\"iqc-data-selection-v1\",\"selection\":{\"mode\":\"RANDOM\",\"sampleSize\":100}}");
+        when(taskMapper.selectById("task-1")).thenReturn(dynamic);
+        when(dataScope.canView(null, null)).thenReturn(true);
+        when(taskMapper.update(any(), any())).thenReturn(1);
+        when(selectionQuery.resolveForExecution(any())).thenReturn(List.of(conversation("conversation-1", 1)));
+        when(messageMapper.selectList(any())).thenReturn(List.of(message("message-1", 1)));
+        var attempts = new java.util.concurrent.atomic.AtomicInteger();
+        org.mockito.Mockito.doAnswer(call -> { ((TaskExecution) call.getArgument(0)).setId("run-" + attempts.incrementAndGet()); return 1; })
+                .when(executionMapper).insert(any(TaskExecution.class));
+        executionService.queue("task-1");
+        assertThat(dynamic.getStatus()).isEqualTo("QUEUED");
+        assertThat(dynamic.getConversationIdsJson()).contains("conversation-1");
+        assertThat(dynamic.getTotalMessages()).isEqualTo(1);
+        assertThat(dynamic.getSelectionFilterJson()).contains("runtimeSeed", "resolvedAt");
+        dynamic.setStatus("FAILED");
+        when(taskItemMapper.selectList(any())).thenReturn(List.of(item("message-1", "FAILED")));
+        executionService.queue("task-1");
+        verify(selectionQuery, times(1)).resolveForExecution(any());
+        verify(taskItemMapper, times(2)).insert(any(TaskItem.class));
+    }
+
+    @Test
+    void emptyRuntimeSelectionDoesNotCreateAnEmptyExecution() {
+        var dynamic = task("CREATED"); dynamic.setCurrentExecutionId(null);
+        dynamic.setSelectionFilterJson("{\"schemaVersion\":\"iqc-data-selection-v1\",\"selection\":{\"mode\":\"FILTER\"}}");
+        when(taskMapper.selectById("task-1")).thenReturn(dynamic);
+        when(dataScope.canView(null, null)).thenReturn(true);
+        when(taskMapper.update(any(), any())).thenReturn(1);
+        when(selectionQuery.resolveForExecution(any())).thenReturn(List.of());
+        assertThatThrownBy(() -> executionService.queue("task-1")).hasMessageContaining("NO_DATA");
+        verify(executionMapper, never()).insert(any(TaskExecution.class));
+        verify(taskItemMapper, never()).insert(any(TaskItem.class));
+    }
+
+    @Test
+    void rejectsMixingNewSelectionWithLegacySamplingOrPreviewSeed() {
+        var selection = new TaskDataSelection(TaskDataSelection.Mode.RANDOM, List.of(), null, 100, "preview-only");
+        assertThatThrownBy(() -> taskService.createConfigured("mixed", null, List.of(), null, null, null, null,
+                null, null, List.of("rule-1"), 1, null, null, "RULE_ONLY", selection)).hasMessageContaining("不能同时指定");
+        org.mockito.Mockito.verifyNoInteractions(taskMapper, conversationMapper);
     }
 
     private Conversation conversation(String id, int messageCount) {

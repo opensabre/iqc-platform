@@ -13,7 +13,7 @@ class InspectionResultExportTest {
     private final InspectionExecutionService execution = mock(InspectionExecutionService.class);
     private final BatchResultQueryService batch = mock(BatchResultQueryService.class);
     private final io.github.opensabre.iqc.quality.BusinessItemReviewService reviews = mock(io.github.opensabre.iqc.quality.BusinessItemReviewService.class);
-    private final InspectionResultController controller = new InspectionResultController(execution, null, batch, null, null, null, reviews);
+    private final InspectionResultController controller = new InspectionResultController(execution, null, batch, null, null, null, reviews, new com.fasterxml.jackson.databind.ObjectMapper());
 
     @Test
     void sensitiveExportRoutesKeepExportPermissionAndAudit() throws Exception {

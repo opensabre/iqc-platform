@@ -123,6 +123,20 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
         return evaluateInput(input, rule, agentSnapshot, context, recordId, true);
     }
 
+    @Override
+    public LlmEvaluation evaluateConversationTraced(
+            List<io.github.opensabre.iqc.conversation.model.ConversationMessage> messages,
+            JsonNode rule, JsonNode agentSnapshot, String recordId,
+            java.util.function.Consumer<String> rawResponse) {
+        java.util.Objects.requireNonNull(rawResponse, "rawResponse");
+        final String input;
+        try { input = conversationInput(messages); }
+        catch (IllegalArgumentException exception) {
+            return new LlmEvaluation(false, false, "会话输入无效: " + exception.getMessage());
+        }
+        return evaluateInput(input, rule, agentSnapshot, null, recordId, true, false, rawResponse);
+    }
+
     /** Uses the same bounded identity-bearing input and governance facilities, with a distinct output contract. */
     @Override
     public LlmEvaluation evaluateCandidates(List<io.github.opensabre.iqc.conversation.model.ConversationMessage> messages,
@@ -179,13 +193,19 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
 
     private LlmEvaluation evaluateInput(String content, JsonNode rule, JsonNode agentSnapshot,
                                        JsonNode preRuleFindings, String recordId, boolean conversation, boolean candidate) {
+        return evaluateInput(content, rule, agentSnapshot, preRuleFindings, recordId, conversation, candidate, ignored -> {});
+    }
+
+    private LlmEvaluation evaluateInput(String content, JsonNode rule, JsonNode agentSnapshot,
+                                       JsonNode preRuleFindings, String recordId, boolean conversation, boolean candidate,
+                                       java.util.function.Consumer<String> rawResponse) {
         String stableId = recordId == null || recordId.isBlank() ? stableId(content, rule) : recordId;
         String usageId = "llm-call:" + stableId;
         String ruleId = rule.path("id").asText("unknown");
         recordUsage(usageId, ruleId, "attempt", UsageOutcome.ATTEMPT);
         try {
             enforceRateLimit();
-            LlmEvaluation result = callWithRetry(content, rule, agentSnapshot, preRuleFindings, conversation, candidate);
+            LlmEvaluation result = callWithRetry(content, rule, agentSnapshot, preRuleFindings, conversation, candidate, rawResponse);
             recordUsage(usageId, ruleId, "success", UsageOutcome.SUCCESS);
             return result;
         } catch (RuntimeException exception) {
@@ -195,13 +215,14 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
     }
 
     private LlmEvaluation callWithRetry(String content, JsonNode rule, JsonNode agentSnapshot,
-                                        JsonNode preRuleFindings, boolean conversation, boolean candidate) {
+                                        JsonNode preRuleFindings, boolean conversation, boolean candidate,
+                                        java.util.function.Consumer<String> rawResponse) {
         RuntimeException last = null;
         int attempts = Math.max(1, Math.min(properties.getMaxAttempts(), 3));
         for (int attempt = 1; attempt <= attempts; attempt++) {
             try {
                 String context = preRuleFindings == null ? "无" : preRuleFindings.toString();
-                Prompt prompt = new Prompt(List.of(new SystemMessage(agentSystemPrompt(agentSnapshot)
+                Prompt prompt = new Prompt(List.of(new SystemMessage(agentSystemPrompt(agentSnapshot) + taskInstruction(agentSnapshot)
                         + (conversation ? CONVERSATION_PROMPT : "") + (candidate ? CANDIDATE_PROMPT : "")),
                         new UserMessage("规则配置:" + rule + "\n本地预检结果:" + context
                                 + (conversation ? "\n待质检会话:" + content : "\n待质检话术:" + LlmTextSanitizer.sanitize(content)))));
@@ -212,6 +233,7 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
                 }
                 String text = response == null || response.getResult() == null
                         ? null : response.getResult().getOutput().getText();
+                rawResponse.accept(text);
                 var evaluation = parseEvaluation(text);
                 if (conversation && rule.has("labelFactTargets")) {
                     try {
@@ -229,6 +251,13 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
             }
         }
         throw last == null ? new IllegalStateException("LLM 未返回结果") : last;
+    }
+
+    /** Task instructions stay separate from the immutable published Agent and the response protocol. */
+    private String taskInstruction(JsonNode agentSnapshot) {
+        if (agentSnapshot == null) return "";
+        String instruction = agentSnapshot.path("taskOverrides").path("prompt").asText("");
+        return instruction.isBlank() ? "" : "\n本次任务指令（不得改变输出协议）:\n" + instruction;
     }
 
     private String agentSystemPrompt(JsonNode agentSnapshot) {

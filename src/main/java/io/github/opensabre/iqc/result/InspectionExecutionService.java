@@ -17,6 +17,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.opensabre.iqc.task.dao.InspectionTaskMapper;
 import io.github.opensabre.iqc.task.model.InspectionTask;
+import io.github.opensabre.iqc.task.TaskDataSelection;
+import io.github.opensabre.iqc.conversation.ConversationQueryService;
 import io.github.opensabre.iqc.task.dao.TaskExecutionMapper;
 import io.github.opensabre.iqc.task.model.TaskExecution;
 import io.github.opensabre.iqc.task.dao.TaskItemMapper;
@@ -55,6 +57,7 @@ import java.math.BigDecimal;
 @Slf4j
 public class InspectionExecutionService {
     private final InspectionTaskMapper taskMapper;
+    private final ConversationQueryService conversationQueryService;
     private final ConversationMapper conversationMapper;
     private final ConversationMessageMapper messageMapper;
     private final InspectionResultMapper resultMapper;
@@ -67,6 +70,7 @@ public class InspectionExecutionService {
     private final HierarchicalResultService hierarchicalResultService;
     private final LabelCandidateService labelCandidateService;
     private final io.github.opensabre.iqc.scheme.SchemeDependencyResolver schemeDependencies;
+    private final io.github.opensabre.iqc.task.TaskWizardRuntime wizardRuntime;
     private final Map<String, DlsEngine.Compiled> dlsCompileCache = Collections.synchronizedMap(
             new LinkedHashMap<>(32, 0.75f, true) {
                 @Override protected boolean removeEldestEntry(Map.Entry<String, DlsEngine.Compiled> eldest) {
@@ -74,7 +78,7 @@ public class InspectionExecutionService {
                 }
             });
 
-    @Transactional
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public InspectionTask queue(String taskId) {
         return queue(taskId, true);
     }
@@ -121,6 +125,8 @@ public class InspectionExecutionService {
                     .eq(InspectionTask::getId, taskId)
                     .eq(InspectionTask::getStatus, previousStatus));
             if (claimed != 1) throw IqcException.invalidState("任务正在被其他请求处理");
+            task.setStatus("QUEUED");
+            if (previousExecutionId == null) materializeRuntimeSelection(task, enforceDataScope);
             int attempt = task.getAttemptCount() == null ? 1 : task.getAttemptCount() + 1;
             TaskExecution execution = new TaskExecution();
             execution.setTaskId(taskId); execution.setAttemptNo(attempt); execution.setStatus("QUEUED"); execution.setProcessedMessages(0); execution.setFailedMessages(0);
@@ -146,6 +152,40 @@ public class InspectionExecutionService {
         } else {
             throw IqcException.taskNotExecutable("当前任务状态不可重复执行: " + task.getStatus());
         }
+    }
+
+    /** Called after the queue claim, inside its transaction; retries reuse the saved task input list. */
+    private void materializeRuntimeSelection(InspectionTask task, boolean userExecution) {
+        JsonNode definition = readSnapshot(task.getSelectionFilterJson());
+        if (definition == null || !"iqc-data-selection-v1".equals(definition.path("schemaVersion").asText())) return;
+        if (!userExecution) throw IqcException.invalidState("新数据选择需在授权用户上下文中执行");
+        TaskDataSelection selection;
+        try { selection = objectMapper.treeToValue(definition.path("selection"), TaskDataSelection.class); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException failure) { throw IqcException.invalidArgument("数据选择配置无法读取"); }
+        if (selection.mode() == TaskDataSelection.Mode.BATCH) {
+            for (String id : selection.conversationIds()) {
+                Conversation conversation = conversationMapper.selectById(id);
+                if (conversation == null || !dataScope.canView(conversation.getCreatedBy(), conversation.getOwnerGroupId()))
+                    throw IqcException.accessDenied("执行时无权使用所选会话");
+                if (!"IMPORTED".equals(conversation.getStatus()) || conversation.getMessageCount() == null || conversation.getMessageCount() < 1)
+                    throw IqcException.invalidState("所选会话尚未处理完成或没有消息");
+            }
+            return;
+        }
+        if (selection.mode() == TaskDataSelection.Mode.RANDOM) {
+            String seed = java.util.UUID.randomUUID().toString();
+            selection = new TaskDataSelection(selection.mode(), List.of(), selection.filter(), selection.sampleSize(), seed);
+            ((ObjectNode) definition).put("runtimeSeed", seed);
+        }
+        List<Conversation> selected = conversationQueryService.resolveForExecution(selection);
+        if (selected.isEmpty()) throw IqcException.invalidState("NO_DATA: 没有满足条件的会话，可调整条件后重新执行");
+        ((ObjectNode) definition).put("resolvedAt", java.time.Instant.now().toString());
+        task.setSelectionFilterJson(writeJson(definition));
+        task.setConversationIdsJson(writeJson(selected.stream().map(Conversation::getId).toList()));
+        task.setConversationId(selected.size() == 1 ? selected.getFirst().getId() : null);
+        task.setTotalMessages(selected.stream().map(Conversation::getMessageCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum());
+        taskMapper.updateById(task);
+
     }
 
     @Async("iqcTaskExecutor")
@@ -295,6 +335,16 @@ public class InspectionExecutionService {
     }
 
     private void processConversation(InspectionTask task, String executionId, JsonNode ruleSnapshot, List<TaskItem> items) {
+        if (ruleSnapshot != null && io.github.opensabre.iqc.task.TaskWizardSnapshot.SCHEMA.equals(ruleSnapshot.path("schemaVersion").asText())) {
+            try {
+                wizardRuntime.execute(task, executionId, objectMapper.treeToValue(ruleSnapshot,
+                        io.github.opensabre.iqc.task.TaskWizardSnapshot.class), items);
+            } catch (com.fasterxml.jackson.core.JsonProcessingException invalid) {
+                throw new IllegalArgumentException("任务执行快照无效", invalid);
+            }
+            return;
+        }
+
         Map<String, ConversationMessage> conversationMessagesById = new LinkedHashMap<>();
         for (TaskItem item : items) {
             ConversationMessage loaded = messageMapper.selectById(item.getMessageId());
