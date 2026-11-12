@@ -359,8 +359,8 @@ class InspectionExecutionServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final LlmQualityProvider llmProvider = mock(LlmQualityProvider.class);
     private final InspectionExecutionService service = new InspectionExecutionService(
-            mock(InspectionTaskMapper.class), mock(ConversationMapper.class), mock(ConversationMessageMapper.class), mock(InspectionResultMapper.class),
-            objectMapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class), mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class));
+            mock(InspectionTaskMapper.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), mock(ConversationMessageMapper.class), mock(InspectionResultMapper.class),
+            objectMapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class), mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
 
     @Test
     void keywordRuleOnlyAppliesToItsTargetSpeaker() {
@@ -379,11 +379,11 @@ class InspectionExecutionServiceTest {
         var messages = mock(ConversationMessageMapper.class);
         var results = mock(InspectionResultMapper.class);
         var hierarchy = mock(HierarchicalResultService.class);
-        var execution = new InspectionExecutionService(tasks, mock(ConversationMapper.class), messages, results,
+        var execution = new InspectionExecutionService(tasks, org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), messages, results,
                 objectMapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class), mock(IqcDataScope.class),
                 llmProvider, mock(UsageCounterRecorder.class), hierarchy,
                 mock(io.github.opensabre.iqc.label.LabelCandidateService.class),
-                mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class));
+                mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
         var task = task();
         task.setStatus("RUNNING");
         var archived = message("客户", "我没有房子");
@@ -409,11 +409,11 @@ class InspectionExecutionServiceTest {
         var messages = mock(ConversationMessageMapper.class);
         var observations = mock(InspectionResultMapper.class);
         var hierarchy = mock(HierarchicalResultService.class);
-        var execution = new InspectionExecutionService(tasks, mock(ConversationMapper.class), messages, observations,
+        var execution = new InspectionExecutionService(tasks, org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), messages, observations,
                 objectMapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class), mock(IqcDataScope.class),
                 llmProvider, mock(UsageCounterRecorder.class), hierarchy,
                 mock(io.github.opensabre.iqc.label.LabelCandidateService.class),
-                mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class));
+                mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
         var task = task(); task.setStatus("RUNNING"); task.setCurrentExecutionId("execution-1");
         var policy = new InspectionScoring.Policy("iqc-score-v2", InspectionScoring.Mode.DEDUCTION,
                 100, 60, List.of());
@@ -752,8 +752,8 @@ class InspectionExecutionServiceTest {
             message.setConversationId("message-1".equals(message.getId()) ? "conversation-1" : "conversation-2");
             return message;
         });
-        InspectionExecutionService concurrentService = new InspectionExecutionService(tasks, mock(ConversationMapper.class), messages, results, objectMapper,
-                executions, items, mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class));
+        InspectionExecutionService concurrentService = new InspectionExecutionService(tasks, org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), messages, results, objectMapper,
+                executions, items, mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
 
         InspectionTask completed = concurrentService.run("task-1", "execution-1");
 
@@ -781,8 +781,8 @@ class InspectionExecutionServiceTest {
         ConversationMessage first = message("agent", "已完成"); first.setId("message-1");
         ConversationMessage second = message("agent", "待恢复"); second.setId("message-2");
         when(messages.selectById("message-1")).thenReturn(first); when(messages.selectById("message-2")).thenReturn(second);
-        InspectionExecutionService resumed = new InspectionExecutionService(tasks, mock(ConversationMapper.class), messages, results, objectMapper,
-                executions, items, mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class));
+        InspectionExecutionService resumed = new InspectionExecutionService(tasks, org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), messages, results, objectMapper,
+                executions, items, mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
 
         InspectionTask result = resumed.run("task-1", "execution-1");
 
@@ -801,9 +801,9 @@ class InspectionExecutionServiceTest {
         when(tasks.selectById("task-1")).thenReturn(queued, running);
         when(executions.selectById("execution-1")).thenReturn(execution);
         when(tasks.update(isNull(), any())).thenReturn(0);
-        InspectionExecutionService contender = new InspectionExecutionService(tasks, mock(ConversationMapper.class), mock(ConversationMessageMapper.class),
+        InspectionExecutionService contender = new InspectionExecutionService(tasks, org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), mock(ConversationMessageMapper.class),
                 mock(InspectionResultMapper.class), objectMapper, executions, items, mock(IqcDataScope.class), llmProvider,
-                mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class));
+                mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
 
         assertThat(contender.run("task-1", "execution-1")).isSameAs(running);
         verifyNoInteractions(items);
@@ -818,8 +818,8 @@ class InspectionExecutionServiceTest {
         when(tasks.selectById("task-1")).thenReturn(paused); when(scope.canView(any(), any())).thenReturn(true);
         when(items.selectList(any())).thenReturn(List.of(succeeded, pending)); when(tasks.update(isNull(), any())).thenReturn(1);
         org.mockito.Mockito.doAnswer(invocation -> { TaskExecution value = invocation.getArgument(0); value.setId("execution-new"); return 1; }).when(executions).insert(any(TaskExecution.class));
-        InspectionExecutionService resumed = new InspectionExecutionService(tasks, mock(ConversationMapper.class), mock(ConversationMessageMapper.class), mock(InspectionResultMapper.class), objectMapper,
-                executions, items, scope, llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class));
+        InspectionExecutionService resumed = new InspectionExecutionService(tasks, org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), mock(ConversationMessageMapper.class), mock(InspectionResultMapper.class), objectMapper,
+                executions, items, scope, llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
 
         InspectionTask result = resumed.resume("task-1");
 

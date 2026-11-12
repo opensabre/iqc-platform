@@ -20,12 +20,18 @@ import io.github.opensabre.iqc.label.LabelResolutionService;
 @RestController
 @RequestMapping("/api/iqc/tasks")
 public class InspectionTaskController {
+    private final com.fasterxml.jackson.databind.ObjectMapper mapper;
     private final InspectionTaskService taskService;
     private final UsageCounterRecorder usageCounterRecorder;
+    private final io.github.opensabre.iqc.task.TaskWizardService wizardService;
 
-    public InspectionTaskController(InspectionTaskService taskService, UsageCounterRecorder usageCounterRecorder) {
+    public InspectionTaskController(InspectionTaskService taskService, UsageCounterRecorder usageCounterRecorder,
+                                    io.github.opensabre.iqc.task.TaskWizardService wizardService,
+                                    com.fasterxml.jackson.databind.ObjectMapper mapper) {
+        this.mapper = mapper;
         this.taskService = taskService;
         this.usageCounterRecorder = usageCounterRecorder;
+        this.wizardService = wizardService;
     }
 
     @GetMapping
@@ -56,17 +62,48 @@ public class InspectionTaskController {
     @ResourcePermission(code = "iqc:task:create", name = "创建质检任务", type = "iqc", description = "创建质检任务")
     @Audit(operationType = OperationType.CREATE, description = "创建 IQC 质检任务", module = "IQC_TASK")
     @RateLimit(sceneCode = "iqc-task-create", maxCount = 20, period = 60)
-    public InspectionTask create(@RequestBody CreateTaskRequest request) {
+    public InspectionTask createFromJson(
+            @io.swagger.v3.oas.annotations.parameters.RequestBody(content = @io.swagger.v3.oas.annotations.media.Content(
+                    schema = @io.swagger.v3.oas.annotations.media.Schema(implementation = CreateTaskRequest.class)))
+            @RequestBody String body) {
+        // Decode the domain JSON nodes with the application's existing persistence mapper.
+        final CreateTaskRequest request;
+        try { request = mapper.readValue(body, CreateTaskRequest.class); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException invalid) {
+            throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("任务创建参数无效");
+        }
+        if (request == null) throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("任务创建参数不能为空");
+        return create(request);
+    }
+
+    /** Shared typed entry keeps legacy and wizard task validation identical for HTTP and internal callers. */
+    public InspectionTask create(CreateTaskRequest request) {
+        if (request.dataSelection() != null && request.scheduledTime() != null)
+            throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("新数据选择暂不支持计划执行时间");
+        if (request.processingConfiguration() != null || request.resultProcessing() != null) {
+            if (request.taskType() != null || request.conversationId() != null || request.conversationIds() != null
+                    || request.selectionFilter() != null || request.scheduledTime() != null || request.sampleSize() != null
+                    || request.sampleSeed() != null || request.agentId() != null || request.ruleSetId() != null || request.ruleIds() != null
+                    || request.labelSelection() != null || request.labelOptions() != null || request.executionMode() != null)
+                throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("新任务配置不能混用旧任务参数");
+            var created = wizardService.create(request.name(), request.dataSelection(), request.processingConfiguration(),
+                    request.resultProcessing(), request.concurrencyLimit());
+            recordCreation(created);
+            return created;
+        }
         List<String> conversationIds = request.conversationIds() == null || request.conversationIds().isEmpty()
                 ? (request.conversationId() == null ? List.of() : List.of(request.conversationId())) : request.conversationIds();
         InspectionTask task = taskService.createConfigured(request.name(), request.taskType(), conversationIds,
                 request.selectionFilter(), "SCHEDULED".equalsIgnoreCase(request.taskType()) ? parseScheduledTime(request.scheduledTime()) : null,
                 request.sampleSize(), request.sampleSeed(), request.agentId(), request.ruleSetId(), request.ruleIds(),
-                request.concurrencyLimit(), request.labelSelection(), request.labelOptions(), request.executionMode());
-        usageCounterRecorder.record(new UsageRecord(
-                "inspection-task:create:" + task.getId(), null, "iqc-platform", "INSPECTION_TASK",
-                task.getId(), "CREATE", UsageOutcome.SUCCESS));
+                request.concurrencyLimit(), request.labelSelection(), request.labelOptions(), request.executionMode(), request.dataSelection());
+        recordCreation(task);
         return task;
+    }
+
+    private void recordCreation(InspectionTask task) {
+        usageCounterRecorder.record(new UsageRecord("inspection-task:create:" + task.getId(), null,
+                "iqc-platform", "INSPECTION_TASK", task.getId(), "CREATE", UsageOutcome.SUCCESS));
     }
 
     private LocalDateTime parseScheduledTime(String value) {
@@ -110,5 +147,11 @@ public class InspectionTaskController {
                                     LabelResolutionService.LabelSelection labelSelection,
                                     InspectionTaskService.LabelExecutionOptions labelOptions,
                                     @io.swagger.v3.oas.annotations.media.Schema(description = "任务执行策略；省略保留旧 Agent 模式。RULE_ONLY 无需 Agent。", allowableValues = {"RULE_ONLY", "RULE_THEN_LLM", "LLM_THEN_RULE", "AGENT_LLM", "INDEPENDENT"})
-                                    String executionMode) { }
+                                    String executionMode,
+                                    @io.swagger.v3.oas.annotations.media.Schema(description = "新数据选择：批量名单，或执行时解析的随机/条件参数；不能与旧取数参数混用")
+                                    io.github.opensabre.iqc.task.TaskDataSelection dataSelection,
+                                    @io.swagger.v3.oas.annotations.media.Schema(description = "质检/打标各自的有序引擎配置")
+                                    io.github.opensabre.iqc.task.TaskProcessingConfiguration processingConfiguration,
+                                    @io.swagger.v3.oas.annotations.media.Schema(description = "独立评分及标签结果处理配置")
+                                    io.github.opensabre.iqc.task.processing.TaskResultProcessingConfiguration resultProcessing) { }
 }

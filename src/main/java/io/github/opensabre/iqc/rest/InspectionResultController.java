@@ -29,6 +29,7 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/api/iqc")
 public class InspectionResultController {
+    private final com.fasterxml.jackson.databind.ObjectMapper mapper;
     private final InspectionExecutionService executionService;
     private final UsageCounterRecorder usageCounterRecorder;
     private final BatchResultQueryService batchResultQueryService;
@@ -42,7 +43,9 @@ public class InspectionResultController {
                                       HierarchicalResultService hierarchicalResultService,
                                       LabelResultQueryService labelResultQueryService,
                                       LabelInsightExportService labelInsightExportService,
-                                      io.github.opensabre.iqc.quality.BusinessItemReviewService businessReviews) {
+                                      io.github.opensabre.iqc.quality.BusinessItemReviewService businessReviews,
+                                      com.fasterxml.jackson.databind.ObjectMapper mapper) {
+        this.mapper = mapper;
         this.executionService = executionService; this.usageCounterRecorder = usageCounterRecorder;
         this.batchResultQueryService = batchResultQueryService; this.hierarchicalResultService = hierarchicalResultService;
         this.labelResultQueryService = labelResultQueryService;
@@ -136,10 +139,21 @@ public class InspectionResultController {
 
     @GetMapping("/tasks/{id}/conversations/{conversationId}/result-hierarchy")
     @ResourcePermission(code = "iqc:result:view", name = "查看分层质检结果", type = "iqc", description = "按会话、规则和消息证据查询质检结果")
-    public Optional<HierarchicalResultService.ResultHierarchy> resultHierarchy(@PathVariable String id, @PathVariable String conversationId) {
+    public Optional<ResultHierarchyResponse> resultHierarchy(@PathVariable String id, @PathVariable String conversationId,
+            @RequestParam(required = false) String executionId) {
         batchResultQueryService.conversationDetail(id, conversationId);
-        return Optional.ofNullable(hierarchicalResultService.hierarchy(id, conversationId));
+        return Optional.ofNullable(executionId == null ? hierarchicalResultService.hierarchy(id, conversationId)
+                : hierarchicalResultService.hierarchy(id, conversationId, executionId)).map(value ->
+                new ResultHierarchyResponse(value.conversation(), value.rules(), value.evidenceByRuleResult(), value.executionId(),
+                        mapper.convertValue(value.engineResultSet(), Object.class),
+                        mapper.convertValue(value.processedResult(), Object.class)));
     }
+
+    /** Plain JSON values keep the HTTP contract independent of the persistence Jackson node version. */
+    public record ResultHierarchyResponse(io.github.opensabre.iqc.result.model.ConversationInspectionResult conversation,
+            List<io.github.opensabre.iqc.result.model.RuleInspectionResult> rules,
+            Map<String, List<io.github.opensabre.iqc.result.model.InspectionEvidence>> evidenceByRuleResult,
+            String executionId, Object engineResultSet, Object processedResult) { }
 
     @GetMapping("/conversations/{conversationId}/result-detail")
     @ResourcePermission(code = "iqc:result:view", name = "查看会话质检明细", type = "iqc", description = "查看会话全部质检结果和标注")

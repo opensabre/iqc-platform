@@ -37,14 +37,39 @@ public class SnapshotChatModelRouter {
             throw new IllegalStateException("Agent 缺少已发布的模型资产快照");
         if(!managed || config.path("assetSnapshots").isMissingNode()) {
             if(defaultModel==null) throw new IllegalStateException("系统默认模型未启用");
-            return defaultModel.call(executablePrompt);
+            return taskDefault(agentSnapshot).call(executablePrompt);
         }
         List<JsonNode> candidates=new ArrayList<>(); candidates.add(config.path("assetSnapshots").path("primaryModel"));
         config.path("assetSnapshots").path("fallbackModels").forEach(candidates::add);
         RuntimeException last=null;
-        for(JsonNode candidate:candidates) try{return create(candidate).call(executablePrompt);}catch(RuntimeException exception){last=exception;}
+        for(JsonNode candidate:candidates) try{return create(taskModel(candidate, agentSnapshot)).call(executablePrompt);}catch(RuntimeException exception){last=exception;}
         throw last==null?new IllegalStateException("Agent 没有可用模型快照"):last;
     }
+    /** Apply per-task controls to a copy, including every fallback, never to published model snapshots. */
+    JsonNode taskModel(JsonNode model, JsonNode snapshot) {
+        JsonNode overrides = snapshot == null ? objectMapper.nullNode() : snapshot.path("taskOverrides");
+        var copy = model.deepCopy();
+        if (overrides.has("temperature") || overrides.has("timeoutSeconds")) {
+            if (!copy.isObject()) throw new IllegalStateException("任务模型快照无效");
+            var object = (com.fasterxml.jackson.databind.node.ObjectNode) copy;
+            if (overrides.has("temperature")) object.set("temperature", overrides.get("temperature"));
+            if (overrides.has("timeoutSeconds")) object.set("timeoutSeconds", overrides.get("timeoutSeconds"));
+        }
+        return copy;
+    }
+
+    /** Legacy deployment models need a per-call client copy for transport timeouts to actually apply. */
+    ChatModel taskDefault(JsonNode snapshot) {
+        JsonNode overrides = snapshot == null ? objectMapper.nullNode() : snapshot.path("taskOverrides");
+        if (!overrides.has("temperature") && !overrides.has("timeoutSeconds")) return defaultModel;
+        if (!(defaultModel instanceof OpenAiChatModel model))
+            throw new IllegalStateException("当前默认模型不支持任务温度或超时参数");
+        var options = model.getOptions().mutate();
+        if (overrides.has("temperature")) options.temperature(overrides.path("temperature").asDouble());
+        if (overrides.has("timeoutSeconds")) options.timeout(Duration.ofSeconds(overrides.path("timeoutSeconds").asInt()));
+        return OpenAiChatModel.builder().options(options.build()).build();
+    }
+
     public ChatModel create(JsonNode model) {
         String provider=model.path("provider").asText();
         if(!List.of("SPRING_AI","OPENAI","DASHSCOPE","OLLAMA").contains(provider)) throw new IllegalStateException("当前 Spring AI 运行时不支持模型供应商: "+provider);

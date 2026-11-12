@@ -24,6 +24,25 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class InspectionResultControllerTest {
 
     @Test
+    void historicalEvidenceQueryAuthorizesConversationBeforeReadingRecords() {
+        var batch = mock(BatchResultQueryService.class);
+        var hierarchy = mock(HierarchicalResultService.class);
+        var controller = new InspectionResultController(mock(InspectionExecutionService.class), mock(UsageCounterRecorder.class),
+                batch, hierarchy, mock(LabelResultQueryService.class), mock(LabelInsightExportService.class),
+                mock(io.github.opensabre.iqc.quality.BusinessItemReviewService.class), new com.fasterxml.jackson.databind.ObjectMapper());
+        controller.resultHierarchy("t1", "c1", "old");
+        var order = org.mockito.Mockito.inOrder(batch, hierarchy);
+        order.verify(batch).conversationDetail("t1", "c1");
+        order.verify(hierarchy).hierarchy("t1", "c1", "old");
+        org.mockito.Mockito.reset(hierarchy);
+        when(batch.conversationDetail("t1", "c1"))
+                .thenThrow(io.github.opensabre.iqc.governance.IqcException.accessDenied("无权查看"));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.resultHierarchy("t1", "c1", "old"))
+                .hasMessageContaining("无权查看");
+        org.mockito.Mockito.verifyNoInteractions(hierarchy);
+    }
+
+    @Test
     void businessResultEndpointReturnsConversationTotalAndCanonicalZeroScore() throws Exception {
         var permission = InspectionResultController.class.getMethod("businessResults", long.class, long.class,
                 String.class, String.class, String.class, java.math.BigDecimal.class, java.math.BigDecimal.class)
@@ -36,7 +55,7 @@ class InspectionResultControllerTest {
                                 "sales.txt", "attempt-2", "FINAL", java.math.BigDecimal.ZERO, 2, 2, 0, "HIGH")), 1, 1, 2));
         var controller = new InspectionResultController(mock(InspectionExecutionService.class), mock(UsageCounterRecorder.class),
                 batch, mock(HierarchicalResultService.class), mock(LabelResultQueryService.class),
-                mock(LabelInsightExportService.class), mock(io.github.opensabre.iqc.quality.BusinessItemReviewService.class));
+                mock(LabelInsightExportService.class), mock(io.github.opensabre.iqc.quality.BusinessItemReviewService.class), new com.fasterxml.jackson.databind.ObjectMapper());
         var mvc = MockMvcBuilders.standaloneSetup(controller).setControllerAdvice(new RestResponseBodyAdvice()).build();
 
         mvc.perform(get("/api/iqc/results/business").param("taskId", "task-1").param("size", "1")
@@ -54,7 +73,7 @@ class InspectionResultControllerTest {
                 mock(InspectionExecutionService.class), mock(UsageCounterRecorder.class),
                 mock(BatchResultQueryService.class), mock(HierarchicalResultService.class),
                 mock(LabelResultQueryService.class), mock(LabelInsightExportService.class),
-                mock(io.github.opensabre.iqc.quality.BusinessItemReviewService.class));
+                mock(io.github.opensabre.iqc.quality.BusinessItemReviewService.class), new com.fasterxml.jackson.databind.ObjectMapper());
         MockMvc mvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new RestResponseBodyAdvice())
                 .build();
