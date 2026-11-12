@@ -27,22 +27,13 @@ class QualityAgentServiceTest {
     @Mock AgentAssetReferenceValidator assetReferenceValidator;
 
     @Test
-    void rollbackCopiesHistoricalVersionIntoNewDraft() {
+    void rollbackRejectsHistoricalRuleConfiguration() {
         QualityAgent agent = agent("agent-1", "PUBLISHED", 3);
-        QualityAgentVersion source = version("agent-1", 1, "PUBLISHED", "{\"mode\":\"RULE\"}");
-        QualityAgentVersion latest = version("agent-1", 3, "PUBLISHED", "{\"mode\":\"LLM\"}");
+        QualityAgentVersion source = version("agent-1", 1, "PUBLISHED", "{\"schemaVersion\":\"2.0\",\"mode\":\"RULE_ONLY\"}");
         when(agentMapper.selectById("agent-1")).thenReturn(agent);
-        when(versionMapper.selectList(any())).thenReturn(List.of(latest, source));
+        when(versionMapper.selectList(any())).thenReturn(List.of(source));
         when(versionMapper.selectOne(any())).thenReturn(source);
-
-        QualityAgentVersion rollback = service().rollback("agent-1", 1);
-
-        assertThat(rollback.getVersionNo()).isEqualTo(4);
-        assertThat(rollback.getStatus()).isEqualTo("DRAFT");
-        assertThat(rollback.getConfigJson()).isEqualTo(source.getConfigJson());
-        assertThat(agent.getStatus()).isEqualTo("DRAFT");
-        verify(versionMapper).insert(rollback);
-        verify(agentMapper).updateById(agent);
+        assertThatThrownBy(() -> service().rollback("agent-1", 1)).hasMessageContaining("纯大模型");
     }
 
     @Test
@@ -85,25 +76,20 @@ class QualityAgentServiceTest {
     @Test
     void createCanonicalizesMultiModelMcpSkillAndPromptConfiguration() throws Exception {
         String config = """
-                {"schemaVersion":"1.0","systemPrompt":"默认质检提示词","primaryModel":"primary",
-                 "models":[
-                   {"id":"primary","provider":"OPENAI","model":"gpt-5","endpoint":"","temperature":0.2,"enabled":true},
-                   {"id":"fallback","provider":"OLLAMA","model":"qwen3","endpoint":"http://ollama:11434","temperature":0.1,"enabled":true}],
-                 "mcpServers":[{"name":"knowledge","transport":"STREAMABLE_HTTP","endpoint":"http://mcp:8080/mcp","enabled":true}],
-                 "skills":[{"name":"合规判断","description":"识别违规","instructions":"必须给出证据","enabled":true}]}
+                {"schemaVersion":"3.0","systemPrompt":"默认提示词","primaryModelProfileId":"primary",
+                 "fallbackModelProfileIds":["fallback"],"mcpServerIds":["knowledge"],"skillIds":["compliance"],"assetSnapshots":{"primaryModel":{"id":"untrusted"}}}
                 """;
-
         QualityAgent created = service().create("多模型 Agent", "MULTI", "test", config);
         var json = new ObjectMapper().readTree(created.getConfigJson());
-
-        assertThat(json.path("models")).hasSize(2);
-        assertThat(json.path("mcpServers").get(0).path("name").asText()).isEqualTo("knowledge");
-        assertThat(json.path("skills").get(0).path("enabled").asBoolean()).isTrue();
+        assertThat(json.path("fallbackModelProfileIds")).hasSize(1);
+        assertThat(json.path("mcpServerIds").get(0).asText()).isEqualTo("knowledge");
+        assertThat(json.path("skillIds").get(0).asText()).isEqualTo("compliance");
+        assertThat(json.path("assetSnapshots").isNull()).isTrue();
         verify(agentMapper).insert(created);
     }
 
     @Test
-    void createRejectsPrimaryModelOutsideModelList() {
+    void createRejectsLegacyConfiguration() {
         String config = """
                 {"schemaVersion":"1.0","systemPrompt":"prompt","primaryModel":"missing",
                  "models":[{"id":"one","provider":"OPENAI","model":"gpt-5","temperature":0.2,"enabled":true}],
@@ -111,7 +97,7 @@ class QualityAgentServiceTest {
                 """;
 
         assertThatThrownBy(() -> service().create("Agent", "AGENT", null, config))
-                .isInstanceOf(IqcException.class).hasMessageContaining("主模型");
+                .isInstanceOf(IqcException.class).hasMessageContaining("纯大模型");
     }
 
     private QualityAgentService service() {
