@@ -115,7 +115,8 @@ public class TaskEnginePlanService {
         return plan.engines().stream().map(engine -> {
             var config = (com.fasterxml.jackson.databind.node.ObjectNode) engine.configuration();
             if (engine.type() == EngineType.LLM) config.put("conversationId", conversationId);
-            MultiEngineExecutor.Adapter adapter = switch (engine.type()) {
+            MultiEngineExecutor.Adapter adapter = "iqc-unified-tags-v1".equals(config.path("schemaVersion").asText())
+                    ? new UnifiedTagEngineAdapter(mapper, regex, dls, llm, engine.type()) : switch (engine.type()) {
                 case REGEX -> regex; case DLS -> dls; case LLM -> llm;
             };
             return new MultiEngineExecutor.Step(engine.operation(), engine.instanceId(), engine.type(), engine.sequence(), config, adapter);

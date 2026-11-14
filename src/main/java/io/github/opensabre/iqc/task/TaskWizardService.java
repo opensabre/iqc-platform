@@ -12,8 +12,22 @@ public class TaskWizardService {
     private final TaskEnginePlanService engines;
     private final TaskResultProcessingService processing;
     private final InspectionTaskService tasks;
+    private final UnifiedLabelPlanService unified;
     public TaskWizardService(TaskEnginePlanService engines, TaskResultProcessingService processing, InspectionTaskService tasks) {
-        this.engines = engines; this.processing = processing; this.tasks = tasks;
+        this(engines, processing, tasks, null);
+    }
+    @org.springframework.beans.factory.annotation.Autowired
+    public TaskWizardService(TaskEnginePlanService engines, TaskResultProcessingService processing, InspectionTaskService tasks,
+                             UnifiedLabelPlanService unified) {
+        this.engines = engines; this.processing = processing; this.tasks = tasks; this.unified = unified;
+    }
+    /** Creates a unified tag MVP using existing selectors, task storage, workers and checkpoints. */
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public InspectionTask createUnified(String name, TaskDataSelection selection, UnifiedLabelPlanService.Configuration configuration,
+                                        Integer concurrency) {
+        if (name == null || name.isBlank() || name.trim().length() > 80 || selection == null || selection.sampleSeed() != null)
+            throw IqcException.invalidArgument("请填写任务名称及有效的数据选择");
+        return tasks.createWithProcessing(name.trim(), selection, concurrency, unified.freeze(configuration), configuration);
     }
     /** All validation and persistence share one transaction; dynamic selection never queries candidate rows here. */
     @Transactional(isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)

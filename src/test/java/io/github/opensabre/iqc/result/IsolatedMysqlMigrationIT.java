@@ -26,6 +26,7 @@ class IsolatedMysqlMigrationIT {
         // Verify the exact isolated server before creating any schema or executing migration DDL.
         try (var connection = DriverManager.getConnection(SERVER + OPTIONS, "root", "");
              var statement = connection.createStatement()) {
+            statement.execute("DROP DATABASE IF EXISTS iqc_validation");
             statement.execute("CREATE DATABASE iqc_validation CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
         }
         var flyway = Flyway.configure().dataSource(SERVER + "iqc_validation" + OPTIONS, "root", "")
@@ -112,6 +113,7 @@ class IsolatedMysqlMigrationIT {
 
         try (var connection = DriverManager.getConnection(SERVER + OPTIONS, "root", "");
              var statement = connection.createStatement()) {
+            statement.execute("DROP DATABASE IF EXISTS iqc_upgrade_validation");
             statement.execute("CREATE DATABASE iqc_upgrade_validation CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
         }
         String upgradeUrl = SERVER + "iqc_upgrade_validation" + OPTIONS;
@@ -129,10 +131,14 @@ class IsolatedMysqlMigrationIT {
             assertThat(column.getInt(1)).isZero();
         }
         var finishArchiveUpgrade = Flyway.configure().dataSource(upgradeUrl, "root", "")
-                .locations("classpath:db/migration/mysql").baselineOnMigrate(false).cleanDisabled(true).load();
+                .locations("classpath:db/migration/mysql").baselineOnMigrate(false).cleanDisabled(true).target("1.1.32").load();
         assertThat(finishArchiveUpgrade.migrate().migrationsExecuted).isEqualTo(1);
         finishArchiveUpgrade.validate();
         assertThat(finishArchiveUpgrade.migrate().migrationsExecuted).isZero();
+        var latest = Flyway.configure().dataSource(upgradeUrl, "root", "")
+                .locations("classpath:db/migration/mysql").baselineOnMigrate(false).cleanDisabled(true).load();
+        assertThat(latest.migrate().migrationsExecuted).isPositive();
+        latest.validate(); assertThat(latest.migrate().migrationsExecuted).isZero();
         try (var connection = DriverManager.getConnection(upgradeUrl, "root", "");
              var statement = connection.createStatement();
              var column = statement.executeQuery("""

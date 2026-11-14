@@ -58,6 +58,29 @@ public class InspectionTaskController {
         return taskService.executions(id);
     }
 
+    /** Unified matching shares task permissions and lifecycle; no scoring or conflict policy is accepted here. */
+    @PostMapping("/unified")
+    @ResourcePermission(code = "iqc:task:create", name = "创建统一标签任务", type = "iqc", description = "按标签绑定执行规则")
+    @Audit(operationType = OperationType.CREATE, description = "创建统一标签任务", module = "IQC_TASK")
+    @RateLimit(sceneCode = "iqc-task-create", maxCount = 20, period = 60)
+    public InspectionTask createUnified(
+            @io.swagger.v3.oas.annotations.parameters.RequestBody(content = @io.swagger.v3.oas.annotations.media.Content(
+                    schema = @io.swagger.v3.oas.annotations.media.Schema(implementation = UnifiedTaskRequest.class)))
+            @RequestBody String body) {
+        final UnifiedTaskRequest request;
+        try { request = mapper.readValue(body, UnifiedTaskRequest.class); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException invalid) {
+            throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("统一标签任务配置无效");
+        }
+        if (request == null) throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("任务参数不能为空");
+        var created = wizardService.createUnified(request.name(), request.dataSelection(), request.configuration(), request.concurrencyLimit());
+        recordCreation(created);
+        return created;
+    }
+    public record UnifiedTaskRequest(String name, io.github.opensabre.iqc.task.TaskDataSelection dataSelection,
+                                    io.github.opensabre.iqc.task.UnifiedLabelPlanService.Configuration configuration,
+                                    Integer concurrencyLimit) { }
+
     @PostMapping
     @ResourcePermission(code = "iqc:task:create", name = "创建质检任务", type = "iqc", description = "创建质检任务")
     @Audit(operationType = OperationType.CREATE, description = "创建 IQC 质检任务", module = "IQC_TASK")

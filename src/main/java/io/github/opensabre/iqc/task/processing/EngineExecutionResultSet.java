@@ -14,8 +14,8 @@ public record EngineExecutionResultSet(
     public static final String SCHEMA_VERSION = "iqc-engine-results-v1";
     public enum Operation { INSPECTION, LABELING }
     public enum EngineType { REGEX, DLS, LLM }
-    public enum ExecutionStatus { SUCCEEDED, FAILED, SKIPPED }
-    public enum ObservationStatus { DETERMINED, UNKNOWN, INVALID }
+    public enum ExecutionStatus { SUCCEEDED, PARTIAL_SUCCESS, FAILED, SKIPPED }
+    public enum ObservationStatus { DETERMINED, MATCHED, NOT_MATCHED, ERROR, SKIPPED, UNKNOWN, INVALID }
 
     public EngineExecutionResultSet {
         if (!SCHEMA_VERSION.equals(schemaVersion)) throw new IllegalArgumentException("不支持的引擎结果集版本");

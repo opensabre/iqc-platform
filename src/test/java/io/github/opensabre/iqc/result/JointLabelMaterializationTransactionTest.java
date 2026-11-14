@@ -140,7 +140,7 @@ class JointLabelMaterializationTransactionTest {
         jdbc.execute("CREATE TABLE iqc_label (id varchar(64) PRIMARY KEY,group_id varchar(64),name varchar(50),code varchar(128),"
                 + "description varchar(500),target_role varchar(32),weight decimal(6,2),status varchar(32),version_no int,source_type varchar(32),owner_group_id varchar(64)" + audit + ")");
         jdbc.execute("CREATE TABLE iqc_label_rule_binding (id varchar(64) PRIMARY KEY,label_id varchar(64),rule_id varchar(64),"
-                + "rule_version_no int,binding_role varchar(16),display_order int" + audit + ")");
+                + "rule_version_no int,rule_type varchar(32),binding_role varchar(16),display_order int" + audit + ")");
         jdbc.execute("CREATE TABLE iqc_label_value_definition (id varchar(64) PRIMARY KEY,label_id varchar(64),value_code varchar(64),"
                 + "value_type varchar(32),description varchar(500),display_order int,config_json clob" + audit + ")");
         jdbc.execute("DROP TABLE IF EXISTS iqc_result_review");
@@ -219,7 +219,7 @@ class JointLabelMaterializationTransactionTest {
                   id varchar(64) PRIMARY KEY, conversation_id varchar(64), conversation_ids_json clob,
                   selection_filter_json clob, concurrency_limit int, scheduled_time timestamp,
                   name varchar(255), task_type varchar(32), agent_id varchar(64), rule_set_id varchar(64),
-                  rule_ids_json clob, agent_snapshot_json clob, rule_snapshot_json clob,
+                  rule_ids_json clob, agent_snapshot_json clob, rule_snapshot_json clob, unified_configuration_json clob,
                   label_scope_snapshot_json clob, run_count int, confidence_threshold decimal(5,4),
                   auto_expand_enabled boolean, auto_expand_prompt varchar(1000), queue_priority bigint,
                   pause_requested boolean, cancel_requested boolean, status varchar(32),
@@ -231,6 +231,7 @@ class JointLabelMaterializationTransactionTest {
                 CREATE TABLE iqc_task_execution (
                   id varchar(64) PRIMARY KEY, task_id varchar(64), attempt_no int, status varchar(32),
                   processed_messages int, failed_messages int, error_message varchar(1000),
+                  configuration_snapshot_json clob, selection_snapshot_json clob,
                   created_by varchar(128), created_time timestamp, updated_by varchar(128), updated_time timestamp)
                 """);
         jdbc.execute("""
@@ -352,7 +353,7 @@ class JointLabelMaterializationTransactionTest {
         jdbc.update("INSERT INTO iqc_label_category (id,name,code,status,version_no,created_by) VALUES ('wizard-category','标签','wizard-category','PUBLISHED',1,'system')");
         jdbc.update("INSERT INTO iqc_label_group (id,category_id,name,code,status,version_no,allow_auto_expand,created_by) VALUES ('wizard-group','wizard-category','标签组','wizard-group','PUBLISHED',1,false,'system')");
         jdbc.update("INSERT INTO iqc_label (id,group_id,name,code,target_role,weight,status,version_no,created_by) VALUES ('wizard-label','wizard-group','退款标签','wizard-label','customer',1,'PUBLISHED',1,'system')");
-        jdbc.update("INSERT INTO iqc_label_rule_binding (id,label_id,rule_id,rule_version_no,binding_role,display_order) VALUES ('wizard-binding','wizard-label','wizard-rule',1,'PRIMARY',0)");
+        jdbc.update("INSERT INTO iqc_label_rule_binding (id,label_id,rule_id,rule_version_no,rule_type,binding_role,display_order) VALUES ('wizard-binding','wizard-label','wizard-rule',1,'REGEX','PRIMARY',0)");
         jdbc.update("INSERT INTO iqc_label_value_definition (id,label_id,value_code,value_type,display_order,config_json) VALUES ('wizard-value','wizard-label','refund','BOOLEAN',0,'{}')");
         var engines = mapper.readValue("""
                 {"schemaVersion":"iqc-task-processing-v1","inspection":{"engines":[
@@ -554,7 +555,7 @@ class JointLabelMaterializationTransactionTest {
                 mapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class),
                 mock(io.github.opensabre.iqc.shared.IqcDataScope.class), llm, mock(UsageCounterRecorder.class),
                 results, mock(io.github.opensabre.iqc.label.LabelCandidateService.class),
-                mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
+                mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.UnifiedLabelPlanService.class));
 
         ReflectionTestUtils.invokeMethod(execution, "processConversation", task, "execution-integrated", snapshot, List.of(item));
 
@@ -596,7 +597,7 @@ class JointLabelMaterializationTransactionTest {
         jdbc.update("INSERT INTO iqc_label_category (id,name,code,status,version_no,created_by,owner_group_id) VALUES ('profile','画像','profile','PUBLISHED',1,'alice','g1')");
         jdbc.update("INSERT INTO iqc_label_group (id,category_id,name,code,status,version_no,allow_auto_expand,created_by,owner_group_id) VALUES ('assets','profile','资产','assets','PUBLISHED',1,false,'alice','g1')");
         jdbc.update("INSERT INTO iqc_label (id,group_id,name,code,target_role,weight,status,version_no,created_by,owner_group_id) VALUES ('house','assets','是否有房','house','customer',1,'PUBLISHED',1,'alice','g1')");
-        jdbc.update("INSERT INTO iqc_label_rule_binding (id,label_id,rule_id,rule_version_no,binding_role,display_order) VALUES ('house-binding','house','rule-1',1,'PRIMARY',0)");
+        jdbc.update("INSERT INTO iqc_label_rule_binding (id,label_id,rule_id,rule_version_no,rule_type,binding_role,display_order) VALUES ('house-binding','house','rule-1',1,'REGEX','PRIMARY',0)");
         jdbc.update("INSERT INTO iqc_label_value_definition (id,label_id,value_code,value_type,display_order,config_json) VALUES ('house-value','house','owns','BOOLEAN',0,?)",
                 "{\"onRuleHit\":{\"rule-1\":false}}");
         String alice = signedHttpIdentity("alice");
@@ -954,7 +955,7 @@ class JointLabelMaterializationTransactionTest {
         var service = new InspectionExecutionService(taskMapper, org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), messages, observations,
                 mapper, executionMapper, taskItemMapper, scope,
                 llm, mock(UsageCounterRecorder.class), results,
-                mock(io.github.opensabre.iqc.label.LabelCandidateService.class), dependencies, org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
+                mock(io.github.opensabre.iqc.label.LabelCandidateService.class), dependencies, org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.UnifiedLabelPlanService.class));
         return new TrialHarness(task, service, llm, release, tasks, labelResolver);
     }
 

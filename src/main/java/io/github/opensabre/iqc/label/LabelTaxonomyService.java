@@ -93,10 +93,30 @@ public class LabelTaxonomyService {
     }
 
     @Transactional public List<LabelRuleBinding> replaceBindings(String labelId, List<BindingRequest> requests) {
-        prepareRevision(labelId); List<BindingRequest> values = requests == null ? List.of() : requests; if (values.isEmpty()) throw IqcException.invalidArgument("标签至少绑定一条规则");
-        bindingMapper.delete(Wrappers.<LabelRuleBinding>lambdaQuery().eq(LabelRuleBinding::getLabelId, labelId)); int order = 0;
-        for (BindingRequest request : values) { QualityRule rule = ruleMapper.selectById(request.ruleId()); if (rule == null || !"PUBLISHED".equals(rule.getStatus())) throw IqcException.invalidArgument("标签只能绑定已发布规则");
-            LabelRuleBinding binding = new LabelRuleBinding(); binding.setLabelId(labelId); binding.setRuleId(rule.getId()); binding.setRuleVersionNo(rule.getVersionNo()); binding.setBindingRole("PRIMARY"); binding.setDisplayOrder(++order); bindingMapper.insert(binding); }
+        InsightLabel label = requireLabel(labelId); requireAccess(label.getCreatedBy(), label.getOwnerGroupId());
+        List<BindingRequest> values = requests == null ? List.of() : requests;
+        if (values.isEmpty() || values.size() > 10) throw IqcException.invalidArgument("标签需绑定 1 到 10 条规则，每种类型最多一条");
+        var requestedRules = new java.util.ArrayList<QualityRule>();
+        var types = new java.util.HashSet<String>();
+        for (var request : values) {
+            if (request == null || blank(request.ruleId())) throw IqcException.invalidArgument("规则 ID 不能为空");
+            var rule = ruleMapper.selectById(request.ruleId());
+            if (rule == null || !"PUBLISHED".equals(rule.getStatus()) || rule.getVersionNo() == null || rule.getRuleType() == null)
+                throw IqcException.invalidArgument("标签只能绑定有明确版本的已发布规则");
+            if (!dataScope.canView(rule.getCreatedBy(), null)) throw IqcException.accessDenied("规则超出数据权限");
+            // Keep legacy types readable, but never permit a second binding of the same type.
+            String type = rule.getRuleType().toUpperCase(java.util.Locale.ROOT);
+            if (!types.add(type)) throw IqcException.invalidArgument("每个标签每种规则类型最多绑定一条: " + type);
+            requestedRules.add(rule);
+        }
+        prepareRevision(labelId);
+        bindingMapper.delete(Wrappers.<LabelRuleBinding>lambdaQuery().eq(LabelRuleBinding::getLabelId, labelId));
+        int order = 0;
+        for (var rule : requestedRules) {
+            LabelRuleBinding binding = new LabelRuleBinding(); binding.setLabelId(labelId); binding.setRuleId(rule.getId());
+            binding.setRuleVersionNo(rule.getVersionNo()); binding.setRuleType(rule.getRuleType().toUpperCase(java.util.Locale.ROOT));
+            binding.setBindingRole("PRIMARY"); binding.setDisplayOrder(++order); bindingMapper.insert(binding);
+        }
         return bindings(labelId);
     }
 
@@ -130,13 +150,15 @@ public class LabelTaxonomyService {
     public LabelDetail detail(String labelId) { InsightLabel label = requireLabel(labelId); requireAccess(label.getCreatedBy(), label.getOwnerGroupId()); return new LabelDetail(label, values(labelId), bindings(labelId)); }
     public List<LabelValueDefinition> values(String labelId) { return valueMapper.selectList(Wrappers.<LabelValueDefinition>lambdaQuery().eq(LabelValueDefinition::getLabelId, labelId).orderByAsc(LabelValueDefinition::getDisplayOrder)); }
     public List<LabelRuleBinding> bindings(String labelId) { return bindingMapper.selectList(Wrappers.<LabelRuleBinding>lambdaQuery().eq(LabelRuleBinding::getLabelId, labelId).orderByAsc(LabelRuleBinding::getDisplayOrder)); }
+    /** Action bindings share the label draft/version lifecycle without introducing another label model. */
+    @Transactional public InsightLabel reviseBindings(String labelId) { return prepareRevision(labelId); }
     private InsightLabel requireLabel(String id) { InsightLabel value = labelMapper.selectById(id); if (value == null) throw IqcException.notFound("标签不存在: " + id); return value; }
     private LabelCategory requireCategory(String id) { LabelCategory value = categoryMapper.selectById(id); if (value == null) throw IqcException.notFound("一级标签不存在: " + id); requireAccess(value.getCreatedBy(), value.getOwnerGroupId()); return value; }
     private LabelGroup requireGroup(String id) { LabelGroup value = groupMapper.selectById(id); if (value == null) throw IqcException.notFound("标签群组不存在: " + id); requireAccess(value.getCreatedBy(), value.getOwnerGroupId()); return value; }
     private void requireAccess(String owner, String group) { if (!dataScope.canView(owner, group)) throw IqcException.accessDenied("无权修改该标签资产"); }
     private void reviseStatus(LabelCategory value) { if ("PUBLISHED".equals(value.getStatus())) { value.setStatus("DRAFT"); value.setVersionNo((value.getVersionNo() == null ? 1 : value.getVersionNo()) + 1); } }
     private void reviseStatus(LabelGroup value) { if ("PUBLISHED".equals(value.getStatus())) { value.setStatus("DRAFT"); value.setVersionNo((value.getVersionNo() == null ? 1 : value.getVersionNo()) + 1); } }
-    private InsightLabel prepareRevision(String id) { InsightLabel value = requireLabel(id); if (!dataScope.canView(value.getCreatedBy(), value.getOwnerGroupId())) throw IqcException.accessDenied("无权修改该标签"); if ("PUBLISHED".equals(value.getStatus())) { value.setStatus("DRAFT"); value.setVersionNo((value.getVersionNo() == null ? 1 : value.getVersionNo()) + 1); labelMapper.updateById(value); } return value; }
+    private InsightLabel prepareRevision(String id) { InsightLabel value = labelMapper.selectOne(Wrappers.<InsightLabel>lambdaQuery().eq(InsightLabel::getId, id).last("FOR UPDATE")); if (value == null) throw IqcException.notFound("标签不存在: " + id); if (!dataScope.canView(value.getCreatedBy(), value.getOwnerGroupId())) throw IqcException.accessDenied("无权修改该标签"); if ("PUBLISHED".equals(value.getStatus())) { value.setStatus("DRAFT"); value.setVersionNo((value.getVersionNo() == null ? 1 : value.getVersionNo()) + 1); labelMapper.updateById(value); } return value; }
     private void requireUniqueCategory(String code) { if (categoryMapper.selectCount(Wrappers.<LabelCategory>lambdaQuery().eq(LabelCategory::getCode, code.trim())) > 0) throw IqcException.invalidArgument("一级标签编码已存在"); }
     private void requireUniqueGroup(String code) { if (groupMapper.selectCount(Wrappers.<LabelGroup>lambdaQuery().eq(LabelGroup::getCode, code.trim())) > 0) throw IqcException.invalidArgument("标签群组编码已存在"); }
     private void requireUniqueLabel(String code) { if (labelMapper.selectCount(Wrappers.<InsightLabel>lambdaQuery().eq(InsightLabel::getCode, code.trim())) > 0) throw IqcException.invalidArgument("标签编码已存在"); }

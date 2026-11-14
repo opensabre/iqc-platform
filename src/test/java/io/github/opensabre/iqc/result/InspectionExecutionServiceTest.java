@@ -40,6 +40,129 @@ import static org.mockito.ArgumentMatchers.isNull;
 
 class InspectionExecutionServiceTest {
     @Test
+    void unifiedWorkersBoundConversationWindowAndReadOnlyItsItems() throws Exception {
+        var task = task(); task.setStatus("RUNNING"); task.setCurrentExecutionId("execution"); task.setConcurrencyLimit(3);
+        var ids = java.util.stream.IntStream.range(0, 12).mapToObj(i -> "conv-" + i).toList();
+        task.setConversationIdsJson(objectMapper.writeValueAsString(ids));
+        var tasks = (InspectionTaskMapper) ReflectionTestUtils.getField(service, "taskMapper");
+        var items = (TaskItemMapper) ReflectionTestUtils.getField(service, "taskItemMapper");
+        var runtime = (io.github.opensabre.iqc.task.TaskWizardRuntime) ReflectionTestUtils.getField(service, "wizardRuntime");
+        when(tasks.selectById(task.getId())).thenReturn(task);
+        when(items.selectList(any())).thenAnswer(call -> {
+            var query = (com.baomidou.mybatisplus.core.conditions.AbstractWrapper<?, ?, ?>) call.getArgument(0);
+            assertThat(query.getSqlSegment()).contains("task_id =", "execution_id =", "conversation_id =");
+            var conversation = query.getParamNameValuePairs().values().stream().map(Object::toString)
+                    .filter(value -> value.startsWith("conv-")).findFirst().orElseThrow();
+            return List.of(taskItem("item-" + conversation, "message", conversation, 1));
+        });
+        var active = new AtomicInteger(); var maximum = new AtomicInteger(); var barrier = new java.util.concurrent.Phaser(3);
+        org.mockito.Mockito.doAnswer(call -> {
+            maximum.accumulateAndGet(active.incrementAndGet(), Math::max);
+            int phase = barrier.arrive();
+            barrier.awaitAdvanceInterruptibly(phase, 5, java.util.concurrent.TimeUnit.SECONDS);
+            active.decrementAndGet(); return null;
+        }).when(runtime).execute(any(), any(), any(), any());
+        var snapshot = objectMapper.readTree("""
+                {"schemaVersion":"iqc-task-wizard-v1","enginePlan":{"schemaVersion":"iqc-task-engine-plan-v1",
+                "engines":[{"operation":"LABELING","instanceId":"tags-REGEX","type":"REGEX","sequence":1,"configuration":{}}]},
+                "unifiedLabels":{"labels":[]}}
+                """);
+        ReflectionTestUtils.invokeMethod(service, "runUnifiedConversations", task, "execution", snapshot);
+        assertThat(maximum.get()).isEqualTo(3); assertThat(active.get()).isZero();
+        verify(items, times(12)).selectList(any()); verify(runtime, times(12)).execute(any(), any(), any(), any());
+        verifyNoInteractions(llmProvider);
+    }
+
+    @Test
+    void unifiedItemCreationPagesMessagesWithDuplicateSequenceNumbers() {
+        var messages = (ConversationMessageMapper) ReflectionTestUtils.getField(service, "messageMapper");
+        var items = (TaskItemMapper) ReflectionTestUtils.getField(service, "taskItemMapper");
+        var page = new java.util.ArrayList<ConversationMessage>();
+        for (int i = 0; i < 500; i++) {
+            var message = message("customer", "内容"); message.setId(String.format("m%04d", i));
+            page.add(message);
+        }
+        var last = message("customer", "最后"); last.setId("m0500");
+        when(messages.selectList(any())).thenReturn(page, List.of(last));
+        ReflectionTestUtils.invokeMethod(service, "createUnifiedItems", task(), "execution", List.of("conversation-1"), null);
+        var created = org.mockito.ArgumentCaptor.forClass(TaskItem.class);
+        verify(items, times(501)).insert(created.capture());
+        assertThat(created.getAllValues()).extracting(TaskItem::getMessageId).doesNotHaveDuplicates().contains("m0500");
+        assertThat(created.getValue().getSequenceNo()).isEqualTo(501);
+        var queries = org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.Wrapper.class);
+        verify(messages, times(2)).selectList(queries.capture());
+        assertThat(queries.getAllValues().get(1).getSqlSegment()).contains("sequence_no >", "sequence_no =", "id >", "LIMIT 500");
+    }
+
+    @Test
+    void unifiedFirstQueueRefreshesConfigurationAndEmptySelectionCompletesWithoutEngines() throws Exception {
+        var task = task(); task.setStatus("CREATED"); task.setCurrentExecutionId(null);
+        task.setRuleSnapshotJson("{}");
+        task.setUnifiedConfigurationJson("{\"engineSequence\":[\"REGEX\"],\"tagSelectionMode\":\"ALL\"}");
+        task.setSelectionFilterJson("{\"schemaVersion\":\"iqc-data-selection-v1\",\"selection\":{\"mode\":\"FILTER\"}}");
+        var config = objectMapper.createObjectNode().put("schemaVersion", "iqc-unified-tags-v1");
+        config.putArray("tags").addObject().put("tagId", "new-tag").put("ruleId", "new-rule");
+        var snapshot = new io.github.opensabre.iqc.task.TaskWizardSnapshot(
+                io.github.opensabre.iqc.task.TaskWizardSnapshot.SCHEMA,
+                new io.github.opensabre.iqc.task.TaskEnginePlanService.FrozenPlan("iqc-task-engine-plan-v1", List.of(
+                        new io.github.opensabre.iqc.task.TaskEnginePlanService.FrozenEngine(
+                                io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.Operation.LABELING,
+                                "tags-REGEX", io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.EngineType.REGEX, 1, config))),
+                null, objectMapper.readTree("{\"labels\":[{\"id\":\"new-tag\"}]}"));
+        var plans = (io.github.opensabre.iqc.task.UnifiedLabelPlanService) ReflectionTestUtils.getField(service, "unifiedPlans");
+        when(plans.freeze(any())).thenReturn(snapshot);
+        var tasks = (InspectionTaskMapper) ReflectionTestUtils.getField(service, "taskMapper");
+        var scope = (IqcDataScope) ReflectionTestUtils.getField(service, "dataScope");
+        var executions = (TaskExecutionMapper) ReflectionTestUtils.getField(service, "executionMapper");
+        var selection = (io.github.opensabre.iqc.conversation.ConversationQueryService) ReflectionTestUtils.getField(service, "conversationQueryService");
+        when(scope.canView(any(), any())).thenReturn(true);
+        when(tasks.selectById(task.getId())).thenReturn(task);
+        when(tasks.update(isNull(), any())).thenReturn(1);
+        when(selection.resolveForExecution(any())).thenReturn(List.of());
+        org.mockito.Mockito.doAnswer(call -> { ((TaskExecution) call.getArgument(0)).setId("empty-run"); return 1; })
+                .when(executions).insert(any(TaskExecution.class));
+        service.queue(task.getId());
+        var captured = org.mockito.ArgumentCaptor.forClass(TaskExecution.class);
+        verify(executions).insert(captured.capture());
+        assertThat(captured.getValue().getConfigurationSnapshotJson()).contains("new-tag", "new-rule");
+        assertThat(task.getRuleIdsJson()).isEqualTo("[\"new-rule\"]");
+        assertThat(task.getTotalMessages()).isZero();
+        when(executions.selectById("empty-run")).thenReturn(captured.getValue());
+        service.run(task.getId(), "empty-run");
+        assertThat(task.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(captured.getValue().getStatus()).isEqualTo("SUCCEEDED");
+        verifyNoInteractions(llmProvider, ReflectionTestUtils.getField(service, "wizardRuntime"));
+    }
+
+    @Test
+    void wizardAttemptsFreezeSelectionAndRetriesInheritOriginalConfiguration() throws Exception {
+        var task = task();
+        task.setRuleSnapshotJson("{\"schemaVersion\":\"" + io.github.opensabre.iqc.task.TaskWizardSnapshot.SCHEMA + "\",\"revision\":1}");
+        task.setConversationIdsJson("[\"conversation-a\"]");
+        task.setSelectionFilterJson("{\"runtimeSeed\":\"seed-a\"}");
+        task.setTotalMessages(3);
+        var first = new TaskExecution(); first.setTaskId(task.getId()); first.setId("first");
+        ReflectionTestUtils.invokeMethod(service, "freezeExecution", task, first, null);
+        assertThat(first.getConfigurationSnapshotJson()).isEqualTo(task.getRuleSnapshotJson());
+        var selected = objectMapper.readTree(first.getSelectionSnapshotJson());
+        assertThat(selected.path("conversationIds").get(0).asText()).isEqualTo("conversation-a");
+        assertThat(selected.path("totalMessages").asInt()).isEqualTo(3);
+        assertThat(selected.path("definition").path("runtimeSeed").asText()).isEqualTo("seed-a");
+        var executions = (TaskExecutionMapper) ReflectionTestUtils.getField(service, "executionMapper");
+        when(executions.selectById("first")).thenReturn(first);
+        task.setRuleSnapshotJson(task.getRuleSnapshotJson().replace("1}", "2}"));
+        task.setConversationIdsJson("[\"conversation-b\"]");
+        var retry = new TaskExecution();
+        ReflectionTestUtils.invokeMethod(service, "freezeExecution", task, retry, "first");
+        assertThat(retry.getConfigurationSnapshotJson()).isEqualTo(first.getConfigurationSnapshotJson());
+        assertThat(retry.getSelectionSnapshotJson()).isEqualTo(first.getSelectionSnapshotJson());
+        first.setTaskId("other-task");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                ReflectionTestUtils.invokeMethod(service, "freezeExecution", task, new TaskExecution(), "first"))
+                .hasMessageContaining("执行快照不属于当前任务");
+    }
+
+    @Test
     void frozenConversationPipelineChecksProjectionThenDetectsScoresAndCallsMaterialization() {
         var definition = new SchemeDefinition(SchemeDefinition.ROUTED_TASK_SCHEMA,
                 List.of(new SchemeDefinition.Item("check", "检查", new SchemeDefinition.RuleReference("local", 1),
@@ -360,7 +483,7 @@ class InspectionExecutionServiceTest {
     private final LlmQualityProvider llmProvider = mock(LlmQualityProvider.class);
     private final InspectionExecutionService service = new InspectionExecutionService(
             mock(InspectionTaskMapper.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), mock(ConversationMessageMapper.class), mock(InspectionResultMapper.class),
-            objectMapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class), mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
+            objectMapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class), mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.UnifiedLabelPlanService.class));
 
     @Test
     void keywordRuleOnlyAppliesToItsTargetSpeaker() {
@@ -383,7 +506,7 @@ class InspectionExecutionServiceTest {
                 objectMapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class), mock(IqcDataScope.class),
                 llmProvider, mock(UsageCounterRecorder.class), hierarchy,
                 mock(io.github.opensabre.iqc.label.LabelCandidateService.class),
-                mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
+                mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.UnifiedLabelPlanService.class));
         var task = task();
         task.setStatus("RUNNING");
         var archived = message("客户", "我没有房子");
@@ -413,7 +536,7 @@ class InspectionExecutionServiceTest {
                 objectMapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class), mock(IqcDataScope.class),
                 llmProvider, mock(UsageCounterRecorder.class), hierarchy,
                 mock(io.github.opensabre.iqc.label.LabelCandidateService.class),
-                mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
+                mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.UnifiedLabelPlanService.class));
         var task = task(); task.setStatus("RUNNING"); task.setCurrentExecutionId("execution-1");
         var policy = new InspectionScoring.Policy("iqc-score-v2", InspectionScoring.Mode.DEDUCTION,
                 100, 60, List.of());
@@ -753,7 +876,7 @@ class InspectionExecutionServiceTest {
             return message;
         });
         InspectionExecutionService concurrentService = new InspectionExecutionService(tasks, org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), messages, results, objectMapper,
-                executions, items, mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
+                executions, items, mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.UnifiedLabelPlanService.class));
 
         InspectionTask completed = concurrentService.run("task-1", "execution-1");
 
@@ -782,7 +905,7 @@ class InspectionExecutionServiceTest {
         ConversationMessage second = message("agent", "待恢复"); second.setId("message-2");
         when(messages.selectById("message-1")).thenReturn(first); when(messages.selectById("message-2")).thenReturn(second);
         InspectionExecutionService resumed = new InspectionExecutionService(tasks, org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), messages, results, objectMapper,
-                executions, items, mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
+                executions, items, mock(IqcDataScope.class), llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.UnifiedLabelPlanService.class));
 
         InspectionTask result = resumed.run("task-1", "execution-1");
 
@@ -803,7 +926,7 @@ class InspectionExecutionServiceTest {
         when(tasks.update(isNull(), any())).thenReturn(0);
         InspectionExecutionService contender = new InspectionExecutionService(tasks, org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), mock(ConversationMessageMapper.class),
                 mock(InspectionResultMapper.class), objectMapper, executions, items, mock(IqcDataScope.class), llmProvider,
-                mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
+                mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.UnifiedLabelPlanService.class));
 
         assertThat(contender.run("task-1", "execution-1")).isSameAs(running);
         verifyNoInteractions(items);
@@ -819,7 +942,7 @@ class InspectionExecutionServiceTest {
         when(items.selectList(any())).thenReturn(List.of(succeeded, pending)); when(tasks.update(isNull(), any())).thenReturn(1);
         org.mockito.Mockito.doAnswer(invocation -> { TaskExecution value = invocation.getArgument(0); value.setId("execution-new"); return 1; }).when(executions).insert(any(TaskExecution.class));
         InspectionExecutionService resumed = new InspectionExecutionService(tasks, org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), mock(ConversationMessageMapper.class), mock(InspectionResultMapper.class), objectMapper,
-                executions, items, scope, llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
+                executions, items, scope, llmProvider, mock(UsageCounterRecorder.class), mock(HierarchicalResultService.class), mock(io.github.opensabre.iqc.label.LabelCandidateService.class), mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.UnifiedLabelPlanService.class));
 
         InspectionTask result = resumed.resume("task-1");
 

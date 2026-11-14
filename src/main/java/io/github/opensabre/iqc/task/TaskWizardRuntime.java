@@ -29,11 +29,12 @@ public final class TaskWizardRuntime {
     private final ConfiguredTaskResultProcessor processor;
     private final TaskWizardResultService results;
     private final ObjectMapper mapper;
+    private final UnifiedTaskResultProcessor unifiedProcessor;
     public TaskWizardRuntime(InspectionTaskMapper tasks, ConversationMessageMapper messages, TaskExecutionMapper executions,
                              EngineResultSetStore store, TaskEnginePlanService plans, ConfiguredTaskResultProcessor processor,
-                             TaskWizardResultService results, ObjectMapper mapper) {
+                             TaskWizardResultService results, ObjectMapper mapper, UnifiedTaskResultProcessor unifiedProcessor) {
         this.tasks = tasks; this.messages = messages; this.executions = executions; this.store = store;
-        this.plans = plans; this.processor = processor; this.results = results; this.mapper = mapper;
+        this.plans = plans; this.processor = processor; this.results = results; this.mapper = mapper; this.unifiedProcessor = unifiedProcessor;
     }
     /** Pause takes effect between conversations; cancellation is checked before each engine. */
     public void execute(InspectionTask task, String executionId, TaskWizardSnapshot snapshot, List<TaskItem> items) {
@@ -52,7 +53,9 @@ public final class TaskWizardRuntime {
         var completed = new MultiEngineExecutor(Clock.systemUTC()).execute(saved, plans.steps(snapshot.enginePlan(), conversationId),
                 () -> cancelled(task.getId(), executionId), store::save);
         if (cancelled(task.getId(), executionId)) return;
-        var processed = processor.process(completed, mapper.valueToTree(snapshot.resultProcessing().configuration()));
+        var processed = snapshot.unifiedLabels() == null
+                ? processor.process(completed, mapper.valueToTree(snapshot.resultProcessing().configuration()))
+                : unifiedProcessor.process(completed, mapper.getNodeFactory().nullNode());
         results.commit(task, completed, processed, items);
     }
     private EngineExecutionResultSet initial(InspectionTask task, String execution, String conversation, TaskWizardSnapshot snapshot) {
@@ -66,8 +69,10 @@ public final class TaskWizardRuntime {
                 if (!original.taskId().equals(task.getId()) || !original.taskConfiguration().equals(mapper.valueToTree(snapshot)))
                     throw new IllegalStateException("重试不能改变已冻结输入配置");
                 return new EngineExecutionResultSet(SCHEMA_VERSION, UUID.randomUUID().toString(), task.getId(), execution,
-                        conversation, original.input(), original.taskConfiguration(), original.engines().stream()
-                        .filter(engine -> engine.status() == ExecutionStatus.SUCCEEDED).toList());
+                        conversation, original.input(), original.taskConfiguration(), snapshot.unifiedLabels() == null ? original.engines().stream()
+                        .filter(engine -> engine.status() == ExecutionStatus.SUCCEEDED).toList()
+                        : original.engines().stream().takeWhile(engine -> engine.status() == ExecutionStatus.SUCCEEDED
+                                || engine.status() == ExecutionStatus.SKIPPED).toList());
             }
         }
         var context = messages.selectList(Wrappers.<ConversationMessage>lambdaQuery().eq(ConversationMessage::getConversationId, conversation)

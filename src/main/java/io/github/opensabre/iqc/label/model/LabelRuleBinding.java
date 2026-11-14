@@ -9,5 +9,7 @@ import lombok.EqualsAndHashCode;
 @Data @TableName("iqc_label_rule_binding") @EqualsAndHashCode(callSuper = true)
 public class LabelRuleBinding extends BasePo {
     private String labelId; private String ruleId; private Integer ruleVersionNo;
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private String ruleType;
     private String bindingRole; private Integer displayOrder;
 }

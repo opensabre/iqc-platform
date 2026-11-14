@@ -50,6 +50,11 @@ public final class LlmEngineAdapter implements MultiEngineExecutor.Adapter {
         }
     }
 
+    /** Reuses the configured provider without converting batch errors to a boolean miss. */
+    public JsonNode evaluateTagBatch(JsonNode request, JsonNode agentSnapshot, String recordId) {
+        return provider.evaluateTagBatch(request, agentSnapshot, recordId);
+    }
+
     private static String text(JsonNode config, String field) {
         JsonNode value = config.get(field);
         if (value == null || !value.isTextual() || value.asText().isBlank())

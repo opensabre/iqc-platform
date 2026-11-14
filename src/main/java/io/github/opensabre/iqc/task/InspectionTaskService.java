@@ -95,11 +95,24 @@ public class InspectionTaskService {
     @Transactional
     public InspectionTask createWithProcessing(String name, TaskDataSelection selection, Integer concurrency,
                                                TaskWizardSnapshot snapshot) {
+        return createWithProcessing(name, selection, concurrency, snapshot, null);
+    }
+
+    /** Persist references separately from the validation preview for execution-time freezing. */
+    @Transactional
+    public InspectionTask createWithProcessing(String name, TaskDataSelection selection, Integer concurrency,
+                                               TaskWizardSnapshot snapshot, UnifiedLabelPlanService.Configuration configuration) {
         return createSelected(name, selection, concurrency, task -> {
+            task.setUnifiedConfigurationJson(configuration == null ? null : writeSnapshot(configuration));
             task.setRuleSnapshotJson(writeSnapshot(snapshot));
             task.setRuleIdsJson(writeSnapshot(snapshot.enginePlan().engines().stream()
-                    .map(engine -> engine.configuration().path("ruleId").asText()).distinct().toList()));
-            var labels = snapshot.resultProcessing().labelSnapshot();
+                    .flatMap(engine -> {
+                        var config = engine.configuration();
+                        if (config.path("tags").isArray()) return java.util.stream.StreamSupport.stream(
+                                config.path("tags").spliterator(), false).map(tag -> tag.path("ruleId").asText());
+                        return java.util.stream.Stream.of(config.path("ruleId").asText());
+                    }).filter(id -> !id.isBlank()).distinct().toList()));
+            var labels = snapshot.unifiedLabels() != null ? snapshot.unifiedLabels() : snapshot.resultProcessing().labelSnapshot();
             task.setLabelScopeSnapshotJson(labels.isNull() ? null : writeSnapshot(labels));
             task.setRunCount(1); task.setQueuePriority(0L); task.setPauseRequested(false); task.setCancelRequested(false);
         });

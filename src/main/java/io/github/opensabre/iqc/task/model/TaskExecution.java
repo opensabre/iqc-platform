@@ -15,4 +15,8 @@ public class TaskExecution extends BasePo {
     private Integer processedMessages;
     private Integer failedMessages;
     private String errorMessage;
+    /** Immutable wizard configuration for this attempt; null for historical executions. */
+    private String configurationSnapshotJson;
+    /** Resolved selector, runtime seed and conversation IDs used by this attempt. */
+    private String selectionSnapshotJson;
 }
