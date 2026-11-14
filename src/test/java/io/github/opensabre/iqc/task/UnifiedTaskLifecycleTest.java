@@ -24,6 +24,52 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class UnifiedTaskLifecycleTest {
+    @Test void failedConversationDoesNotLeakIntoAnotherConversationsDurableLlmStage() throws Exception {
+        var mapper = new ObjectMapper();
+        var ds = new JdbcDataSource(); ds.setURL("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1");
+        var jdbc = new JdbcTemplate(ds);
+        jdbc.execute(Files.readString(Path.of("src/main/resources/db/migration/mysql/ddl/V1.1.33__ddl_add_engine_execution_result_set.sql")));
+        var store = new EngineResultSetStore(jdbc, mapper);
+        var provider = mock(LlmQualityProvider.class);
+        when(provider.evaluateTagBatch(any(), any(), any())).thenAnswer(call -> {
+            com.fasterxml.jackson.databind.JsonNode request = call.getArgument(0);
+            if (request.path("conversationId").asText().equals("c1")) throw new IllegalStateException("provider unavailable");
+            return mapper.readTree("""
+                    {"results":[{"tagId":"10","status":"MATCHED"}],
+                     "metadata":{"model":"reported-model-v2","inputTokens":8,"outputTokens":2}}
+                    """);
+        });
+        var adapter = new UnifiedTagEngineAdapter(mapper, new RegexEngineAdapter(mapper), new DlsEngineAdapter(mapper),
+                new LlmEngineAdapter(provider, mapper), EngineType.LLM);
+        var executor = new MultiEngineExecutor(java.time.Clock.systemUTC());
+        for (String conversation : List.of("c1", "c2")) {
+            var config = mapper.createObjectNode().put("schemaVersion", "iqc-unified-tags-v1").put("conversationId", conversation);
+            config.putObject("agentSnapshot");
+            config.putArray("tags").addObject().put("tagId", "10").put("ruleId", "20")
+                    .put("ruleVersionNo", 3).put("expression", "退款意向");
+            var input = new InputSnapshot("input-" + conversation, java.time.Instant.EPOCH,
+                    List.of(new Message("message-" + conversation, 1, "customer", null, "我要退款")));
+            var initial = new EngineExecutionResultSet(SCHEMA_VERSION, "set-" + conversation, "task", "execution", conversation,
+                    input, config, List.of());
+            var plan = List.of(new MultiEngineExecutor.Step(Operation.LABELING, "tags-LLM", EngineType.LLM, 1, config, adapter));
+            var result = executor.execute(initial, plan, () -> false, store::save);
+            assertThat(store.find("execution", conversation)).contains(result);
+        }
+        var failed = store.find("execution", "c1").orElseThrow();
+        var succeeded = store.find("execution", "c2").orElseThrow();
+        assertThat(failed.engines().getFirst().status()).isEqualTo(ExecutionStatus.FAILED);
+        assertThat(failed.engines().getFirst().failure().code()).isEqualTo("LLM_CALL_FAILED");
+        assertThat(failed.engines().getFirst().observations().getFirst().status()).isEqualTo(ObservationStatus.ERROR);
+        assertThat(succeeded.engines().getFirst().status()).isEqualTo(ExecutionStatus.SUCCEEDED);
+        assertThat(succeeded.engines().getFirst().observations().getFirst().status()).isEqualTo(ObservationStatus.MATCHED);
+        assertThat(succeeded.input().messages().getFirst().messageId()).isEqualTo("message-c2");
+        var trace = mapper.readTree(succeeded.engines().getFirst().rawOutput());
+        assertThat(trace.at("/tagResults/0/ruleVersionNo").asInt()).isEqualTo(3);
+        assertThat(trace.at("/metadata/provider/model").asText()).isEqualTo("reported-model-v2");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_engine_execution_result_set", Integer.class)).isEqualTo(2);
+        verify(provider, times(2)).evaluateTagBatch(any(), any(), any());
+    }
+
     @Test void runtimeCheckpointsStagesAndCommitsPendingResultWithoutScoringOrAnotherModelCall() throws Exception {
         var mapper = new ObjectMapper();
         com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(new org.apache.ibatis.builder.MapperBuilderAssistant(
