@@ -9,7 +9,7 @@
 | 标签规则绑定 | iqc_label_rule_binding | replaceBindings 在事务内按规则 ID 排序取得当前规则行锁，再检查发布状态及权限、替换绑定；本轮已改 |
 | 规则集及其版本 | QualityRuleSetService.validateRules / ruleIdsJson | 创建、修订、提交和发布的写入事务现已同序锁定规则；只读查询不加写锁，Agent 的规则集引用由这层继续保护 |
 | 方案草稿与发布版本 | InspectionScheme.draftConfigJson / InspectionSchemeVersion.snapshotJson | 依赖冻结现已同序锁定 Item.rule、appliesWhen、execution.prefilter/candidate 及冻结标签规则；草稿直接写入路径仍需单独核对，不能把冻结器覆盖范围扩大到所有草稿操作 |
-| 未结束任务 | InspectionTaskService 的规则选择及 TaskWizardService 的执行计划快照 | 直接规则任务快照已按 ID 升序加锁并保留配置顺序，规则集选择沿用规则集校验锁；统一标签执行计划和方案任务入口仍需核对，不能只检查任务上的单个 ruleIdsJson |
+| 未结束任务 | InspectionTaskService 的规则选择及 TaskWizardService 的执行计划快照 | 直接规则任务快照已按 ID 升序加锁并保留配置顺序，规则集选择沿用规则集校验锁；统一标签计划已在写事务中锁定并检查全部绑定规则，方案任务入口仍需核对，不能只检查任务上的单个 ruleIdsJson |
 | 历史执行 | TaskExecution.configurationSnapshotJson 等 | 保留精确版本和原始内容，不改写历史快照；不能以当前可见引用标签列表为空作为可删除证明 |
 
 规则停用/删除必须先取得同一规则行锁，再检查全局引用；所有引用写入者也要在事务内锁定当前规则并重新校验状态。仅在停用端做一次 count 检查会与新绑定竞态，不足以发布。多个规则按 ID 升序锁定，但业务引擎顺序和绑定显示顺序保持用户配置。
@@ -55,3 +55,12 @@ QualityRuleSetService 在实际写事务中按规则 ID 排序取得行锁，校
 InspectionTaskService.snapshotAgentAndRules 在任务创建事务中按规则 ID 升序锁定当前规则，再按配置顺序生成快照。已停用或不存在的规则拒绝写入任务。该方法覆盖直接规则、规则集、定时与抽样创建共享的快照路径；此结论不扩大至统一标签计划、方案任务或全部任务入口。没有新增兼容分支或修改历史快照。
 
 针对性任务服务单元回归 40 项通过，包含锁顺序、快照顺序、停用规则拒绝创建及既有任务模式回归。H2 真实事务并发回归 3 项通过，覆盖规则集、方案依赖冻结及新增任务创建：停用事务持锁时等待，提交后拒绝新引用。本轮新增任务路径尚未在 MySQL 上复验，不能以此前规则集与方案的 MySQL 结果代替。
+
+
+## 统一标签任务计划增量
+
+UnifiedLabelPlanService 在标签及权限解析后收集全部绑定规则（包含本轮未选择的引擎类型），按 ID 升序校验当前定义。实际写事务使用同一 SELECT FOR UPDATE 行锁，保持至任务或执行快照提交；单独只读预览使用普通查询。当前定义不存在或停用时拒绝冻结，已有已发布精确版本不绕过当前停用状态；仍由绑定版本决定规则内容，不以当前草稿或最新版本替换。TaskWizardService 创建和 InspectionExecutionService 首轮/新轮次冻结均在既有写事务中调用该方法，重试继承既有快照。
+
+该变更不证明所有规则引用生命周期已完成；方案草稿、方案任务以及原任务引擎计划仍需核对，停用/删除入口尚未开放。
+
+本轮验证：UnifiedLabelPlanServiceTest 9 项、UnifiedTaskScheduleServiceTest 6 项通过；H2 真实事务并发 4 项通过（规则集、方案、直接任务、统一标签计划）。统一标签并发用例使用真实规则 Mapper 和事务管理器，标签选择发现用 Mock 隔离，因此不作为完整标签解析或 MySQL 并发验证的证据。新用例证明持锁停用期间冻结等待、提交后拒绝引用；单元用例验证固定锁顺序、精确版本、只读不加锁与新草稿不替换已发布版本。本轮未部署、未创建 PR。

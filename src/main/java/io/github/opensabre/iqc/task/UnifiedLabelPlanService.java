@@ -23,15 +23,17 @@ public class UnifiedLabelPlanService {
     private final LabelResolutionService resolver;
     private final InsightLabelMapper labels;
     private final QualityRuleVersionMapper versions;
+    private final io.github.opensabre.iqc.rule.dao.QualityRuleMapper rules;
     private final QualityAgentMapper agents;
     private final IqcDataScope scope;
     private final ObjectMapper mapper;
     private final io.github.opensabre.iqc.label.LabelActionService actions;
     public UnifiedLabelPlanService(LabelResolutionService resolver, InsightLabelMapper labels,
                                    QualityRuleVersionMapper versions, QualityAgentMapper agents,
-                                   IqcDataScope scope, ObjectMapper mapper, io.github.opensabre.iqc.label.LabelActionService actions) {
+                                   IqcDataScope scope, ObjectMapper mapper, io.github.opensabre.iqc.label.LabelActionService actions,
+                                   io.github.opensabre.iqc.rule.dao.QualityRuleMapper rules) {
         this.resolver = resolver; this.labels = labels; this.versions = versions;
-        this.agents = agents; this.scope = scope; this.mapper = mapper; this.actions = actions;
+        this.agents = agents; this.scope = scope; this.mapper = mapper; this.actions = actions; this.rules = rules;
     }
 
     /** References only: clients cannot inject rule content, Agent snapshots or scoring policies. */
@@ -71,6 +73,19 @@ public class UnifiedLabelPlanService {
         }
         if (ids.isEmpty() || ids.size() > 500) throw IqcException.invalidArgument("MVP 每次需选择 1 到 500 个可见已发布标签，超限不截断");
         var resolved = resolver.resolve(new LabelResolutionService.LabelSelection(null, null, ids, null));
+        boolean writing = org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+                && !org.springframework.transaction.support.TransactionSynchronizationManager.isCurrentTransactionReadOnly();
+        // A writer retains current-definition locks until its task or execution snapshot commits.
+        // Exact immutable version content below remains the source of the execution expressions.
+        var referencedRules = resolved.labels().stream().flatMap(label -> label.bindings().stream())
+                .map(io.github.opensabre.iqc.label.model.LabelRuleBinding::getRuleId).toList();
+        if (referencedRules.stream().anyMatch(id -> id == null || id.isBlank()))
+            throw IqcException.invalidArgument("标签规则绑定缺少有效规则 ID");
+        for (var ruleId : referencedRules.stream().distinct().sorted().toList()) {
+            var current = writing ? rules.lockById(ruleId) : rules.selectById(ruleId);
+            if (current == null || "DISABLED".equals(current.getStatus()))
+                throw IqcException.invalidArgument("标签引用的规则不存在或已停用: " + ruleId);
+        }
         var snapshot = mapper.valueToTree(resolved);
         for (var label : snapshot.path("labels")) {
             ((com.fasterxml.jackson.databind.node.ObjectNode) label).set("actions", mapper.valueToTree(actions.snapshots(label.path("id").asText())));

@@ -313,13 +313,23 @@ class JointLabelMaterializationTransactionTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {"RULE_SET", "SCHEME", "TASK"})
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"RULE_SET", "SCHEME", "TASK", "UNIFIED"})
     void ruleSetAndSchemeWritersRecheckRuleStatusAfterLifecycleLock(String kind) throws Exception {
         var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("reference-rule");
         rule.setName("引用规则"); rule.setCode("reference-rule"); rule.setStatus("PUBLISHED"); rule.setRuleType("REGEX"); ruleMapper.insert(rule);
         var sets = mock(io.github.opensabre.iqc.rule.dao.QualityRuleSetMapper.class);
         var setVersions = mock(io.github.opensabre.iqc.rule.dao.QualityRuleSetVersionMapper.class);
         var ruleSets = new io.github.opensabre.iqc.rule.QualityRuleSetService(sets, setVersions, ruleMapper, mapper);
+        var selectedLabels = mock(LabelResolutionService.class);
+        var binding = new LabelRuleBinding(); binding.setRuleId("reference-rule"); binding.setRuleVersionNo(1);
+        when(selectedLabels.resolve(any())).thenReturn(new LabelResolutionService.ResolvedSelection("1.0", List.of(
+                new LabelResolutionService.LabelSnapshot("reference-label", 1, "标签", "REFERENCE", null, null, null,
+                        null, null, false, null, null, List.of(binding), List.of())), List.of("reference-rule")));
+        // Real rule mapper and transaction manager; only selection discovery is isolated from this lock test.
+        var unified = new io.github.opensabre.iqc.task.UnifiedLabelPlanService(selectedLabels,
+                mock(io.github.opensabre.iqc.label.dao.InsightLabelMapper.class), ruleVersionMapper,
+                mock(io.github.opensabre.iqc.agent.dao.QualityAgentMapper.class), mock(io.github.opensabre.iqc.shared.IqcDataScope.class), mapper,
+                mock(io.github.opensabre.iqc.label.LabelActionService.class), ruleMapper);
         var definition = new io.github.opensabre.iqc.scheme.SchemeDefinition(io.github.opensabre.iqc.scheme.SchemeDefinition.SCHEMA,
                 List.of(new io.github.opensabre.iqc.scheme.SchemeDefinition.Item("item", "检查项",
                         new io.github.opensabre.iqc.scheme.SchemeDefinition.RuleReference("reference-rule", 1),
@@ -335,6 +345,9 @@ class JointLabelMaterializationTransactionTest {
                         .executeWithoutResult(writer -> {
                             if ("RULE_SET".equals(kind)) ruleSets.create("引用集", "REFERENCE_SET", null, List.of("reference-rule"), "ALL");
                             else if ("SCHEME".equals(kind)) referenceDependencies.resolve(definition);
+                            else if ("UNIFIED".equals(kind)) unified.freeze(new io.github.opensabre.iqc.task.UnifiedLabelPlanService.Configuration(
+                                    List.of(io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.EngineType.REGEX),
+                                    "SELECTED", List.of("reference-label"), null));
                             else taskService.createConfigured("引用任务", null, List.of(), null, null, null, null,
                                     null, null, List.of("reference-rule"), 1, null, null, "RULE_ONLY",
                                     new io.github.opensabre.iqc.task.TaskDataSelection(

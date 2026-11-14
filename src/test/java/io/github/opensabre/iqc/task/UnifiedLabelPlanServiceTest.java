@@ -20,8 +20,9 @@ class UnifiedLabelPlanServiceTest {
     final InsightLabelMapper labels = mock(InsightLabelMapper.class);
     final QualityRuleVersionMapper versions = mock(QualityRuleVersionMapper.class);
     final io.github.opensabre.iqc.label.LabelActionService actions = mock(io.github.opensabre.iqc.label.LabelActionService.class);
+    final io.github.opensabre.iqc.rule.dao.QualityRuleMapper rules = mock(io.github.opensabre.iqc.rule.dao.QualityRuleMapper.class);
     final UnifiedLabelPlanService service = new UnifiedLabelPlanService(resolver, labels, versions,
-            mock(QualityAgentMapper.class), mock(IqcDataScope.class), new ObjectMapper(), actions);
+            mock(QualityAgentMapper.class), mock(IqcDataScope.class), new ObjectMapper(), actions, rules);
     LabelRuleBinding binding(String rule) {
         var binding = new LabelRuleBinding(); binding.setLabelId("10"); binding.setRuleId(rule); binding.setRuleVersionNo(2); return binding;
     }
@@ -30,6 +31,11 @@ class UnifiedLabelPlanServiceTest {
         version.setRuleType(type); version.setExpression("退款"); return version;
     }
     void resolve(LabelRuleBinding... bindings) {
+        for (var binding : bindings) {
+            var current = new io.github.opensabre.iqc.rule.model.QualityRule();
+            current.setId(binding.getRuleId()); current.setStatus("PUBLISHED");
+            when(rules.selectById(binding.getRuleId())).thenReturn(current);
+        }
         when(resolver.resolve(any())).thenReturn(new LabelResolutionService.ResolvedSelection("1.0", List.of(
                 new LabelResolutionService.LabelSnapshot("10", 1, "退款", "REFUND", "g", "group", "G", "c", "cat", false,
                         "customer", java.math.BigDecimal.ONE, List.of(bindings), List.of())), List.of("r1", "r2")));
@@ -70,6 +76,61 @@ class UnifiedLabelPlanServiceTest {
         assertThat(frozen.unifiedLabels().at("/labels/0/actions/0/type").asText()).isEqualTo("DEDUCT_SCORE");
         when(actions.snapshots("10")).thenReturn(List.of());
         assertThat(frozen.unifiedLabels().at("/labels/0/actions/0/actionId").asText()).isEqualTo("9007199254740993");
+    }
+
+    @Test void writingFreezeLocksInStableOrderAndRetainsExactVersionsAndStageOrder() {
+        resolve(binding("z"), binding("a"));
+        when(versions.selectOne(any())).thenReturn(version("z", "REGEX"), version("a", "DLS"));
+        for (var id : List.of("z", "a")) {
+            var current = new io.github.opensabre.iqc.rule.model.QualityRule();
+            current.setId(id); current.setStatus("PUBLISHED"); current.setVersionNo(99);
+            when(rules.lockById(id)).thenReturn(current);
+        }
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            var frozen = service.freeze(new UnifiedLabelPlanService.Configuration(
+                    List.of(EngineType.DLS, EngineType.REGEX), "SELECTED", List.of("10"), null));
+            var order = inOrder(rules); order.verify(rules).lockById("a"); order.verify(rules).lockById("z");
+            verify(rules, never()).selectById(any(String.class));
+            assertThat(frozen.enginePlan().engines()).extracting(TaskEnginePlanService.FrozenEngine::type)
+                    .containsExactly(EngineType.DLS, EngineType.REGEX);
+            assertThat(frozen.enginePlan().engines().get(1).configuration().at("/tags/0/ruleVersionNo").asInt()).isEqualTo(2);
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+    }
+
+    @Test void readOnlyPreviewDoesNotRequestWriteLocks() {
+        resolve(binding("r1")); when(versions.selectOne(any())).thenReturn(version("r1", "REGEX"));
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+        org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionReadOnly(true);
+        try {
+            service.freeze(new UnifiedLabelPlanService.Configuration(List.of(EngineType.REGEX), "SELECTED", List.of("10"), null));
+            verify(rules).selectById("r1"); verify(rules, never()).lockById(any(String.class));
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false);
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+        }
+    }
+
+    @Test void publishedHistoricalVersionCannotReviveDisabledCurrentRule() {
+        resolve(binding("r1"));
+        var disabled = new io.github.opensabre.iqc.rule.model.QualityRule(); disabled.setStatus("DISABLED");
+        when(rules.selectById("r1")).thenReturn(disabled);
+        assertThatThrownBy(() -> service.freeze(new UnifiedLabelPlanService.Configuration(
+                List.of(EngineType.REGEX), "SELECTED", List.of("10"), null))).hasMessageContaining("停用");
+        verifyNoInteractions(versions, actions);
+    }
+
+    @Test void currentDraftDoesNotReplacePinnedPublishedVersion() {
+        resolve(binding("r1"));
+        var current = new io.github.opensabre.iqc.rule.model.QualityRule();
+        current.setId("r1"); current.setStatus("DRAFT"); current.setVersionNo(3);
+        when(rules.selectById("r1")).thenReturn(current);
+        when(versions.selectOne(any())).thenReturn(version("r1", "REGEX"));
+        var frozen = service.freeze(new UnifiedLabelPlanService.Configuration(
+                List.of(EngineType.REGEX), "SELECTED", List.of("10"), null));
+        assertThat(frozen.enginePlan().engines().getFirst().configuration().at("/tags/0/ruleVersionNo").asInt()).isEqualTo(2);
     }
 
 }
