@@ -206,8 +206,13 @@ public class SchemeDependencyResolver {
             mergeReference(references, binding.getRuleId(), binding.getRuleVersionNo());
         List<JsonNode> frozenRules = new ArrayList<>();
         boolean requiresLlm = false;
+        boolean writing = org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+                && !org.springframework.transaction.support.TransactionSynchronizationManager.isCurrentTransactionReadOnly();
+        var locked = new java.util.HashMap<String, io.github.opensabre.iqc.rule.model.QualityRule>();
+        // Lock all rule identities in a stable order, while retaining the business dependency order below.
+        if (writing) references.keySet().stream().sorted().forEach(id -> locked.put(id, rules.lockById(id)));
         for (var reference : references.entrySet()) {
-            var current = rules.selectById(reference.getKey());
+            var current = writing ? locked.get(reference.getKey()) : rules.selectById(reference.getKey());
             if (current == null || "DISABLED".equals(current.getStatus())) throw IqcException.invalidState("规则不存在或已停用: " + reference.getKey());
             var version = ruleVersions.selectOne(Wrappers.<QualityRuleVersion>lambdaQuery()
                     .eq(QualityRuleVersion::getRuleId, reference.getKey())

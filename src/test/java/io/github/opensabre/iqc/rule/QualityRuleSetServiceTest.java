@@ -25,6 +25,27 @@ class QualityRuleSetServiceTest {
     private final QualityRuleSetService service = new QualityRuleSetService(mapper, versionMapper, ruleMapper, new ObjectMapper());
 
     @Test
+    void writingReferencesLocksDefinitionsInStableOrderWithoutChangingStoredOrder() {
+        var rule = new QualityRule(); rule.setStatus("PUBLISHED");
+        when(ruleMapper.lockById(any())).thenReturn(rule);
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            var set = service.create("规则集", "SET", null, List.of("z", "a"), "ALL");
+            assertThat(set.getRuleIdsJson()).isEqualTo("[\"z\",\"a\"]");
+            var locks = org.mockito.Mockito.inOrder(ruleMapper);
+            locks.verify(ruleMapper).lockById("a"); locks.verify(ruleMapper).lockById("z");
+            org.mockito.Mockito.verify(ruleMapper, org.mockito.Mockito.never()).selectById(any(String.class));
+        } finally { org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false); }
+    }
+
+    @Test
+    void draftRuleSetCannotIntroduceReferenceToDisabledRule() {
+        var rule = new QualityRule(); rule.setStatus("DISABLED"); when(ruleMapper.selectById("disabled")).thenReturn(rule);
+        assertThatThrownBy(() -> service.create("规则集", "SET", null, List.of("disabled"), "ALL")).hasMessageContaining("停用");
+        org.mockito.Mockito.verify(mapper, org.mockito.Mockito.never()).insert(any(QualityRuleSet.class));
+    }
+
+    @Test
     void publishedSetReturnsOrderedRuleIds() {
         QualityRuleSet set = new QualityRuleSet(); set.setId("set-1"); set.setStatus("PUBLISHED"); set.setRuleIdsJson("[\"rule-2\",\"rule-1\"]");
         QualityRule published = new QualityRule(); published.setStatus("PUBLISHED");

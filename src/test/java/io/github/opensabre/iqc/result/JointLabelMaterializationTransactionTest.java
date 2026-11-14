@@ -124,6 +124,7 @@ class JointLabelMaterializationTransactionTest {
     @Autowired private TaskItemMapper taskItemMapper;
     @Autowired private io.github.opensabre.iqc.label.LabelTaxonomyService taxonomy;
     @Autowired private org.springframework.transaction.PlatformTransactionManager transactionManager;
+    @Autowired private io.github.opensabre.iqc.scheme.SchemeDependencyResolver referenceDependencies;
     @Autowired private io.github.opensabre.iqc.label.dao.InsightLabelMapper usageLabels;
     @Autowired private QualityRuleMapper ruleMapper;
     @Autowired private QualityRuleVersionMapper ruleVersionMapper;
@@ -309,6 +310,39 @@ class JointLabelMaterializationTransactionTest {
                 """);
         task.setScheduledTime(io.github.opensabre.iqc.task.UnifiedTaskScheduleService.schedulingNow().minusMinutes(1));
         taskMapper.insert(task); return task;
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"RULE_SET", "SCHEME"})
+    void ruleSetAndSchemeWritersRecheckRuleStatusAfterLifecycleLock(String kind) throws Exception {
+        var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("reference-rule");
+        rule.setName("引用规则"); rule.setCode("reference-rule"); rule.setStatus("PUBLISHED"); rule.setRuleType("REGEX"); ruleMapper.insert(rule);
+        var sets = mock(io.github.opensabre.iqc.rule.dao.QualityRuleSetMapper.class);
+        var setVersions = mock(io.github.opensabre.iqc.rule.dao.QualityRuleSetVersionMapper.class);
+        var ruleSets = new io.github.opensabre.iqc.rule.QualityRuleSetService(sets, setVersions, ruleMapper, mapper);
+        var definition = new io.github.opensabre.iqc.scheme.SchemeDefinition(io.github.opensabre.iqc.scheme.SchemeDefinition.SCHEMA,
+                List.of(new io.github.opensabre.iqc.scheme.SchemeDefinition.Item("item", "检查项",
+                        new io.github.opensabre.iqc.scheme.SchemeDefinition.RuleReference("reference-rule", 1),
+                        io.github.opensabre.iqc.scheme.SchemeDefinition.HitMeaning.COMPLIANCE)), null,
+                new io.github.opensabre.iqc.scoring.InspectionScoring.Policy("iqc-score-v2",
+                        io.github.opensabre.iqc.scoring.InspectionScoring.Mode.DEDUCTION, 100, 60,
+                        List.of(new io.github.opensabre.iqc.scoring.InspectionScoring.Item("item", 10, false))));
+        try (var worker = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            var pending = new java.util.concurrent.atomic.AtomicReference<java.util.concurrent.Future<?>>();
+            new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+                var locked = ruleMapper.lockById("reference-rule"); locked.setStatus("DISABLED"); ruleMapper.updateById(locked);
+                pending.set(worker.submit(() -> new org.springframework.transaction.support.TransactionTemplate(transactionManager)
+                        .executeWithoutResult(writer -> {
+                            if ("RULE_SET".equals(kind)) ruleSets.create("引用集", "REFERENCE_SET", null, List.of("reference-rule"), "ALL");
+                            else referenceDependencies.resolve(definition);
+                        })));
+                org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.TimeoutException.class,
+                        () -> pending.get().get(200, java.util.concurrent.TimeUnit.MILLISECONDS));
+            });
+            assertThatThrownBy(() -> pending.get().get(10, java.util.concurrent.TimeUnit.SECONDS))
+                    .isInstanceOf(java.util.concurrent.ExecutionException.class).hasStackTraceContaining("停用");
+        }
+        org.mockito.Mockito.verifyNoInteractions(sets, setVersions);
     }
 
     @Test

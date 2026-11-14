@@ -17,6 +17,19 @@ import static org.mockito.Mockito.*;
 
 class SchemeDependencyResolverTest {
     @Test
+    void readOnlyPreviewDoesNotRequestRuleWriteLocks() {
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+        org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionReadOnly(true);
+        try {
+            resolver.resolve(InspectionSchemeServiceTest.definition());
+            verify(rules).selectById("rule"); verify(rules, never()).lockById(any());
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+            org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+    }
+
+    @Test
     void routeDefinitionsResolveAndMalformedRouteTaskCannotStart() {
         var old = InspectionSchemeServiceTest.definition(); var item = old.items().getFirst();
         var routed = new SchemeDefinition(old.schemaVersion(), java.util.List.of(new SchemeDefinition.Item(
@@ -352,6 +365,16 @@ class SchemeDependencyResolverTest {
         assertThat(resolved.rules().get(1).path("expression").asText()).isEqualTo("product");
         assertThat(resolved.rules().get(1).path("deduction").asInt()).isZero();
         assertThat(resolved.rules().get(1).path("veto").asBoolean()).isFalse();
+        when(rules.lockById("rule")).thenReturn(current); when(rules.lockById("gate")).thenReturn(gateRule);
+        when(versions.selectOne(any(Wrapper.class))).thenReturn(version, gateVersion);
+        clearInvocations(rules);
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            var written = resolver.resolve(conditional);
+            assertThat(written.rules()).extracting(node -> node.path("id").asText()).containsExactly("rule", "gate");
+            var locks = inOrder(rules); locks.verify(rules).lockById("gate"); locks.verify(rules).lockById("rule");
+            verify(rules, never()).selectById(any(String.class));
+        } finally { org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false); }
         gateRule.setStatus("DISABLED");
         assertThatThrownBy(() -> resolver.resolve(conditional)).hasMessageContaining("停用");
     }
