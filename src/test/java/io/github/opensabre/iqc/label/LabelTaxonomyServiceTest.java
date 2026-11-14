@@ -31,6 +31,25 @@ class LabelTaxonomyServiceTest {
     }
 
     @Test
+    void explicitEmptyBindingsCreateDraftRevisionAndDoNotResolveRules() {
+        var label = new InsightLabel(); label.setId("label"); label.setStatus("PUBLISHED"); label.setVersionNo(3);
+        when(labels.selectById("label")).thenReturn(label); when(labels.selectOne(any())).thenReturn(label);
+        when(bindings.selectList(any())).thenReturn(List.of());
+        service.replaceBindings("label", List.of());
+        org.assertj.core.api.Assertions.assertThat(label.getStatus()).isEqualTo("DRAFT");
+        org.assertj.core.api.Assertions.assertThat(label.getVersionNo()).isEqualTo(4);
+        verify(labels).updateById(label); verify(bindings).delete(any()); verifyNoInteractions(rules);
+        assertThatThrownBy(() -> service.publish("label")).hasMessageContaining("绑定已发布规则");
+    }
+
+    @Test
+    void omittedBindingsDoNotAccidentallyClearExistingRules() {
+        when(labels.selectById("label")).thenReturn(new InsightLabel());
+        assertThatThrownBy(() -> service.replaceBindings("label", null)).hasMessageContaining("数组");
+        verify(bindings, never()).delete(any()); verify(labels, never()).updateById(any(InsightLabel.class));
+    }
+
+    @Test
     void rejectsMoreThanTenValues() {
         when(labels.selectById("label-1")).thenReturn(new InsightLabel());
         List<LabelTaxonomyService.ValueRequest> requests = java.util.stream.IntStream.range(0, 11)

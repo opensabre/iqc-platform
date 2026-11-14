@@ -92,10 +92,12 @@ public class LabelTaxonomyService {
         return values(labelId);
     }
 
+    /** Explicit empty selection unbinds all rules and revises a published label without altering frozen executions. */
     @Transactional public List<LabelRuleBinding> replaceBindings(String labelId, List<BindingRequest> requests) {
         InsightLabel label = requireLabel(labelId); requireAccess(label.getCreatedBy(), label.getOwnerGroupId());
-        List<BindingRequest> values = requests == null ? List.of() : requests;
-        if (values.isEmpty() || values.size() > 10) throw IqcException.invalidArgument("标签需绑定 1 到 10 条规则，每种类型最多一条");
+        if (requests == null) throw IqcException.invalidArgument("请提供规则绑定数组，空数组表示解除全部绑定");
+        List<BindingRequest> values = requests;
+        if (values.size() > 10) throw IqcException.invalidArgument("标签最多绑定 10 条规则，每种类型最多一条");
         var requestedRules = new java.util.ArrayList<QualityRule>();
         var types = new java.util.HashSet<String>();
         for (var request : values) {

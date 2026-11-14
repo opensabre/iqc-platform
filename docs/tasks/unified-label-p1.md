@@ -31,7 +31,7 @@ P1（绑定/动作）→ P2（每次执行冻结、定时/周期与分页选数�
 
 ## 接口和页面
 
-- 沿用 `PUT /api/iqc/labels/{id}/bindings`，服务端推导规则类型，不接受客户端伪造类型；每类型重复在任何写入前拒绝。
+- 沿用 `PUT /api/iqc/labels/{id}/bindings`，服务端推导规则类型，不接受客户端伪造类型；每类型重复在任何写入前拒绝。显式空数组允许解除全部规则绑定并保存草稿，缺失/null 请求拒绝；无规则标签不能发布。
 - `GET/POST /api/iqc/label-actions`、`PUT/DELETE /api/iqc/label-actions/{id}`、`POST /api/iqc/label-actions/{id}/disable` 管理动作定义。
 - `GET/PUT /api/iqc/labels/{id}/actions` 显示或整组替换动作绑定，空数组表示显式解绑。目录支持 page/size，每页最多 500。
 - 动作复用 `iqc:label:view/manage` 及 IQC 数据范围校验、审计、雪花 ID 和元数据填充。被任何标签引用的动作不能停用/删除；动作类型不可原地变更。
@@ -61,3 +61,10 @@ pnpm build
 ## 本批验证结果（2026-11-14）
 
 后端针对性验证累计 88 项通过，另有应用启动、权限和 OpenAPI 装配 4 项通过；管理端 16 项通过，生产构建和 TypeScript 检查通过。Flyway 布局检查通过，MySQL 8.0.34 使用独立临时 datadir、端口和测试库验证新装、升级、重复迁移与预期拒绝场景。未使用共享或生产数据库；尚未做真实 LLM 调用与性能验收。
+
+
+## 规则解绑增量
+
+标签编辑允许清空规则选择，PUT bindings 的空数组明确表示解除全部规则绑定。发布标签被修改时按既有流程转为下一版本草稿；历史任务执行的规则内容和版本快照不改写。发布仍要求至少一条已发布规则，空绑定草稿不能进入新的统一任务快照。此项补齐解绑语义，不代表规则资产删除、停用及全部引用生命周期已交付。
+
+解绑增量验证：LabelTaxonomyServiceTest 9 项、UnifiedLabelPlanServiceTest 5 项通过，管理端规则绑定校验 4 项通过，类型检查及生产构建通过；未执行线上部署。
