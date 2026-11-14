@@ -122,6 +122,7 @@ class JointLabelMaterializationTransactionTest {
     private InspectionTaskMapper taskMapper;
     @Autowired private TaskExecutionMapper executionMapper;
     @Autowired private TaskItemMapper taskItemMapper;
+    @Autowired private io.github.opensabre.iqc.label.dao.InsightLabelMapper usageLabels;
     @Autowired private QualityRuleMapper ruleMapper;
     @Autowired private QualityRuleVersionMapper ruleVersionMapper;
     @Autowired private InspectionSchemeMapper schemeMapper;
@@ -306,6 +307,31 @@ class JointLabelMaterializationTransactionTest {
                 """);
         task.setScheduledTime(io.github.opensabre.iqc.task.UnifiedTaskScheduleService.schedulingNow().minusMinutes(1));
         taskMapper.insert(task); return task;
+    }
+
+    @Test
+    void ruleUsagePaginatesOnlyVisibleCurrentBindingsAndDoesNotLeakPrivateCounts() {
+        var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("usage-rule");
+        rule.setName("规则"); rule.setCode("usage-rule"); ruleMapper.insert(rule);
+        for (int i = 1; i <= 4; i++) {
+            jdbc.update("INSERT INTO iqc_label (id,name,code,status,version_no,created_by,owner_group_id) VALUES (?,?,?,?,?,?,?)",
+                    "usage-" + i, "标签" + i, "usage-" + i, "DRAFT", 1, i == 1 ? "alice" : "bob", i == 2 ? "team" : "private");
+            if (i != 4) jdbc.update("INSERT INTO iqc_label_rule_binding (id,label_id,rule_id,rule_version_no,rule_type) VALUES (?,?,?,?,?)",
+                    "usage-binding-" + i, "usage-" + i, "usage-rule", 1, "REGEX");
+        }
+        var scope = mock(io.github.opensabre.iqc.shared.IqcDataScope.class);
+        when(scope.canView(nullable(String.class), nullable(String.class))).thenReturn(true);
+        when(scope.owner()).thenReturn("alice"); when(scope.groupId()).thenReturn("team");
+        var service = new io.github.opensabre.iqc.label.LabelTaxonomyService(null, null, usageLabels, null, null, ruleMapper, scope, mapper);
+        var first = service.labelsUsingRule("usage-rule", 1, 1);
+        var second = service.labelsUsingRule("usage-rule", 2, 1);
+        assertThat(first.total()).isEqualTo(2); assertThat(second.total()).isEqualTo(2);
+        assertThat(first.records()).extracting(io.github.opensabre.iqc.label.model.InsightLabel::getId).containsExactly("usage-1");
+        assertThat(second.records()).extracting(io.github.opensabre.iqc.label.model.InsightLabel::getId).containsExactly("usage-2");
+        when(scope.canViewAll()).thenReturn(true);
+        assertThat(service.labelsUsingRule("usage-rule", 1, 1000).total()).isEqualTo(3);
+        when(scope.canView(nullable(String.class), nullable(String.class))).thenReturn(false);
+        assertThatThrownBy(() -> service.labelsUsingRule("usage-rule", 1, 20)).hasMessageContaining("权限");
     }
 
     @Test

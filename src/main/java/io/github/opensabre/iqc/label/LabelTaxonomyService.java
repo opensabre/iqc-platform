@@ -27,6 +27,23 @@ public class LabelTaxonomyService {
     private final IqcDataScope dataScope;
     private final ObjectMapper objectMapper;
 
+    /** Paginates live rule references with data scope applied before counting or returning labels. */
+    public io.github.opensabre.iqc.shared.IqcPage<InsightLabel> labelsUsingRule(String ruleId, long current, long size) {
+        var rule = ruleMapper.selectById(ruleId);
+        if (rule == null) throw IqcException.notFound("规则不存在");
+        if (!dataScope.canView(rule.getCreatedBy(), null)) throw IqcException.accessDenied("规则超出数据权限");
+        var query = Wrappers.<InsightLabel>lambdaQuery().apply(
+                "EXISTS (SELECT 1 FROM iqc_label_rule_binding b WHERE b.label_id = iqc_label.id AND b.rule_id = {0})", ruleId);
+        if (!dataScope.canViewAll()) {
+            String owner = dataScope.owner(), group = dataScope.groupId();
+            query.and(q -> q.eq(InsightLabel::getCreatedBy, owner)
+                    .or(group != null, nested -> nested.eq(InsightLabel::getOwnerGroupId, group)));
+        }
+        query.orderByAsc(InsightLabel::getName).orderByAsc(InsightLabel::getId);
+        var page = new com.baomidou.mybatisplus.extension.plugins.pagination.Page<InsightLabel>(Math.max(1, current), Math.min(100, Math.max(1, size)));
+        return io.github.opensabre.iqc.shared.IqcPage.from(labelMapper.selectPage(page, query));
+    }
+
     public TaxonomyTree tree(String keyword) {
         String term = blank(keyword) ? null : keyword.trim();
         List<LabelCategory> categories = categoryMapper.selectList(Wrappers.<LabelCategory>lambdaQuery().orderByAsc(LabelCategory::getName));
