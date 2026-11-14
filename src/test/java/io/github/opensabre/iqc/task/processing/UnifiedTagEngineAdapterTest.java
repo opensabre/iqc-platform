@@ -64,6 +64,27 @@ class UnifiedTagEngineAdapterTest {
         assertThat(mapper.readTree(output.rawOutput()).at("/metadata/modelCalled").asBoolean()).isFalse();
         verifyNoInteractions(provider);
     }
+    @Test void twentyPendingTagsUseOneRequestAndOneStageResult() throws Exception {
+        String[] ids = java.util.stream.IntStream.rangeClosed(1, 20)
+                .mapToObj(Integer::toString).toArray(String[]::new);
+        var response = mapper.createObjectNode();
+        var results = response.putArray("results");
+        for (String id : ids) results.addObject().put("tagId", id).put("status", "NOT_MATCHED");
+        when(provider.evaluateTagBatch(any(), any(), anyString())).thenReturn(response);
+
+        var output = adapter(EngineType.LLM).execute(input, config(ids));
+
+        var request = org.mockito.ArgumentCaptor.forClass(com.fasterxml.jackson.databind.JsonNode.class);
+        verify(provider, times(1)).evaluateTagBatch(request.capture(), any(), anyString());
+        assertThat(request.getValue().path("tags").findValuesAsText("tagId")).containsExactly(ids);
+        assertThat(request.getValue().path("tags").findValuesAsText("prompt"))
+                .containsExactly(java.util.stream.IntStream.rangeClosed(1, 20)
+                        .mapToObj(i -> i == 1 ? "退款" : "投诉").toArray(String[]::new));
+        assertThat(request.getValue().toString()).contains("我要退款");
+        assertThat(output.status()).isEqualTo(ExecutionStatus.SUCCEEDED);
+        assertThat(output.observations()).extracting(Observation::targetId).containsExactly(ids);
+        assertThat(output.observations()).allMatch(result -> result.status() == ObservationStatus.NOT_MATCHED);
+    }
     @Test void malformedDuplicateMissingAndUnexpectedTagsNeverBecomeMisses() throws Exception {
         when(provider.evaluateTagBatch(any(), any(), anyString())).thenReturn(mapper.readTree("""
                 {"results":[{"tagId":"1","status":"MATCHED"},{"tagId":"1","status":"NOT_MATCHED"},

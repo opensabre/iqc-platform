@@ -1,5 +1,7 @@
 # 统一标签识别 MVP
 
+> 当前验收范围以用户后续指令为准：不设计旧任务兼容方案，不将旧模式兼容列为交付条件。以下历史记录中的旧路径回归只表示当时执行过的检查。当前阶段缺口见 [验收核对](unified-label-acceptance.md)。
+
 > 以下记录初次 MVP 范围；用户已确认继续开发。后续 P1 迁移与动作能力见 [P1 增量](unified-label-p1.md)，不能将初始 MVP 的“无新增迁移”用于当前分支发布。
 
 本版本依据工作区 `IQC_统一规则标签任务执行框架_PRD_V1.0.md`，先交付可本地验证的匹配闭环。它不是 P1～P5 全量交付，也不改变旧任务的评分、路线及标签值语义。
@@ -94,6 +96,5 @@ pnpm build
 | LLM 优先 | 选择 LLM → REGEX，LLM 应分析全部适用标签；其他会话不继承前一会话的过滤集合 | `llmFirstEvaluatesEveryApplicableTagAndAnotherConversationHasNoUpstream` |
 | 异常响应 | 在测试提供方返回重复、缺失或越界标签，观察 ERROR / PARTIAL_SUCCESS；不能显示为 NOT_MATCHED | `malformedDuplicateMissingAndUnexpectedTagsNeverBecomeMisses`；真实提供方待验 |
 | 恢复与结果保存 | 中断后恢复同次执行，已完成阶段不重复调用；查看阶段记录及待处置提示，不生成正式标签或分数 | `UnifiedTaskLifecycleTest` 使用 H2 存储验证检查点恢复及待处置结果；真实进程中断待验 |
-| 旧任务兼容 | 创建旧模式任务并查看历史结果，确认原有配置、评分和证据展示 | 既有任务与处理器回归、前端旧模式测试；真实环境待验 |
 
 验收确认后才进入 PR 与发布流程。该确认不等同于决定扣分或冲突策略，也不自动批准修改框架或共享服务。后续 P1～P5 仍按上面的未完成范围继续，不能以 MVP 测试通过替代全量 PRD 验收。
