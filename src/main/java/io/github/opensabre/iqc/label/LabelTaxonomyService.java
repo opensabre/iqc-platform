@@ -117,9 +117,13 @@ public class LabelTaxonomyService {
         if (values.size() > 10) throw IqcException.invalidArgument("标签最多绑定 10 条规则，每种类型最多一条");
         var requestedRules = new java.util.ArrayList<QualityRule>();
         var types = new java.util.HashSet<String>();
-        for (var request : values) {
+        for (var request : values)
             if (request == null || blank(request.ruleId())) throw IqcException.invalidArgument("规则 ID 不能为空");
-            var rule = ruleMapper.selectById(request.ruleId());
+        // Lock in stable order before validation; a concurrent lifecycle operation must see the committed binding.
+        var lockedRules = new java.util.HashMap<String, QualityRule>();
+        values.stream().map(BindingRequest::ruleId).distinct().sorted().forEach(id -> lockedRules.put(id, ruleMapper.lockById(id)));
+        for (var request : values) {
+            var rule = lockedRules.get(request.ruleId());
             if (rule == null || !"PUBLISHED".equals(rule.getStatus()) || rule.getVersionNo() == null || rule.getRuleType() == null)
                 throw IqcException.invalidArgument("标签只能绑定有明确版本的已发布规则");
             if (!dataScope.canView(rule.getCreatedBy(), null)) throw IqcException.accessDenied("规则超出数据权限");

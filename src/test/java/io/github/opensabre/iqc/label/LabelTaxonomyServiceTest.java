@@ -31,6 +31,19 @@ class LabelTaxonomyServiceTest {
     }
 
     @Test
+    void ruleLocksUseStableOrderWhileSavedBindingsKeepUserOrder() {
+        when(labels.selectById("label")).thenReturn(new InsightLabel());
+        when(rules.lockById("a")).thenReturn(rule("a", "REGEX"));
+        when(rules.lockById("z")).thenReturn(rule("z", "LLM"));
+        service.replaceBindings("label", List.of(new LabelTaxonomyService.BindingRequest("z"), new LabelTaxonomyService.BindingRequest("a")));
+        var locks = inOrder(rules); locks.verify(rules).lockById("a"); locks.verify(rules).lockById("z");
+        var saved = org.mockito.ArgumentCaptor.forClass(io.github.opensabre.iqc.label.model.LabelRuleBinding.class);
+        verify(bindings, times(2)).insert(saved.capture());
+        org.assertj.core.api.Assertions.assertThat(saved.getAllValues()).extracting(io.github.opensabre.iqc.label.model.LabelRuleBinding::getRuleId)
+                .containsExactly("z", "a");
+    }
+
+    @Test
     void explicitEmptyBindingsCreateDraftRevisionAndDoNotResolveRules() {
         var label = new InsightLabel(); label.setId("label"); label.setStatus("PUBLISHED"); label.setVersionNo(3);
         when(labels.selectById("label")).thenReturn(label); when(labels.selectOne(any())).thenReturn(label);
@@ -97,7 +110,7 @@ class LabelTaxonomyServiceTest {
     void sameTypeRulesAreRejectedBeforeAnyBindingOrLabelIsChanged() {
         when(labels.selectById("label")).thenReturn(new InsightLabel());
         var first = rule("r1", "REGEX"); var second = rule("r2", "REGEX");
-        when(rules.selectById("r1")).thenReturn(first); when(rules.selectById("r2")).thenReturn(second);
+        when(rules.lockById("r1")).thenReturn(first); when(rules.lockById("r2")).thenReturn(second);
         assertThatThrownBy(() -> service.replaceBindings("label", List.of(
                 new LabelTaxonomyService.BindingRequest("r1"), new LabelTaxonomyService.BindingRequest("r2"))))
                 .isInstanceOf(IqcException.class).hasMessageContaining("最多绑定一条");
@@ -106,8 +119,8 @@ class LabelTaxonomyServiceTest {
     @Test
     void oneRuleCanBeReusedByLabelsAndEachBindingStoresItsTypeAndVersion() {
         when(labels.selectById(anyString())).thenReturn(new InsightLabel());
-        when(rules.selectById("r1")).thenReturn(rule("r1", "REGEX"));
-        when(rules.selectById("r2")).thenReturn(rule("r2", "LLM"));
+        when(rules.lockById("r1")).thenReturn(rule("r1", "REGEX"));
+        when(rules.lockById("r2")).thenReturn(rule("r2", "LLM"));
         when(bindings.selectList(any())).thenReturn(List.of());
         service.replaceBindings("label1", List.of(new LabelTaxonomyService.BindingRequest("r1"), new LabelTaxonomyService.BindingRequest("r2")));
         service.replaceBindings("label2", List.of(new LabelTaxonomyService.BindingRequest("r1")));

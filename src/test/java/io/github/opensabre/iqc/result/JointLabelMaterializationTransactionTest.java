@@ -122,6 +122,8 @@ class JointLabelMaterializationTransactionTest {
     private InspectionTaskMapper taskMapper;
     @Autowired private TaskExecutionMapper executionMapper;
     @Autowired private TaskItemMapper taskItemMapper;
+    @Autowired private io.github.opensabre.iqc.label.LabelTaxonomyService taxonomy;
+    @Autowired private org.springframework.transaction.PlatformTransactionManager transactionManager;
     @Autowired private io.github.opensabre.iqc.label.dao.InsightLabelMapper usageLabels;
     @Autowired private QualityRuleMapper ruleMapper;
     @Autowired private QualityRuleVersionMapper ruleVersionMapper;
@@ -310,11 +312,37 @@ class JointLabelMaterializationTransactionTest {
     }
 
     @Test
+    void newLabelBindingWaitsForRuleLifecycleLockAndRechecksCommittedStatus() throws Exception {
+        var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("locked-rule");
+        rule.setName("锁定规则"); rule.setCode("locked-rule"); rule.setStatus("PUBLISHED"); rule.setRuleType("REGEX");
+        rule.setVersionNo(1); rule.setCreatedBy("system"); ruleMapper.insert(rule);
+        jdbc.update("INSERT INTO iqc_label_category (id,name,code,status,version_no) VALUES ('locked-category','锁测试分类','locked-category','PUBLISHED',1)");
+        jdbc.update("INSERT INTO iqc_label_group (id,category_id,name,code,status,version_no) VALUES ('locked-group','locked-category','锁测试组','locked-group','PUBLISHED',1)");
+        jdbc.update("INSERT INTO iqc_label (id,group_id,name,code,status,version_no,created_by) VALUES ('locked-label','locked-group','标签','locked-label','DRAFT',1,'system')");
+        try (var worker = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            var pending = new java.util.concurrent.atomic.AtomicReference<java.util.concurrent.Future<?>>();
+            new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+                var locked = ruleMapper.lockById("locked-rule"); locked.setStatus("DISABLED"); ruleMapper.updateById(locked);
+                pending.set(worker.submit(() -> taxonomy.replaceBindings("locked-label",
+                        List.of(new io.github.opensabre.iqc.label.LabelTaxonomyService.BindingRequest("locked-rule")))));
+                org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.TimeoutException.class,
+                        () -> pending.get().get(200, java.util.concurrent.TimeUnit.MILLISECONDS));
+            });
+            assertThatThrownBy(() -> pending.get().get(10, java.util.concurrent.TimeUnit.SECONDS))
+                    .isInstanceOf(java.util.concurrent.ExecutionException.class).hasCauseInstanceOf(io.github.opensabre.iqc.governance.IqcException.class)
+                    .hasStackTraceContaining("已发布规则");
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_label_rule_binding WHERE label_id='locked-label'", Integer.class)).isZero();
+    }
+
+    @Test
     void ruleUsagePaginatesOnlyVisibleCurrentBindingsAndDoesNotLeakPrivateCounts() {
         var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("usage-rule");
-        rule.setName("规则"); rule.setCode("usage-rule"); ruleMapper.insert(rule);
+        rule.setName("规则"); rule.setCode("usage-rule"); rule.setRuleType("REGEX"); rule.setStatus("PUBLISHED"); ruleMapper.insert(rule);
+        jdbc.update("INSERT INTO iqc_label_category (id,name,code,status,version_no) VALUES ('usage-category','引用分类','usage-category','PUBLISHED',1)");
+        jdbc.update("INSERT INTO iqc_label_group (id,category_id,name,code,status,version_no) VALUES ('usage-group','usage-category','引用组','usage-group','PUBLISHED',1)");
         for (int i = 1; i <= 4; i++) {
-            jdbc.update("INSERT INTO iqc_label (id,name,code,status,version_no,created_by,owner_group_id) VALUES (?,?,?,?,?,?,?)",
+            jdbc.update("INSERT INTO iqc_label (id,group_id,name,code,status,version_no,created_by,owner_group_id) VALUES (?,'usage-group',?,?,?,?,?,?)",
                     "usage-" + i, "标签" + i, "usage-" + i, "DRAFT", 1, i == 1 ? "alice" : "bob", i == 2 ? "team" : "private");
             if (i != 4) jdbc.update("INSERT INTO iqc_label_rule_binding (id,label_id,rule_id,rule_version_no,rule_type) VALUES (?,?,?,?,?)",
                     "usage-binding-" + i, "usage-" + i, "usage-rule", 1, "REGEX");
