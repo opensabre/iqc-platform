@@ -29,3 +29,11 @@ RuleLifecycleWebSecurityTest 使用生产 IqcResourceServerConfiguration、真�
 真实业务错误是 HTTP 200、非成功 code、mesg 且省略 null data。管理端响应拦截器原先漏识别这类错误；已修复并加入 4 项真实拦截器测试，API 回归 25 项和生产构建通过。浏览器在新生产构建上复验两种引用拒绝（无错误成功提示）、成功停用和成功删除，全部使用 API 夹具。
 
 Java 21 使用前述 Maven/Mockito 参数，运行 `-Dtest=RuleLifecycleWebSecurityTest,IqcExceptionHandlerAdviceTest,QualityConfigControllerPermissionTest test`：8+3+1 共 12 项通过。初次测试编译修正泛型重载和 Jackson 版本；首次运行发现 void 响应问题，修正应用端后最终复跑通过。
+
+## P3 可观测性增量（2026-11-15）
+
+SpringAiLlmQualityProvider 保留提供方实际返回的模型名称、输入/输出 Token 和尝试次数；框架 EmptyUsage、空计数及负计数不作为有效 Token 写入，也不将缺失模型名替换成配置名冒充提供方报告。UnifiedTagEngineAdapter 将这些数据复制至阶段 `metadata.provider`，与框架自己的过滤数量、是否调用和阶段耗时分开；完整提供方响应仍保留在 providerResponse。复用已有阶段原始输出存储，不新增表或 API。
+
+管理端引擎记录显示提供方模型及输入/输出 Token；调用发生但提供方未报告时显示“未知”，真实零值仍显示 0；跳过阶段仍显示未调用。统计是最后一次成功返回的提供方用量，不包含失败重试未报告的消耗；阶段 elapsedMs 包括本阶段等待和重试，不能据此推导模型服务吞吐。
+
+Java 21 运行前述 Maven/Mockito 参数及 `-Dtest=SpringAiLlmQualityProviderTest,UnifiedTagEngineAdapterTest test`，8+9 共 17 项通过。管理端 `pnpm test -- src/components/TaskWizardResults.test.ts`，10 项通过，其中覆盖实际计数、真实零值、缺失用量及提供方模型显示；`pnpm build` 类型检查和生产构建通过，保留既有包体大小提示。测试中的 123/45 是 Mock 数据，不是实际模型性能或 Token 节约证据。真实模型、数据集和联调环境仍需指定后验收。

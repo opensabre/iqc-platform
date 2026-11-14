@@ -118,6 +118,9 @@ public final class UnifiedTagEngineAdapter implements MultiEngineExecutor.Adapte
     private MultiEngineExecutor.Output output(List<JsonNode> tags, List<Observation> observations, List<Evidence> evidence,
                                                ObjectNode metadata, JsonNode response, long started, Failure failure, ExecutionStatus status) {
         metadata.put("elapsedMs", java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
+        // Keep provider-reported telemetry separate from framework filter counts and elapsed time.
+        if (response != null && response.path("metadata").isObject())
+            metadata.set("provider", response.path("metadata").deepCopy());
         var payload = mapper.createObjectNode().put("engineType", type.name()).put("status", switch (status) {
             case SUCCEEDED -> "SUCCESS"; case PARTIAL_SUCCESS -> "PARTIAL_SUCCESS"; case FAILED -> "ERROR"; case SKIPPED -> "SKIPPED";
         });

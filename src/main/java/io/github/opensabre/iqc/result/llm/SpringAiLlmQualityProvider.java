@@ -201,10 +201,15 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
                 var output = (com.fasterxml.jackson.databind.node.ObjectNode) decoded;
                 var metadata = objectMapper.createObjectNode().put("attemptCount", attempt);
                 if (response.getMetadata() != null) {
-                    metadata.put("model", response.getMetadata().getModel());
-                    if (response.getMetadata().getUsage() != null) {
-                        metadata.put("inputTokens", response.getMetadata().getUsage().getPromptTokens());
-                        metadata.put("outputTokens", response.getMetadata().getUsage().getCompletionTokens());
+                    String reportedModel = response.getMetadata().getModel();
+                    if (reportedModel != null && !reportedModel.isBlank()) metadata.put("model", reportedModel);
+                    var usage = response.getMetadata().getUsage();
+                    // EmptyUsage is a framework placeholder, not a provider-reported zero-token call.
+                    if (usage != null && !(usage instanceof org.springframework.ai.chat.metadata.EmptyUsage)) {
+                        if (usage.getPromptTokens() != null && usage.getPromptTokens() >= 0)
+                            metadata.put("inputTokens", usage.getPromptTokens());
+                        if (usage.getCompletionTokens() != null && usage.getCompletionTokens() >= 0)
+                            metadata.put("outputTokens", usage.getCompletionTokens());
                     }
                 }
                 output.set("metadata", metadata);

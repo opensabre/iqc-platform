@@ -68,6 +68,7 @@ class UnifiedTagEngineAdapterTest {
         String[] ids = java.util.stream.IntStream.rangeClosed(1, 20)
                 .mapToObj(Integer::toString).toArray(String[]::new);
         var response = mapper.createObjectNode();
+        response.putObject("metadata").put("model", "reported-model").put("inputTokens", 123).put("outputTokens", 45);
         var results = response.putArray("results");
         for (String id : ids) results.addObject().put("tagId", id).put("status", "NOT_MATCHED");
         when(provider.evaluateTagBatch(any(), any(), anyString())).thenReturn(response);
@@ -84,6 +85,11 @@ class UnifiedTagEngineAdapterTest {
         assertThat(output.status()).isEqualTo(ExecutionStatus.SUCCEEDED);
         assertThat(output.observations()).extracting(Observation::targetId).containsExactly(ids);
         assertThat(output.observations()).allMatch(result -> result.status() == ObservationStatus.NOT_MATCHED);
+        var metadata = mapper.readTree(output.rawOutput()).path("metadata");
+        assertThat(metadata.at("/provider/inputTokens").asInt()).isEqualTo(123);
+        assertThat(metadata.at("/provider/outputTokens").asInt()).isEqualTo(45);
+        assertThat(metadata.at("/provider/model").asText()).isEqualTo("reported-model");
+        assertThat(metadata.path("pendingTagCount").asInt()).isEqualTo(20);
     }
     @Test void malformedDuplicateMissingAndUnexpectedTagsNeverBecomeMisses() throws Exception {
         when(provider.evaluateTagBatch(any(), any(), anyString())).thenReturn(mapper.readTree("""
