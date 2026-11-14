@@ -105,6 +105,17 @@ public class QualityConfigController {
     @RateLimit(sceneCode = "iqc-rule-create", maxCount = 30, period = 60)
     public QualityRule createRule(@RequestBody RuleRequest request) { return ruleService.create(request.name(), request.code(), request.category(), request.ruleType(), request.targetRole(), request.expression(), request.description(), request.deduction(), request.riskLevel(), request.veto()); }
 
+    /** Existing management permission applies; references are checked globally after rule authorization. */
+    @PostMapping("/rules/{id}/disable")
+    @ResourcePermission(code = "iqc:rule:manage", name = "停用规则", type = "iqc", description = "停用无引用规则")
+    @Audit(operationType = OperationType.UPDATE, description = "停用 IQC 规则", module = "IQC_RULE")
+    public QualityRule disableRule(@PathVariable String id) { return ruleService.disable(id); }
+
+    @DeleteMapping("/rules/{id}")
+    @ResourcePermission(code = "iqc:rule:manage", name = "删除规则", type = "iqc", description = "删除无引用规则及其版本")
+    @Audit(operationType = OperationType.DELETE, description = "删除 IQC 规则", module = "IQC_RULE")
+    public void deleteRule(@PathVariable String id) { ruleService.delete(id); }
+
     /** Validates an XLSX DLS workbook and optionally creates one draft rule per populated sheet. */
     @PostMapping(value = "/rules/import-dls", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResourcePermission(code = "iqc:rule:import", name = "导入 DLS 规则", type = "iqc", description = "预检并导入 DLS Excel 规则库")

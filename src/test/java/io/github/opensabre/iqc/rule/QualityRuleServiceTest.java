@@ -20,7 +20,9 @@ import static org.mockito.Mockito.when;
 class QualityRuleServiceTest {
     private final QualityRuleMapper mapper = mock(QualityRuleMapper.class);
     private final QualityRuleVersionMapper versionMapper = mock(QualityRuleVersionMapper.class);
-    private final QualityRuleService service = new QualityRuleService(mapper, versionMapper, new ObjectMapper());
+    private final RuleReferenceGuard references = mock(RuleReferenceGuard.class);
+    private final io.github.opensabre.iqc.shared.IqcDataScope scope = mock(io.github.opensabre.iqc.shared.IqcDataScope.class);
+    private final QualityRuleService service = new QualityRuleService(mapper, versionMapper, new ObjectMapper(), references, scope);
 
     @Test
     void keywordTestReturnsTheMatchedKeyword() {
@@ -121,7 +123,7 @@ class QualityRuleServiceTest {
         QualityRule rule = rule("KEYWORD", "优惠");
         QualityRuleVersion version = new QualityRuleVersion();
         version.setRuleId("rule-1"); version.setVersionNo(1); version.setExpression("优惠"); version.setStatus("DRAFT");
-        when(mapper.selectById("rule-1")).thenReturn(rule);
+        when(mapper.lockById("rule-1")).thenReturn(rule);
         when(versionMapper.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(version));
 
         service.submit("rule-1");
@@ -144,4 +146,33 @@ class QualityRuleServiceTest {
         rule.setExpression(expression);
         return rule;
     }
+    @Test void lifecycleLocksAuthorizesThenChecksReferencesBeforeMutation() {
+        var rule = rule("REGEX", "退款"); rule.setCreatedBy("owner");
+        when(mapper.lockById("rule-1")).thenReturn(rule); when(scope.canView("owner", null)).thenReturn(true);
+        service.disable("rule-1");
+        assertThat(rule.getStatus()).isEqualTo("DISABLED");
+        var order = org.mockito.Mockito.inOrder(mapper, scope, references);
+        order.verify(mapper).lockById("rule-1"); order.verify(scope).canView("owner", null);
+        order.verify(references).requireUnreferenced("rule-1"); order.verify(mapper).updateById(rule);
+        service.delete("rule-1");
+        verify(versionMapper).delete(org.mockito.ArgumentMatchers.any()); verify(mapper).deleteById("rule-1");
+    }
+
+    @Test void referencedOrUnauthorizedRulesCannotBeRemovedAndDisabledRulesCannotBeRepublished() {
+        var rule = rule("REGEX", "退款"); rule.setCreatedBy("private-owner");
+        when(mapper.lockById("rule-1")).thenReturn(rule);
+        assertThatThrownBy(() -> service.delete("rule-1")).hasMessageContaining("无权");
+        org.mockito.Mockito.verifyNoInteractions(references, versionMapper);
+        when(scope.canView("private-owner", null)).thenReturn(true);
+        org.mockito.Mockito.doThrow(IqcException.invalidState("规则仍被引用" )).when(references).requireUnreferenced("rule-1");
+        assertThatThrownBy(() -> service.disable("rule-1")).hasMessageContaining("引用");
+        assertThatThrownBy(() -> service.delete("rule-1")).hasMessageContaining("引用");
+        org.mockito.Mockito.verify(mapper, org.mockito.Mockito.never()).deleteById("rule-1");
+        org.mockito.Mockito.verify(mapper, org.mockito.Mockito.never()).updateById(rule);
+        rule.setStatus("DISABLED");
+        assertThatThrownBy(() -> service.submit("rule-1")).hasMessageContaining("停用");
+        assertThatThrownBy(() -> service.publish("rule-1")).hasMessageContaining("停用");
+        assertThatThrownBy(() -> service.reject("rule-1")).hasMessageContaining("停用");
+    }
+
 }

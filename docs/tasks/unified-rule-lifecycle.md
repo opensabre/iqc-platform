@@ -2,6 +2,16 @@
 
 本次盘点基于 QualityRuleService、LabelTaxonomyService、QualityRuleSetService、SchemeDependencyResolver、InspectionTaskService 和 TaskWizardService 当前代码。没有复用到覆盖这些领域引用的现成删除/停用守卫；AgentAssetReferenceValidator 仅负责模型、MCP 和 Skill，不能替代规则引用检查。
 
+## 当前交付状态
+
+规则停用、删除 API 已接入 RuleReferenceGuard：先锁定当前规则并检查管理范围，再以 READ_COMMITTED 事务扫描全局引用，避免获取锁之前的旧一致性快照。扫描复用标签绑定、规则集当前/历史版本、方案草稿/发布版本、任务和执行配置快照，不受调用者可见范围过滤；错误只返回通用原因。任何保存的引用（包括历史快照）存在时均拒绝停用和删除，不改写历史内容。无引用时停用只改当前状态，删除在同一事务内删除当前定义及其版本。停用后审批/修订接口拒绝写入，不提供自动恢复或兼容回退。
+
+新增 RuleReferenceGuard 的原因：现有 AgentAssetReferenceValidator 检查模型/MCP/Skill，现有标签引用查询只用于可见标签分页，均不能证明规则不存在跨领域引用。未新增引用表或通用平台；以每页 200 条、主键游标读取现有 JSON 并检查明确的 ID 字段。代价是停用/删除操作需要扫描现有配置总量，属于当前 MVP 的低频管理操作；尚未测量大数据量延迟，不能宣称索引查询性能。后续若有性能证据，再评估沿用现有存储的查询优化。
+
+接口：`POST /api/iqc/config/rules/{id}/disable`、`DELETE /api/iqc/config/rules/{id}`；复用 `iqc:rule:manage` 和既有审计模块。管理端规则页提供确认框及服务端错误反馈，引用标签列表为空不视为允许删除。
+
+验证：引用检查与规则服务 29 项单元/H2 数据库回归通过，前端生产构建通过（已有 bundle 大小提示）。隔离 MySQL 8.0.34 上 8 项事务与并发验证通过：2 项真实生命周期服务测试覆盖历史私有任务引用阻止操作、状态与快照未变、解除测试引用后的停用与定义/版本原子删除，以及实际停用事务与新任务引用竞争；另 6 项复验规则集、方案冻结、直接任务、统一标签计划、草稿和引擎计划引用写入路径。测试数据库经临时目录和端口保护核验，未访问共享应用数据库。尚未开展浏览器验收、HTTP 权限拒绝场景或大存量扫描压测，不能以服务测试代替这些证据。以下分次实施记录保留当时边界，当前状态以本节为准。
+
 ## 引用入口与改造顺序
 
 | 引用来源 | 权威位置 | 写入事务与处理 |
@@ -18,7 +28,7 @@
 
 QualityRuleMapper.lockById 以 SELECT FOR UPDATE 读取当前定义。标签绑定使用该入口，参数、重复类型、发布状态及权限检查保持；锁顺序不改变保存顺序。未新增独立引用表、服务平台或规则合并逻辑。
 
-本轮尚未开放规则停用、删除接口，因为方案任务及原任务引擎计划等写入路径尚未全部统一到同一并发保护协议。后续必须一起补齐守卫、权限审计、管理端入口及并发验收，不能将标签路径测试作为整个生命周期完成的证据。
+早期提交仅保护引用写入路径，未开放生命周期接口。当前已接入守卫、权限审计和管理端入口，见上方当前交付状态；验收范围仍以实际测试记录为准。
 
 ## 后续验收
 
@@ -78,3 +88,14 @@ InspectionSchemeService 在新建/派生插入前、修订完成权限和版本�
 TaskEnginePlanService 的写事务先汇总质检和打标两分支的全部规则 ID，去重并升序锁定，再按原业务顺序校验和冻结配置。相同规则跨分支只加锁一次，不按分支分别排序，避免相反配置顺序造成不一致的锁顺序。只读预览不请求写锁。停用规则仍由已有发布状态校验拒绝，不新增兼容或评分处理。
 
 本轮验证：TaskEnginePlanServiceTest 9 项通过；H2 真实事务并发 6 项通过，新增 ENGINE_PLAN 用例确认停用事务持锁期间等待，提交后拒绝冻结。单元新增跨两分支排序、共享规则仅锁一次、执行顺序保持和只读预览不请求写锁。方案发布变体跨次依赖解析与全局生命周期守卫仍需核对；局部锁顺序验证不作为所有引用入口闭合的证据。未新增迁移，未复验 MySQL，未创建 PR 或部署。
+
+
+## 生命周期接口验证命令
+
+```sh
+JAVA_HOME=/path/to/java21 mvn -o -DforkCount=1 -DargLine=-javaagent:/path/to/mockito-core.jar -Dtest=RuleReferenceGuardTest,QualityRuleServiceTest test
+# 仅使用现有保护校验过的隔离 MySQL 实例：端口 34307、临时目录前缀及 @@datadir 必须匹配。
+IQC_MYSQL_VALIDATION_DIR=/private/tmp/iqc-mysql-validation.example/data \
+  mvn -o -Dtest='IsolatedMysqlJointTransactionIT#ruleLifecycleChecksHistoricalReferencesThenAtomicallyRemovesUnreferencedVersions+actualRuleDisableSerializesWithNewTaskReference+ruleSetAndSchemeWritersRecheckRuleStatusAfterLifecycleLock' test
+# 管理端：pnpm build
+```

@@ -127,6 +127,7 @@ class JointLabelMaterializationTransactionTest {
     @Autowired private io.github.opensabre.iqc.scheme.SchemeDependencyResolver referenceDependencies;
     @Autowired private io.github.opensabre.iqc.label.dao.InsightLabelMapper usageLabels;
     @Autowired private QualityRuleMapper ruleMapper;
+    @Autowired private io.github.opensabre.iqc.rule.QualityRuleService ruleLifecycle;
     @Autowired private QualityRuleVersionMapper ruleVersionMapper;
     @Autowired private InspectionSchemeMapper schemeMapper;
     @Autowired private io.github.opensabre.iqc.scheme.dao.InspectionSchemeVersionMapper schemeVersionMapper;
@@ -310,6 +311,57 @@ class JointLabelMaterializationTransactionTest {
                 """);
         task.setScheduledTime(io.github.opensabre.iqc.task.UnifiedTaskScheduleService.schedulingNow().minusMinutes(1));
         taskMapper.insert(task); return task;
+    }
+
+    private void ensureLifecycleReferenceTables() {
+        if (!usesMigratedSchema()) {
+            jdbc.execute("CREATE TABLE IF NOT EXISTS iqc_quality_rule_set (id varchar(64) PRIMARY KEY,rule_ids_json clob)");
+            jdbc.execute("CREATE TABLE IF NOT EXISTS iqc_quality_rule_set_version (id varchar(64) PRIMARY KEY,rule_ids_json clob)");
+        }
+    }
+
+    private void insertLifecycleRule() {
+        var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("lifecycle-rule");
+        rule.setName("生命周期"); rule.setCode("lifecycle-rule"); rule.setStatus("PUBLISHED"); rule.setRuleType("REGEX");
+        rule.setVersionNo(1); rule.setCreatedBy("system"); rule.setExpression("退款"); ruleMapper.insert(rule);
+        var version = new io.github.opensabre.iqc.rule.model.QualityRuleVersion();
+        version.setRuleId(rule.getId()); version.setVersionNo(1); version.setName(rule.getName()); version.setCode(rule.getCode());
+        version.setRuleType("REGEX"); version.setStatus("PUBLISHED"); version.setExpression("退款"); ruleVersionMapper.insert(version);
+    }
+
+    @Test void ruleLifecycleChecksHistoricalReferencesThenAtomicallyRemovesUnreferencedVersions() {
+        ensureLifecycleReferenceTables(); insertLifecycleRule();
+        jdbc.update("INSERT INTO iqc_inspection_task(id,name,status,rule_ids_json,created_by) VALUES ('lifecycle-history','历史任务','SUCCEEDED','[\"lifecycle-rule\"]','private-owner')");
+        assertThatThrownBy(() -> ruleLifecycle.disable("lifecycle-rule")).hasMessage("规则仍被引用，不能删除或停用");
+        assertThatThrownBy(() -> ruleLifecycle.delete("lifecycle-rule")).hasMessage("规则仍被引用，不能删除或停用");
+        assertThat(ruleMapper.selectById("lifecycle-rule").getStatus()).isEqualTo("PUBLISHED");
+        assertThat(jdbc.queryForObject("SELECT rule_ids_json FROM iqc_inspection_task WHERE id='lifecycle-history'", String.class)).contains("lifecycle-rule");
+        jdbc.update("DELETE FROM iqc_inspection_task WHERE id='lifecycle-history'");
+        assertThat(ruleLifecycle.disable("lifecycle-rule").getStatus()).isEqualTo("DISABLED");
+        ruleLifecycle.delete("lifecycle-rule");
+        assertThat(ruleMapper.selectById("lifecycle-rule")).isNull();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_quality_rule_version WHERE rule_id='lifecycle-rule'", Long.class)).isZero();
+    }
+
+    @Test void actualRuleDisableSerializesWithNewTaskReference() throws Exception {
+        ensureLifecycleReferenceTables(); insertLifecycleRule();
+        var transaction = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        transaction.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+        try (var worker = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            var pending = new java.util.concurrent.atomic.AtomicReference<java.util.concurrent.Future<?>>();
+            transaction.executeWithoutResult(tx -> {
+                ruleLifecycle.disable("lifecycle-rule");
+                pending.set(worker.submit(() -> taskService.createConfigured("并发引用", null, List.of(), null, null, null, null,
+                        null, null, List.of("lifecycle-rule"), 1, null, null, "RULE_ONLY",
+                        new io.github.opensabre.iqc.task.TaskDataSelection(io.github.opensabre.iqc.task.TaskDataSelection.Mode.RANDOM,
+                                List.of(), null, 1, null))));
+                org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.TimeoutException.class,
+                        () -> pending.get().get(200, java.util.concurrent.TimeUnit.MILLISECONDS));
+            });
+            assertThatThrownBy(() -> pending.get().get(10, java.util.concurrent.TimeUnit.SECONDS))
+                    .isInstanceOf(java.util.concurrent.ExecutionException.class).hasStackTraceContaining("已发布规则");
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE name='并发引用'", Long.class)).isZero();
     }
 
     @org.junit.jupiter.params.ParameterizedTest
