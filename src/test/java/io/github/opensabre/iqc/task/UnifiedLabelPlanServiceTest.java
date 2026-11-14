@@ -9,6 +9,13 @@ import io.github.opensabre.iqc.rule.dao.QualityRuleVersionMapper;
 import io.github.opensabre.iqc.rule.model.QualityRuleVersion;
 import io.github.opensabre.iqc.shared.IqcDataScope;
 import io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.EngineType;
+import io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.InputSnapshot;
+import io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.Message;
+import io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.Observation;
+import io.github.opensabre.iqc.task.processing.UnifiedTagEngineAdapter;
+import io.github.opensabre.iqc.task.processing.RegexEngineAdapter;
+import io.github.opensabre.iqc.task.processing.DlsEngineAdapter;
+import io.github.opensabre.iqc.task.processing.LlmEngineAdapter;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
@@ -51,6 +58,35 @@ class UnifiedLabelPlanServiceTest {
         assertThat(frozen.path("ruleId").asText()).isEqualTo("r1");
         var mutable = (com.fasterxml.jackson.databind.node.ObjectNode)snapshot.unifiedLabels(); mutable.removeAll();
         assertThat(snapshot.unifiedLabels().path("labels")).hasSize(1);
+    }
+    @Test void selectedTagWithoutRegexBindingProducesNoFalseMissInTheSingleStage() throws Exception {
+        resolve(binding("r1"), binding("r2"));
+        var first = resolver.resolve(null).labels().getFirst();
+        var secondBinding = binding("r1"); secondBinding.setLabelId("20");
+        var second = new LabelResolutionService.LabelSnapshot("20", 1, "退款意向", "REFUND_INTENT", "g", "group", "G", "c", "cat", false,
+                "customer", java.math.BigDecimal.ONE, List.of(secondBinding), List.of());
+        var thirdBinding = binding("r2"); thirdBinding.setLabelId("30");
+        var third = new LabelResolutionService.LabelSnapshot("30", 1, "其他意向", "OTHER", "g", "group", "G", "c", "cat", false,
+                "customer", java.math.BigDecimal.ONE, List.of(thirdBinding), List.of());
+        when(resolver.resolve(any())).thenReturn(new LabelResolutionService.ResolvedSelection("1.0",
+                List.of(first, second, third), List.of("r1", "r2")));
+        // Binding versions are read in selected-label order, including non-selected engine types.
+        when(versions.selectOne(any())).thenReturn(version("r1", "REGEX"), version("r2", "DLS"),
+                version("r1", "REGEX"), version("r2", "DLS"));
+        var frozen = service.freeze(new UnifiedLabelPlanService.Configuration(List.of(EngineType.REGEX),
+                "SELECTED", List.of("10", "20", "30"), null));
+        assertThat(frozen.enginePlan().engines()).hasSize(1);
+        assertThat(frozen.unifiedLabels().path("labels")).hasSize(3);
+        var stage = frozen.enginePlan().engines().getFirst();
+        var mapper = new ObjectMapper();
+        var adapter = new UnifiedTagEngineAdapter(mapper, new RegexEngineAdapter(mapper), new DlsEngineAdapter(mapper),
+                new LlmEngineAdapter(mock(io.github.opensabre.iqc.result.llm.LlmQualityProvider.class), mapper), EngineType.REGEX);
+        var input = new InputSnapshot("input", java.time.Instant.EPOCH,
+                List.of(new Message("m1", 1, "customer", null, "我要退款")));
+        var output = adapter.execute(input, stage.configuration());
+        assertThat(output.observations()).extracting(Observation::targetId)
+                .containsExactly("10", "20").doesNotContain("30");
+        assertThat(mapper.readTree(output.rawOutput()).path("tagResults")).hasSize(2);
     }
     @Test void refusesExistingSameTypeBindingsWithoutChoosingOne() {
         resolve(binding("r1"), binding("r2"));

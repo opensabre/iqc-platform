@@ -37,3 +37,13 @@ SpringAiLlmQualityProvider 保留提供方实际返回的模型名称、输入/�
 管理端引擎记录显示提供方模型及输入/输出 Token；调用发生但提供方未报告时显示“未知”，真实零值仍显示 0；跳过阶段仍显示未调用。统计是最后一次成功返回的提供方用量，不包含失败重试未报告的消耗；阶段 elapsedMs 包括本阶段等待和重试，不能据此推导模型服务吞吐。
 
 Java 21 运行前述 Maven/Mockito 参数及 `-Dtest=SpringAiLlmQualityProviderTest,UnifiedTagEngineAdapterTest test`，8+9 共 17 项通过。管理端 `pnpm test -- src/components/TaskWizardResults.test.ts`，10 项通过，其中覆盖实际计数、真实零值、缺失用量及提供方模型显示；`pnpm build` 类型检查和生产构建通过，保留既有包体大小提示。测试中的 123/45 是 Mock 数据，不是实际模型性能或 Token 节约证据。真实模型、数据集和联调环境仍需指定后验收。
+
+## 执行详情计数与 AC-04 核对（2026-11-15）
+
+管理端按各统一引擎的原始 observations 分别显示命中、未命中、错误、未知和跳过数量，满足 PRD 10.4 的阶段统计要求。只统计已记录的逐标签状态，不把未绑定规则、上游命中过滤或阶段整体失败自行转换成标签状态。相反结果在不同阶段各自保留；没有新增结果合并策略、表或接口。
+
+`pnpm test -- src/components/TaskWizardResults.test.ts` 11 项通过，包含同一标签跨引擎相反结论及五类状态计数。`pnpm build` 类型检查与生产构建通过，仍有既有包体提示。这里只验证展示，不宣称已通过真实服务端到端验收。
+
+AC-04 补充跨计划冻结与真实正则适配器的样例：选定三个标签，两个复用同一正则规则，第三个仅绑定 DLS。完整快照保留三个标签，但唯一 REGEX 阶段只有两个适用标签及两个结果，第三个标签不生成 NOT_MATCHED。
+
+Java 21 使用前述 Maven/Mockito 参数运行 `-Dtest=UnifiedLabelPlanServiceTest test`，最终 10 项全部通过。解析标签、规则版本读取仍为 Mock，冻结计划和正则匹配为真实实现；该用例不替代真实数据库和已部署任务链路验证。
