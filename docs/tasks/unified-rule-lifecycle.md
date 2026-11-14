@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 标签规则绑定 | iqc_label_rule_binding | replaceBindings 在事务内按规则 ID 排序取得当前规则行锁，再检查发布状态及权限、替换绑定；本轮已改 |
 | 规则集及其版本 | QualityRuleSetService.validateRules / ruleIdsJson | 创建、修订、提交和发布的写入事务现已同序锁定规则；只读查询不加写锁，Agent 的规则集引用由这层继续保护 |
-| 方案草稿与发布版本 | InspectionScheme.draftConfigJson / InspectionSchemeVersion.snapshotJson | 依赖冻结现已同序锁定 Item.rule、appliesWhen、execution.prefilter/candidate 及冻结标签规则；草稿直接写入路径仍需单独核对，不能把冻结器覆盖范围扩大到所有草稿操作 |
+| 方案草稿与发布版本 | InspectionScheme.draftConfigJson / InspectionSchemeVersion.snapshotJson | 依赖冻结现已同序锁定 Item.rule、appliesWhen、execution.prefilter/candidate 及冻结标签规则；草稿创建、修订及派生现通过同一规则行锁检查直接检测、条件及所有策略阶段引用；不提前要求草稿可执行或规则版本已发布 |
 | 未结束任务 | InspectionTaskService 的规则选择及 TaskWizardService 的执行计划快照 | 直接规则任务快照已按 ID 升序加锁并保留配置顺序，规则集选择沿用规则集校验锁；统一标签计划已在写事务中锁定并检查全部绑定规则，方案任务入口仍需核对，不能只检查任务上的单个 ruleIdsJson |
 | 历史执行 | TaskExecution.configurationSnapshotJson 等 | 保留精确版本和原始内容，不改写历史快照；不能以当前可见引用标签列表为空作为可删除证明 |
 
@@ -18,7 +18,7 @@
 
 QualityRuleMapper.lockById 以 SELECT FOR UPDATE 读取当前定义。标签绑定使用该入口，参数、重复类型、发布状态及权限检查保持；锁顺序不改变保存顺序。未新增独立引用表、服务平台或规则合并逻辑。
 
-本轮尚未开放规则停用、删除接口，因为方案草稿及任务等写入路径尚未全部统一到同一并发保护协议。后续必须一起补齐守卫、权限审计、管理端入口及并发验收，不能将标签路径测试作为整个生命周期完成的证据。
+本轮尚未开放规则停用、删除接口，因为方案任务及原任务引擎计划等写入路径尚未全部统一到同一并发保护协议。后续必须一起补齐守卫、权限审计、管理端入口及并发验收，不能将标签路径测试作为整个生命周期完成的证据。
 
 ## 后续验收
 
@@ -64,3 +64,10 @@ UnifiedLabelPlanService 在标签及权限解析后收集全部绑定规则（�
 该变更不证明所有规则引用生命周期已完成；方案草稿、方案任务以及原任务引擎计划仍需核对，停用/删除入口尚未开放。
 
 本轮验证：UnifiedLabelPlanServiceTest 9 项、UnifiedTaskScheduleServiceTest 6 项通过；H2 真实事务并发 4 项通过（规则集、方案、直接任务、统一标签计划）。统一标签并发用例使用真实规则 Mapper 和事务管理器，标签选择发现用 Mock 隔离，因此不作为完整标签解析或 MySQL 并发验证的证据。新用例证明持锁停用期间冻结等待、提交后拒绝引用；单元用例验证固定锁顺序、精确版本、只读不加锁与新草稿不替换已发布版本。本轮未部署、未创建 PR。
+
+
+## 方案草稿增量
+
+InspectionSchemeService 在新建/派生插入前、修订完成权限和版本校验后，调用已有 SchemeDependencyResolver 的草稿规则引用检查。收集所有 Item.rule、appliesWhen、当前阶段及所有允许策略阶段的规则 ID，去重后升序锁定当前定义；不存在或已停用则拒绝保存。没有增加新持久化模型，也不要求草稿规则已发布、Agent 可执行、模型可用或评分策略可执行。标签仍保存原版本引用，不在编辑草稿时重新解析为当前绑定，标签绑定自身的生命周期保护继续有效。
+
+本轮验证：方案服务 28、依赖解析 31、方案任务 11、路线依赖 10，共 80 项单元回归通过；H2 真实事务并发 5 项通过，新增草稿引用检查持锁等待与提交后拒绝引用。首轮新增策略夹具错误使用合规语义，触发现有初筛约束；改为违规语义后定向重跑依赖解析 31 项全通过，生产约束未放宽。本轮尚未复验 MySQL 或派生草稿端到端流程。停用/删除 API 与全局引用守卫仍未交付，不能以草稿路径闭合替代整体生命周期验收。

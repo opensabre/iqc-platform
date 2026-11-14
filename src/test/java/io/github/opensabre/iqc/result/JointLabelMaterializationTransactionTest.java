@@ -313,7 +313,7 @@ class JointLabelMaterializationTransactionTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {"RULE_SET", "SCHEME", "TASK", "UNIFIED"})
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"RULE_SET", "SCHEME", "TASK", "UNIFIED", "DRAFT"})
     void ruleSetAndSchemeWritersRecheckRuleStatusAfterLifecycleLock(String kind) throws Exception {
         var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("reference-rule");
         rule.setName("引用规则"); rule.setCode("reference-rule"); rule.setStatus("PUBLISHED"); rule.setRuleType("REGEX"); ruleMapper.insert(rule);
@@ -344,6 +344,7 @@ class JointLabelMaterializationTransactionTest {
                 pending.set(worker.submit(() -> new org.springframework.transaction.support.TransactionTemplate(transactionManager)
                         .executeWithoutResult(writer -> {
                             if ("RULE_SET".equals(kind)) ruleSets.create("引用集", "REFERENCE_SET", null, List.of("reference-rule"), "ALL");
+                            else if ("DRAFT".equals(kind)) referenceDependencies.validateDraftRuleReferences(definition);
                             else if ("SCHEME".equals(kind)) referenceDependencies.resolve(definition);
                             else if ("UNIFIED".equals(kind)) unified.freeze(new io.github.opensabre.iqc.task.UnifiedLabelPlanService.Configuration(
                                     List.of(io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.EngineType.REGEX),

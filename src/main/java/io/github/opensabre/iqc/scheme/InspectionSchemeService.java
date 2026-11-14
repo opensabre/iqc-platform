@@ -67,6 +67,7 @@ public class InspectionSchemeService {
     }
 
     private InspectionScheme insertDraft(DraftRequest request, Lineage lineage) {
+        dependencies.validateDraftRuleReferences(request.definition());
         InspectionScheme scheme = new InspectionScheme();
         apply(scheme, request); scheme.setDraftRevision(1); scheme.setActivePublishedVersion(null);
         scheme.setStatus("ACTIVE"); scheme.setCreatedBy(scope.owner()); scheme.setOwnerGroupId(scope.groupId());
@@ -87,6 +88,7 @@ public class InspectionSchemeService {
         validate(request);
         InspectionScheme scheme = locked(id); requireRevision(scheme, expectedRevision);
         if (!scheme.getCode().equals(request.code())) throw IqcException.invalidArgument("方案编码不能修改");
+        dependencies.validateDraftRuleReferences(request.definition());
         apply(scheme, request); scheme.setDraftRevision(scheme.getDraftRevision() + 1);
         schemes.updateById(scheme);
         return scheme;
