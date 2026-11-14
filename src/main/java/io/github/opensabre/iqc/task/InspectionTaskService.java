@@ -619,9 +619,12 @@ public class InspectionTaskService {
         task.setRuleSetId(effectiveRuleSetId); task.setRuleIdsJson(writeSnapshot(ruleIds));
         task.setAgentId(mode == TaskExecutionStrategy.Mode.RULE_ONLY ? null : agentId);
         task.setAgentSnapshotJson(mode == TaskExecutionStrategy.Mode.RULE_ONLY ? null : writeSnapshot(agent));
+        // Retain lifecycle locks until the task snapshot commits, without reordering execution.
+        var lockedRules = new java.util.HashMap<String, QualityRule>();
+        ruleIds.stream().sorted().forEach(id -> lockedRules.put(id, ruleMapper.lockById(id)));
         List<QualityRule> rules = new ArrayList<>();
         for (String ruleId : ruleIds) {
-            QualityRule rule = ruleMapper.selectById(ruleId);
+            QualityRule rule = lockedRules.get(ruleId);
             if (rule == null || !"PUBLISHED".equals(rule.getStatus())) throw IqcException.invalidArgument("只能选择已发布规则");
             rules.add(rule);
         }

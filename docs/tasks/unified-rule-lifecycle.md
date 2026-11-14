@@ -9,7 +9,7 @@
 | 标签规则绑定 | iqc_label_rule_binding | replaceBindings 在事务内按规则 ID 排序取得当前规则行锁，再检查发布状态及权限、替换绑定；本轮已改 |
 | 规则集及其版本 | QualityRuleSetService.validateRules / ruleIdsJson | 创建、修订、提交和发布的写入事务现已同序锁定规则；只读查询不加写锁，Agent 的规则集引用由这层继续保护 |
 | 方案草稿与发布版本 | InspectionScheme.draftConfigJson / InspectionSchemeVersion.snapshotJson | 依赖冻结现已同序锁定 Item.rule、appliesWhen、execution.prefilter/candidate 及冻结标签规则；草稿直接写入路径仍需单独核对，不能把冻结器覆盖范围扩大到所有草稿操作 |
-| 未结束任务 | InspectionTaskService 的规则选择及 TaskWizardService 的执行计划快照 | 后续覆盖直接规则、规则集及统一标签快照的引用冻结入口；不能只检查任务上的单个 ruleIdsJson |
+| 未结束任务 | InspectionTaskService 的规则选择及 TaskWizardService 的执行计划快照 | 直接规则任务快照已按 ID 升序加锁并保留配置顺序，规则集选择沿用规则集校验锁；统一标签执行计划和方案任务入口仍需核对，不能只检查任务上的单个 ruleIdsJson |
 | 历史执行 | TaskExecution.configurationSnapshotJson 等 | 保留精确版本和原始内容，不改写历史快照；不能以当前可见引用标签列表为空作为可删除证明 |
 
 规则停用/删除必须先取得同一规则行锁，再检查全局引用；所有引用写入者也要在事务内锁定当前规则并重新校验状态。仅在停用端做一次 count 检查会与新绑定竞态，不足以发布。多个规则按 ID 升序锁定，但业务引擎顺序和绑定显示顺序保持用户配置。
@@ -48,3 +48,10 @@ IQC_MYSQL_VALIDATION_DIR=/private/tmp/iqc-mysql-validation.example/data \
 QualityRuleSetService 在实际写事务中按规则 ID 排序取得行锁，校验后仍按输入顺序保存版本；草稿规则集也禁止新增停用规则引用。SchemeDependencyResolver 在实际写事务中先锁定全部规则，再按原依赖顺序读取精确已发布版本。无事务或只读事务中的查询、预览不取得写锁，不改变既有预览行为。
 
 已通过 55 项针对性单元回归：规则集 5、方案依赖 29、路线计划 10、方案任务 11。新增覆盖稳定锁顺序、输出顺序保持、只读预览不加写锁和草稿拒绝停用规则。隔离 MySQL 8.0.34 并发验证 2 项通过：规则集写入和方案依赖冻结均在停用事务持锁期间等待，提交后读取最新状态并拒绝引用，失败不写入规则集。
+
+
+## 直接规则任务快照增量
+
+InspectionTaskService.snapshotAgentAndRules 在任务创建事务中按规则 ID 升序锁定当前规则，再按配置顺序生成快照。已停用或不存在的规则拒绝写入任务。该方法覆盖直接规则、规则集、定时与抽样创建共享的快照路径；此结论不扩大至统一标签计划、方案任务或全部任务入口。没有新增兼容分支或修改历史快照。
+
+针对性任务服务单元回归 40 项通过，包含锁顺序、快照顺序、停用规则拒绝创建及既有任务模式回归。H2 真实事务并发回归 3 项通过，覆盖规则集、方案依赖冻结及新增任务创建：停用事务持锁时等待，提交后拒绝新引用。本轮新增任务路径尚未在 MySQL 上复验，不能以此前规则集与方案的 MySQL 结果代替。

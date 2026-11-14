@@ -313,7 +313,7 @@ class JointLabelMaterializationTransactionTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {"RULE_SET", "SCHEME"})
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"RULE_SET", "SCHEME", "TASK"})
     void ruleSetAndSchemeWritersRecheckRuleStatusAfterLifecycleLock(String kind) throws Exception {
         var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("reference-rule");
         rule.setName("引用规则"); rule.setCode("reference-rule"); rule.setStatus("PUBLISHED"); rule.setRuleType("REGEX"); ruleMapper.insert(rule);
@@ -334,13 +334,17 @@ class JointLabelMaterializationTransactionTest {
                 pending.set(worker.submit(() -> new org.springframework.transaction.support.TransactionTemplate(transactionManager)
                         .executeWithoutResult(writer -> {
                             if ("RULE_SET".equals(kind)) ruleSets.create("引用集", "REFERENCE_SET", null, List.of("reference-rule"), "ALL");
-                            else referenceDependencies.resolve(definition);
+                            else if ("SCHEME".equals(kind)) referenceDependencies.resolve(definition);
+                            else taskService.createConfigured("引用任务", null, List.of(), null, null, null, null,
+                                    null, null, List.of("reference-rule"), 1, null, null, "RULE_ONLY",
+                                    new io.github.opensabre.iqc.task.TaskDataSelection(
+                                            io.github.opensabre.iqc.task.TaskDataSelection.Mode.RANDOM, List.of(), null, 1, null));
                         })));
                 org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.TimeoutException.class,
                         () -> pending.get().get(200, java.util.concurrent.TimeUnit.MILLISECONDS));
             });
             assertThatThrownBy(() -> pending.get().get(10, java.util.concurrent.TimeUnit.SECONDS))
-                    .isInstanceOf(java.util.concurrent.ExecutionException.class).hasStackTraceContaining("停用");
+                    .isInstanceOf(java.util.concurrent.ExecutionException.class).hasStackTraceContaining("TASK".equals(kind) ? "已发布规则" : "停用");
         }
         org.mockito.Mockito.verifyNoInteractions(sets, setVersions);
     }

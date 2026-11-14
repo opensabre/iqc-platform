@@ -153,6 +153,33 @@ class InspectionTaskServiceTest {
     }
 
     @Test
+    void directTaskLocksRulesInStableOrderAndPreservesSnapshotOrder() throws Exception {
+        stubVisibleConversation();
+        stubPublishedRule("z", "REGEX");
+        stubPublishedRule("a", "REGEX");
+        var task = taskService.createBatch("rules", List.of("conversation-1"), null, null,
+                List.of("z", "a"), 1, "RULE_ONLY");
+        var ordered = org.mockito.Mockito.inOrder(ruleMapper);
+        ordered.verify(ruleMapper).lockById("a");
+        ordered.verify(ruleMapper).lockById("z");
+        var rules = new ObjectMapper().readTree(task.getRuleSnapshotJson()).path("rules");
+        assertThat(rules.get(0).path("id").asText()).isEqualTo("z");
+        assertThat(rules.get(1).path("id").asText()).isEqualTo("a");
+        verify(ruleMapper, never()).selectById(any(String.class));
+    }
+
+    @Test
+    void directTaskRejectsRuleDisabledBeforeLockAcquisition() {
+        stubVisibleConversation();
+        var rule = new io.github.opensabre.iqc.rule.model.QualityRule();
+        rule.setId("disabled"); rule.setStatus("DISABLED");
+        when(ruleMapper.lockById("disabled")).thenReturn(rule);
+        assertThatThrownBy(() -> taskService.createBatch("rules", List.of("conversation-1"), null, null,
+                List.of("disabled"), 1, "RULE_ONLY")).hasMessageContaining("已发布规则");
+        verify(taskMapper, never()).insert(any(InspectionTask.class));
+    }
+
+    @Test
     void pureRuleTaskRejectsLlmRatherThanSilentlySkippingIt() {
         stubVisibleConversation();
         stubPublishedRule("rule-1", "LLM");
@@ -219,7 +246,7 @@ class InspectionTaskServiceTest {
     private void stubPublishedRule(String id, String type) {
         var rule = new io.github.opensabre.iqc.rule.model.QualityRule();
         rule.setId(id); rule.setRuleType(type); rule.setStatus("PUBLISHED"); rule.setVersionNo(2);
-        when(ruleMapper.selectById(id)).thenReturn(rule);
+        when(ruleMapper.lockById(id)).thenReturn(rule);
     }
 
     @Test
@@ -246,7 +273,7 @@ class InspectionTaskServiceTest {
         when(agentMapper.selectById("agent-1")).thenReturn(agent);
         io.github.opensabre.iqc.rule.model.QualityRule rule = new io.github.opensabre.iqc.rule.model.QualityRule();
         rule.setId("rule-1"); rule.setStatus("PUBLISHED");
-        when(ruleMapper.selectById("rule-1")).thenReturn(rule);
+        when(ruleMapper.lockById("rule-1")).thenReturn(rule);
 
         InspectionTask created = taskService.createBatch("batch", List.of("conversation-1", "conversation-2"),
                 "agent-1", null, List.of("rule-1"), 4);
@@ -267,7 +294,7 @@ class InspectionTaskServiceTest {
         QualityAgent agent = new QualityAgent(); agent.setId("agent-1"); agent.setStatus("PUBLISHED");
         when(agentMapper.selectById("agent-1")).thenReturn(agent);
         var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("rule-1"); rule.setStatus("PUBLISHED");
-        when(ruleMapper.selectById("rule-1")).thenReturn(rule);
+        when(ruleMapper.lockById("rule-1")).thenReturn(rule);
         when(ruleSetService.published("set-1")).thenReturn(
                 new QualityRuleSetService.PublishedRuleSet("set-1", "服务规范", "SERVICE_STANDARD", 3, "ALL", List.of("rule-1")));
 
@@ -288,7 +315,7 @@ class InspectionTaskServiceTest {
         QualityAgent agent = new QualityAgent(); agent.setId("agent-1"); agent.setStatus("PUBLISHED");
         when(agentMapper.selectById("agent-1")).thenReturn(agent);
         io.github.opensabre.iqc.rule.model.QualityRule rule = new io.github.opensabre.iqc.rule.model.QualityRule();
-        rule.setId("rule-1"); rule.setStatus("PUBLISHED"); when(ruleMapper.selectById("rule-1")).thenReturn(rule);
+        rule.setId("rule-1"); rule.setStatus("PUBLISHED"); when(ruleMapper.lockById("rule-1")).thenReturn(rule);
         when(dataScope.owner()).thenReturn("alice"); when(dataScope.groupId()).thenReturn("group-1");
         var scheduledTime = java.time.LocalDateTime.now().plusMinutes(10);
         InspectionTask scheduled = taskService.createScheduled("nightly",
@@ -674,7 +701,7 @@ class InspectionTaskServiceTest {
     void dynamicSelectionCreationStoresOnlyCriteriaAndDoesNotReadMatchingData() {
         var rule = new io.github.opensabre.iqc.rule.model.QualityRule();
         rule.setId("rule-1"); rule.setStatus("PUBLISHED"); rule.setRuleType("REGEX"); rule.setExpression("退款");
-        when(ruleMapper.selectById("rule-1")).thenReturn(rule);
+        when(ruleMapper.lockById("rule-1")).thenReturn(rule);
         var selection = new TaskDataSelection(TaskDataSelection.Mode.RANDOM, List.of(), null, 100, null);
         var created = taskService.createConfigured("runtime sample", null, List.of(), null, null, null, null,
                 null, null, List.of("rule-1"), 1, null, null, "RULE_ONLY", selection);
