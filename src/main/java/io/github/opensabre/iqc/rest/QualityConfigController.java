@@ -114,7 +114,11 @@ public class QualityConfigController {
     @DeleteMapping("/rules/{id}")
     @ResourcePermission(code = "iqc:rule:manage", name = "删除规则", type = "iqc", description = "删除无引用规则及其版本")
     @Audit(operationType = OperationType.DELETE, description = "删除 IQC 规则", module = "IQC_RULE")
-    public void deleteRule(@PathVariable String id) { ruleService.delete(id); }
+    public io.github.opensabre.common.core.entity.vo.Result<?> deleteRule(@PathVariable String id) {
+        ruleService.delete(id);
+        // An explicit envelope avoids the shared advice's null-body string serialization.
+        return io.github.opensabre.common.core.entity.vo.Result.success();
+    }
 
     /** Validates an XLSX DLS workbook and optionally creates one draft rule per populated sheet. */
     @PostMapping(value = "/rules/import-dls", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
