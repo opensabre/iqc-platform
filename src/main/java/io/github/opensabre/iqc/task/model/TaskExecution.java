@@ -10,6 +10,8 @@ import lombok.EqualsAndHashCode;
 @EqualsAndHashCode(callSuper = true)
 public class TaskExecution extends BasePo {
     private String taskId;
+    /** First execution ID of one logical run; retries and resumes share this value. */
+    private String runId;
     private Integer attemptNo;
     private String status;
     private Integer processedMessages;

@@ -561,7 +561,7 @@ public class InspectionTaskService {
     @Transactional
     public List<InspectionTask> materializeDue(LocalDateTime now) {
         List<InspectionTask> due = taskMapper.selectList(Wrappers.<InspectionTask>lambdaQuery()
-                .eq(InspectionTask::getStatus, "SCHEDULED").le(InspectionTask::getScheduledTime, now)
+                .eq(InspectionTask::getStatus, "SCHEDULED").isNull(InspectionTask::getTriggerConfigurationJson).le(InspectionTask::getScheduledTime, now)
                 .orderByDesc(InspectionTask::getQueuePriority)
                 .orderByAsc(InspectionTask::getScheduledTime).orderByAsc(InspectionTask::getCreatedTime).last("LIMIT 20"));
         List<InspectionTask> ready = new ArrayList<>();
@@ -780,12 +780,12 @@ public class InspectionTaskService {
                         .eq(TaskExecution::getTaskId, taskId).orderByAsc(TaskExecution::getAttemptNo))
                 .stream().map(execution -> new TaskRunSummary(execution.getId(), execution.getAttemptNo(),
                         execution.getStatus(), execution.getProcessedMessages(), execution.getFailedMessages(),
-                        execution.getCreatedTime(), execution.getId().equals(task.getCurrentExecutionId())))
+                        execution.getCreatedTime(), execution.getId().equals(task.getCurrentExecutionId()), execution.getRunId()))
                 .toList();
     }
 
     public record TaskRunSummary(String id, Integer attemptNo, String status, Integer processedMessages,
-                                 Integer failedMessages, java.util.Date createdTime, boolean current) { }
+                                 Integer failedMessages, java.util.Date createdTime, boolean current, String runId) { }
 
     @Transactional
     public InspectionTask cancel(String id) {
@@ -797,6 +797,7 @@ public class InspectionTaskService {
         int cancelled = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
                 .set(InspectionTask::getStatus, targetStatus)
                 .set(InspectionTask::getCancelRequested, true)
+                .set(task.getTriggerConfigurationJson() != null, InspectionTask::getEnabled, false)
                 .eq(InspectionTask::getId, id)
                 .in(InspectionTask::getStatus, "SCHEDULED", "MATERIALIZING", "CREATED", "QUEUED", "RUNNING", "PAUSE_REQUESTED", "PAUSED"));
         if (cancelled == 1 && !running && task.getCurrentExecutionId() != null) {

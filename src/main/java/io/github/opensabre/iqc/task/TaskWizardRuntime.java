@@ -59,8 +59,12 @@ public final class TaskWizardRuntime {
         results.commit(task, completed, processed, items);
     }
     private EngineExecutionResultSet initial(InspectionTask task, String execution, String conversation, TaskWizardSnapshot snapshot) {
-        var previousRuns = executions.selectList(Wrappers.<TaskExecution>lambdaQuery().eq(TaskExecution::getTaskId, task.getId())
-                .ne(TaskExecution::getId, execution).orderByDesc(TaskExecution::getAttemptNo));
+        var currentExecution = executions.selectById(execution);
+        var query = Wrappers.<TaskExecution>lambdaQuery().eq(TaskExecution::getTaskId, task.getId()).ne(TaskExecution::getId, execution);
+        if (currentExecution == null || currentExecution.getRunId() == null || !task.getId().equals(currentExecution.getTaskId()))
+            throw new IllegalStateException("执行缺少有效运行轮次");
+        query.eq(TaskExecution::getRunId, currentExecution.getRunId());
+        var previousRuns = executions.selectList(query.orderByDesc(TaskExecution::getAttemptNo));
         // A new retry attempt keeps the original input and successful engine outputs; failed engines run again.
         for (var previous : previousRuns) {
             var prior = store.find(previous.getId(), conversation);

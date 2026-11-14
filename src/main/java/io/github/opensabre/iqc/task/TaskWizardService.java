@@ -13,9 +13,6 @@ public class TaskWizardService {
     private final TaskResultProcessingService processing;
     private final InspectionTaskService tasks;
     private final UnifiedLabelPlanService unified;
-    public TaskWizardService(TaskEnginePlanService engines, TaskResultProcessingService processing, InspectionTaskService tasks) {
-        this(engines, processing, tasks, null);
-    }
     @org.springframework.beans.factory.annotation.Autowired
     public TaskWizardService(TaskEnginePlanService engines, TaskResultProcessingService processing, InspectionTaskService tasks,
                              UnifiedLabelPlanService unified) {

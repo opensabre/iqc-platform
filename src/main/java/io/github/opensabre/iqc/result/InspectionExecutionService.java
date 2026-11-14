@@ -93,6 +93,8 @@ public class InspectionExecutionService {
     private InspectionTask queue(String taskId, boolean enforceDataScope) {
         InspectionTask task = taskMapper.selectById(taskId);
         if (task == null) throw IqcException.notFound("质检任务不存在: " + taskId);
+        if (task.getTriggerConfigurationJson() != null && !Boolean.TRUE.equals(task.getEnabled()))
+            throw IqcException.invalidState("任务已停用");
         if (enforceDataScope && !dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权执行该质检任务");
         if ("CREATED".equals(task.getStatus()) || "FAILED".equals(task.getStatus()) || "PARTIAL_FAILED".equals(task.getStatus())) {
             JsonNode snapshot = readSnapshot(task.getRuleSnapshotJson());
@@ -218,11 +220,15 @@ public class InspectionExecutionService {
         if (configuration == null || !io.github.opensabre.iqc.task.TaskWizardSnapshot.SCHEMA.equals(
                 configuration.path("schemaVersion").asText())) return;
         TaskExecution previous = previousId == null ? null : executionMapper.selectById(previousId);
+        if (previousId != null && previous == null) throw IqcException.invalidState("原执行记录不存在");
         if (previous != null && !task.getId().equals(previous.getTaskId()))
             throw IqcException.invalidState("执行快照不属于当前任务");
-        execution.setConfigurationSnapshotJson(previous != null && previous.getConfigurationSnapshotJson() != null
-                ? previous.getConfigurationSnapshotJson() : task.getRuleSnapshotJson());
-        if (previous != null && previous.getSelectionSnapshotJson() != null) {
+        if (execution.getId() == null) execution.setId(com.baomidou.mybatisplus.core.toolkit.IdWorker.getIdStr());
+        if (previous != null && (previous.getRunId() == null || previous.getConfigurationSnapshotJson() == null
+                || previous.getSelectionSnapshotJson() == null)) throw IqcException.invalidState("重试执行缺少完整冻结快照");
+        execution.setRunId(previous == null ? execution.getId() : previous.getRunId());
+        execution.setConfigurationSnapshotJson(previous == null ? task.getRuleSnapshotJson() : previous.getConfigurationSnapshotJson());
+        if (previous != null) {
             execution.setSelectionSnapshotJson(previous.getSelectionSnapshotJson());
         } else {
             ObjectNode selection = objectMapper.createObjectNode();
@@ -339,8 +345,11 @@ public class InspectionExecutionService {
         task.setStatus("RUNNING");
         execution.setStatus("RUNNING"); executionMapper.updateById(execution);
         // Wizard attempts execute their own immutable configuration, including after a retry.
-        if (execution.getConfigurationSnapshotJson() != null)
-            task.setRuleSnapshotJson(execution.getConfigurationSnapshotJson());
+        var definitionSnapshot = readSnapshot(task.getRuleSnapshotJson());
+        if (definitionSnapshot != null && io.github.opensabre.iqc.task.TaskWizardSnapshot.SCHEMA.equals(definitionSnapshot.path("schemaVersion").asText())
+                && (execution.getConfigurationSnapshotJson() == null || execution.getRunId() == null))
+            throw IqcException.invalidState("执行缺少冻结配置或运行轮次");
+        if (execution.getConfigurationSnapshotJson() != null) task.setRuleSnapshotJson(execution.getConfigurationSnapshotJson());
         JsonNode ruleSnapshot = readSnapshot(task.getRuleSnapshotJson());
         // An asset can be disabled while this task waits in the executor queue. Check before any conversation work.
         io.github.opensabre.iqc.scheme.SchemeDependencyResolver.validateRouteTaskProjection(ruleSnapshot,

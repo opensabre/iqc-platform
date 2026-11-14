@@ -24,10 +24,14 @@ public class InspectionTaskController {
     private final InspectionTaskService taskService;
     private final UsageCounterRecorder usageCounterRecorder;
     private final io.github.opensabre.iqc.task.TaskWizardService wizardService;
+    private final io.github.opensabre.iqc.task.UnifiedTaskScheduleService schedules;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public InspectionTaskController(InspectionTaskService taskService, UsageCounterRecorder usageCounterRecorder,
                                     io.github.opensabre.iqc.task.TaskWizardService wizardService,
-                                    com.fasterxml.jackson.databind.ObjectMapper mapper) {
+                                    com.fasterxml.jackson.databind.ObjectMapper mapper,
+                                    io.github.opensabre.iqc.task.UnifiedTaskScheduleService schedules) {
+        this.schedules = schedules;
         this.mapper = mapper;
         this.taskService = taskService;
         this.usageCounterRecorder = usageCounterRecorder;
@@ -73,13 +77,25 @@ public class InspectionTaskController {
             throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("统一标签任务配置无效");
         }
         if (request == null) throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("任务参数不能为空");
-        var created = wizardService.createUnified(request.name(), request.dataSelection(), request.configuration(), request.concurrencyLimit());
+        if (request.trigger() == null) throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("请选择触发方式");
+        var created = schedules.create(request.name(), request.dataSelection(), request.configuration(), request.concurrencyLimit(), request.trigger());
+        schedules.start(created);
         recordCreation(created);
         return created;
     }
     public record UnifiedTaskRequest(String name, io.github.opensabre.iqc.task.TaskDataSelection dataSelection,
                                     io.github.opensabre.iqc.task.UnifiedLabelPlanService.Configuration configuration,
-                                    Integer concurrencyLimit) { }
+                                    Integer concurrencyLimit, io.github.opensabre.iqc.task.UnifiedTaskScheduleService.Trigger trigger) { }
+
+    /** Enables future trigger occurrences; the current run is controlled by the existing pause/cancel endpoints. */
+    @PutMapping("/{id}/enabled")
+    @ResourcePermission(code = "iqc:task:execute", name = "启停统一任务", type = "iqc", description = "启停统一任务触发计划")
+    @Audit(operationType = OperationType.UPDATE, description = "启停统一任务", module = "IQC_TASK")
+    public InspectionTask enabled(@PathVariable String id, @RequestBody EnabledRequest request) {
+        if (request == null || request.enabled() == null) throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("请指定启停状态");
+        return schedules.setEnabled(id, request.enabled());
+    }
+    public record EnabledRequest(Boolean enabled) { }
 
     @PostMapping
     @ResourcePermission(code = "iqc:task:create", name = "创建质检任务", type = "iqc", description = "创建质检任务")

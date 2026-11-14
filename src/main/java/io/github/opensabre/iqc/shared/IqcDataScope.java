@@ -16,7 +16,29 @@ public class IqcDataScope {
     private final IqcOrganizationClient organizationClient;
     private final UserContextHolder userContext = UserContextHolder.getInstance();
 
+    private final ThreadLocal<ExecutionScope> executionScope = new ThreadLocal<>();
+
+    /** Server-created authorization bound for IQC schedules; never accepted from a public request. */
+    public record ExecutionScope(boolean all, String owner, String groupId) {
+        public ExecutionScope {
+            if (owner == null || owner.isBlank() || "system".equals(owner))
+                throw new IllegalArgumentException("调度授权缺少有效用户");
+        }
+    }
+
+    /** Matches the existing scheduler's captured owner/group/all semantics without copying organization records. */
+    public ExecutionScope captureExecutionScope() { return new ExecutionScope(canViewAll(), owner(), groupId()); }
+
+    /** A short queue/freeze operation only; always restores the caller's scope, including on failure. */
+    public <T> T withinExecutionScope(ExecutionScope scope, java.util.function.Supplier<T> operation) {
+        java.util.Objects.requireNonNull(scope);
+        var previous = executionScope.get(); executionScope.set(scope);
+        try { return operation.get(); }
+        finally { if (previous == null) executionScope.remove(); else executionScope.set(previous); }
+    }
+
     public String owner() {
+        if (executionScope.get() != null) return executionScope.get().owner();
         String username = userContext.getUsername();
         if (username != null && !username.isBlank()) return username;
         String userId = userContext.getUserId();
@@ -24,6 +46,7 @@ public class IqcDataScope {
     }
 
     public boolean canViewAll() {
+        if (executionScope.get() != null) return executionScope.get().all();
         return effectiveRoles().stream().map(this::normalizeRole)
                         .anyMatch(role -> role.equals("ADMIN") || role.equals("SUPER_ADMIN"))
                 || effectiveScopes().contains("iqc:result:all");
@@ -61,6 +84,7 @@ public class IqcDataScope {
     }
 
     public String groupId() {
+        if (executionScope.get() != null) return executionScope.get().groupId();
         if (organizationClient == null) return null;
         String uniqueId = owner();
         try {

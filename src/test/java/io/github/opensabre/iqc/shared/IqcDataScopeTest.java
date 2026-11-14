@@ -21,6 +21,21 @@ class IqcDataScopeTest {
     }
 
     @Test
+    void scheduledScopeIsThreadLocalAndRestoredAfterNestedFailure() throws Exception {
+        context.setContext(Map.of(context.KEY_USERNAME, "alice"));
+        var captured = new IqcDataScope.ExecutionScope(false, "schedule-owner", "team");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> scope.withinExecutionScope(captured, () -> {
+            assertThat(scope.owner()).isEqualTo("schedule-owner"); assertThat(scope.groupId()).isEqualTo("team");
+            assertThat(scope.canView("another", "team")).isTrue(); assertThat(scope.canView("another", "other")).isFalse();
+            assertThat(java.util.concurrent.CompletableFuture.supplyAsync(scope::owner).join()).isEqualTo("system");
+            return scope.withinExecutionScope(new IqcDataScope.ExecutionScope(true, "nested", null), () -> {
+                assertThat(scope.canViewAll()).isTrue(); throw new IllegalStateException("failed");
+            });
+        })).hasMessageContaining("failed");
+        assertThat(scope.owner()).isEqualTo("alice"); assertThat(scope.canViewAll()).isFalse();
+    }
+
+    @Test
     void ordinaryUserIsRestrictedToOwnRecords() {
         context.setContext(Map.of(context.KEY_USERNAME, "alice", context.KEY_USER_ID, "u-1"));
         assertThat(scope.owner()).isEqualTo("alice");

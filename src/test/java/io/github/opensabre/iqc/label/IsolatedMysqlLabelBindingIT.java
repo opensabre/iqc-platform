@@ -40,6 +40,10 @@ class IsolatedMysqlLabelBindingIT {
             try(var rows=s.executeQuery("SELECT rule_type FROM iqc_label_rule_binding WHERE id='b1'")){assertThat(rows.next()).isTrue();assertThat(rows.getString(1)).isEqualTo("REGEX");}
             assertThatThrownBy(()->s.execute("INSERT INTO iqc_label_rule_binding(id,label_id,rule_id,rule_version_no,rule_type) VALUES ('bad','t1','other',1,'REGEX')")).hasMessageContaining("Duplicate");
             assertThatThrownBy(()->s.execute("INSERT INTO iqc_label_rule_binding(id,label_id,rule_id,rule_version_no) VALUES ('missing','t3','other',1)")).hasMessageContaining("Check constraint");
+            s.execute("INSERT INTO iqc_inspection_task(id,name,status,trigger_configuration_json,enabled) VALUES ('task','周期任务','SCHEDULED','{}',1)");
+            s.execute("INSERT INTO iqc_task_execution(id,task_id,attempt_no,status,run_id,configuration_snapshot_json,selection_snapshot_json) VALUES ('run-1','task',1,'SUCCEEDED','run-1','{}','{}'),('retry','task',2,'SUCCEEDED','run-1','{}','{}'),('run-2','task',3,'QUEUED','run-2','{}','{}')");
+            try(var rows=s.executeQuery("SELECT COUNT(*) FROM iqc_task_execution WHERE task_id='task' AND run_id='run-1'")){assertThat(rows.next()).isTrue();assertThat(rows.getInt(1)).isEqualTo(2);}
+            try(var rows=s.executeQuery("SHOW INDEX FROM iqc_task_execution WHERE Key_name='idx_iqc_task_execution_run'")){assertThat(rows.next()).isTrue();}
             s.execute("INSERT INTO iqc_label_action_definition(id,type,name) VALUES (9007199254740993,'RECORD_TAG','记录标签')");
             s.execute("INSERT INTO iqc_label_action_binding(id,label_id,action_id) VALUES (9007199254740994,'t1',9007199254740993)");
             assertThatThrownBy(()->s.execute("INSERT INTO iqc_label_action_binding(id,label_id,action_id) VALUES (9007199254740995,'t1',9007199254740993)")).hasMessageContaining("Duplicate");

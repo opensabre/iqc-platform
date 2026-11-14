@@ -111,6 +111,8 @@ class JointLabelMaterializationTransactionTest {
     @Autowired private ConversationMapper conversations;
     @Autowired private InspectionTaskService taskService;
     @Autowired private InspectionExecutionService runtimeQueue;
+    @Autowired private io.github.opensabre.iqc.task.UnifiedTaskScheduleService unifiedSchedules;
+    @MockitoBean private io.github.opensabre.iqc.task.UnifiedLabelPlanService unifiedPlans;
     @Autowired private InspectionResultMapper observations;
     @Autowired private ConversationInspectionResultMapper canonicalResults;
     @Autowired private InspectionLabelResultMapper persistedLabels;
@@ -219,7 +221,7 @@ class JointLabelMaterializationTransactionTest {
                   id varchar(64) PRIMARY KEY, conversation_id varchar(64), conversation_ids_json clob,
                   selection_filter_json clob, concurrency_limit int, scheduled_time timestamp,
                   name varchar(255), task_type varchar(32), agent_id varchar(64), rule_set_id varchar(64),
-                  rule_ids_json clob, agent_snapshot_json clob, rule_snapshot_json clob, unified_configuration_json clob,
+                  rule_ids_json clob, agent_snapshot_json clob, rule_snapshot_json clob, unified_configuration_json clob, trigger_configuration_json clob, enabled boolean,
                   label_scope_snapshot_json clob, run_count int, confidence_threshold decimal(5,4),
                   auto_expand_enabled boolean, auto_expand_prompt varchar(1000), queue_priority bigint,
                   pause_requested boolean, cancel_requested boolean, status varchar(32),
@@ -229,7 +231,7 @@ class JointLabelMaterializationTransactionTest {
                 """);
         jdbc.execute("""
                 CREATE TABLE iqc_task_execution (
-                  id varchar(64) PRIMARY KEY, task_id varchar(64), attempt_no int, status varchar(32),
+                  id varchar(64) PRIMARY KEY, task_id varchar(64), run_id varchar(64), attempt_no int, status varchar(32),
                   processed_messages int, failed_messages int, error_message varchar(1000),
                   configuration_snapshot_json clob, selection_snapshot_json clob,
                   created_by varchar(128), created_time timestamp, updated_by varchar(128), updated_time timestamp)
@@ -282,6 +284,70 @@ class JointLabelMaterializationTransactionTest {
                   created_by varchar(128), created_time timestamp, updated_by varchar(128), updated_time timestamp,
                   UNIQUE (conversation_result_id, label_id, value_code))
                 """);
+    }
+
+    private InspectionTask unifiedScheduleFixture() throws Exception {
+        var snapshot = new io.github.opensabre.iqc.task.TaskWizardSnapshot(io.github.opensabre.iqc.task.TaskWizardSnapshot.SCHEMA,
+                new io.github.opensabre.iqc.task.TaskEnginePlanService.FrozenPlan("iqc-task-engine-plan-v1", List.of(
+                        new io.github.opensabre.iqc.task.TaskEnginePlanService.FrozenEngine(
+                                io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.Operation.LABELING, "tags-REGEX",
+                                io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.EngineType.REGEX, 1,
+                                mapper.readTree("{\"schemaVersion\":\"iqc-unified-tags-v1\",\"tags\":[]}")))), null, mapper.readTree("{\"labels\":[]}"));
+        org.mockito.Mockito.when(unifiedPlans.freeze(org.mockito.ArgumentMatchers.any())).thenReturn(snapshot);
+        var task = new InspectionTask(); task.setId("unified-periodic"); task.setName("周期任务"); task.setTaskType("BATCH");
+        task.setCreatedBy("schedule-owner"); task.setStatus("SCHEDULED"); task.setEnabled(true);
+        task.setConcurrencyLimit(1); task.setTotalMessages(0); task.setProcessedMessages(0); task.setFailedMessages(0); task.setAttemptCount(0);
+        task.setConversationIdsJson("[]"); task.setRuleSnapshotJson(mapper.writeValueAsString(snapshot));
+        task.setUnifiedConfigurationJson("{\"engineSequence\":[\"REGEX\"],\"tagSelectionMode\":\"ALL\"}");
+        task.setSelectionFilterJson("{\"schemaVersion\":\"iqc-data-selection-v1\",\"selection\":{\"mode\":\"FILTER\"}}");
+        task.setTriggerConfigurationJson("""
+                {"trigger":{"type":"PERIODIC","cron":"0 * * * * *","enabled":true},
+                "scope":{"all":false,"owner":"schedule-owner","groupId":null}}
+                """);
+        task.setScheduledTime(io.github.opensabre.iqc.task.UnifiedTaskScheduleService.schedulingNow().minusMinutes(1));
+        taskMapper.insert(task); return task;
+    }
+
+    @Test
+    void unifiedPeriodicClaimsAreSerializedAndNewRunsDoNotOverwriteEarlierAttempts() throws Exception {
+        var task = unifiedScheduleFixture();
+        var now = io.github.opensabre.iqc.task.UnifiedTaskScheduleService.schedulingNow();
+        try (var workers = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var first = workers.submit(() -> unifiedSchedules.queueDue(task.getId(), now));
+            var second = workers.submit(() -> unifiedSchedules.queueDue(task.getId(), now));
+            for (var result : List.of(first, second)) {
+                try { result.get(); }
+                catch (java.util.concurrent.ExecutionException conflict) {
+                    // H2 RR can report a serialization retry instead of observing the updated locked row.
+                    Throwable cause = conflict;
+                    while (cause != null && !(cause instanceof java.sql.SQLException)) cause = cause.getCause();
+                    assertThat(cause).isInstanceOf(java.sql.SQLException.class);
+                    assertThat(((java.sql.SQLException) cause).getSQLState()).isEqualTo("40001");
+                }
+            }
+        }
+        assertThat(count("iqc_task_execution")).isEqualTo(1);
+        var queued = taskMapper.selectById(task.getId()); var first = executionMapper.selectById(queued.getCurrentExecutionId());
+        assertThat(first.getRunId()).isEqualTo(first.getId()); assertThat(first.getConfigurationSnapshotJson()).isNotNull();
+        runtimeQueue.run(task.getId(), first.getId());
+        assertThat(executionMapper.selectById(first.getId()).getStatus()).isEqualTo("SUCCEEDED");
+        var next = unifiedSchedules.queueDue(task.getId(), queued.getScheduledTime());
+        var second = executionMapper.selectById(next.getCurrentExecutionId());
+        assertThat(second.getRunId()).isEqualTo(second.getId()).isNotEqualTo(first.getRunId());
+        assertThat(second.getAttemptNo()).isEqualTo(2); assertThat(count("iqc_task_execution")).isEqualTo(2);
+        assertThat(executionMapper.selectById(first.getId()).getStatus()).isEqualTo("SUCCEEDED");
+        org.mockito.Mockito.verify(unifiedPlans, org.mockito.Mockito.times(2)).freeze(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void unifiedQueueFreezeFailureRollsBackClaimAndExecutionCreation() throws Exception {
+        var task = unifiedScheduleFixture();
+        org.mockito.Mockito.when(unifiedPlans.freeze(org.mockito.ArgumentMatchers.any())).thenThrow(new IllegalStateException("freeze rejected"));
+        assertThatThrownBy(() -> unifiedSchedules.queueDue(task.getId(), io.github.opensabre.iqc.task.UnifiedTaskScheduleService.schedulingNow()))
+                .hasMessageContaining("freeze rejected");
+        assertThat(taskMapper.selectById(task.getId()).getStatus()).isEqualTo("SCHEDULED");
+        assertThat(taskMapper.selectById(task.getId()).getCurrentExecutionId()).isNull();
+        assertThat(count("iqc_task_execution")).isZero();
     }
 
     @Test

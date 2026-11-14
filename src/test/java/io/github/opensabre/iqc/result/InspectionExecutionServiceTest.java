@@ -144,6 +144,7 @@ class InspectionExecutionServiceTest {
         var first = new TaskExecution(); first.setTaskId(task.getId()); first.setId("first");
         ReflectionTestUtils.invokeMethod(service, "freezeExecution", task, first, null);
         assertThat(first.getConfigurationSnapshotJson()).isEqualTo(task.getRuleSnapshotJson());
+        assertThat(first.getRunId()).isEqualTo(first.getId());
         var selected = objectMapper.readTree(first.getSelectionSnapshotJson());
         assertThat(selected.path("conversationIds").get(0).asText()).isEqualTo("conversation-a");
         assertThat(selected.path("totalMessages").asInt()).isEqualTo(3);
@@ -155,6 +156,7 @@ class InspectionExecutionServiceTest {
         var retry = new TaskExecution();
         ReflectionTestUtils.invokeMethod(service, "freezeExecution", task, retry, "first");
         assertThat(retry.getConfigurationSnapshotJson()).isEqualTo(first.getConfigurationSnapshotJson());
+        assertThat(retry.getRunId()).isEqualTo(first.getRunId());
         assertThat(retry.getSelectionSnapshotJson()).isEqualTo(first.getSelectionSnapshotJson());
         first.setTaskId("other-task");
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->

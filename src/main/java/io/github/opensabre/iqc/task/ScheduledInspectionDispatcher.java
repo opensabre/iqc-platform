@@ -16,6 +16,7 @@ import java.time.LocalDateTime;
 public class ScheduledInspectionDispatcher {
     private final InspectionTaskService taskService;
     private final InspectionExecutionService executionService;
+    private final UnifiedTaskScheduleService unifiedSchedules;
 
     @org.springframework.beans.factory.annotation.Value("${iqc.task.execution-timeout-minutes:30}")
     private long executionTimeoutMinutes;
@@ -24,6 +25,14 @@ public class ScheduledInspectionDispatcher {
     public void dispatchDueTasks() {
         int recovered = taskService.recoverStaleExecutions(java.time.Duration.ofMinutes(Math.max(1, executionTimeoutMinutes)));
         if (recovered > 0) log.warn("event=iqc_stale_execution_recovery recovered={}", recovered);
+        LocalDateTime now = UnifiedTaskScheduleService.schedulingNow();
+        for (var task : unifiedSchedules.due(now)) {
+            try { unifiedSchedules.start(unifiedSchedules.queueDue(task.getId(), now)); }
+            catch (RuntimeException failure) {
+                unifiedSchedules.recordDispatchFailure(task.getId(), task.getScheduledTime(), now);
+                log.error("event=iqc_unified_dispatch taskId={} errorType={}", task.getId(), failure.getClass().getSimpleName());
+            }
+        }
         for (var task : taskService.materializeDue(LocalDateTime.now())) {
             try {
                 var queued = executionService.queueSystem(task.getId());

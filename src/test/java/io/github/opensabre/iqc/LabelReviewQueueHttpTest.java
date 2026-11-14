@@ -71,7 +71,7 @@ class LabelReviewQueueHttpTest {
                     id varchar(64) PRIMARY KEY, conversation_id varchar(64), name varchar(100), task_type varchar(32),
                     conversation_ids_json clob, selection_filter_json clob, concurrency_limit int, scheduled_time timestamp,
                     agent_id varchar(64), rule_set_id varchar(64), rule_ids_json clob, agent_snapshot_json clob,
-                    rule_snapshot_json clob, unified_configuration_json clob, label_scope_snapshot_json clob, run_count int, confidence_threshold decimal(10,4),
+                    rule_snapshot_json clob, unified_configuration_json clob, trigger_configuration_json clob, enabled boolean, label_scope_snapshot_json clob, run_count int, confidence_threshold decimal(10,4),
                     auto_expand_enabled boolean, auto_expand_prompt clob, queue_priority bigint, pause_requested boolean,
                     cancel_requested boolean, status varchar(32), total_messages int, processed_messages int,
                     failed_messages int, current_execution_id varchar(64), attempt_count int, owner_group_id varchar(64),
