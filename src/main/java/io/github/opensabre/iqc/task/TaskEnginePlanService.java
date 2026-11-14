@@ -35,14 +35,25 @@ public class TaskEnginePlanService {
     @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public FrozenPlan freeze(TaskProcessingConfiguration request) {
         java.util.Objects.requireNonNull(request);
+        boolean writing = org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+                && !org.springframework.transaction.support.TransactionSynchronizationManager.isCurrentTransactionReadOnly();
+        var locked = new java.util.HashMap<String, io.github.opensabre.iqc.rule.model.QualityRule>();
+        if (writing) {
+            var ids = new java.util.TreeSet<String>();
+            for (var operation : java.util.Arrays.asList(request.inspection(), request.labeling()))
+                if (operation != null) for (var engine : operation.engines()) ids.add(text(engine.parameters(), "ruleId"));
+            // Lock once across both operations before following either business execution order.
+            ids.forEach(id -> locked.put(id, rules.lockById(id)));
+        }
         var frozen = new ArrayList<FrozenEngine>();
-        freezeOperation(request.inspection(), Operation.INSPECTION, frozen);
-        freezeOperation(request.labeling(), Operation.LABELING, frozen);
+        freezeOperation(request.inspection(), Operation.INSPECTION, frozen, writing, locked);
+        freezeOperation(request.labeling(), Operation.LABELING, frozen, writing, locked);
         return new FrozenPlan(FrozenPlan.SCHEMA, frozen);
     }
 
     private void freezeOperation(TaskProcessingConfiguration.Processing operation, Operation kind,
-                                 List<FrozenEngine> frozen) {
+                                 List<FrozenEngine> frozen, boolean writing,
+                                 java.util.Map<String, io.github.opensabre.iqc.rule.model.QualityRule> locked) {
         if (operation == null) return;
         int position = 0;
         for (var engine : operation.engines()) {
@@ -54,7 +65,7 @@ public class TaskEnginePlanService {
             });
             String target = text(parameters, "targetId");
             String ruleId = text(parameters, "ruleId");
-            var rule = rules.selectById(ruleId);
+            var rule = writing ? locked.get(ruleId) : rules.selectById(ruleId);
             if (rule == null || !"PUBLISHED".equals(rule.getStatus()))
                 throw IqcException.invalidArgument("只能选择已发布规则: " + ruleId);
             if (!engine.type().name().equals(rule.getRuleType()))

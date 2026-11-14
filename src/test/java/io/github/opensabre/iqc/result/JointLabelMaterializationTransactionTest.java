@@ -313,7 +313,7 @@ class JointLabelMaterializationTransactionTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {"RULE_SET", "SCHEME", "TASK", "UNIFIED", "DRAFT"})
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"RULE_SET", "SCHEME", "TASK", "UNIFIED", "DRAFT", "ENGINE_PLAN"})
     void ruleSetAndSchemeWritersRecheckRuleStatusAfterLifecycleLock(String kind) throws Exception {
         var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("reference-rule");
         rule.setName("引用规则"); rule.setCode("reference-rule"); rule.setStatus("PUBLISHED"); rule.setRuleType("REGEX"); ruleMapper.insert(rule);
@@ -344,6 +344,16 @@ class JointLabelMaterializationTransactionTest {
                 pending.set(worker.submit(() -> new org.springframework.transaction.support.TransactionTemplate(transactionManager)
                         .executeWithoutResult(writer -> {
                             if ("RULE_SET".equals(kind)) ruleSets.create("引用集", "REFERENCE_SET", null, List.of("reference-rule"), "ALL");
+                            else if ("ENGINE_PLAN".equals(kind)) {
+                                var plans = new io.github.opensabre.iqc.task.TaskEnginePlanService(ruleMapper,
+                                        mock(io.github.opensabre.iqc.agent.dao.QualityAgentMapper.class), mapper, null, null, null);
+                                var engine = new io.github.opensabre.iqc.task.TaskProcessingConfiguration.Engine("check",
+                                        io.github.opensabre.iqc.task.TaskProcessingConfiguration.EngineType.REGEX,
+                                        mapper.createObjectNode().put("targetId", "check").put("ruleId", "reference-rule"));
+                                plans.freeze(new io.github.opensabre.iqc.task.TaskProcessingConfiguration(
+                                        io.github.opensabre.iqc.task.TaskProcessingConfiguration.SCHEMA,
+                                        new io.github.opensabre.iqc.task.TaskProcessingConfiguration.Processing(List.of(engine)), null));
+                            }
                             else if ("DRAFT".equals(kind)) referenceDependencies.validateDraftRuleReferences(definition);
                             else if ("SCHEME".equals(kind)) referenceDependencies.resolve(definition);
                             else if ("UNIFIED".equals(kind)) unified.freeze(new io.github.opensabre.iqc.task.UnifiedLabelPlanService.Configuration(
@@ -358,7 +368,7 @@ class JointLabelMaterializationTransactionTest {
                         () -> pending.get().get(200, java.util.concurrent.TimeUnit.MILLISECONDS));
             });
             assertThatThrownBy(() -> pending.get().get(10, java.util.concurrent.TimeUnit.SECONDS))
-                    .isInstanceOf(java.util.concurrent.ExecutionException.class).hasStackTraceContaining("TASK".equals(kind) ? "已发布规则" : "停用");
+                    .isInstanceOf(java.util.concurrent.ExecutionException.class).hasStackTraceContaining(List.of("TASK", "ENGINE_PLAN").contains(kind) ? "已发布规则" : "停用");
         }
         org.mockito.Mockito.verifyNoInteractions(sets, setVersions);
     }
