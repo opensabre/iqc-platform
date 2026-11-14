@@ -14,6 +14,19 @@ import static org.mockito.Mockito.*;
 
 class InspectionTaskControllerTest {
     @Test
+    void exposesImmutableSnapshotWithExistingTaskViewPermission() throws Exception {
+        var service = mock(InspectionTaskService.class);
+        var controller = new InspectionTaskController(service, mock(UsageCounterRecorder.class),
+                mock(io.github.opensabre.iqc.task.TaskWizardService.class), new ObjectMapper(),
+                mock(io.github.opensabre.iqc.task.UnifiedTaskScheduleService.class));
+        controller.executionSnapshot("task", "attempt");
+        verify(service).executionSnapshot("task", "attempt");
+        var endpoint = InspectionTaskController.class.getMethod("executionSnapshot", String.class, String.class);
+        assertThat(endpoint.getAnnotation(io.github.opensabre.boot.annotations.ResourcePermission.class).code())
+                .isEqualTo("iqc:task:view");
+    }
+
+    @Test
     void exposesScopedExecutionAttemptsForTheBusinessRunSelector() throws Exception {
         var service = mock(InspectionTaskService.class);
         var controller = new InspectionTaskController(service, mock(UsageCounterRecorder.class), mock(io.github.opensabre.iqc.task.TaskWizardService.class), new com.fasterxml.jackson.databind.ObjectMapper(), mock(io.github.opensabre.iqc.task.UnifiedTaskScheduleService.class));

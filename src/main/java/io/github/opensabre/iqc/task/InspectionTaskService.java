@@ -784,6 +784,21 @@ public class InspectionTaskService {
                 .toList();
     }
 
+    /** Reads one immutable attempt only after task authorization and execution ownership checks. */
+    public TaskExecutionSnapshot executionSnapshot(String taskId, String executionId) {
+        get(taskId);
+        var execution = executionMapper.selectById(executionId);
+        if (execution == null || !taskId.equals(execution.getTaskId()))
+            throw IqcException.notFound("任务执行记录不存在");
+        if (execution.getConfigurationSnapshotJson() == null || execution.getSelectionSnapshotJson() == null
+                || execution.getRunId() == null) throw IqcException.invalidState("执行缺少完整冻结快照");
+        return new TaskExecutionSnapshot(execution.getId(), execution.getRunId(), execution.getAttemptNo(),
+                execution.getStatus(), execution.getConfigurationSnapshotJson(), execution.getSelectionSnapshotJson());
+    }
+
+    public record TaskExecutionSnapshot(String executionId, String runId, Integer attemptNo, String status,
+                                        String configurationSnapshotJson, String selectionSnapshotJson) { }
+
     public record TaskRunSummary(String id, Integer attemptNo, String status, Integer processedMessages,
                                  Integer failedMessages, java.util.Date createdTime, boolean current, String runId) { }
 

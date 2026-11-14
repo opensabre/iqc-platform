@@ -345,6 +345,34 @@ class InspectionTaskServiceTest {
         verify(executionMapper, times(1)).selectList(any());
     }
 
+    @Test
+    void executionSnapshotReturnsStoredVersionsAndRejectsCrossTaskOrIncompleteAttempts() {
+        when(taskMapper.selectById("task-1")).thenReturn(task("task-1"));
+        when(dataScope.canView(null, null)).thenReturn(true);
+        var execution = new TaskExecution(); execution.setId("attempt"); execution.setTaskId("task-1");
+        execution.setRunId("root"); execution.setAttemptNo(2); execution.setStatus("SUCCEEDED");
+        execution.setConfigurationSnapshotJson("{\"ruleVersion\":1}");
+        execution.setSelectionSnapshotJson("{\"conversationIds\":[]}");
+        when(executionMapper.selectById("attempt")).thenReturn(execution);
+        var snapshot = taskService.executionSnapshot("task-1", "attempt");
+        assertThat(snapshot.configurationSnapshotJson()).isEqualTo(execution.getConfigurationSnapshotJson());
+        assertThat(snapshot.selectionSnapshotJson()).isEqualTo(execution.getSelectionSnapshotJson());
+        assertThat(snapshot.runId()).isEqualTo("root"); assertThat(snapshot.attemptNo()).isEqualTo(2);
+        execution.setTaskId("another-task");
+        assertThatThrownBy(() -> taskService.executionSnapshot("task-1", "attempt")).hasMessageContaining("不存在");
+        execution.setTaskId("task-1"); execution.setConfigurationSnapshotJson(null);
+        assertThatThrownBy(() -> taskService.executionSnapshot("task-1", "attempt")).hasMessageContaining("快照");
+        assertThatThrownBy(() -> taskService.executionSnapshot("task-1", "missing")).hasMessageContaining("不存在");
+    }
+
+    @Test
+    void executionSnapshotDoesNotReadAttemptBeforeDataScopeAuthorization() {
+        when(taskMapper.selectById("task-1")).thenReturn(task("task-1"));
+        when(dataScope.canView(null, null)).thenReturn(false);
+        assertThatThrownBy(() -> taskService.executionSnapshot("task-1", "attempt")).hasMessageContaining("无权");
+        verify(executionMapper, never()).selectById(any(String.class));
+    }
+
     private void stubVisibleConversation() {
         Conversation conversation = conversation("conversation-1", 1);
         conversation.setSourceFileName("conversation.txt");

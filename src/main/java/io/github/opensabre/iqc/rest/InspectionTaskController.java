@@ -62,6 +62,14 @@ public class InspectionTaskController {
         return taskService.executions(id);
     }
 
+    /** Returns the stored attempt snapshot rather than resolving today's rule/tag definitions. */
+    @GetMapping("/{id}/executions/{executionId}/snapshot")
+    @ResourcePermission(code = "iqc:task:view", name = "查看任务执行快照", type = "iqc", description = "查看授权任务的冻结执行配置与选数")
+    @RateLimit(sceneCode = "iqc-task-execution-query", maxCount = 60, period = 60)
+    public InspectionTaskService.TaskExecutionSnapshot executionSnapshot(@PathVariable String id, @PathVariable String executionId) {
+        return taskService.executionSnapshot(id, executionId);
+    }
+
     /** Unified matching shares task permissions and lifecycle; no scoring or conflict policy is accepted here. */
     @PostMapping("/unified")
     @ResourcePermission(code = "iqc:task:create", name = "创建统一标签任务", type = "iqc", description = "按标签绑定执行规则")
