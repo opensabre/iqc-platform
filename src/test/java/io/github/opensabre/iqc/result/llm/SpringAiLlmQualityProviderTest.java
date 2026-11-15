@@ -52,6 +52,45 @@ class SpringAiLlmQualityProviderTest {
         assertThat(captured).containsExactly("{bad}");
     }
 
+    @Test
+    void tagBatchUsesOneRequestForAllTagsWithoutLegacyHitField() throws Exception {
+        var mapper = new ObjectMapper();
+        var model = mock(ChatModel.class);
+        when(model.call(any(Prompt.class))).thenReturn(response("{\"results\":[{\"tagId\":\"1\",\"status\":\"MATCHED\"},{\"tagId\":\"2\",\"status\":\"NOT_MATCHED\"}]}"));
+        var properties = new LlmQualityProperties(); properties.setMaxAttempts(1);
+        var provider = new SpringAiLlmQualityProvider(model, null, mapper,
+                mock(GovernanceRateLimiter.class), mock(UsageCounterRecorder.class), properties);
+        var result = provider.evaluateTagBatch(mapper.readTree("{\"conversation\":[],\"tags\":[{\"tagId\":\"1\",\"prompt\":\"退款\"},{\"tagId\":\"2\",\"prompt\":\"投诉\"}]}"), mapper.createObjectNode(), "batch1");
+        assertThat(result.path("results")).hasSize(2);
+        var prompt = org.mockito.ArgumentCaptor.forClass(Prompt.class);
+        verify(model, org.mockito.Mockito.times(1)).call(prompt.capture());
+        assertThat(prompt.getValue().getContents()).contains("退款", "投诉").doesNotContain("必须包含 {\"hit\"");
+    }
+
+    @Test
+    void tagBatchRetainsReportedUsageAndModelButDoesNotInventMissingUsage() throws Exception {
+        var mapper = new ObjectMapper();
+        var model = mock(ChatModel.class);
+        String text = "{\"results\":[{\"tagId\":\"1\",\"status\":\"UNKNOWN\"}]}";
+        var metadata = org.springframework.ai.chat.metadata.ChatResponseMetadata.builder()
+                .model("reported-model-v2").usage(new org.springframework.ai.chat.metadata.DefaultUsage(123, 45)).build();
+        when(model.call(any(Prompt.class))).thenReturn(
+                new ChatResponse(List.of(new Generation(new AssistantMessage(text))), metadata), response(text));
+        var properties = new LlmQualityProperties(); properties.setMaxAttempts(1);
+        var provider = new SpringAiLlmQualityProvider(model, null, mapper,
+                mock(GovernanceRateLimiter.class), mock(UsageCounterRecorder.class), properties);
+        var request = mapper.readTree("{\"conversation\":[],\"tags\":[{\"tagId\":\"1\",\"prompt\":\"退款\"}]}");
+        var reported = provider.evaluateTagBatch(request, mapper.createObjectNode(), "reported").path("metadata");
+        assertThat(reported.path("model").asText()).isEqualTo("reported-model-v2");
+        assertThat(reported.path("inputTokens").asInt()).isEqualTo(123);
+        assertThat(reported.path("outputTokens").asInt()).isEqualTo(45);
+        assertThat(reported.path("attemptCount").asInt()).isEqualTo(1);
+        var absent = provider.evaluateTagBatch(request, mapper.createObjectNode(), "absent").path("metadata");
+        assertThat(absent.has("inputTokens")).isFalse();
+        assertThat(absent.has("outputTokens")).isFalse();
+        assertThat(absent.has("model")).isFalse();
+    }
+
     private static ChatResponse response(String text) {
         return new ChatResponse(List.of(new Generation(new AssistantMessage(text))));
     }

@@ -111,6 +111,8 @@ class JointLabelMaterializationTransactionTest {
     @Autowired private ConversationMapper conversations;
     @Autowired private InspectionTaskService taskService;
     @Autowired private InspectionExecutionService runtimeQueue;
+    @Autowired private io.github.opensabre.iqc.task.UnifiedTaskScheduleService unifiedSchedules;
+    @MockitoBean private io.github.opensabre.iqc.task.UnifiedLabelPlanService unifiedPlans;
     @Autowired private InspectionResultMapper observations;
     @Autowired private ConversationInspectionResultMapper canonicalResults;
     @Autowired private InspectionLabelResultMapper persistedLabels;
@@ -120,7 +122,12 @@ class JointLabelMaterializationTransactionTest {
     private InspectionTaskMapper taskMapper;
     @Autowired private TaskExecutionMapper executionMapper;
     @Autowired private TaskItemMapper taskItemMapper;
+    @Autowired private io.github.opensabre.iqc.label.LabelTaxonomyService taxonomy;
+    @Autowired private org.springframework.transaction.PlatformTransactionManager transactionManager;
+    @Autowired private io.github.opensabre.iqc.scheme.SchemeDependencyResolver referenceDependencies;
+    @Autowired private io.github.opensabre.iqc.label.dao.InsightLabelMapper usageLabels;
     @Autowired private QualityRuleMapper ruleMapper;
+    @Autowired private io.github.opensabre.iqc.rule.QualityRuleService ruleLifecycle;
     @Autowired private QualityRuleVersionMapper ruleVersionMapper;
     @Autowired private InspectionSchemeMapper schemeMapper;
     @Autowired private io.github.opensabre.iqc.scheme.dao.InspectionSchemeVersionMapper schemeVersionMapper;
@@ -140,7 +147,7 @@ class JointLabelMaterializationTransactionTest {
         jdbc.execute("CREATE TABLE iqc_label (id varchar(64) PRIMARY KEY,group_id varchar(64),name varchar(50),code varchar(128),"
                 + "description varchar(500),target_role varchar(32),weight decimal(6,2),status varchar(32),version_no int,source_type varchar(32),owner_group_id varchar(64)" + audit + ")");
         jdbc.execute("CREATE TABLE iqc_label_rule_binding (id varchar(64) PRIMARY KEY,label_id varchar(64),rule_id varchar(64),"
-                + "rule_version_no int,binding_role varchar(16),display_order int" + audit + ")");
+                + "rule_version_no int,rule_type varchar(32),binding_role varchar(16),display_order int" + audit + ")");
         jdbc.execute("CREATE TABLE iqc_label_value_definition (id varchar(64) PRIMARY KEY,label_id varchar(64),value_code varchar(64),"
                 + "value_type varchar(32),description varchar(500),display_order int,config_json clob" + audit + ")");
         jdbc.execute("DROP TABLE IF EXISTS iqc_result_review");
@@ -219,7 +226,7 @@ class JointLabelMaterializationTransactionTest {
                   id varchar(64) PRIMARY KEY, conversation_id varchar(64), conversation_ids_json clob,
                   selection_filter_json clob, concurrency_limit int, scheduled_time timestamp,
                   name varchar(255), task_type varchar(32), agent_id varchar(64), rule_set_id varchar(64),
-                  rule_ids_json clob, agent_snapshot_json clob, rule_snapshot_json clob,
+                  rule_ids_json clob, agent_snapshot_json clob, rule_snapshot_json clob, unified_configuration_json clob, trigger_configuration_json clob, enabled boolean,
                   label_scope_snapshot_json clob, run_count int, confidence_threshold decimal(5,4),
                   auto_expand_enabled boolean, auto_expand_prompt varchar(1000), queue_priority bigint,
                   pause_requested boolean, cancel_requested boolean, status varchar(32),
@@ -229,8 +236,9 @@ class JointLabelMaterializationTransactionTest {
                 """);
         jdbc.execute("""
                 CREATE TABLE iqc_task_execution (
-                  id varchar(64) PRIMARY KEY, task_id varchar(64), attempt_no int, status varchar(32),
+                  id varchar(64) PRIMARY KEY, task_id varchar(64), run_id varchar(64), attempt_no int, status varchar(32),
                   processed_messages int, failed_messages int, error_message varchar(1000),
+                  configuration_snapshot_json clob, selection_snapshot_json clob,
                   created_by varchar(128), created_time timestamp, updated_by varchar(128), updated_time timestamp)
                 """);
         jdbc.execute("""
@@ -281,6 +289,241 @@ class JointLabelMaterializationTransactionTest {
                   created_by varchar(128), created_time timestamp, updated_by varchar(128), updated_time timestamp,
                   UNIQUE (conversation_result_id, label_id, value_code))
                 """);
+    }
+
+    private InspectionTask unifiedScheduleFixture() throws Exception {
+        when(httpOrganization.getAuthorizationUser("schedule-owner")).thenReturn(Result.success(
+                new IqcOrganizationClient.AuthorizationUser("schedule-user", "schedule-owner", null, true, true, true, true, "N")));
+        when(httpOrganization.getUserRoles("schedule-user")).thenReturn(Result.success(
+                List.of(new IqcOrganizationClient.AuthorizationRole("USER"))));
+        when(httpOrganization.getRoleResources("USER")).thenReturn(Result.success(
+                List.of(new IqcOrganizationClient.AuthorizationResource("iqc:task:execute", "/api/iqc/tasks/{id}/run", "POST"))));
+        var snapshot = new io.github.opensabre.iqc.task.TaskWizardSnapshot(io.github.opensabre.iqc.task.TaskWizardSnapshot.SCHEMA,
+                new io.github.opensabre.iqc.task.TaskEnginePlanService.FrozenPlan("iqc-task-engine-plan-v1", List.of(
+                        new io.github.opensabre.iqc.task.TaskEnginePlanService.FrozenEngine(
+                                io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.Operation.LABELING, "tags-REGEX",
+                                io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.EngineType.REGEX, 1,
+                                mapper.readTree("{\"schemaVersion\":\"iqc-unified-tags-v1\",\"tags\":[]}")))), null, mapper.readTree("{\"labels\":[]}"));
+        org.mockito.Mockito.when(unifiedPlans.freeze(org.mockito.ArgumentMatchers.any())).thenReturn(snapshot);
+        var task = new InspectionTask(); task.setId("unified-periodic"); task.setName("周期任务"); task.setTaskType("BATCH");
+        task.setCreatedBy("schedule-owner"); task.setStatus("SCHEDULED"); task.setEnabled(true);
+        task.setConcurrencyLimit(1); task.setTotalMessages(0); task.setProcessedMessages(0); task.setFailedMessages(0); task.setAttemptCount(0);
+        task.setConversationIdsJson("[]"); task.setRuleSnapshotJson(mapper.writeValueAsString(snapshot));
+        task.setUnifiedConfigurationJson("{\"engineSequence\":[\"REGEX\"],\"tagSelectionMode\":\"ALL\"}");
+        task.setSelectionFilterJson("{\"schemaVersion\":\"iqc-data-selection-v1\",\"selection\":{\"mode\":\"FILTER\"}}");
+        task.setTriggerConfigurationJson("""
+                {"trigger":{"type":"PERIODIC","cron":"0 * * * * *","enabled":true},
+                "scope":{"all":false,"owner":"schedule-owner","groupId":null}}
+                """);
+        task.setScheduledTime(io.github.opensabre.iqc.task.UnifiedTaskScheduleService.schedulingNow().minusMinutes(1));
+        taskMapper.insert(task); return task;
+    }
+
+    private void ensureLifecycleReferenceTables() {
+        // The lifecycle guard scans historical scheme releases even when none reference this rule.
+        createIsolatedSchemeVersionTable();
+        if (!usesMigratedSchema()) {
+            jdbc.execute("CREATE TABLE IF NOT EXISTS iqc_quality_rule_set (id varchar(64) PRIMARY KEY,rule_ids_json clob)");
+            jdbc.execute("CREATE TABLE IF NOT EXISTS iqc_quality_rule_set_version (id varchar(64) PRIMARY KEY,rule_ids_json clob)");
+        }
+    }
+
+    private void insertLifecycleRule() {
+        var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("lifecycle-rule");
+        rule.setName("生命周期"); rule.setCode("lifecycle-rule"); rule.setStatus("PUBLISHED"); rule.setRuleType("REGEX");
+        rule.setVersionNo(1); rule.setCreatedBy("system"); rule.setExpression("退款"); ruleMapper.insert(rule);
+        var version = new io.github.opensabre.iqc.rule.model.QualityRuleVersion();
+        version.setRuleId(rule.getId()); version.setVersionNo(1); version.setName(rule.getName()); version.setCode(rule.getCode());
+        version.setRuleType("REGEX"); version.setStatus("PUBLISHED"); version.setExpression("退款"); ruleVersionMapper.insert(version);
+    }
+
+    @Test void ruleLifecycleChecksHistoricalReferencesThenAtomicallyRemovesUnreferencedVersions() {
+        ensureLifecycleReferenceTables(); insertLifecycleRule();
+        jdbc.update("INSERT INTO iqc_inspection_task(id,name,status,rule_ids_json,created_by) VALUES ('lifecycle-history','历史任务','SUCCEEDED','[\"lifecycle-rule\"]','private-owner')");
+        assertThatThrownBy(() -> ruleLifecycle.disable("lifecycle-rule")).hasMessage("规则仍被引用，不能删除或停用");
+        assertThatThrownBy(() -> ruleLifecycle.delete("lifecycle-rule")).hasMessage("规则仍被引用，不能删除或停用");
+        assertThat(ruleMapper.selectById("lifecycle-rule").getStatus()).isEqualTo("PUBLISHED");
+        assertThat(jdbc.queryForObject("SELECT rule_ids_json FROM iqc_inspection_task WHERE id='lifecycle-history'", String.class)).contains("lifecycle-rule");
+        jdbc.update("DELETE FROM iqc_inspection_task WHERE id='lifecycle-history'");
+        assertThat(ruleLifecycle.disable("lifecycle-rule").getStatus()).isEqualTo("DISABLED");
+        ruleLifecycle.delete("lifecycle-rule");
+        assertThat(ruleMapper.selectById("lifecycle-rule")).isNull();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_quality_rule_version WHERE rule_id='lifecycle-rule'", Long.class)).isZero();
+    }
+
+    @Test void actualRuleDisableSerializesWithNewTaskReference() throws Exception {
+        ensureLifecycleReferenceTables(); insertLifecycleRule();
+        var transaction = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        transaction.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+        try (var worker = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            var pending = new java.util.concurrent.atomic.AtomicReference<java.util.concurrent.Future<?>>();
+            transaction.executeWithoutResult(tx -> {
+                ruleLifecycle.disable("lifecycle-rule");
+                pending.set(worker.submit(() -> taskService.createConfigured("并发引用", null, List.of(), null, null, null, null,
+                        null, null, List.of("lifecycle-rule"), 1, null, null, "RULE_ONLY",
+                        new io.github.opensabre.iqc.task.TaskDataSelection(io.github.opensabre.iqc.task.TaskDataSelection.Mode.RANDOM,
+                                List.of(), null, 1, null))));
+                org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.TimeoutException.class,
+                        () -> pending.get().get(200, java.util.concurrent.TimeUnit.MILLISECONDS));
+            });
+            assertThatThrownBy(() -> pending.get().get(10, java.util.concurrent.TimeUnit.SECONDS))
+                    .isInstanceOf(java.util.concurrent.ExecutionException.class).hasStackTraceContaining("已发布规则");
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_inspection_task WHERE name='并发引用'", Long.class)).isZero();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"RULE_SET", "SCHEME", "TASK", "UNIFIED", "DRAFT", "ENGINE_PLAN"})
+    void ruleSetAndSchemeWritersRecheckRuleStatusAfterLifecycleLock(String kind) throws Exception {
+        var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("reference-rule");
+        rule.setName("引用规则"); rule.setCode("reference-rule"); rule.setStatus("PUBLISHED"); rule.setRuleType("REGEX"); ruleMapper.insert(rule);
+        var sets = mock(io.github.opensabre.iqc.rule.dao.QualityRuleSetMapper.class);
+        var setVersions = mock(io.github.opensabre.iqc.rule.dao.QualityRuleSetVersionMapper.class);
+        var ruleSets = new io.github.opensabre.iqc.rule.QualityRuleSetService(sets, setVersions, ruleMapper, mapper);
+        var selectedLabels = mock(LabelResolutionService.class);
+        var binding = new LabelRuleBinding(); binding.setRuleId("reference-rule"); binding.setRuleVersionNo(1);
+        when(selectedLabels.resolve(any())).thenReturn(new LabelResolutionService.ResolvedSelection("1.0", List.of(
+                new LabelResolutionService.LabelSnapshot("reference-label", 1, "标签", "REFERENCE", null, null, null,
+                        null, null, false, null, null, List.of(binding), List.of())), List.of("reference-rule")));
+        // Real rule mapper and transaction manager; only selection discovery is isolated from this lock test.
+        var unified = new io.github.opensabre.iqc.task.UnifiedLabelPlanService(selectedLabels,
+                mock(io.github.opensabre.iqc.label.dao.InsightLabelMapper.class), ruleVersionMapper,
+                mock(io.github.opensabre.iqc.agent.dao.QualityAgentMapper.class), mock(io.github.opensabre.iqc.shared.IqcDataScope.class), mapper,
+                mock(io.github.opensabre.iqc.label.LabelActionService.class), ruleMapper);
+        var definition = new io.github.opensabre.iqc.scheme.SchemeDefinition(io.github.opensabre.iqc.scheme.SchemeDefinition.SCHEMA,
+                List.of(new io.github.opensabre.iqc.scheme.SchemeDefinition.Item("item", "检查项",
+                        new io.github.opensabre.iqc.scheme.SchemeDefinition.RuleReference("reference-rule", 1),
+                        io.github.opensabre.iqc.scheme.SchemeDefinition.HitMeaning.COMPLIANCE)), null,
+                new io.github.opensabre.iqc.scoring.InspectionScoring.Policy("iqc-score-v2",
+                        io.github.opensabre.iqc.scoring.InspectionScoring.Mode.DEDUCTION, 100, 60,
+                        List.of(new io.github.opensabre.iqc.scoring.InspectionScoring.Item("item", 10, false))));
+        try (var worker = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            var pending = new java.util.concurrent.atomic.AtomicReference<java.util.concurrent.Future<?>>();
+            new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+                var locked = ruleMapper.lockById("reference-rule"); locked.setStatus("DISABLED"); ruleMapper.updateById(locked);
+                pending.set(worker.submit(() -> new org.springframework.transaction.support.TransactionTemplate(transactionManager)
+                        .executeWithoutResult(writer -> {
+                            if ("RULE_SET".equals(kind)) ruleSets.create("引用集", "REFERENCE_SET", null, List.of("reference-rule"), "ALL");
+                            else if ("ENGINE_PLAN".equals(kind)) {
+                                var plans = new io.github.opensabre.iqc.task.TaskEnginePlanService(ruleMapper,
+                                        mock(io.github.opensabre.iqc.agent.dao.QualityAgentMapper.class), mapper, null, null, null);
+                                var engine = new io.github.opensabre.iqc.task.TaskProcessingConfiguration.Engine("check",
+                                        io.github.opensabre.iqc.task.TaskProcessingConfiguration.EngineType.REGEX,
+                                        mapper.createObjectNode().put("targetId", "check").put("ruleId", "reference-rule"));
+                                plans.freeze(new io.github.opensabre.iqc.task.TaskProcessingConfiguration(
+                                        io.github.opensabre.iqc.task.TaskProcessingConfiguration.SCHEMA,
+                                        new io.github.opensabre.iqc.task.TaskProcessingConfiguration.Processing(List.of(engine)), null));
+                            }
+                            else if ("DRAFT".equals(kind)) referenceDependencies.validateDraftRuleReferences(definition);
+                            else if ("SCHEME".equals(kind)) referenceDependencies.resolve(definition);
+                            else if ("UNIFIED".equals(kind)) unified.freeze(new io.github.opensabre.iqc.task.UnifiedLabelPlanService.Configuration(
+                                    List.of(io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.EngineType.REGEX),
+                                    "SELECTED", List.of("reference-label"), null));
+                            else taskService.createConfigured("引用任务", null, List.of(), null, null, null, null,
+                                    null, null, List.of("reference-rule"), 1, null, null, "RULE_ONLY",
+                                    new io.github.opensabre.iqc.task.TaskDataSelection(
+                                            io.github.opensabre.iqc.task.TaskDataSelection.Mode.RANDOM, List.of(), null, 1, null));
+                        })));
+                org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.TimeoutException.class,
+                        () -> pending.get().get(200, java.util.concurrent.TimeUnit.MILLISECONDS));
+            });
+            assertThatThrownBy(() -> pending.get().get(10, java.util.concurrent.TimeUnit.SECONDS))
+                    .isInstanceOf(java.util.concurrent.ExecutionException.class).hasStackTraceContaining(List.of("TASK", "ENGINE_PLAN").contains(kind) ? "已发布规则" : "停用");
+        }
+        org.mockito.Mockito.verifyNoInteractions(sets, setVersions);
+    }
+
+    @Test
+    void newLabelBindingWaitsForRuleLifecycleLockAndRechecksCommittedStatus() throws Exception {
+        var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("locked-rule");
+        rule.setName("锁定规则"); rule.setCode("locked-rule"); rule.setStatus("PUBLISHED"); rule.setRuleType("REGEX");
+        rule.setVersionNo(1); rule.setCreatedBy("system"); ruleMapper.insert(rule);
+        jdbc.update("INSERT INTO iqc_label_category (id,name,code,status,version_no) VALUES ('locked-category','锁测试分类','locked-category','PUBLISHED',1)");
+        jdbc.update("INSERT INTO iqc_label_group (id,category_id,name,code,status,version_no) VALUES ('locked-group','locked-category','锁测试组','locked-group','PUBLISHED',1)");
+        jdbc.update("INSERT INTO iqc_label (id,group_id,name,code,status,version_no,created_by) VALUES ('locked-label','locked-group','标签','locked-label','DRAFT',1,'system')");
+        try (var worker = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            var pending = new java.util.concurrent.atomic.AtomicReference<java.util.concurrent.Future<?>>();
+            new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+                var locked = ruleMapper.lockById("locked-rule"); locked.setStatus("DISABLED"); ruleMapper.updateById(locked);
+                pending.set(worker.submit(() -> taxonomy.replaceBindings("locked-label",
+                        List.of(new io.github.opensabre.iqc.label.LabelTaxonomyService.BindingRequest("locked-rule")))));
+                org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.TimeoutException.class,
+                        () -> pending.get().get(200, java.util.concurrent.TimeUnit.MILLISECONDS));
+            });
+            assertThatThrownBy(() -> pending.get().get(10, java.util.concurrent.TimeUnit.SECONDS))
+                    .isInstanceOf(java.util.concurrent.ExecutionException.class).hasCauseInstanceOf(io.github.opensabre.iqc.governance.IqcException.class)
+                    .hasStackTraceContaining("已发布规则");
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iqc_label_rule_binding WHERE label_id='locked-label'", Integer.class)).isZero();
+    }
+
+    @Test
+    void ruleUsagePaginatesOnlyVisibleCurrentBindingsAndDoesNotLeakPrivateCounts() {
+        var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("usage-rule");
+        rule.setName("规则"); rule.setCode("usage-rule"); rule.setRuleType("REGEX"); rule.setStatus("PUBLISHED"); ruleMapper.insert(rule);
+        jdbc.update("INSERT INTO iqc_label_category (id,name,code,status,version_no) VALUES ('usage-category','引用分类','usage-category','PUBLISHED',1)");
+        jdbc.update("INSERT INTO iqc_label_group (id,category_id,name,code,status,version_no) VALUES ('usage-group','usage-category','引用组','usage-group','PUBLISHED',1)");
+        for (int i = 1; i <= 4; i++) {
+            jdbc.update("INSERT INTO iqc_label (id,group_id,name,code,status,version_no,created_by,owner_group_id) VALUES (?,'usage-group',?,?,?,?,?,?)",
+                    "usage-" + i, "标签" + i, "usage-" + i, "DRAFT", 1, i == 1 ? "alice" : "bob", i == 2 ? "team" : "private");
+            if (i != 4) jdbc.update("INSERT INTO iqc_label_rule_binding (id,label_id,rule_id,rule_version_no,rule_type) VALUES (?,?,?,?,?)",
+                    "usage-binding-" + i, "usage-" + i, "usage-rule", 1, "REGEX");
+        }
+        var scope = mock(io.github.opensabre.iqc.shared.IqcDataScope.class);
+        when(scope.canView(nullable(String.class), nullable(String.class))).thenReturn(true);
+        when(scope.owner()).thenReturn("alice"); when(scope.groupId()).thenReturn("team");
+        var service = new io.github.opensabre.iqc.label.LabelTaxonomyService(null, null, usageLabels, null, null, ruleMapper, scope, mapper);
+        var first = service.labelsUsingRule("usage-rule", 1, 1);
+        var second = service.labelsUsingRule("usage-rule", 2, 1);
+        assertThat(first.total()).isEqualTo(2); assertThat(second.total()).isEqualTo(2);
+        assertThat(first.records()).extracting(io.github.opensabre.iqc.label.model.InsightLabel::getId).containsExactly("usage-1");
+        assertThat(second.records()).extracting(io.github.opensabre.iqc.label.model.InsightLabel::getId).containsExactly("usage-2");
+        when(scope.canViewAll()).thenReturn(true);
+        assertThat(service.labelsUsingRule("usage-rule", 1, 1000).total()).isEqualTo(3);
+        when(scope.canView(nullable(String.class), nullable(String.class))).thenReturn(false);
+        assertThatThrownBy(() -> service.labelsUsingRule("usage-rule", 1, 20)).hasMessageContaining("权限");
+    }
+
+    @Test
+    void unifiedPeriodicClaimsAreSerializedAndNewRunsDoNotOverwriteEarlierAttempts() throws Exception {
+        var task = unifiedScheduleFixture();
+        var now = io.github.opensabre.iqc.task.UnifiedTaskScheduleService.schedulingNow();
+        try (var workers = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var first = workers.submit(() -> unifiedSchedules.queueDue(task.getId(), now));
+            var second = workers.submit(() -> unifiedSchedules.queueDue(task.getId(), now));
+            for (var result : List.of(first, second)) {
+                try { result.get(); }
+                catch (java.util.concurrent.ExecutionException conflict) {
+                    // H2 RR can report a serialization retry instead of observing the updated locked row.
+                    Throwable cause = conflict;
+                    while (cause != null && !(cause instanceof java.sql.SQLException)) cause = cause.getCause();
+                    assertThat(cause).isInstanceOf(java.sql.SQLException.class);
+                    assertThat(((java.sql.SQLException) cause).getSQLState()).isEqualTo("40001");
+                }
+            }
+        }
+        assertThat(count("iqc_task_execution")).isEqualTo(1);
+        var queued = taskMapper.selectById(task.getId()); var first = executionMapper.selectById(queued.getCurrentExecutionId());
+        assertThat(first.getRunId()).isEqualTo(first.getId()); assertThat(first.getConfigurationSnapshotJson()).isNotNull();
+        runtimeQueue.run(task.getId(), first.getId());
+        assertThat(executionMapper.selectById(first.getId()).getStatus()).isEqualTo("SUCCEEDED");
+        var next = unifiedSchedules.queueDue(task.getId(), queued.getScheduledTime());
+        var second = executionMapper.selectById(next.getCurrentExecutionId());
+        assertThat(second.getRunId()).isEqualTo(second.getId()).isNotEqualTo(first.getRunId());
+        assertThat(second.getAttemptNo()).isEqualTo(2); assertThat(count("iqc_task_execution")).isEqualTo(2);
+        assertThat(executionMapper.selectById(first.getId()).getStatus()).isEqualTo("SUCCEEDED");
+        org.mockito.Mockito.verify(unifiedPlans, org.mockito.Mockito.times(2)).freeze(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void unifiedQueueFreezeFailureRollsBackClaimAndExecutionCreation() throws Exception {
+        var task = unifiedScheduleFixture();
+        org.mockito.Mockito.when(unifiedPlans.freeze(org.mockito.ArgumentMatchers.any())).thenThrow(new IllegalStateException("freeze rejected"));
+        assertThatThrownBy(() -> unifiedSchedules.queueDue(task.getId(), io.github.opensabre.iqc.task.UnifiedTaskScheduleService.schedulingNow()))
+                .hasMessageContaining("freeze rejected");
+        assertThat(taskMapper.selectById(task.getId()).getStatus()).isEqualTo("SCHEDULED");
+        assertThat(taskMapper.selectById(task.getId()).getCurrentExecutionId()).isNull();
+        assertThat(count("iqc_task_execution")).isZero();
     }
 
     @Test
@@ -352,7 +595,7 @@ class JointLabelMaterializationTransactionTest {
         jdbc.update("INSERT INTO iqc_label_category (id,name,code,status,version_no,created_by) VALUES ('wizard-category','标签','wizard-category','PUBLISHED',1,'system')");
         jdbc.update("INSERT INTO iqc_label_group (id,category_id,name,code,status,version_no,allow_auto_expand,created_by) VALUES ('wizard-group','wizard-category','标签组','wizard-group','PUBLISHED',1,false,'system')");
         jdbc.update("INSERT INTO iqc_label (id,group_id,name,code,target_role,weight,status,version_no,created_by) VALUES ('wizard-label','wizard-group','退款标签','wizard-label','customer',1,'PUBLISHED',1,'system')");
-        jdbc.update("INSERT INTO iqc_label_rule_binding (id,label_id,rule_id,rule_version_no,binding_role,display_order) VALUES ('wizard-binding','wizard-label','wizard-rule',1,'PRIMARY',0)");
+        jdbc.update("INSERT INTO iqc_label_rule_binding (id,label_id,rule_id,rule_version_no,rule_type,binding_role,display_order) VALUES ('wizard-binding','wizard-label','wizard-rule',1,'REGEX','PRIMARY',0)");
         jdbc.update("INSERT INTO iqc_label_value_definition (id,label_id,value_code,value_type,display_order,config_json) VALUES ('wizard-value','wizard-label','refund','BOOLEAN',0,'{}')");
         var engines = mapper.readValue("""
                 {"schemaVersion":"iqc-task-processing-v1","inspection":{"engines":[
@@ -554,7 +797,7 @@ class JointLabelMaterializationTransactionTest {
                 mapper, mock(TaskExecutionMapper.class), mock(TaskItemMapper.class),
                 mock(io.github.opensabre.iqc.shared.IqcDataScope.class), llm, mock(UsageCounterRecorder.class),
                 results, mock(io.github.opensabre.iqc.label.LabelCandidateService.class),
-                mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
+                mock(io.github.opensabre.iqc.scheme.SchemeDependencyResolver.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.UnifiedLabelPlanService.class));
 
         ReflectionTestUtils.invokeMethod(execution, "processConversation", task, "execution-integrated", snapshot, List.of(item));
 
@@ -596,7 +839,7 @@ class JointLabelMaterializationTransactionTest {
         jdbc.update("INSERT INTO iqc_label_category (id,name,code,status,version_no,created_by,owner_group_id) VALUES ('profile','画像','profile','PUBLISHED',1,'alice','g1')");
         jdbc.update("INSERT INTO iqc_label_group (id,category_id,name,code,status,version_no,allow_auto_expand,created_by,owner_group_id) VALUES ('assets','profile','资产','assets','PUBLISHED',1,false,'alice','g1')");
         jdbc.update("INSERT INTO iqc_label (id,group_id,name,code,target_role,weight,status,version_no,created_by,owner_group_id) VALUES ('house','assets','是否有房','house','customer',1,'PUBLISHED',1,'alice','g1')");
-        jdbc.update("INSERT INTO iqc_label_rule_binding (id,label_id,rule_id,rule_version_no,binding_role,display_order) VALUES ('house-binding','house','rule-1',1,'PRIMARY',0)");
+        jdbc.update("INSERT INTO iqc_label_rule_binding (id,label_id,rule_id,rule_version_no,rule_type,binding_role,display_order) VALUES ('house-binding','house','rule-1',1,'REGEX','PRIMARY',0)");
         jdbc.update("INSERT INTO iqc_label_value_definition (id,label_id,value_code,value_type,display_order,config_json) VALUES ('house-value','house','owns','BOOLEAN',0,?)",
                 "{\"onRuleHit\":{\"rule-1\":false}}");
         String alice = signedHttpIdentity("alice");
@@ -954,7 +1197,7 @@ class JointLabelMaterializationTransactionTest {
         var service = new InspectionExecutionService(taskMapper, org.mockito.Mockito.mock(io.github.opensabre.iqc.conversation.ConversationQueryService.class), mock(ConversationMapper.class), messages, observations,
                 mapper, executionMapper, taskItemMapper, scope,
                 llm, mock(UsageCounterRecorder.class), results,
-                mock(io.github.opensabre.iqc.label.LabelCandidateService.class), dependencies, org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class));
+                mock(io.github.opensabre.iqc.label.LabelCandidateService.class), dependencies, org.mockito.Mockito.mock(io.github.opensabre.iqc.task.TaskWizardRuntime.class), org.mockito.Mockito.mock(io.github.opensabre.iqc.task.UnifiedLabelPlanService.class));
         return new TrialHarness(task, service, llm, release, tasks, labelResolver);
     }
 

@@ -94,18 +94,30 @@ public class ConversationQueryService {
     /** Resolves all eligible input rows at execution, sharing the preview filter and random sampler. */
     @org.springframework.transaction.annotation.Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public List<Conversation> resolveForExecution(io.github.opensabre.iqc.task.TaskDataSelection selection) {
-        if (selection.mode() == io.github.opensabre.iqc.task.TaskDataSelection.Mode.RANDOM)
-            return preview(selection, 1, selection.sampleSize()).conversations().records();
+        var selected = new java.util.ArrayList<Conversation>();
+        visitForExecution(selection, selected::addAll);
+        return List.copyOf(selected);
+    }
+
+    /** Visits bounded pages in one database snapshot; callers must consume rather than retain full rows. */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public void visitForExecution(io.github.opensabre.iqc.task.TaskDataSelection selection,
+                                  java.util.function.Consumer<List<Conversation>> consumer) {
+        if (selection.mode() == io.github.opensabre.iqc.task.TaskDataSelection.Mode.RANDOM) {
+            var sample = preview(selection, 1, selection.sampleSize()).conversations().records();
+            for (int offset = 0; offset < sample.size(); offset += 500)
+                consumer.accept(List.copyOf(sample.subList(offset, Math.min(offset + 500, sample.size()))));
+            return;
+        }
         if (selection.mode() != io.github.opensabre.iqc.task.TaskDataSelection.Mode.FILTER)
             throw IqcException.invalidArgument("批量名单无需动态取数");
-        var selected = new java.util.ArrayList<Conversation>();
         boolean all = dataScope.canViewAll(); String owner = dataScope.owner(), group = dataScope.groupId();
         String cursor = null;
         while (true) {
             var rows = conversationMapper.selectList(filteredQuery(selection.filter(), true, all, owner, group)
                     .gt(cursor != null, Conversation::getId, cursor).orderByAsc(Conversation::getId).last("LIMIT 500"));
-            selected.addAll(rows);
-            if (rows.size() < 500) return List.copyOf(selected);
+            if (!rows.isEmpty()) consumer.accept(List.copyOf(rows));
+            if (rows.size() < 500) return;
             String next = rows.getLast().getId();
             if (next.equals(cursor)) throw IqcException.invalidState("会话分页游标未前进");
             cursor = next;

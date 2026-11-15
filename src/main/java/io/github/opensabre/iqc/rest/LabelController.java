@@ -19,6 +19,14 @@ public class LabelController {
     @ResourcePermission(code="iqc:label:view", name="查看标签树", type="iqc", description="查询洞察标签树")
     public LabelTaxonomyService.TaxonomyTree tree(@RequestParam(required=false) String keyword) { return service.tree(keyword); }
 
+    /** Current editable bindings only; historical task snapshots are queried by execution. */
+    @GetMapping("/using-rule/{ruleId}")
+    @ResourcePermission(code="iqc:label:view", name="查看规则引用标签", type="iqc", description="分页查看当前规则绑定的可见标签")
+    public io.github.opensabre.iqc.shared.IqcPage<InsightLabel> labelsUsingRule(@PathVariable String ruleId,
+            @RequestParam(defaultValue="1") long current, @RequestParam(defaultValue="20") long size) {
+        return service.labelsUsingRule(ruleId, current, size);
+    }
+
     @GetMapping("/{id}")
     @ResourcePermission(code="iqc:label:view", name="查看标签详情", type="iqc", description="查询标签值与规则绑定")
     public LabelTaxonomyService.LabelDetail detail(@PathVariable String id) { return service.detail(id); }

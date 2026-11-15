@@ -16,6 +16,21 @@ public interface IqcOrganizationClient {
     @GetMapping("/user")
     Result<OrganizationUser> getUserByUniqueId(@RequestParam("uniqueId") String uniqueId);
 
+    /** Existing generic identity, role and resource endpoints supply live scheduler authorization. */
+    @GetMapping("/user")
+    Result<AuthorizationUser> getAuthorizationUser(@RequestParam("uniqueId") String uniqueId);
+
+    @GetMapping("/role/user/{userId}")
+    Result<java.util.List<AuthorizationRole>> getUserRoles(@PathVariable("userId") String userId);
+
+    @GetMapping("/resource/role/{roleCode}")
+    Result<java.util.List<AuthorizationResource>> getRoleResources(@PathVariable("roleCode") String roleCode);
+
+    record AuthorizationUser(String id, String username, String groupId, Boolean enabled,
+                             Boolean accountNonExpired, Boolean credentialsNonExpired, Boolean accountNonLocked, String deleted) { }
+    record AuthorizationRole(String code) { }
+    record AuthorizationResource(String code, String url, String method) { }
+
     /** Registers the complete IQC HTTP permission snapshot in OpenSabre Organization. */
     @PutMapping("/internal/resource-registrations/{application}")
     Result<ResourceRegistrationResult> registerResources(@PathVariable("application") String application,

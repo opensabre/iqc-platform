@@ -157,4 +157,40 @@ class TaskEnginePlanServiceTest {
         var rule = new QualityRule(); rule.setId(id); rule.setName(id); rule.setStatus("PUBLISHED");
         rule.setRuleType(type); rule.setExpression(expression); rule.setVersionNo(2); rule.setTargetRole("all"); return rule;
     }
+    @Test void writerLocksAcrossBothOperationsBeforeFreezingInConfiguredOrder() {
+        var z = new TaskProcessingConfiguration.Engine("zEngine", TaskProcessingConfiguration.EngineType.REGEX,
+                mapper.createObjectNode().put("targetId", "check").put("ruleId", "z"));
+        var a = new TaskProcessingConfiguration.Engine("aEngine", TaskProcessingConfiguration.EngineType.REGEX,
+                mapper.createObjectNode().put("targetId", "tag").put("ruleId", "a"));
+        var request = new TaskProcessingConfiguration(TaskProcessingConfiguration.SCHEMA,
+                new TaskProcessingConfiguration.Processing(List.of(z)), new TaskProcessingConfiguration.Processing(List.of(a, z)));
+        when(rules.lockById("z")).thenReturn(rule("z", "REGEX", "退款"));
+        when(rules.lockById("a")).thenReturn(rule("a", "REGEX", "退款"));
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            var frozen = service.freeze(request);
+            var order = inOrder(rules); order.verify(rules).lockById("a"); order.verify(rules).lockById("z");
+            verifyNoMoreInteractions(rules);
+            assertThat(frozen.engines()).extracting(TaskEnginePlanService.FrozenEngine::instanceId)
+                    .containsExactly("zEngine", "aEngine", "zEngine");
+            assertThat(frozen.engines()).extracting(TaskEnginePlanService.FrozenEngine::operation)
+                    .containsExactly(Operation.INSPECTION, Operation.LABELING, Operation.LABELING);
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+    }
+
+    @Test void readonlyTransactionKeepsPreviewNonLocking() throws Exception {
+        when(rules.selectById("r1")).thenReturn(rule("r1", "REGEX", "退款"));
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+        org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionReadOnly(true);
+        try {
+            service.freeze(request(single("REGEX", "\"ruleId\":\"r1\"")));
+            verify(rules).selectById("r1"); verify(rules, never()).lockById(any());
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false);
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+        }
+    }
+
 }

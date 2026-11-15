@@ -55,7 +55,9 @@ class InspectionSchemeServiceTest {
                 new InspectionSchemeService.DraftRequest("新标题", "sales", null, "销售", definition()));
         assertThat(revised.getDraftRevision()).isEqualTo(3);
         assertThat(revised.getActivePublishedVersion()).isEqualTo(1);
-        verifyNoInteractions(versions, dependencies);
+        verifyNoInteractions(versions);
+        verify(dependencies).validateDraftRuleReferences(any());
+        verifyNoMoreInteractions(dependencies);
     }
 
     @Test
@@ -332,7 +334,9 @@ class InspectionSchemeServiceTest {
         service.revise("scheme", 2, new InspectionSchemeService.DraftRequest("修正标准", "sales", null, "销售", definition()));
         assertThat(scheme.getStatus()).isEqualTo("DISABLED");
         assertThat(scheme.getActivePublishedVersion()).isEqualTo(1);
-        verifyNoInteractions(versions, dependencies);
+        verifyNoInteractions(versions);
+        verify(dependencies).validateDraftRuleReferences(any());
+        verifyNoMoreInteractions(dependencies);
     }
 
     @Test
@@ -447,4 +451,16 @@ class InspectionSchemeServiceTest {
         assertThatThrownBy(() -> new SchemeDefinition(SchemeDefinition.SCHEMA, original.items(), null, wrong))
                 .hasMessageContaining("评分项目");
     }
+    @Test void disabledRuleCannotBeSavedInNewOrRevisedDraft() {
+        doThrow(io.github.opensabre.iqc.governance.IqcException.invalidState("规则已停用"))
+                .when(dependencies).validateDraftRuleReferences(any());
+        var request = new InspectionSchemeService.DraftRequest("标题", "sales", null, "销售", definition());
+        assertThatThrownBy(() -> service.create(request)).hasMessageContaining("停用");
+        assertThatThrownBy(() -> service.revise("scheme", 2, request)).hasMessageContaining("停用");
+        assertThat(scheme.getDraftRevision()).isEqualTo(2);
+        verify(schemes, never()).insert(any(InspectionScheme.class));
+        verify(schemes, never()).updateById(any(InspectionScheme.class));
+        verifyNoInteractions(versions);
+    }
+
 }

@@ -96,7 +96,16 @@ public class QualityRuleSetService {
         List<String> normalized = ids == null ? List.of() : ids.stream().filter(value -> value != null && !value.isBlank()).map(String::trim).distinct().toList();
         if (normalized.isEmpty()) throw IqcException.invalidArgument("规则集至少包含一条规则");
         if (normalized.size() > 100) throw IqcException.invalidArgument("规则集最多包含 100 条规则");
-        for (String id : normalized) { QualityRule rule = ruleMapper.selectById(id); if (rule == null) throw IqcException.invalidArgument("规则不存在: " + id); if (requirePublished && !"PUBLISHED".equals(rule.getStatus())) throw IqcException.invalidArgument("规则集只能引用已发布规则: " + id); }
+        boolean writing = org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+                && !org.springframework.transaction.support.TransactionSynchronizationManager.isCurrentTransactionReadOnly();
+        var locked = new java.util.HashMap<String, QualityRule>();
+        // Writers retain locks until their reference/version commit; read-only lookups remain non-locking.
+        if (writing) normalized.stream().sorted().forEach(id -> locked.put(id, ruleMapper.lockById(id)));
+        for (String id : normalized) {
+            QualityRule rule = writing ? locked.get(id) : ruleMapper.selectById(id);
+            if (rule == null || "DISABLED".equals(rule.getStatus())) throw IqcException.invalidArgument("规则不存在或已停用: " + id);
+            if (requirePublished && !"PUBLISHED".equals(rule.getStatus())) throw IqcException.invalidArgument("规则集只能引用已发布规则: " + id);
+        }
         return normalized;
     }
 

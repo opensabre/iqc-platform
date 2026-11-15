@@ -95,11 +95,24 @@ public class InspectionTaskService {
     @Transactional
     public InspectionTask createWithProcessing(String name, TaskDataSelection selection, Integer concurrency,
                                                TaskWizardSnapshot snapshot) {
+        return createWithProcessing(name, selection, concurrency, snapshot, null);
+    }
+
+    /** Persist references separately from the validation preview for execution-time freezing. */
+    @Transactional
+    public InspectionTask createWithProcessing(String name, TaskDataSelection selection, Integer concurrency,
+                                               TaskWizardSnapshot snapshot, UnifiedLabelPlanService.Configuration configuration) {
         return createSelected(name, selection, concurrency, task -> {
+            task.setUnifiedConfigurationJson(configuration == null ? null : writeSnapshot(configuration));
             task.setRuleSnapshotJson(writeSnapshot(snapshot));
             task.setRuleIdsJson(writeSnapshot(snapshot.enginePlan().engines().stream()
-                    .map(engine -> engine.configuration().path("ruleId").asText()).distinct().toList()));
-            var labels = snapshot.resultProcessing().labelSnapshot();
+                    .flatMap(engine -> {
+                        var config = engine.configuration();
+                        if (config.path("tags").isArray()) return java.util.stream.StreamSupport.stream(
+                                config.path("tags").spliterator(), false).map(tag -> tag.path("ruleId").asText());
+                        return java.util.stream.Stream.of(config.path("ruleId").asText());
+                    }).filter(id -> !id.isBlank()).distinct().toList()));
+            var labels = snapshot.unifiedLabels() != null ? snapshot.unifiedLabels() : snapshot.resultProcessing().labelSnapshot();
             task.setLabelScopeSnapshotJson(labels.isNull() ? null : writeSnapshot(labels));
             task.setRunCount(1); task.setQueuePriority(0L); task.setPauseRequested(false); task.setCancelRequested(false);
         });
@@ -548,7 +561,7 @@ public class InspectionTaskService {
     @Transactional
     public List<InspectionTask> materializeDue(LocalDateTime now) {
         List<InspectionTask> due = taskMapper.selectList(Wrappers.<InspectionTask>lambdaQuery()
-                .eq(InspectionTask::getStatus, "SCHEDULED").le(InspectionTask::getScheduledTime, now)
+                .eq(InspectionTask::getStatus, "SCHEDULED").isNull(InspectionTask::getTriggerConfigurationJson).le(InspectionTask::getScheduledTime, now)
                 .orderByDesc(InspectionTask::getQueuePriority)
                 .orderByAsc(InspectionTask::getScheduledTime).orderByAsc(InspectionTask::getCreatedTime).last("LIMIT 20"));
         List<InspectionTask> ready = new ArrayList<>();
@@ -606,9 +619,12 @@ public class InspectionTaskService {
         task.setRuleSetId(effectiveRuleSetId); task.setRuleIdsJson(writeSnapshot(ruleIds));
         task.setAgentId(mode == TaskExecutionStrategy.Mode.RULE_ONLY ? null : agentId);
         task.setAgentSnapshotJson(mode == TaskExecutionStrategy.Mode.RULE_ONLY ? null : writeSnapshot(agent));
+        // Retain lifecycle locks until the task snapshot commits, without reordering execution.
+        var lockedRules = new java.util.HashMap<String, QualityRule>();
+        ruleIds.stream().sorted().forEach(id -> lockedRules.put(id, ruleMapper.lockById(id)));
         List<QualityRule> rules = new ArrayList<>();
         for (String ruleId : ruleIds) {
-            QualityRule rule = ruleMapper.selectById(ruleId);
+            QualityRule rule = lockedRules.get(ruleId);
             if (rule == null || !"PUBLISHED".equals(rule.getStatus())) throw IqcException.invalidArgument("只能选择已发布规则");
             rules.add(rule);
         }
@@ -767,12 +783,27 @@ public class InspectionTaskService {
                         .eq(TaskExecution::getTaskId, taskId).orderByAsc(TaskExecution::getAttemptNo))
                 .stream().map(execution -> new TaskRunSummary(execution.getId(), execution.getAttemptNo(),
                         execution.getStatus(), execution.getProcessedMessages(), execution.getFailedMessages(),
-                        execution.getCreatedTime(), execution.getId().equals(task.getCurrentExecutionId())))
+                        execution.getCreatedTime(), execution.getId().equals(task.getCurrentExecutionId()), execution.getRunId()))
                 .toList();
     }
 
+    /** Reads one immutable attempt only after task authorization and execution ownership checks. */
+    public TaskExecutionSnapshot executionSnapshot(String taskId, String executionId) {
+        get(taskId);
+        var execution = executionMapper.selectById(executionId);
+        if (execution == null || !taskId.equals(execution.getTaskId()))
+            throw IqcException.notFound("任务执行记录不存在");
+        if (execution.getConfigurationSnapshotJson() == null || execution.getSelectionSnapshotJson() == null
+                || execution.getRunId() == null) throw IqcException.invalidState("执行缺少完整冻结快照");
+        return new TaskExecutionSnapshot(execution.getId(), execution.getRunId(), execution.getAttemptNo(),
+                execution.getStatus(), execution.getConfigurationSnapshotJson(), execution.getSelectionSnapshotJson());
+    }
+
+    public record TaskExecutionSnapshot(String executionId, String runId, Integer attemptNo, String status,
+                                        String configurationSnapshotJson, String selectionSnapshotJson) { }
+
     public record TaskRunSummary(String id, Integer attemptNo, String status, Integer processedMessages,
-                                 Integer failedMessages, java.util.Date createdTime, boolean current) { }
+                                 Integer failedMessages, java.util.Date createdTime, boolean current, String runId) { }
 
     @Transactional
     public InspectionTask cancel(String id) {
@@ -784,6 +815,7 @@ public class InspectionTaskService {
         int cancelled = taskMapper.update(null, Wrappers.<InspectionTask>lambdaUpdate()
                 .set(InspectionTask::getStatus, targetStatus)
                 .set(InspectionTask::getCancelRequested, true)
+                .set(task.getTriggerConfigurationJson() != null, InspectionTask::getEnabled, false)
                 .eq(InspectionTask::getId, id)
                 .in(InspectionTask::getStatus, "SCHEDULED", "MATERIALIZING", "CREATED", "QUEUED", "RUNNING", "PAUSE_REQUESTED", "PAUSED"));
         if (cancelled == 1 && !running && task.getCurrentExecutionId() != null) {

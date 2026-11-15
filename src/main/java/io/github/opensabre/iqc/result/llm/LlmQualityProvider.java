@@ -29,6 +29,11 @@ public interface LlmQualityProvider {
         return new LlmEvaluation(false, false, "当前模型适配器不支持原始响应记录");
     }
 
+    /** One semantic request containing every pending tag; unsupported providers fail explicitly. */
+    default JsonNode evaluateTagBatch(JsonNode request, JsonNode agentSnapshot, String recordId) {
+        throw new UnsupportedOperationException("当前模型适配器不支持批量标签识别");
+    }
+
     default LlmEvaluation evaluate(String content, JsonNode rule) {
         return evaluate(content, rule, null);
     }

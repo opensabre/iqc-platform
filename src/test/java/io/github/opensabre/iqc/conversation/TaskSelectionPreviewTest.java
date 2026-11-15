@@ -74,5 +74,23 @@ class TaskSelectionPreviewTest {
         verify(mapper, times(3)).selectList(any());
     }
 
+    @Test void executionVisitorDeliversEachPageBeforeFetchingTheNext() {
+        var first = new ArrayList<Conversation>();
+        for (int i = 0; i < 500; i++) first.add(row(String.format("%04d", i)));
+        var sizes = new ArrayList<Integer>();
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        when(mapper.selectList(any())).thenAnswer(call -> {
+            if (calls.getAndIncrement() == 0) return first;
+            assertThat(sizes).containsExactly(500);
+            return List.of(row("0500"));
+        });
+        service.visitForExecution(new TaskDataSelection(TaskDataSelection.Mode.FILTER, null, null, null, null),
+                rows -> sizes.add(rows.size()));
+        assertThat(sizes).containsExactly(500, 1);
+        var captured = org.mockito.ArgumentCaptor.forClass(Wrapper.class);
+        verify(mapper, times(2)).selectList(captured.capture());
+        assertThat(captured.getAllValues().get(1).getSqlSegment()).contains("id >", "LIMIT 500", "created_by", "owner_group_id");
+    }
+
     private Conversation row(String id) { Conversation row = new Conversation(); row.setId(id); return row; }
 }

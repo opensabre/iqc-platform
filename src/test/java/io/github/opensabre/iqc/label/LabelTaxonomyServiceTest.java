@@ -27,6 +27,39 @@ class LabelTaxonomyServiceTest {
     @BeforeEach
     void allowCurrentScope() {
         when(scope.canView(any(), any())).thenReturn(true);
+        when(labels.selectOne(any())).thenReturn(new InsightLabel());
+    }
+
+    @Test
+    void ruleLocksUseStableOrderWhileSavedBindingsKeepUserOrder() {
+        when(labels.selectById("label")).thenReturn(new InsightLabel());
+        when(rules.lockById("a")).thenReturn(rule("a", "REGEX"));
+        when(rules.lockById("z")).thenReturn(rule("z", "LLM"));
+        service.replaceBindings("label", List.of(new LabelTaxonomyService.BindingRequest("z"), new LabelTaxonomyService.BindingRequest("a")));
+        var locks = inOrder(rules); locks.verify(rules).lockById("a"); locks.verify(rules).lockById("z");
+        var saved = org.mockito.ArgumentCaptor.forClass(io.github.opensabre.iqc.label.model.LabelRuleBinding.class);
+        verify(bindings, times(2)).insert(saved.capture());
+        org.assertj.core.api.Assertions.assertThat(saved.getAllValues()).extracting(io.github.opensabre.iqc.label.model.LabelRuleBinding::getRuleId)
+                .containsExactly("z", "a");
+    }
+
+    @Test
+    void explicitEmptyBindingsCreateDraftRevisionAndDoNotResolveRules() {
+        var label = new InsightLabel(); label.setId("label"); label.setStatus("PUBLISHED"); label.setVersionNo(3);
+        when(labels.selectById("label")).thenReturn(label); when(labels.selectOne(any())).thenReturn(label);
+        when(bindings.selectList(any())).thenReturn(List.of());
+        service.replaceBindings("label", List.of());
+        org.assertj.core.api.Assertions.assertThat(label.getStatus()).isEqualTo("DRAFT");
+        org.assertj.core.api.Assertions.assertThat(label.getVersionNo()).isEqualTo(4);
+        verify(labels).updateById(label); verify(bindings).delete(any()); verifyNoInteractions(rules);
+        assertThatThrownBy(() -> service.publish("label")).hasMessageContaining("绑定已发布规则");
+    }
+
+    @Test
+    void omittedBindingsDoNotAccidentallyClearExistingRules() {
+        when(labels.selectById("label")).thenReturn(new InsightLabel());
+        assertThatThrownBy(() -> service.replaceBindings("label", null)).hasMessageContaining("数组");
+        verify(bindings, never()).delete(any()); verify(labels, never()).updateById(any(InsightLabel.class));
     }
 
     @Test
@@ -73,4 +106,29 @@ class LabelTaxonomyServiceTest {
 
         assertThatThrownBy(() -> service.detail("label-1")).isInstanceOf(IqcException.class).hasMessageContaining("无权");
     }
+    @Test
+    void sameTypeRulesAreRejectedBeforeAnyBindingOrLabelIsChanged() {
+        when(labels.selectById("label")).thenReturn(new InsightLabel());
+        var first = rule("r1", "REGEX"); var second = rule("r2", "REGEX");
+        when(rules.lockById("r1")).thenReturn(first); when(rules.lockById("r2")).thenReturn(second);
+        assertThatThrownBy(() -> service.replaceBindings("label", List.of(
+                new LabelTaxonomyService.BindingRequest("r1"), new LabelTaxonomyService.BindingRequest("r2"))))
+                .isInstanceOf(IqcException.class).hasMessageContaining("最多绑定一条");
+        verifyNoInteractions(bindings); verify(labels, never()).updateById(any(InsightLabel.class));
+    }
+    @Test
+    void oneRuleCanBeReusedByLabelsAndEachBindingStoresItsTypeAndVersion() {
+        when(labels.selectById(anyString())).thenReturn(new InsightLabel());
+        when(rules.lockById("r1")).thenReturn(rule("r1", "REGEX"));
+        when(rules.lockById("r2")).thenReturn(rule("r2", "LLM"));
+        when(bindings.selectList(any())).thenReturn(List.of());
+        service.replaceBindings("label1", List.of(new LabelTaxonomyService.BindingRequest("r1"), new LabelTaxonomyService.BindingRequest("r2")));
+        service.replaceBindings("label2", List.of(new LabelTaxonomyService.BindingRequest("r1")));
+        verify(bindings).insert(argThat((io.github.opensabre.iqc.label.model.LabelRuleBinding b) -> "label1".equals(b.getLabelId()) && "r1".equals(b.getRuleId()) && "REGEX".equals(b.getRuleType()) && b.getRuleVersionNo() == 2));
+        verify(bindings).insert(argThat((io.github.opensabre.iqc.label.model.LabelRuleBinding b) -> "label2".equals(b.getLabelId()) && "r1".equals(b.getRuleId())));
+    }
+    private io.github.opensabre.iqc.rule.model.QualityRule rule(String id, String type) {
+        var r = new io.github.opensabre.iqc.rule.model.QualityRule(); r.setId(id); r.setRuleType(type); r.setVersionNo(2); r.setStatus("PUBLISHED"); return r;
+    }
+
 }

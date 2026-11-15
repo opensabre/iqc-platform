@@ -17,6 +17,19 @@ import static org.mockito.Mockito.*;
 
 class SchemeDependencyResolverTest {
     @Test
+    void readOnlyPreviewDoesNotRequestRuleWriteLocks() {
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+        org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionReadOnly(true);
+        try {
+            resolver.resolve(InspectionSchemeServiceTest.definition());
+            verify(rules).selectById("rule"); verify(rules, never()).lockById(any());
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+            org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+    }
+
+    @Test
     void routeDefinitionsResolveAndMalformedRouteTaskCannotStart() {
         var old = InspectionSchemeServiceTest.definition(); var item = old.items().getFirst();
         var routed = new SchemeDefinition(old.schemaVersion(), java.util.List.of(new SchemeDefinition.Item(
@@ -352,6 +365,16 @@ class SchemeDependencyResolverTest {
         assertThat(resolved.rules().get(1).path("expression").asText()).isEqualTo("product");
         assertThat(resolved.rules().get(1).path("deduction").asInt()).isZero();
         assertThat(resolved.rules().get(1).path("veto").asBoolean()).isFalse();
+        when(rules.lockById("rule")).thenReturn(current); when(rules.lockById("gate")).thenReturn(gateRule);
+        when(versions.selectOne(any(Wrapper.class))).thenReturn(version, gateVersion);
+        clearInvocations(rules);
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            var written = resolver.resolve(conditional);
+            assertThat(written.rules()).extracting(node -> node.path("id").asText()).containsExactly("rule", "gate");
+            var locks = inOrder(rules); locks.verify(rules).lockById("gate"); locks.verify(rules).lockById("rule");
+            verify(rules, never()).selectById(any(String.class));
+        } finally { org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false); }
         gateRule.setStatus("DISABLED");
         assertThatThrownBy(() -> resolver.resolve(conditional)).hasMessageContaining("停用");
     }
@@ -505,4 +528,37 @@ class SchemeDependencyResolverTest {
         doThrow(io.github.opensabre.iqc.governance.IqcException.invalidState("模型已停用")).when(assets).validate(any());
         assertThatThrownBy(() -> resolver.resolve(definition)).hasMessageContaining("停用");
     }
+    @Test void draftLocksDetectorsGatesAndEveryAlternativeWithoutResolvingPublishedVersions() {
+        var original = InspectionSchemeServiceTest.definition();
+        var prefilter = new SchemeDefinition.Execution(SchemeDefinition.Route.RULE_THEN_LLM,
+                new SchemeDefinition.RuleReference("a", 1), null, null, true);
+        var candidate = new SchemeDefinition.Execution(SchemeDefinition.Route.LLM_THEN_RULE, null,
+                new SchemeDefinition.RuleReference("z", 1), null, null);
+        var variants = new SchemeExecutionVariants("first", java.util.List.of(
+                new SchemeExecutionVariants.Variant("first", "初筛", "覆盖", "本地", java.util.Map.of("greeting", prefilter)),
+                new SchemeExecutionVariants.Variant("second", "候选", "覆盖", "模型", java.util.Map.of("greeting", candidate))));
+        var item = original.items().getFirst();
+        var draft = new SchemeDefinition(original.schemaVersion(), java.util.List.of(new SchemeDefinition.Item(
+                item.itemCode(), item.name(), item.rule(), SchemeDefinition.HitMeaning.VIOLATION, new SchemeDefinition.RuleReference("gate", 1))),
+                null, original.scoring(), null, null, variants);
+        for (var id : java.util.List.of("rule", "gate", "z", "a")) {
+            var current = new QualityRule(); current.setId(id); current.setStatus("DRAFT");
+            when(rules.lockById(id)).thenReturn(current);
+        }
+        resolver.validateDraftRuleReferences(draft);
+        var order = inOrder(rules);
+        for (var id : java.util.List.of("a", "gate", "rule", "z")) order.verify(rules).lockById(id);
+        verifyNoInteractions(versions, agents, agentVersions, labels, assets);
+    }
+
+    @Test void draftRejectsMissingAndDisabledRulesBeforeVersionResolution() {
+        assertThatThrownBy(() -> resolver.validateDraftRuleReferences(InspectionSchemeServiceTest.definition()))
+                .hasMessageContaining("不存在或已停用");
+        var disabled = new QualityRule(); disabled.setStatus("DISABLED");
+        when(rules.lockById("rule")).thenReturn(disabled);
+        assertThatThrownBy(() -> resolver.validateDraftRuleReferences(InspectionSchemeServiceTest.definition()))
+                .hasMessageContaining("停用");
+        verifyNoInteractions(versions, agents, agentVersions, labels, assets);
+    }
+
 }

@@ -21,6 +21,11 @@ public class InspectionTask extends BasePo {
     private String ruleIdsJson;
     private String agentSnapshotJson;
     private String ruleSnapshotJson;
+    /** Unified task references, resolved again when the first execution is queued. */
+    private String unifiedConfigurationJson;
+    /** Server-owned trigger plus captured IQC access bound; selection remains independent. */
+    private String triggerConfigurationJson;
+    private Boolean enabled;
     private String labelScopeSnapshotJson;
     private Integer runCount;
     private java.math.BigDecimal confidenceThreshold;

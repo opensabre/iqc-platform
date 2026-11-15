@@ -71,6 +71,7 @@ public class InspectionExecutionService {
     private final LabelCandidateService labelCandidateService;
     private final io.github.opensabre.iqc.scheme.SchemeDependencyResolver schemeDependencies;
     private final io.github.opensabre.iqc.task.TaskWizardRuntime wizardRuntime;
+    private final io.github.opensabre.iqc.task.UnifiedLabelPlanService unifiedPlans;
     private final Map<String, DlsEngine.Compiled> dlsCompileCache = Collections.synchronizedMap(
             new LinkedHashMap<>(32, 0.75f, true) {
                 @Override protected boolean removeEldestEntry(Map.Entry<String, DlsEngine.Compiled> eldest) {
@@ -92,6 +93,8 @@ public class InspectionExecutionService {
     private InspectionTask queue(String taskId, boolean enforceDataScope) {
         InspectionTask task = taskMapper.selectById(taskId);
         if (task == null) throw IqcException.notFound("质检任务不存在: " + taskId);
+        if (task.getTriggerConfigurationJson() != null && !Boolean.TRUE.equals(task.getEnabled()))
+            throw IqcException.invalidState("任务已停用");
         if (enforceDataScope && !dataScope.canView(task.getCreatedBy(), task.getOwnerGroupId())) throw IqcException.accessDenied("无权执行该质检任务");
         if ("CREATED".equals(task.getStatus()) || "FAILED".equals(task.getStatus()) || "PARTIAL_FAILED".equals(task.getStatus())) {
             JsonNode snapshot = readSnapshot(task.getRuleSnapshotJson());
@@ -126,23 +129,31 @@ public class InspectionExecutionService {
                     .eq(InspectionTask::getStatus, previousStatus));
             if (claimed != 1) throw IqcException.invalidState("任务正在被其他请求处理");
             task.setStatus("QUEUED");
-            if (previousExecutionId == null) materializeRuntimeSelection(task, enforceDataScope);
+            if (previousExecutionId == null) {
+                freezeUnifiedDefinition(task, enforceDataScope);
+                materializeRuntimeSelection(task, enforceDataScope);
+            }
             int attempt = task.getAttemptCount() == null ? 1 : task.getAttemptCount() + 1;
             TaskExecution execution = new TaskExecution();
             execution.setTaskId(taskId); execution.setAttemptNo(attempt); execution.setStatus("QUEUED"); execution.setProcessedMessages(0); execution.setFailedMessages(0);
             execution.setProcessedMessages(successfulMessages);
+            freezeExecution(task, execution, previousExecutionId);
             executionMapper.insert(execution);
             List<String> conversationIds = conversationIds(task);
-            List<ConversationMessage> messages = conversationIds.isEmpty() ? List.of() : messageMapper.selectList(Wrappers.<ConversationMessage>lambdaQuery()
-                    .in(ConversationMessage::getConversationId, conversationIds)
-                    .orderByAsc(ConversationMessage::getConversationId).orderByAsc(ConversationMessage::getSequenceNo));
-            int batchSequence = 0;
-            for (ConversationMessage message : messages) {
-                if (retryMessageIds != null && !retryMessageIds.contains(message.getId())) continue;
-                TaskItem item = new TaskItem();
-                item.setTaskId(taskId); item.setExecutionId(execution.getId()); item.setMessageId(message.getId());
-                item.setConversationId(message.getConversationId()); item.setSequenceNo(++batchSequence); item.setStatus("PENDING"); item.setAttemptCount(0);
-                taskItemMapper.insert(item);
+            if (task.getUnifiedConfigurationJson() != null) {
+                createUnifiedItems(task, execution.getId(), conversationIds, retryMessageIds);
+            } else {
+                List<ConversationMessage> messages = conversationIds.isEmpty() ? List.of() : messageMapper.selectList(Wrappers.<ConversationMessage>lambdaQuery()
+                        .in(ConversationMessage::getConversationId, conversationIds)
+                        .orderByAsc(ConversationMessage::getConversationId).orderByAsc(ConversationMessage::getSequenceNo));
+                int batchSequence = 0;
+                for (ConversationMessage message : messages) {
+                    if (retryMessageIds != null && !retryMessageIds.contains(message.getId())) continue;
+                    TaskItem item = new TaskItem();
+                    item.setTaskId(taskId); item.setExecutionId(execution.getId()); item.setMessageId(message.getId());
+                    item.setConversationId(message.getConversationId()); item.setSequenceNo(++batchSequence); item.setStatus("PENDING"); item.setAttemptCount(0);
+                    taskItemMapper.insert(item);
+                }
             }
             task = taskMapper.selectById(taskId);
             task.setCurrentExecutionId(execution.getId()); task.setAttemptCount(attempt);
@@ -151,6 +162,81 @@ public class InspectionExecutionService {
             return task;
         } else {
             throw IqcException.taskNotExecutable("当前任务状态不可重复执行: " + task.getStatus());
+        }
+    }
+
+    /** Materialize at most 500 messages at a time; tuple cursors preserve duplicate sequence numbers. */
+    private void createUnifiedItems(InspectionTask task, String executionId, List<String> conversations, Set<String> retryIds) {
+        int sequence = 0;
+        for (String conversation : conversations) {
+            Integer cursorSequence = null;
+            String cursorId = null;
+            while (true) {
+                var query = Wrappers.<ConversationMessage>lambdaQuery().eq(ConversationMessage::getConversationId, conversation);
+                if (cursorId != null) {
+                    Integer previousSequence = cursorSequence; String previousId = cursorId;
+                    query.and(q -> q.gt(ConversationMessage::getSequenceNo, previousSequence)
+                            .or(next -> next.eq(ConversationMessage::getSequenceNo, previousSequence).gt(ConversationMessage::getId, previousId)));
+                }
+                var rows = messageMapper.selectList(query.orderByAsc(ConversationMessage::getSequenceNo)
+                        .orderByAsc(ConversationMessage::getId).last("LIMIT 500"));
+                for (var message : rows) {
+                    if (retryIds != null && !retryIds.contains(message.getId())) continue;
+                    var item = new TaskItem(); item.setTaskId(task.getId()); item.setExecutionId(executionId);
+                    item.setConversationId(conversation); item.setMessageId(message.getId()); item.setSequenceNo(++sequence);
+                    item.setStatus("PENDING"); item.setAttemptCount(0); taskItemMapper.insert(item);
+                }
+                if (rows.size() < 500) break;
+                var last = rows.getLast();
+                if (last.getId().equals(cursorId)) throw IqcException.invalidState("消息分页游标未前进");
+                cursorSequence = last.getSequenceNo(); cursorId = last.getId();
+            }
+        }
+    }
+
+    /** ALL and SELECTED resolve under the executing user's scope, never from client-provided snapshots. */
+    private void freezeUnifiedDefinition(InspectionTask task, boolean userExecution) {
+        if (task.getUnifiedConfigurationJson() == null) return;
+        if (!userExecution) throw IqcException.invalidState("统一任务需在授权用户上下文中冻结配置");
+        io.github.opensabre.iqc.task.UnifiedLabelPlanService.Configuration definition;
+        try {
+            definition = objectMapper.readValue(task.getUnifiedConfigurationJson(),
+                    io.github.opensabre.iqc.task.UnifiedLabelPlanService.Configuration.class);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException failure) {
+            throw IqcException.invalidArgument("统一任务定义无法读取");
+        }
+        var snapshot = unifiedPlans.freeze(definition);
+        task.setRuleSnapshotJson(writeJson(snapshot));
+        task.setLabelScopeSnapshotJson(writeJson(snapshot.unifiedLabels()));
+        task.setRuleIdsJson(writeJson(snapshot.enginePlan().engines().stream()
+                .flatMap(engine -> java.util.stream.StreamSupport.stream(engine.configuration().path("tags").spliterator(), false))
+                .map(tag -> tag.path("ruleId").asText()).filter(id -> !id.isBlank()).distinct().toList()));
+        taskMapper.updateById(task);
+    }
+
+    /** Capture wizard state in the queue transaction; retries and resumes inherit the original selection. */
+    private void freezeExecution(InspectionTask task, TaskExecution execution, String previousId) {
+        JsonNode configuration = readSnapshot(task.getRuleSnapshotJson());
+        if (configuration == null || !io.github.opensabre.iqc.task.TaskWizardSnapshot.SCHEMA.equals(
+                configuration.path("schemaVersion").asText())) return;
+        TaskExecution previous = previousId == null ? null : executionMapper.selectById(previousId);
+        if (previousId != null && previous == null) throw IqcException.invalidState("原执行记录不存在");
+        if (previous != null && !task.getId().equals(previous.getTaskId()))
+            throw IqcException.invalidState("执行快照不属于当前任务");
+        if (execution.getId() == null) execution.setId(com.baomidou.mybatisplus.core.toolkit.IdWorker.getIdStr());
+        if (previous != null && (previous.getRunId() == null || previous.getConfigurationSnapshotJson() == null
+                || previous.getSelectionSnapshotJson() == null)) throw IqcException.invalidState("重试执行缺少完整冻结快照");
+        execution.setRunId(previous == null ? execution.getId() : previous.getRunId());
+        execution.setConfigurationSnapshotJson(previous == null ? task.getRuleSnapshotJson() : previous.getConfigurationSnapshotJson());
+        if (previous != null) {
+            execution.setSelectionSnapshotJson(previous.getSelectionSnapshotJson());
+        } else {
+            ObjectNode selection = objectMapper.createObjectNode();
+            selection.put("schemaVersion", "iqc-execution-selection-v1");
+            selection.set("definition", readSnapshot(task.getSelectionFilterJson()));
+            selection.set("conversationIds", objectMapper.valueToTree(conversationIds(task)));
+            selection.set("totalMessages", objectMapper.valueToTree(task.getTotalMessages()));
+            execution.setSelectionSnapshotJson(writeJson(selection));
         }
     }
 
@@ -177,13 +263,23 @@ public class InspectionExecutionService {
             selection = new TaskDataSelection(selection.mode(), List.of(), selection.filter(), selection.sampleSize(), seed);
             ((ObjectNode) definition).put("runtimeSeed", seed);
         }
-        List<Conversation> selected = conversationQueryService.resolveForExecution(selection);
-        if (selected.isEmpty()) throw IqcException.invalidState("NO_DATA: 没有满足条件的会话，可调整条件后重新执行");
+        var selectedIds = new ArrayList<String>();
+        int[] totalMessages = {0};
+        java.util.function.Consumer<List<Conversation>> consume = rows -> {
+            for (var row : rows) {
+                selectedIds.add(row.getId());
+                totalMessages[0] = Math.addExact(totalMessages[0], row.getMessageCount() == null ? 0 : row.getMessageCount());
+            }
+        };
+        if (task.getUnifiedConfigurationJson() != null) conversationQueryService.visitForExecution(selection, consume);
+        else consume.accept(conversationQueryService.resolveForExecution(selection));
+        if (selectedIds.isEmpty() && task.getUnifiedConfigurationJson() == null)
+            throw IqcException.invalidState("NO_DATA: 没有满足条件的会话，可调整条件后重新执行");
         ((ObjectNode) definition).put("resolvedAt", java.time.Instant.now().toString());
         task.setSelectionFilterJson(writeJson(definition));
-        task.setConversationIdsJson(writeJson(selected.stream().map(Conversation::getId).toList()));
-        task.setConversationId(selected.size() == 1 ? selected.getFirst().getId() : null);
-        task.setTotalMessages(selected.stream().map(Conversation::getMessageCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum());
+        task.setConversationIdsJson(writeJson(selectedIds));
+        task.setConversationId(selectedIds.size() == 1 ? selectedIds.getFirst() : null);
+        task.setTotalMessages(totalMessages[0]);
         taskMapper.updateById(task);
 
     }
@@ -248,6 +344,12 @@ public class InspectionExecutionService {
         }
         task.setStatus("RUNNING");
         execution.setStatus("RUNNING"); executionMapper.updateById(execution);
+        // Wizard attempts execute their own immutable configuration, including after a retry.
+        var definitionSnapshot = readSnapshot(task.getRuleSnapshotJson());
+        if (definitionSnapshot != null && io.github.opensabre.iqc.task.TaskWizardSnapshot.SCHEMA.equals(definitionSnapshot.path("schemaVersion").asText())
+                && (execution.getConfigurationSnapshotJson() == null || execution.getRunId() == null))
+            throw IqcException.invalidState("执行缺少冻结配置或运行轮次");
+        if (execution.getConfigurationSnapshotJson() != null) task.setRuleSnapshotJson(execution.getConfigurationSnapshotJson());
         JsonNode ruleSnapshot = readSnapshot(task.getRuleSnapshotJson());
         // An asset can be disabled while this task waits in the executor queue. Check before any conversation work.
         io.github.opensabre.iqc.scheme.SchemeDependencyResolver.validateRouteTaskProjection(ruleSnapshot,
@@ -255,23 +357,31 @@ public class InspectionExecutionService {
         io.github.opensabre.iqc.scheme.SchemeDependencyResolver.validateJointTaskProjection(ruleSnapshot,
                 task.getLabelScopeSnapshotJson(), objectMapper);
         schemeDependencies.validateTaskDependencies(ruleSnapshot);
-        List<TaskItem> items = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
-                .eq(TaskItem::getExecutionId, executionId).orderByAsc(TaskItem::getSequenceNo));
-        int previouslyProcessed = Math.max(0, (task.getTotalMessages() == null ? items.size() : task.getTotalMessages()) - items.size());
-        Map<String, List<TaskItem>> byConversation = items.stream().collect(java.util.stream.Collectors.groupingBy(
-                item -> item.getConversationId() == null ? "legacy" : item.getConversationId(), LinkedHashMap::new, java.util.stream.Collectors.toList()));
-        int concurrency = Math.min(Math.max(1, task.getConcurrencyLimit() == null ? 1 : task.getConcurrencyLimit()), Math.max(1, byConversation.size()));
-        InspectionTask executionTask = task;
-        // A batch parallelizes conversations, while messages inside one conversation keep their original order.
-        try (ExecutorService workers = Executors.newFixedThreadPool(concurrency, Thread.ofPlatform().name("iqc-conversation-", 0).factory())) {
-            List<Future<?>> futures = new ArrayList<>();
-            for (List<TaskItem> conversationItems : byConversation.values()) {
-                futures.add(workers.submit(() -> processConversation(executionTask, executionId, ruleSnapshot, conversationItems)));
-            }
-            for (Future<?> future : futures) {
-                try { future.get(); }
-                catch (InterruptedException exception) { Thread.currentThread().interrupt(); throw new IllegalStateException("质检批次执行被中断", exception); }
-                catch (java.util.concurrent.ExecutionException exception) { throw new IllegalStateException("质检批次并发执行失败", exception.getCause()); }
+        boolean paged = task.getUnifiedConfigurationJson() != null;
+        int previouslyProcessed;
+        if (paged) {
+            long count = taskItemMapper.selectCount(Wrappers.<TaskItem>lambdaQuery().eq(TaskItem::getExecutionId, executionId));
+            previouslyProcessed = Math.max(0, (task.getTotalMessages() == null ? Math.toIntExact(count) : task.getTotalMessages()) - Math.toIntExact(count));
+            runUnifiedConversations(task, executionId, ruleSnapshot);
+        } else {
+            List<TaskItem> items = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
+                    .eq(TaskItem::getExecutionId, executionId).orderByAsc(TaskItem::getSequenceNo));
+            previouslyProcessed = Math.max(0, (task.getTotalMessages() == null ? items.size() : task.getTotalMessages()) - items.size());
+            Map<String, List<TaskItem>> byConversation = items.stream().collect(java.util.stream.Collectors.groupingBy(
+                    item -> item.getConversationId() == null ? "legacy" : item.getConversationId(), LinkedHashMap::new, java.util.stream.Collectors.toList()));
+            int concurrency = Math.min(Math.max(1, task.getConcurrencyLimit() == null ? 1 : task.getConcurrencyLimit()), Math.max(1, byConversation.size()));
+            InspectionTask executionTask = task;
+            // A batch parallelizes conversations, while messages inside one conversation keep their original order.
+            try (ExecutorService workers = Executors.newFixedThreadPool(concurrency, Thread.ofPlatform().name("iqc-conversation-", 0).factory())) {
+                List<Future<?>> futures = new ArrayList<>();
+                for (List<TaskItem> conversationItems : byConversation.values()) {
+                    futures.add(workers.submit(() -> processConversation(executionTask, executionId, ruleSnapshot, conversationItems)));
+                }
+                for (Future<?> future : futures) {
+                    try { future.get(); }
+                    catch (InterruptedException exception) { Thread.currentThread().interrupt(); throw new IllegalStateException("质检批次执行被中断", exception); }
+                    catch (java.util.concurrent.ExecutionException exception) { throw new IllegalStateException("质检批次并发执行失败", exception.getCause()); }
+                }
             }
         }
         task = taskMapper.selectById(taskId);
@@ -284,10 +394,18 @@ public class InspectionExecutionService {
         }
         // Batch commits update locked database rows, not the worker's original objects.
         // Aggregate committed progress so both legacy and item-route execution use the same source of truth.
-        List<TaskItem> committedItems = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
-                .eq(TaskItem::getExecutionId, executionId).orderByAsc(TaskItem::getSequenceNo));
-        int processed = previouslyProcessed + (int) committedItems.stream().filter(item -> List.of("SUCCEEDED", "FAILED", "CANCELLED").contains(item.getStatus())).count();
-        int failed = (int) committedItems.stream().filter(item -> "FAILED".equals(item.getStatus())).count();
+        int processed, failed;
+        if (paged) {
+            processed = previouslyProcessed + Math.toIntExact(taskItemMapper.selectCount(Wrappers.<TaskItem>lambdaQuery()
+                    .eq(TaskItem::getExecutionId, executionId).in(TaskItem::getStatus, List.of("SUCCEEDED", "FAILED", "CANCELLED"))));
+            failed = Math.toIntExact(taskItemMapper.selectCount(Wrappers.<TaskItem>lambdaQuery()
+                    .eq(TaskItem::getExecutionId, executionId).eq(TaskItem::getStatus, "FAILED")));
+        } else {
+            List<TaskItem> committedItems = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
+                    .eq(TaskItem::getExecutionId, executionId).orderByAsc(TaskItem::getSequenceNo));
+            processed = previouslyProcessed + (int) committedItems.stream().filter(item -> List.of("SUCCEEDED", "FAILED", "CANCELLED").contains(item.getStatus())).count();
+            failed = (int) committedItems.stream().filter(item -> "FAILED".equals(item.getStatus())).count();
+        }
         task.setProcessedMessages(processed); task.setFailedMessages(failed);
         if ("PAUSE_REQUESTED".equals(task.getStatus())) {
             task.setStatus("PAUSED"); taskMapper.updateById(task);
@@ -297,6 +415,33 @@ public class InspectionExecutionService {
         task.setStatus(failed > 0 ? "PARTIAL_FAILED" : "SUCCEEDED"); taskMapper.updateById(task);
         execution.setProcessedMessages(processed); execution.setFailedMessages(failed); execution.setStatus(failed > 0 ? "PARTIAL_FAILED" : "SUCCEEDED"); executionMapper.updateById(execution);
         return task;
+    }
+
+    /** Keep at most concurrencyLimit conversations and futures in memory; context remains conversation-local. */
+    private void runUnifiedConversations(InspectionTask task, String executionId, JsonNode snapshot) {
+        var ids = conversationIds(task);
+        int concurrency = Math.max(1, Math.min(32, task.getConcurrencyLimit() == null ? 1 : task.getConcurrencyLimit()));
+        try (ExecutorService workers = Executors.newFixedThreadPool(concurrency, Thread.ofPlatform().name("iqc-conversation-", 0).factory())) {
+            for (int offset = 0; offset < ids.size(); offset += concurrency) {
+                var current = taskMapper.selectById(task.getId());
+                if (current == null || !"RUNNING".equals(current.getStatus()) || !executionId.equals(current.getCurrentExecutionId())) return;
+                var futures = new ArrayList<Future<?>>();
+                for (String conversation : ids.subList(offset, Math.min(offset + concurrency, ids.size()))) {
+                    futures.add(workers.submit(() -> {
+                        var items = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
+                                .eq(TaskItem::getTaskId, task.getId()).eq(TaskItem::getConversationId, conversation)
+                                .eq(TaskItem::getExecutionId, executionId)
+                                .orderByAsc(TaskItem::getSequenceNo));
+                        if (!items.isEmpty()) processConversation(task, executionId, snapshot, items);
+                    }));
+                }
+                for (var future : futures) {
+                    try { future.get(); }
+                    catch (InterruptedException failure) { Thread.currentThread().interrupt(); throw new IllegalStateException("质检批次执行被中断", failure); }
+                    catch (java.util.concurrent.ExecutionException failure) { throw new IllegalStateException("质检批次并发执行失败", failure.getCause()); }
+                }
+            }
+        }
     }
 
     @Transactional
@@ -323,6 +468,7 @@ public class InspectionExecutionService {
         int attempt = task.getAttemptCount() == null ? 1 : task.getAttemptCount() + 1;
         TaskExecution execution = new TaskExecution(); execution.setTaskId(taskId); execution.setAttemptNo(attempt); execution.setStatus("QUEUED");
         execution.setProcessedMessages(Math.max(0, (task.getTotalMessages() == null ? previousItems.size() : task.getTotalMessages()) - unfinished.size())); execution.setFailedMessages(0);
+        freezeExecution(task, execution, task.getCurrentExecutionId());
         executionMapper.insert(execution);
         int sequence = 0;
         for (TaskItem previous : unfinished) {

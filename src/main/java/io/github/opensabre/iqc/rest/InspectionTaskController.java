@@ -24,10 +24,14 @@ public class InspectionTaskController {
     private final InspectionTaskService taskService;
     private final UsageCounterRecorder usageCounterRecorder;
     private final io.github.opensabre.iqc.task.TaskWizardService wizardService;
+    private final io.github.opensabre.iqc.task.UnifiedTaskScheduleService schedules;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public InspectionTaskController(InspectionTaskService taskService, UsageCounterRecorder usageCounterRecorder,
                                     io.github.opensabre.iqc.task.TaskWizardService wizardService,
-                                    com.fasterxml.jackson.databind.ObjectMapper mapper) {
+                                    com.fasterxml.jackson.databind.ObjectMapper mapper,
+                                    io.github.opensabre.iqc.task.UnifiedTaskScheduleService schedules) {
+        this.schedules = schedules;
         this.mapper = mapper;
         this.taskService = taskService;
         this.usageCounterRecorder = usageCounterRecorder;
@@ -57,6 +61,49 @@ public class InspectionTaskController {
     public List<InspectionTaskService.TaskRunSummary> executions(@PathVariable String id) {
         return taskService.executions(id);
     }
+
+    /** Returns the stored attempt snapshot rather than resolving today's rule/tag definitions. */
+    @GetMapping("/{id}/executions/{executionId}/snapshot")
+    @ResourcePermission(code = "iqc:task:view", name = "查看任务执行快照", type = "iqc", description = "查看授权任务的冻结执行配置与选数")
+    @RateLimit(sceneCode = "iqc-task-execution-query", maxCount = 60, period = 60)
+    public InspectionTaskService.TaskExecutionSnapshot executionSnapshot(@PathVariable String id, @PathVariable String executionId) {
+        return taskService.executionSnapshot(id, executionId);
+    }
+
+    /** Unified matching shares task permissions and lifecycle; no scoring or conflict policy is accepted here. */
+    @PostMapping("/unified")
+    @ResourcePermission(code = "iqc:task:create", name = "创建统一标签任务", type = "iqc", description = "按标签绑定执行规则")
+    @Audit(operationType = OperationType.CREATE, description = "创建统一标签任务", module = "IQC_TASK")
+    @RateLimit(sceneCode = "iqc-task-create", maxCount = 20, period = 60)
+    public InspectionTask createUnified(
+            @io.swagger.v3.oas.annotations.parameters.RequestBody(content = @io.swagger.v3.oas.annotations.media.Content(
+                    schema = @io.swagger.v3.oas.annotations.media.Schema(implementation = UnifiedTaskRequest.class)))
+            @RequestBody String body) {
+        final UnifiedTaskRequest request;
+        try { request = mapper.readValue(body, UnifiedTaskRequest.class); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException invalid) {
+            throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("统一标签任务配置无效");
+        }
+        if (request == null) throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("任务参数不能为空");
+        if (request.trigger() == null) throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("请选择触发方式");
+        var created = schedules.create(request.name(), request.dataSelection(), request.configuration(), request.concurrencyLimit(), request.trigger());
+        schedules.start(created);
+        recordCreation(created);
+        return created;
+    }
+    public record UnifiedTaskRequest(String name, io.github.opensabre.iqc.task.TaskDataSelection dataSelection,
+                                    io.github.opensabre.iqc.task.UnifiedLabelPlanService.Configuration configuration,
+                                    Integer concurrencyLimit, io.github.opensabre.iqc.task.UnifiedTaskScheduleService.Trigger trigger) { }
+
+    /** Enables future trigger occurrences; the current run is controlled by the existing pause/cancel endpoints. */
+    @PutMapping("/{id}/enabled")
+    @ResourcePermission(code = "iqc:task:execute", name = "启停统一任务", type = "iqc", description = "启停统一任务触发计划")
+    @Audit(operationType = OperationType.UPDATE, description = "启停统一任务", module = "IQC_TASK")
+    public InspectionTask enabled(@PathVariable String id, @RequestBody EnabledRequest request) {
+        if (request == null || request.enabled() == null) throw io.github.opensabre.iqc.governance.IqcException.invalidArgument("请指定启停状态");
+        return schedules.setEnabled(id, request.enabled());
+    }
+    public record EnabledRequest(Boolean enabled) { }
 
     @PostMapping
     @ResourcePermission(code = "iqc:task:create", name = "创建质检任务", type = "iqc", description = "创建质检任务")

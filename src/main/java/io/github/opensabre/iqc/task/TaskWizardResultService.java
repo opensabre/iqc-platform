@@ -42,9 +42,9 @@ public class TaskWizardResultService {
         result.setAggregationMode("TASK_PROCESSOR");
         result.setScore(null);
         var scoring = output.get("scoring");
-        result.setScoreStatus(scoring == null ? "NOT_APPLICABLE" : scoring.path("scoreStatus").asText());
+        result.setScoreStatus(output.has("processingStatus") ? "PENDING" : scoring == null ? "NOT_APPLICABLE" : scoring.path("scoreStatus").asText());
         result.setFinalScore(scoring == null || !scoring.hasNonNull("finalScore") ? null : scoring.path("finalScore").decimalValue());
-        result.setResultStatus(scoring == null ? "NOT_APPLICABLE" : scoring.path("conclusion").asText());
+        result.setResultStatus(output.has("processingStatus") ? "PENDING" : scoring == null ? "NOT_APPLICABLE" : scoring.path("conclusion").asText());
         try {
             result.setScoringResultJson(scoring == null ? null : mapper.writeValueAsString(scoring));
             // The complete processed payload, including label candidates, stays linked to source engine records.
@@ -52,7 +52,7 @@ public class TaskWizardResultService {
         } catch (com.fasterxml.jackson.core.JsonProcessingException invalid) { throw new IllegalArgumentException(invalid); }
         int written = result.getId() == null ? results.insert(result) : results.updateById(result);
         if (written != 1) throw new IllegalStateException("任务结果保存失败");
-        boolean failed = set.engines().stream().anyMatch(engine -> engine.status() == EngineExecutionResultSet.ExecutionStatus.FAILED);
+        boolean failed = set.engines().stream().anyMatch(engine -> engine.status() == EngineExecutionResultSet.ExecutionStatus.FAILED || engine.status() == EngineExecutionResultSet.ExecutionStatus.PARTIAL_SUCCESS);
         for (var requested : batch) {
             var item = items.selectById(requested.getId());
             if (item == null || !task.getId().equals(item.getTaskId()) || !set.executionId().equals(item.getExecutionId())

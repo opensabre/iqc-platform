@@ -31,6 +31,31 @@ public class SchemeDependencyResolver {
     private final io.github.opensabre.iqc.scheme.dao.InspectionSchemeMapper schemes;
     private final io.github.opensabre.iqc.label.LabelResolutionService labels;
 
+    /** Protects draft references in the caller's write transaction without requiring executable assets. */
+    public void validateDraftRuleReferences(SchemeDefinition definition) {
+        var ids = new java.util.TreeSet<String>();
+        for (var item : definition.items()) {
+            ids.add(item.rule().id());
+            if (item.appliesWhen() != null) ids.add(item.appliesWhen().id());
+            collectDraftStageRules(ids, item.execution());
+        }
+        if (definition.executionVariants() != null)
+            for (var variant : definition.executionVariants().variants())
+                variant.routes().values().forEach(execution -> collectDraftStageRules(ids, execution));
+        // Label references stay references; current label bindings are protected by their own lifecycle.
+        for (var id : ids) {
+            var current = rules.lockById(id);
+            if (current == null || "DISABLED".equals(current.getStatus()))
+                throw IqcException.invalidState("规则不存在或已停用: " + id);
+        }
+    }
+
+    private static void collectDraftStageRules(java.util.Set<String> ids, SchemeDefinition.Execution execution) {
+        if (execution == null) return;
+        if (execution.prefilter() != null) ids.add(execution.prefilter().id());
+        if (execution.candidate() != null) ids.add(execution.candidate().id());
+    }
+
     /** Rechecks kill switches at execution boundaries without replacing any frozen task configuration. */
     public void validateTaskDependencies(JsonNode taskSnapshot) {
         SchemeDefinition definition = SchemeResultEvaluator.definition(taskSnapshot, mapper);
@@ -206,8 +231,13 @@ public class SchemeDependencyResolver {
             mergeReference(references, binding.getRuleId(), binding.getRuleVersionNo());
         List<JsonNode> frozenRules = new ArrayList<>();
         boolean requiresLlm = false;
+        boolean writing = org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+                && !org.springframework.transaction.support.TransactionSynchronizationManager.isCurrentTransactionReadOnly();
+        var locked = new java.util.HashMap<String, io.github.opensabre.iqc.rule.model.QualityRule>();
+        // Lock all rule identities in a stable order, while retaining the business dependency order below.
+        if (writing) references.keySet().stream().sorted().forEach(id -> locked.put(id, rules.lockById(id)));
         for (var reference : references.entrySet()) {
-            var current = rules.selectById(reference.getKey());
+            var current = writing ? locked.get(reference.getKey()) : rules.selectById(reference.getKey());
             if (current == null || "DISABLED".equals(current.getStatus())) throw IqcException.invalidState("规则不存在或已停用: " + reference.getKey());
             var version = ruleVersions.selectOne(Wrappers.<QualityRuleVersion>lambdaQuery()
                     .eq(QualityRuleVersion::getRuleId, reference.getKey())

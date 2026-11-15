@@ -20,6 +20,48 @@ public class QualityRuleService {
     private final QualityRuleMapper mapper;
     private final QualityRuleVersionMapper versionMapper;
     private final ObjectMapper objectMapper;
+    private final RuleReferenceGuard references;
+    private final io.github.opensabre.iqc.shared.IqcDataScope scope;
+
+    /** Disable only an unreferenced definition; immutable versions are retained. */
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+    public QualityRule disable(String id) {
+        var rule = lifecycleRule(id);
+        if ("DISABLED".equals(rule.getStatus())) return rule;
+        references.requireUnreferenced(id);
+        rule.setStatus("DISABLED"); mapper.updateById(rule); return rule;
+    }
+
+    /** Reactivation creates a new draft; historical publication never authorizes the new version. */
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+    public QualityRule enable(String id) {
+        var rule = lifecycleRule(id);
+        if (!"DISABLED".equals(rule.getStatus())) throw IqcException.invalidState("只有已停用规则可以重新启用");
+        int next = versions(id).stream().map(QualityRuleVersion::getVersionNo)
+                .filter(java.util.Objects::nonNull).max(Integer::compareTo).orElse(0) + 1;
+        var draft = toVersion(rule, next, "DRAFT");
+        versionMapper.insert(draft);
+        rule.setVersionNo(next);
+        rule.setStatus("DRAFT");
+        mapper.updateById(rule);
+        return rule;
+    }
+
+    /** Delete an unreferenced definition and its versions in the same transaction. */
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+    public void delete(String id) {
+        lifecycleRule(id);
+        references.requireUnreferenced(id);
+        versionMapper.delete(Wrappers.<QualityRuleVersion>lambdaQuery().eq(QualityRuleVersion::getRuleId, id));
+        mapper.deleteById(id);
+    }
+
+    private QualityRule lifecycleRule(String id) {
+        var rule = mapper.lockById(id);
+        if (rule == null) throw IqcException.notFound("规则不存在");
+        if (!scope.canView(rule.getCreatedBy(), null)) throw IqcException.accessDenied("无权管理该规则");
+        return rule;
+    }
 
     public List<QualityRule> list() { return mapper.selectList(Wrappers.<QualityRule>lambdaQuery().orderByDesc(QualityRule::getCreatedTime)); }
 
@@ -46,8 +88,9 @@ public class QualityRuleService {
 
     @Transactional
     public QualityRule submit(String id) {
-        QualityRule rule = mapper.selectById(id);
+        QualityRule rule = mapper.lockById(id);
         if (rule == null) throw IqcException.notFound("规则不存在: " + id);
+        if ("DISABLED".equals(rule.getStatus())) throw IqcException.invalidState("规则已停用");
         QualityRuleVersion version = latestVersion(id);
         if (version == null) { version = toVersion(rule, rule.getVersionNo() == null ? 1 : rule.getVersionNo(), "DRAFT"); versionMapper.insert(version); }
         if (version.getExpression() == null || version.getExpression().isBlank()) throw IqcException.invalidArgument("规则表达式不能为空");
@@ -58,8 +101,9 @@ public class QualityRuleService {
 
     @Transactional
     public QualityRule publish(String id) {
-        QualityRule rule = mapper.selectById(id);
+        QualityRule rule = mapper.lockById(id);
         if (rule == null) throw IqcException.notFound("规则不存在: " + id);
+        if ("DISABLED".equals(rule.getStatus())) throw IqcException.invalidState("规则已停用");
         QualityRuleVersion version = latestVersion(id);
         if (version == null || !"PENDING_APPROVAL".equals(version.getStatus())) throw IqcException.invalidState("规则必须先提交审批");
         version.setStatus("PUBLISHED"); versionMapper.updateById(version);
@@ -68,12 +112,14 @@ public class QualityRuleService {
 
     @Transactional
     public QualityRule reject(String id) {
-        QualityRule rule = mapper.selectById(id);
+        QualityRule rule = mapper.lockById(id);
         if (rule == null) throw IqcException.notFound("规则不存在: " + id);
+        if ("DISABLED".equals(rule.getStatus())) throw IqcException.invalidState("规则已停用");
         QualityRuleVersion version = latestVersion(id);
         if (version == null || !"PENDING_APPROVAL".equals(version.getStatus())) throw IqcException.invalidState("规则当前没有待审批版本");
         version.setStatus("REJECTED"); versionMapper.updateById(version);
-        rule.setStatus(versions(id).stream().anyMatch(item -> "PUBLISHED".equals(item.getStatus())) ? "PUBLISHED" : "DRAFT");
+        rule.setStatus(versions(id).stream().anyMatch(item -> "PUBLISHED".equals(item.getStatus())
+                && java.util.Objects.equals(item.getVersionNo(), rule.getVersionNo())) ? "PUBLISHED" : "DRAFT");
         mapper.updateById(rule); return rule;
     }
 
@@ -83,8 +129,9 @@ public class QualityRuleService {
 
     @Transactional
     public QualityRuleVersion createVersion(String ruleId, String name, String code, String category, String ruleType, String targetRole, String expression, String description, Integer deduction, String riskLevel, Boolean veto) {
-        QualityRule rule = mapper.selectById(ruleId);
+        QualityRule rule = mapper.lockById(ruleId);
         if (rule == null) throw IqcException.notFound("规则不存在: " + ruleId);
+        if ("DISABLED".equals(rule.getStatus())) throw IqcException.invalidState("规则已停用");
         int next = versions(ruleId).stream().map(QualityRuleVersion::getVersionNo).filter(java.util.Objects::nonNull).max(Integer::compareTo).orElse(0) + 1;
         QualityRuleVersion version = new QualityRuleVersion(); version.setRuleId(ruleId); version.setVersionNo(next); version.setName(name == null ? rule.getName() : name.trim()); version.setCode(code == null ? rule.getCode() : code.trim()); version.setCategory(category == null || category.isBlank() ? rule.getCategory() : category.trim().toUpperCase());
         version.setRuleType(ruleType == null ? rule.getRuleType() : ruleType); version.setTargetRole(targetRole == null || targetRole.isBlank() ? rule.getTargetRole() : targetRole.trim().toLowerCase()); version.setExpression(expression); version.setDescription(description); version.setDeduction(deduction == null ? 10 : Math.max(0, Math.min(100, deduction)));

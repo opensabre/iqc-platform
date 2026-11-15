@@ -17,11 +17,20 @@ public final class MultiEngineExecutor {
     public MultiEngineExecutor(Clock clock) { this.clock = Objects.requireNonNull(clock); }
 
     /** Adapter output keeps the actual response even when parsing or evidence validation fails. */
-    public record Output(String rawOutput, List<Observation> observations, List<Evidence> evidence, Failure failure) {
+    public record Output(String rawOutput, List<Observation> observations, List<Evidence> evidence, Failure failure, ExecutionStatus status) {
+        public Output(String rawOutput, List<Observation> observations, List<Evidence> evidence, Failure failure) {
+            this(rawOutput, observations, evidence, failure, null);
+        }
         public Output { observations = List.copyOf(observations); evidence = List.copyOf(evidence); }
     }
     @FunctionalInterface
-    public interface Adapter { Output execute(InputSnapshot input, JsonNode configuration) throws Exception; }
+    public interface Adapter {
+        Output execute(InputSnapshot input, JsonNode configuration) throws Exception;
+        /** New adapters may read immutable prior stages; older adapters keep their original contract. */
+        default Output execute(InputSnapshot input, JsonNode configuration, List<EngineResult> upstream) throws Exception {
+            return execute(input, configuration);
+        }
+    }
     /** Each operation has its own sequence; the adapter receives a defensive configuration copy. */
     public record Step(Operation operation, String instanceId, EngineType type, int sequence,
                        JsonNode configuration, Adapter adapter) {
@@ -65,8 +74,8 @@ public final class MultiEngineExecutor {
                 status = ExecutionStatus.SKIPPED;
             } else {
                 try {
-                    output = Objects.requireNonNull(step.adapter().execute(saved.input(), step.configuration()), "引擎返回空结果");
-                    status = output.failure() == null ? ExecutionStatus.SUCCEEDED : ExecutionStatus.FAILED;
+                    output = Objects.requireNonNull(step.adapter().execute(saved.input(), step.configuration(), List.copyOf(results)), "引擎返回空结果");
+                    status = output.status() != null ? output.status() : output.failure() == null ? ExecutionStatus.SUCCEEDED : ExecutionStatus.FAILED;
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt(); stopped = true;
                     output = new Output(null, List.of(), List.of(), new Failure("INTERRUPTED", "引擎调用被中断"));

@@ -14,6 +14,12 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class IqcExceptionHandlerAdvice {
 
+    /** Preserve IQC's actionable business reason in the existing Result envelope. */
+    @ExceptionHandler(IqcException.class)
+    public Result<?> businessException(IqcException exception) {
+        return Result.fail(exception.getErrorType(), exception.getMessage());
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public Result<?> invalidArgument(IllegalArgumentException exception) {
         return Result.fail(IqcErrorType.INVALID_ARGUMENT, exception.getMessage());
