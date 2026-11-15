@@ -73,3 +73,7 @@ Java 21 使用前述 Maven/Mockito 参数运行 `-Dtest=UnifiedTaskLifecycleTest
 EngineCheckpointProcessRecoveryTest 在 JUnit 临时目录创建 H2 文件数据库，使用正式 V1.1.33 检查点 DDL、真实 EngineResultSetStore、MultiEngineExecutor、统一 REGEX 与 LLM 适配器。第一子 JVM 执行正则，保存结果后 Runtime.halt(86)，绕过关闭钩子；第二个全新 JVM 从同一数据库恢复。断言已提交阶段逐字段不变、冻结会话输入不变、正则不重跑，LLM 只收到尚未命中的标签 20，调用文件最终仅 REGEX/LLM 各一次。两个子进程均有超时和清理，数据库不连接共享实例。
 
 Java 21 使用前述 Maven/Mockito 参数及 `-Dtest=EngineCheckpointProcessRecoveryTest test`：1 项通过、零失败。模型响应是测试替身，不代表实际模型用量；测试主动在检查点提交之后中断，不覆盖外部模型已返回但检查点未提交时的重复请求，也不声称外部调用恰好一次。该验证覆盖执行器与持久化层的真实进程边界，整服务重启后的调度接管、真实 MySQL 崩溃恢复及发布环境验收仍未完成。没有修改生产重试或结果处置策略。
+
+## 发布与恢复操作说明（2026-11-15）
+
+已在既有 [部署文档](../deployment.md) 补充统一任务的迁移顺序、受控投递、权限及场景验证、进程超时后的人工重试、周期新轮次区别、停止投递和备份回滚边界，以及真实性能记录字段。按当前源码核对：停用定义也会拒绝手动 run；一次性定义已经触发后不能重新启用，因此不能将“停用后直接重试”写成可执行恢复步骤。新 retry attempt 只继承统一阶段的成功/跳过连续前缀，不声称失败阶段恰好调用一次。文档步骤尚未在部署环境执行，也没有增加旧版本翻译器或自动重试策略。
