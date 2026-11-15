@@ -111,6 +111,12 @@ public class QualityConfigController {
     @Audit(operationType = OperationType.UPDATE, description = "停用 IQC 规则", module = "IQC_RULE")
     public QualityRule disableRule(@PathVariable String id) { return ruleService.disable(id); }
 
+    /** Starts a fresh approval cycle instead of restoring an old publication. */
+    @PostMapping("/rules/{id}/enable")
+    @ResourcePermission(code = "iqc:rule:manage", name = "重新启用规则", type = "iqc", description = "创建待审批规则草稿")
+    @Audit(operationType = OperationType.UPDATE, description = "重新启用 IQC 规则为草稿", module = "IQC_RULE")
+    public QualityRule enableRule(@PathVariable String id) { return ruleService.enable(id); }
+
     @DeleteMapping("/rules/{id}")
     @ResourcePermission(code = "iqc:rule:manage", name = "删除规则", type = "iqc", description = "删除无引用规则及其版本")
     @Audit(operationType = OperationType.DELETE, description = "删除 IQC 规则", module = "IQC_RULE")

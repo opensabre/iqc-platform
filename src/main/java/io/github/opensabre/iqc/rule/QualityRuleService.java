@@ -32,6 +32,21 @@ public class QualityRuleService {
         rule.setStatus("DISABLED"); mapper.updateById(rule); return rule;
     }
 
+    /** Reactivation creates a new draft; historical publication never authorizes the new version. */
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+    public QualityRule enable(String id) {
+        var rule = lifecycleRule(id);
+        if (!"DISABLED".equals(rule.getStatus())) throw IqcException.invalidState("只有已停用规则可以重新启用");
+        int next = versions(id).stream().map(QualityRuleVersion::getVersionNo)
+                .filter(java.util.Objects::nonNull).max(Integer::compareTo).orElse(0) + 1;
+        var draft = toVersion(rule, next, "DRAFT");
+        versionMapper.insert(draft);
+        rule.setVersionNo(next);
+        rule.setStatus("DRAFT");
+        mapper.updateById(rule);
+        return rule;
+    }
+
     /** Delete an unreferenced definition and its versions in the same transaction. */
     @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public void delete(String id) {
@@ -103,7 +118,8 @@ public class QualityRuleService {
         QualityRuleVersion version = latestVersion(id);
         if (version == null || !"PENDING_APPROVAL".equals(version.getStatus())) throw IqcException.invalidState("规则当前没有待审批版本");
         version.setStatus("REJECTED"); versionMapper.updateById(version);
-        rule.setStatus(versions(id).stream().anyMatch(item -> "PUBLISHED".equals(item.getStatus())) ? "PUBLISHED" : "DRAFT");
+        rule.setStatus(versions(id).stream().anyMatch(item -> "PUBLISHED".equals(item.getStatus())
+                && java.util.Objects.equals(item.getVersionNo(), rule.getVersionNo())) ? "PUBLISHED" : "DRAFT");
         mapper.updateById(rule); return rule;
     }
 

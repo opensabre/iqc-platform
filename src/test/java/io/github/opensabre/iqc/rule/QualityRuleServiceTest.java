@@ -25,6 +25,32 @@ class QualityRuleServiceTest {
     private final QualityRuleService service = new QualityRuleService(mapper, versionMapper, new ObjectMapper(), references, scope);
 
     @Test
+    void reactivationRequiresNewApprovalAndRejectionDoesNotReviveHistoricalPublication() {
+        var current = rule("REGEX", "退款"); current.setStatus("DISABLED"); current.setVersionNo(2);
+        when(mapper.lockById("rule-1")).thenReturn(current);
+        when(scope.canView(current.getCreatedBy(), null)).thenReturn(true);
+        var historical = new QualityRuleVersion(); historical.setRuleId("rule-1");
+        historical.setVersionNo(2); historical.setStatus("PUBLISHED");
+        when(versionMapper.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(historical));
+        assertThat(service.enable("rule-1").getStatus()).isEqualTo("DRAFT");
+        assertThat(current.getVersionNo()).isEqualTo(3);
+        var inserted = org.mockito.ArgumentCaptor.forClass(QualityRuleVersion.class);
+        verify(versionMapper).insert(inserted.capture());
+        var draft = inserted.getValue();
+        assertThat(draft.getStatus()).isEqualTo("DRAFT");
+        assertThat(draft.getExpression()).isEqualTo("退款");
+        when(versionMapper.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(draft, historical));
+        assertThatThrownBy(() -> service.publish("rule-1")).hasMessage("规则必须先提交审批");
+        service.submit("rule-1");
+        assertThat(service.reject("rule-1").getStatus()).isEqualTo("DRAFT");
+        assertThat(historical.getStatus()).isEqualTo("PUBLISHED");
+        service.submit("rule-1");
+        assertThat(service.publish("rule-1").getStatus()).isEqualTo("PUBLISHED");
+        assertThat(draft.getStatus()).isEqualTo("PUBLISHED");
+        assertThatThrownBy(() -> service.enable("rule-1")).hasMessage("只有已停用规则可以重新启用");
+    }
+
+    @Test
     void keywordTestReturnsTheMatchedKeyword() {
         QualityRule rule = rule("KEYWORD", "减免|优惠");
         when(mapper.selectById("rule-1")).thenReturn(rule);

@@ -292,6 +292,12 @@ class JointLabelMaterializationTransactionTest {
     }
 
     private InspectionTask unifiedScheduleFixture() throws Exception {
+        when(httpOrganization.getAuthorizationUser("schedule-owner")).thenReturn(Result.success(
+                new IqcOrganizationClient.AuthorizationUser("schedule-user", "schedule-owner", null, true, true, true, true, "N")));
+        when(httpOrganization.getUserRoles("schedule-user")).thenReturn(Result.success(
+                List.of(new IqcOrganizationClient.AuthorizationRole("USER"))));
+        when(httpOrganization.getRoleResources("USER")).thenReturn(Result.success(
+                List.of(new IqcOrganizationClient.AuthorizationResource("iqc:task:execute", "/api/iqc/tasks/{id}/run", "POST"))));
         var snapshot = new io.github.opensabre.iqc.task.TaskWizardSnapshot(io.github.opensabre.iqc.task.TaskWizardSnapshot.SCHEMA,
                 new io.github.opensabre.iqc.task.TaskEnginePlanService.FrozenPlan("iqc-task-engine-plan-v1", List.of(
                         new io.github.opensabre.iqc.task.TaskEnginePlanService.FrozenEngine(

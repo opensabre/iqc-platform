@@ -24,11 +24,18 @@ class UnifiedTaskScheduleServiceTest {
     private final InspectionTaskMapper mapper = mock(InspectionTaskMapper.class);
     private final InspectionExecutionService executions = mock(InspectionExecutionService.class);
     private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
-    private final IqcDataScope scope = new IqcDataScope(null);
+    private final io.github.opensabre.iqc.shared.IqcOrganizationClient organization = mock(io.github.opensabre.iqc.shared.IqcOrganizationClient.class);
+    private final IqcDataScope scope = new IqcDataScope(organization);
     private final UnifiedTaskScheduleService service = new UnifiedTaskScheduleService(wizard, tasks, mapper, executions, scope, json);
     private final UserContextHolder context = UserContextHolder.getInstance();
     @BeforeEach void setup() {
         context.setContext(Map.of(context.KEY_USERNAME, "alice"));
+        when(organization.getAuthorizationUser("alice")).thenReturn(io.github.opensabre.common.core.entity.vo.Result.success(
+                new io.github.opensabre.iqc.shared.IqcOrganizationClient.AuthorizationUser("u1", "alice", null, true, true, true, true, "N")));
+        when(organization.getUserRoles("u1")).thenReturn(io.github.opensabre.common.core.entity.vo.Result.success(
+                java.util.List.of(new io.github.opensabre.iqc.shared.IqcOrganizationClient.AuthorizationRole("USER"))));
+        when(organization.getRoleResources("USER")).thenReturn(io.github.opensabre.common.core.entity.vo.Result.success(
+                java.util.List.of(new io.github.opensabre.iqc.shared.IqcOrganizationClient.AuthorizationResource("iqc:task:execute", "/api/iqc/tasks/{id}/run", "POST"))));
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "schedule"), InspectionTask.class);
     }
     @AfterEach void cleanup() { context.clear(); }
@@ -38,6 +45,14 @@ class UnifiedTaskScheduleServiceTest {
         when(mapper.selectOne(any())).thenReturn(task); when(tasks.get("task")).thenReturn(task);
         return service.create("name", null, null, 1, trigger);
     }
+    @Test void revokedExecutionGrantRejectsNextRoundBeforeQueueing() {
+        var task = create(new Trigger(TriggerType.PERIODIC, null, "0 * * * * *", true));
+        when(organization.getRoleResources("USER")).thenReturn(io.github.opensabre.common.core.entity.vo.Result.success(java.util.List.of()));
+        assertThatThrownBy(() -> service.queueDue("task", task.getScheduledTime())).hasMessageContaining("失权");
+        verifyNoInteractions(executions);
+        assertThat(task.getCurrentExecutionId()).isNull();
+    }
+
     @Test void validatesIndependentTriggerFieldsAndCron() {
         assertThatThrownBy(() -> new Trigger(TriggerType.PERIODIC, null, "invalid", true)).hasMessageContaining("Cron");
         assertThatThrownBy(() -> new Trigger(TriggerType.SCHEDULED, null, null, true)).hasMessageContaining("执行时间");

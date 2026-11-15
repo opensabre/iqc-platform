@@ -29,6 +29,40 @@ public class IqcDataScope {
     /** Matches the existing scheduler's captured owner/group/all semantics without copying organization records. */
     public ExecutionScope captureExecutionScope() { return new ExecutionScope(canViewAll(), owner(), groupId()); }
 
+    /** Re-resolves current grants for each scheduled round; failed lookups never reuse captured privilege. */
+    public ExecutionScope revalidateExecutionScope(ExecutionScope captured) {
+        if (organizationClient == null) throw deniedSchedule();
+        var user = authorizationData(organizationClient.getAuthorizationUser(captured.owner()));
+        if (user.id() == null || !captured.owner().equals(user.username()) || !Boolean.TRUE.equals(user.enabled())
+                || !Boolean.TRUE.equals(user.accountNonExpired()) || !Boolean.TRUE.equals(user.credentialsNonExpired())
+                || !Boolean.TRUE.equals(user.accountNonLocked()) || !"N".equals(user.deleted())) throw deniedSchedule();
+        var roles = authorizationData(organizationClient.getUserRoles(user.id()));
+        boolean execute = false, all = false;
+        var matcher = new org.springframework.util.AntPathMatcher();
+        for (var role : roles) {
+            if (role.code() == null || role.code().isBlank()) throw deniedSchedule();
+            String normalized = normalizeRole(role.code());
+            all |= normalized.equals("ADMIN") || normalized.equals("SUPER_ADMIN");
+            for (var resource : authorizationData(organizationClient.getRoleResources(role.code()))) {
+                all |= "iqc:result:all".equals(resource.code());
+                execute |= "POST".equalsIgnoreCase(resource.method()) && resource.url() != null
+                        && matcher.match(resource.url(), "/api/iqc/tasks/scheduled-round/run");
+            }
+        }
+        if (!execute) throw deniedSchedule();
+        return new ExecutionScope(all, captured.owner(), user.groupId());
+    }
+
+    private static <T> T authorizationData(io.github.opensabre.common.core.entity.vo.Result<T> response) {
+        if (response == null || !io.github.opensabre.common.core.entity.vo.Result.SUCCESSFUL_CODE.equals(response.getCode())
+                || response.getData() == null) throw deniedSchedule();
+        return response.getData();
+    }
+
+    private static io.github.opensabre.iqc.governance.IqcException deniedSchedule() {
+        return io.github.opensabre.iqc.governance.IqcException.accessDenied("周期执行用户已失权或无法验证当前权限");
+    }
+
     /** A short queue/freeze operation only; always restores the caller's scope, including on failure. */
     public <T> T withinExecutionScope(ExecutionScope scope, java.util.function.Supplier<T> operation) {
         java.util.Objects.requireNonNull(scope);

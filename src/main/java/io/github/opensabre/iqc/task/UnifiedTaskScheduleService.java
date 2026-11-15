@@ -85,10 +85,11 @@ public class UnifiedTaskScheduleService {
         if (!eligible(task, now)) return null;
         var stored = decode(task.getTriggerConfigurationJson());
         if (stored.trigger().type() != TriggerType.PERIODIC && task.getCurrentExecutionId() != null) return null;
+        var currentScope = scope.revalidateExecutionScope(stored.scope());
         task.setCurrentExecutionId(null); task.setStatus("CREATED");
         task.setProcessedMessages(0); task.setFailedMessages(0); task.setPauseRequested(false); task.setCancelRequested(false);
         saveSchedulingState(task);
-        return scope.withinExecutionScope(stored.scope(), () -> {
+        return scope.withinExecutionScope(currentScope, () -> {
             var queued = executions.queue(id);
             // At most one run after a missed deadline; no concurrent catch-up backlog is generated.
             queued.setScheduledTime(stored.trigger().type() == TriggerType.PERIODIC ? stored.trigger().next(now) : null);
