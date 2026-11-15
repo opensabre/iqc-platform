@@ -5,7 +5,7 @@
 | PRD 范围 | 已有实现与证据 | 剩余验收 |
 | --- | --- | --- |
 | P1 / AC-01、02 | 精确版本绑定、规则类型唯一约束、动作定义和绑定；标签/规则计划及迁移测试；规则停用和删除全局引用保护、并发及 MVC 鉴权链测试 | 规则重新启用语义待确认；真实网关资源权限拒绝、大存量引用扫描耗时 |
-| P2 / AC-03～05 | 触发计划、选择器、冻结快照、会话检查点、阶段只追加；调度、执行器、生命周期及管理端快照测试 | 实际进程中断恢复、超长会话和海量会话运行 |
+| P2 / AC-03～05 | 触发计划、选择器、冻结快照、会话检查点、阶段只追加；调度、执行器、生命周期及管理端快照测试 | 整服务重启后的调度接管（执行器跨 JVM 检查点恢复已验证）、超长会话和海量会话运行 |
 | P3 / AC-06～09 | MATCHED 过滤、零调用跳过、单请求批量、严格响应校验；UnifiedTagEngineAdapterTest | 独立 Agent 平台接口尚未提供；真实模型/版本/Token 联调 |
 | P4 / AC-10、11 | 完整上下文和绑定动作交给 UnifiedTaskResultProcessor；保持 PENDING_POLICY，不生成分数、不合并冲突；生命周期与动作边界测试 | 扣分、去重和正式标签策略仍待业务确定 |
 | P5 / AC-12 | 隔离 MySQL 新装/升级/重复迁移、事务及并发检查；前端构建、规则生命周期浏览器模拟验收 | 真实 HTTP 联调，10/100/500 标签 Token/耗时/吞吐/出错率，发布和回滚演练 |
@@ -67,3 +67,9 @@ Java 21 使用前述 Maven/Mockito 参数运行 `-Dtest=UnifiedTaskLifecycleTest
 后端 Java 21 使用前述 Mockito 参数执行默认 `mvn -q -o -DforkCount=1 -DargLine=... test`。首次沙箱运行因本地端口禁止而无法完成 HTTP 集成测试；允许本地测试端口后完整运行 771 项，769 项通过，两项生命周期事务测试因 H2 夹具缺少 iqc_inspection_scheme_version 表失败。补齐夹具，复用原有 createIsolatedSchemeVersionTable；生产代码和正式迁移不变。定向运行 `-Dtest=JointLabelMaterializationTransactionTest#ruleLifecycleChecksHistoricalReferencesThenAtomicallyRemovesUnreferencedVersions+actualRuleDisableSerializesWithNewTaskReference`，两项通过、零失败。修正后未再重跑整个后端测试集，不将分批结果描述为一次完整全绿运行。
 
 默认 Surefire 测试不包含 IsolatedMysql*IT；本轮不替代先前隔离 MySQL 迁移和并发验证，也不证明真实 Agent、网关联调、进程中断恢复或性能验收。未推送、创建 PR 或部署。
+
+## P2 执行器跨 JVM 检查点恢复（2026-11-15）
+
+EngineCheckpointProcessRecoveryTest 在 JUnit 临时目录创建 H2 文件数据库，使用正式 V1.1.33 检查点 DDL、真实 EngineResultSetStore、MultiEngineExecutor、统一 REGEX 与 LLM 适配器。第一子 JVM 执行正则，保存结果后 Runtime.halt(86)，绕过关闭钩子；第二个全新 JVM 从同一数据库恢复。断言已提交阶段逐字段不变、冻结会话输入不变、正则不重跑，LLM 只收到尚未命中的标签 20，调用文件最终仅 REGEX/LLM 各一次。两个子进程均有超时和清理，数据库不连接共享实例。
+
+Java 21 使用前述 Maven/Mockito 参数及 `-Dtest=EngineCheckpointProcessRecoveryTest test`：1 项通过、零失败。模型响应是测试替身，不代表实际模型用量；测试主动在检查点提交之后中断，不覆盖外部模型已返回但检查点未提交时的重复请求，也不声称外部调用恰好一次。该验证覆盖执行器与持久化层的真实进程边界，整服务重启后的调度接管、真实 MySQL 崩溃恢复及发布环境验收仍未完成。没有修改生产重试或结果处置策略。
