@@ -59,3 +59,11 @@ PRD 10.1 要求启停。当前已有停用，但没有重新启用路由；Quali
 新增同任务、同次执行的双会话样例，复用真实 MultiEngineExecutor、UnifiedTagEngineAdapter 和 H2 EngineResultSetStore。第一条会话的 Mock 提供方抛出异常，检查点保存 FAILED / LLM_CALL_FAILED / ERROR；随后第二条会话正常匹配，保存 SUCCEEDED / MATCHED、独立消息身份、规则版本及提供方模型元数据。数据库保存两份可分别查询的结果，两次模型请求互不串用输入或结果。
 
 Java 21 使用前述 Maven/Mockito 参数运行 `-Dtest=UnifiedTaskLifecycleTest test`，2 项全部通过。另一项原有用例同时复验运行时检查点、待处置结果、恢复和轮次隔离。新增用例为顺序双会话，不代表并行负载、真实模型或实际进程中断验收；没有修改执行或结果处置策略。
+
+## 集中回归（2026-11-15）
+
+管理端修正两处仍读取旧任务向导 rules 参数的测试，改为验证当前统一向导的已发布 Agent 及标签配置传递、加载失败隔离和显式重试，不恢复旧接口。最终 `pnpm test`：42 个文件、233 项全部通过。
+
+后端 Java 21 使用前述 Mockito 参数执行默认 `mvn -q -o -DforkCount=1 -DargLine=... test`。首次沙箱运行因本地端口禁止而无法完成 HTTP 集成测试；允许本地测试端口后完整运行 771 项，769 项通过，两项生命周期事务测试因 H2 夹具缺少 iqc_inspection_scheme_version 表失败。补齐夹具，复用原有 createIsolatedSchemeVersionTable；生产代码和正式迁移不变。定向运行 `-Dtest=JointLabelMaterializationTransactionTest#ruleLifecycleChecksHistoricalReferencesThenAtomicallyRemovesUnreferencedVersions+actualRuleDisableSerializesWithNewTaskReference`，两项通过、零失败。修正后未再重跑整个后端测试集，不将分批结果描述为一次完整全绿运行。
+
+默认 Surefire 测试不包含 IsolatedMysql*IT；本轮不替代先前隔离 MySQL 迁移和并发验证，也不证明真实 Agent、网关联调、进程中断恢复或性能验收。未推送、创建 PR 或部署。

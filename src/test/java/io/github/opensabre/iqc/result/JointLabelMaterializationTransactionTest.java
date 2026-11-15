@@ -314,6 +314,8 @@ class JointLabelMaterializationTransactionTest {
     }
 
     private void ensureLifecycleReferenceTables() {
+        // The lifecycle guard scans historical scheme releases even when none reference this rule.
+        createIsolatedSchemeVersionTable();
         if (!usesMigratedSchema()) {
             jdbc.execute("CREATE TABLE IF NOT EXISTS iqc_quality_rule_set (id varchar(64) PRIMARY KEY,rule_ids_json clob)");
             jdbc.execute("CREATE TABLE IF NOT EXISTS iqc_quality_rule_set_version (id varchar(64) PRIMARY KEY,rule_ids_json clob)");
