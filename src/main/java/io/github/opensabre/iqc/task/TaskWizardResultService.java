@@ -45,6 +45,9 @@ public class TaskWizardResultService {
         result.setScoreStatus(output.has("processingStatus") ? "PENDING" : scoring == null ? "NOT_APPLICABLE" : scoring.path("scoreStatus").asText());
         result.setFinalScore(scoring == null || !scoring.hasNonNull("finalScore") ? null : scoring.path("finalScore").decimalValue());
         result.setResultStatus(output.has("processingStatus") ? "PENDING" : scoring == null ? "NOT_APPLICABLE" : scoring.path("conclusion").asText());
+        result.setReason(output.has("processingStatus")
+                ? "匹配结果已保存；正式标签与扣分策略待确认"
+                : scoring == null ? "本次任务未配置评分处理" : "任务结果已按配置完成处理");
         try {
             result.setScoringResultJson(scoring == null ? null : mapper.writeValueAsString(scoring));
             // The complete processed payload, including label candidates, stays linked to source engine records.

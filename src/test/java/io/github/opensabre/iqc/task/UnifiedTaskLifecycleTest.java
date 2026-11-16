@@ -117,6 +117,7 @@ class UnifiedTaskLifecycleTest {
         assertThat(persisted.getValue().getResultStatus()).isEqualTo("PENDING");
         assertThat(persisted.getValue().getScoreStatus()).isEqualTo("PENDING");
         assertThat(persisted.getValue().getFinalScore()).isNull();
+        assertThat(persisted.getValue().getReason()).isEqualTo("匹配结果已保存；正式标签与扣分策略待确认");
         assertThat(mapper.readTree(persisted.getValue().getBusinessItemResultsJson()).at("/output/processingStatus").asText()).isEqualTo("PENDING_POLICY");
         assertThat(item.getStatus()).isEqualTo("SUCCEEDED");
         verifyNoInteractions(provider);
