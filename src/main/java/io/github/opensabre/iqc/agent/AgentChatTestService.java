@@ -40,7 +40,8 @@ public class AgentChatTestService {
             if (version == null) throw IqcException.notFound("智能体版本不存在");
             try { config=json.readValue(version.getConfigJson(), AgentConfiguration.class); }
             catch (Exception error) { throw IqcException.invalidArgument("保存版本的配置格式错误"); }
-            config=chatCapabilities(config);
+            if (!AgentConfiguration.CAPABILITY_SCHEMA.equals(config.schemaVersion()))
+                throw IqcException.invalidArgument("不支持的智能体配置，请使用纯大模型能力配置");
             config.validated();
             if (config.assetSnapshots() == null || !("PUBLISHED".equals(version.getStatus()) || "PENDING_APPROVAL".equals(version.getStatus())))
                 config=config.withSnapshots(assets.snapshot(config));
@@ -84,22 +85,8 @@ public class AgentChatTestService {
         } catch (IqcException error) { throw error; }
         catch (RuntimeException error) { throw IqcException.invalidState(phase+"失败，请检查对应服务连接、认证引用及超时配置"); }
     }
-    /** Read-only projection of a trusted legacy version: no task policy is executed or persisted. */
-    private AgentConfiguration chatCapabilities(AgentConfiguration config) {
-        if (AgentConfiguration.CAPABILITY_SCHEMA.equals(config.schemaVersion())) return config;
-        if (!"2.0".equals(config.schemaVersion()) || "RULE_ONLY".equalsIgnoreCase(config.mode())
-                || config.primaryModelProfileId() == null || config.primaryModelProfileId().isBlank())
-            throw IqcException.invalidArgument("此历史版本没有可测试的大模型能力，请配置新的智能体版本");
-        boolean extensions="AGENT_LLM".equals(config.mode());
-        var frozen=config.assetSnapshots();
-        if (frozen != null && !extensions)
-            frozen=new AgentConfiguration.AssetSnapshots(frozen.primaryModel(),frozen.fallbackModels(),List.of(),List.of());
-        return new AgentConfiguration("3.0",null,config.systemPrompt(),null,List.of(),List.of(),List.of(),
-                config.primaryModelProfileId(),config.fallbackModelProfileIds(),
-                extensions ? config.mcpServerIds() : List.of(),extensions ? config.skillIds() : List.of(),frozen,null);
-    }
-
-    public record Request(String configJson, List<Turn> messages, String agentId, Integer versionNo) {
+    public record Request(String configJson, List<Turn> messages, String agentId, Integer versionNo, String sessionId) {
+        public Request(String configJson, List<Turn> messages, String agentId, Integer versionNo) { this(configJson,messages,agentId,versionNo,null); }
         public Request(String configJson, List<Turn> messages) { this(configJson,messages,null,null); }
     }
     public record Turn(String role, String content) { }
