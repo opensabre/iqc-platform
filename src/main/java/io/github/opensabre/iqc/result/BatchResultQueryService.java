@@ -386,6 +386,13 @@ public class BatchResultQueryService {
     /** Both result views count explicit processor targets, never individual engine votes. */
     private ProcessorCounts processorCounts(ConversationInspectionResult canonical) {
         JsonNode output = exportJson(canonical.getBusinessItemResultsJson()).path("output");
+        if ("iqc-unified-processing-v1".equals(output.path("schemaVersion").asText())) {
+            if (!"PENDING_POLICY".equals(output.path("processingStatus").asText())
+                    || !output.path("labels").isArray() || !output.path("actionStatuses").isArray())
+                throw IqcException.invalidState("统一任务处理结果损坏");
+            // Unified matching intentionally persists candidates/actions without a finalized quality score.
+            return new ProcessorCounts(0, 0, 0);
+        }
         if (!"iqc-task-processed-results-v1".equals(output.path("schemaVersion").asText()))
             throw IqcException.invalidState("任务处理结果损坏");
         int count = 0, failures = 0, errors = 0;

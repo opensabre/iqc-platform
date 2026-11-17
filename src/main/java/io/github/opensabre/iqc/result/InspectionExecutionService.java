@@ -394,17 +394,20 @@ public class InspectionExecutionService {
         }
         // Batch commits update locked database rows, not the worker's original objects.
         // Aggregate committed progress so both legacy and item-route execution use the same source of truth.
-        int processed, failed;
+        int processed, failed, pending;
         if (paged) {
             processed = previouslyProcessed + Math.toIntExact(taskItemMapper.selectCount(Wrappers.<TaskItem>lambdaQuery()
                     .eq(TaskItem::getExecutionId, executionId).in(TaskItem::getStatus, List.of("SUCCEEDED", "FAILED", "CANCELLED"))));
             failed = Math.toIntExact(taskItemMapper.selectCount(Wrappers.<TaskItem>lambdaQuery()
                     .eq(TaskItem::getExecutionId, executionId).eq(TaskItem::getStatus, "FAILED")));
+            pending = Math.toIntExact(taskItemMapper.selectCount(Wrappers.<TaskItem>lambdaQuery()
+                    .eq(TaskItem::getExecutionId, executionId).in(TaskItem::getStatus, List.of("PENDING", "RUNNING"))));
         } else {
             List<TaskItem> committedItems = taskItemMapper.selectList(Wrappers.<TaskItem>lambdaQuery()
                     .eq(TaskItem::getExecutionId, executionId).orderByAsc(TaskItem::getSequenceNo));
             processed = previouslyProcessed + (int) committedItems.stream().filter(item -> List.of("SUCCEEDED", "FAILED", "CANCELLED").contains(item.getStatus())).count();
             failed = (int) committedItems.stream().filter(item -> "FAILED".equals(item.getStatus())).count();
+            pending = (int) committedItems.stream().filter(item -> List.of("PENDING", "RUNNING").contains(item.getStatus())).count();
         }
         task.setProcessedMessages(processed); task.setFailedMessages(failed);
         if ("PAUSE_REQUESTED".equals(task.getStatus())) {
@@ -412,8 +415,16 @@ public class InspectionExecutionService {
             execution.setProcessedMessages(processed); execution.setFailedMessages(failed); execution.setStatus("PAUSED"); executionMapper.updateById(execution);
             return task;
         }
-        task.setStatus(failed > 0 ? "PARTIAL_FAILED" : "SUCCEEDED"); taskMapper.updateById(task);
-        execution.setProcessedMessages(processed); execution.setFailedMessages(failed); execution.setStatus(failed > 0 ? "PARTIAL_FAILED" : "SUCCEEDED"); executionMapper.updateById(execution);
+        String finalStatus = pending > 0
+                ? processed > 0 ? "PARTIAL_FAILED" : "FAILED"
+                : failed > 0 ? "PARTIAL_FAILED" : "SUCCEEDED";
+        if (pending > 0) {
+            execution.setErrorMessage("执行结束时仍有 " + pending + " 条消息未处理");
+            log.warn("event=iqc_task_execution_incomplete taskId={} executionId={} processedMessages={} failedMessages={} pendingMessages={}",
+                    taskId, executionId, processed, failed, pending);
+        }
+        task.setStatus(finalStatus); taskMapper.updateById(task);
+        execution.setProcessedMessages(processed); execution.setFailedMessages(failed); execution.setStatus(finalStatus); executionMapper.updateById(execution);
         return task;
     }
 
