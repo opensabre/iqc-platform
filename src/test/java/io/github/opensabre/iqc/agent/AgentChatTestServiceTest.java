@@ -64,20 +64,14 @@ class AgentChatTestServiceTest {
         verifyNoInteractions(assets);
     }
 
-    @Test void legacySavedModelVersionCanChatWithoutExecutingItsRulePolicy() throws Exception {
-        var version=new io.github.opensabre.iqc.agent.model.QualityAgentVersion(); version.setStatus("PUBLISHED");
-        version.setConfigJson("{\"schemaVersion\":\"2.0\",\"mode\":\"RULE_THEN_LLM\",\"ruleSetId\":\"rules\",\"systemPrompt\":\"Legacy prompt\",\"primaryModelProfileId\":\"pinned\",\"assetSnapshots\":{\"primaryModel\":{\"id\":\"pinned\"},\"skills\":[],\"mcpServers\":[],\"fallbackModels\":[]}}");
+    @Test void rejectsSavedLegacyRuleConfigurationBeforeCallingModelOrTools() {
+        var version=new io.github.opensabre.iqc.agent.model.QualityAgentVersion();
+        version.setConfigJson("{\"schemaVersion\":\"2.0\",\"mode\":\"RULE_THEN_LLM\"}");
         when(versions.selectOne(any())).thenReturn(version);
-        var session=mock(SnapshotMcpToolProvider.Session.class);when(session.callbacks()).thenReturn(new ToolCallback[0]);when(tools.open(any())).thenReturn(session);
-        when(models.call(any(Prompt.class),any(),any(ToolCallback[].class))).thenReturn(new ChatResponse(List.of(new Generation(new AssistantMessage("ok")))));
-        var result=service.chat(new AgentChatTestService.Request("{}",List.of(new AgentChatTestService.Turn("user","hi")),"agent-1",2));
-        assertThat(result.content()).isEqualTo("ok");
-        var snapshot=org.mockito.ArgumentCaptor.forClass(com.fasterxml.jackson.databind.JsonNode.class);
-        verify(tools).open(snapshot.capture());
-        assertThat(snapshot.getValue().path("configJson").path("schemaVersion").asText()).isEqualTo("3.0");
-        assertThat(snapshot.getValue().path("configJson").path("mode").isNull()).isTrue();
-        assertThat(snapshot.getValue().path("configJson").path("ruleSetId").isNull()).isTrue();
-        verifyNoInteractions(assets);
+        assertThatThrownBy(() -> service.chat(new AgentChatTestService.Request("{}",
+                List.of(new AgentChatTestService.Turn("user","hi")),"agent-1",2)))
+                .hasMessageContaining("不支持的智能体配置");
+        verifyNoInteractions(assets, models, tools);
     }
 
 }

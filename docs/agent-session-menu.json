@@ -1,0 +1,21 @@
+{
+  "status": "approved_for_deployment",
+  "productCode": "iqc",
+  "menu": {
+    "name": "会话查询",
+    "type": "MENU",
+    "parent": { "name": "智能体管理", "existingMenuIdHint": "900105" },
+    "href": "/iqc/agent-sessions",
+    "description": "{\"perm\":\"iqc:agent:view\"}",
+    "position": "after_agent_list",
+    "roles": "same_as_existing_agent_list_menu"
+  },
+  "resources": [
+    { "code": "iqc:agent-session:query", "method": "GET", "url": "/api/iqc/config/agent-sessions" },
+    { "code": "iqc:agent-session:agent-query", "method": "GET", "url": "/api/iqc/config/agents/{agentId}/sessions" },
+    { "code": "iqc:agent-session:detail", "method": "GET", "url": "/api/iqc/config/agents/{agentId}/sessions/{sessionId}" }
+  ],
+  "resourceRoles": "same_as_existing_agent_view_resource",
+  "applyUsing": "existing_generic_organization_menu_and_resource_management",
+  "changes": "only IQC menu and URL permission records; no base service source changes or additional role grants"
+}
