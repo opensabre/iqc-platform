@@ -2,7 +2,7 @@ package io.github.opensabre.iqc.task;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.opensabre.iqc.agent.dao.QualityAgentMapper;
+import io.github.opensabre.iqc.integration.iac.IacAgentCatalog;
 import io.github.opensabre.iqc.governance.IqcException;
 import io.github.opensabre.iqc.label.LabelResolutionService;
 import io.github.opensabre.iqc.label.dao.InsightLabelMapper;
@@ -24,12 +24,12 @@ public class UnifiedLabelPlanService {
     private final InsightLabelMapper labels;
     private final QualityRuleVersionMapper versions;
     private final io.github.opensabre.iqc.rule.dao.QualityRuleMapper rules;
-    private final QualityAgentMapper agents;
+    private final IacAgentCatalog agents;
     private final IqcDataScope scope;
     private final ObjectMapper mapper;
     private final io.github.opensabre.iqc.label.LabelActionService actions;
     public UnifiedLabelPlanService(LabelResolutionService resolver, InsightLabelMapper labels,
-                                   QualityRuleVersionMapper versions, QualityAgentMapper agents,
+                                   QualityRuleVersionMapper versions, IacAgentCatalog agents,
                                    IqcDataScope scope, ObjectMapper mapper, io.github.opensabre.iqc.label.LabelActionService actions,
                                    io.github.opensabre.iqc.rule.dao.QualityRuleMapper rules) {
         this.resolver = resolver; this.labels = labels; this.versions = versions;
@@ -119,7 +119,7 @@ public class UnifiedLabelPlanService {
         }
         com.fasterxml.jackson.databind.JsonNode agentSnapshot = mapper.getNodeFactory().nullNode();
         if (request.engineSequence().contains(EngineExecutionResultSet.EngineType.LLM)) {
-            var agent = request.agentId() == null ? null : agents.selectById(request.agentId());
+            var agent = request.agentId() == null ? null : agents.findById(request.agentId());
             if (agent == null || !"PUBLISHED".equals(agent.getStatus())) throw IqcException.invalidArgument("请选择已发布的智能体配置");
             if (!scope.canView(agent.getCreatedBy(), null)) throw IqcException.accessDenied("智能体配置超出数据权限");
             agentSnapshot = mapper.valueToTree(agent);

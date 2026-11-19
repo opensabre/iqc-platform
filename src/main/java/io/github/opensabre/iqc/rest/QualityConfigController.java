@@ -4,7 +4,6 @@ import io.github.opensabre.boot.annotations.ResourcePermission;
 import io.github.opensabre.governance.audit.annotations.Audit;
 import io.github.opensabre.governance.audit.annotations.OperationType;
 import io.github.opensabre.governance.ratelimit.annotations.RateLimit;
-import io.github.opensabre.iqc.agent.QualityAgentService;
 import io.github.opensabre.iqc.agent.AgentEffectService;
 import io.github.opensabre.iqc.agent.model.QualityAgent;
 import io.github.opensabre.iqc.agent.model.QualityAgentVersion;
@@ -25,68 +24,16 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/iqc/config")
 public class QualityConfigController {
-    private final QualityAgentService agentService;
     private final AgentEffectService agentEffectService;
     private final QualityRuleService ruleService;
     private final QualityRuleSetService ruleSetService;
     private final DlsImportService dlsImportService;
 
-    public QualityConfigController(QualityAgentService agentService, AgentEffectService agentEffectService,
+    public QualityConfigController(AgentEffectService agentEffectService,
                                    QualityRuleService ruleService, QualityRuleSetService ruleSetService,
                                    DlsImportService dlsImportService) {
-        this.agentService = agentService; this.agentEffectService = agentEffectService; this.ruleService = ruleService;
+        this.agentEffectService = agentEffectService; this.ruleService = ruleService;
         this.ruleSetService = ruleSetService; this.dlsImportService = dlsImportService;
-    }
-
-    @GetMapping("/agents")
-    @ResourcePermission(code = "iqc:agent:view", name = "查看 Agent", type = "iqc", description = "查询 Agent")
-    public List<QualityAgent> agents() { return agentService.list(); }
-
-    @PostMapping("/agents")
-    @ResourcePermission(code = "iqc:agent:manage", name = "管理 Agent", type = "iqc", description = "创建 Agent")
-    @Audit(operationType = OperationType.CREATE, description = "创建 IQC Agent", module = "IQC_AGENT")
-    @RateLimit(sceneCode = "iqc-agent-create", maxCount = 20, period = 60)
-    public QualityAgent createAgent(@RequestBody AgentRequest request) { return agentService.create(request.name(), request.code(), request.description(), request.configJson()); }
-
-    @PostMapping("/agents/{id}/submit")
-    @ResourcePermission(code = "iqc:agent:submit", name = "提交 Agent 审批", type = "iqc", description = "提交 Agent 审批")
-    @Audit(operationType = OperationType.UPDATE, description = "提交 IQC Agent 审批", module = "IQC_AGENT")
-    public QualityAgent submitAgent(@PathVariable String id) { return agentService.submit(id); }
-
-    @PostMapping("/agents/{id}/approve")
-    @ResourcePermission(code = "iqc:agent:approve", name = "审批 Agent", type = "iqc", description = "审批通过 Agent")
-    @Audit(operationType = OperationType.UPDATE, description = "审批通过 IQC Agent", module = "IQC_AGENT")
-    public QualityAgent publishAgent(@PathVariable String id) { return agentService.publish(id); }
-
-    @PostMapping("/agents/{id}/reject")
-    @ResourcePermission(code = "iqc:agent:approve", name = "驳回 Agent", type = "iqc", description = "驳回 Agent")
-    @Audit(operationType = OperationType.UPDATE, description = "驳回 IQC Agent", module = "IQC_AGENT")
-    public QualityAgent rejectAgent(@PathVariable String id) { return agentService.reject(id); }
-
-    @PostMapping("/agents/{id}/disable")
-    @ResourcePermission(code = "iqc:agent:disable", name = "停用 Agent", type = "iqc", description = "停用已发布 Agent")
-    @Audit(operationType = OperationType.UPDATE, description = "停用 IQC Agent", module = "IQC_AGENT")
-    public QualityAgent disableAgent(@PathVariable String id) { return agentService.disable(id); }
-
-    @GetMapping("/agents/{id}/versions")
-    @ResourcePermission(code = "iqc:agent:view", name = "查看 Agent 版本", type = "iqc", description = "查询 Agent 版本")
-    public List<QualityAgentVersion> agentVersions(@PathVariable String id) { return agentService.versions(id); }
-
-    @PostMapping("/agents/{id}/versions")
-    @ResourcePermission(code = "iqc:agent:version:manage", name = "创建 Agent 版本", type = "iqc", description = "创建 Agent 版本")
-    @Audit(operationType = OperationType.CREATE, description = "创建 IQC Agent 版本", module = "IQC_AGENT")
-    public QualityAgentVersion createAgentVersion(@PathVariable String id, @RequestBody AgentRequest request) { return agentService.createVersion(id, request.name(), request.code(), request.description(), request.configJson()); }
-
-    @PostMapping("/agents/{id}/versions/{versionNo}/rollback")
-    @ResourcePermission(code = "iqc:agent:version:rollback", name = "回滚 Agent 版本", type = "iqc", description = "基于历史版本创建新草稿")
-    @Audit(operationType = OperationType.UPDATE, description = "回滚 IQC Agent 版本", module = "IQC_AGENT")
-    public QualityAgentVersion rollbackAgent(@PathVariable String id, @PathVariable int versionNo) { return agentService.rollback(id, versionNo); }
-
-    @GetMapping("/agents/{id}/versions/compare")
-    @ResourcePermission(code = "iqc:agent:view", name = "比较 Agent 版本", type = "iqc", description = "比较 Agent 版本配置差异")
-    public QualityAgentService.AgentVersionComparison compareAgentVersions(@PathVariable String id,
-            @RequestParam int fromVersion, @RequestParam int toVersion) {
-        return agentService.compare(id, fromVersion, toVersion);
     }
 
     @GetMapping("/agents/{id}/versions/{versionNo}/effect")
@@ -201,7 +148,6 @@ public class QualityConfigController {
     @ResourcePermission(code = "iqc:rule:approve", name = "驳回规则集", type = "iqc", description = "驳回规则集")
     public QualityRuleSet rejectRuleSet(@PathVariable String id) { return ruleSetService.reject(id); }
 
-    public record AgentRequest(String name, String code, String description, String configJson) { }
     public record RuleRequest(String name, String code, String category, String ruleType, String targetRole, String expression, String description, Integer deduction, String riskLevel, Boolean veto) { }
     public record RuleTestRequest(String content, List<RuleTestMessage> messages) { }
     public record RuleTestMessage(String id, Integer sequenceNo, String speakerRole, String content) { }

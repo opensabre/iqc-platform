@@ -1,7 +1,7 @@
 package io.github.opensabre.iqc.task;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.opensabre.iqc.agent.dao.QualityAgentMapper;
+import io.github.opensabre.iqc.integration.iac.IacAgentCatalog;
 import io.github.opensabre.iqc.label.LabelResolutionService;
 import io.github.opensabre.iqc.label.dao.InsightLabelMapper;
 import io.github.opensabre.iqc.label.model.LabelRuleBinding;
@@ -29,7 +29,7 @@ class UnifiedLabelPlanServiceTest {
     final io.github.opensabre.iqc.label.LabelActionService actions = mock(io.github.opensabre.iqc.label.LabelActionService.class);
     final io.github.opensabre.iqc.rule.dao.QualityRuleMapper rules = mock(io.github.opensabre.iqc.rule.dao.QualityRuleMapper.class);
     final UnifiedLabelPlanService service = new UnifiedLabelPlanService(resolver, labels, versions,
-            mock(QualityAgentMapper.class), mock(IqcDataScope.class), new ObjectMapper(), actions, rules);
+            mock(IacAgentCatalog.class), mock(IqcDataScope.class), new ObjectMapper(), actions, rules);
     LabelRuleBinding binding(String rule) {
         var binding = new LabelRuleBinding(); binding.setLabelId("10"); binding.setRuleId(rule); binding.setRuleVersionNo(2); return binding;
     }

@@ -2,7 +2,7 @@ package io.github.opensabre.iqc.agent;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.opensabre.iqc.agent.dao.QualityAgentMapper;
+import io.github.opensabre.iqc.integration.iac.IacAgentCatalog;
 import io.github.opensabre.iqc.governance.IqcException;
 import io.github.opensabre.iqc.result.dao.InspectionResultMapper;
 import io.github.opensabre.iqc.result.model.InspectionResult;
@@ -21,7 +21,7 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class AgentEffectService {
-    private final QualityAgentMapper agentMapper;
+    private final IacAgentCatalog agentMapper;
     private final InspectionTaskMapper taskMapper;
     private final InspectionResultMapper resultMapper;
     private final ObjectMapper objectMapper;
@@ -30,7 +30,7 @@ public class AgentEffectService {
      * Returns effectiveness metrics for one Agent version without re-running historical conversations.
      */
     public AgentEffectReport report(String agentId, int versionNo) {
-        if (agentMapper.selectById(agentId) == null) throw IqcException.notFound("Agent 不存在: " + agentId);
+        if (agentMapper.findById(agentId) == null) throw IqcException.notFound("Agent 不存在: " + agentId);
         List<InspectionTask> tasks = taskMapper.selectList(Wrappers.<InspectionTask>lambdaQuery().eq(InspectionTask::getAgentId, agentId));
         List<String> taskIds = tasks.stream().filter(task -> snapshotVersion(task.getAgentSnapshotJson()) == versionNo).map(InspectionTask::getId).toList();
         List<InspectionResult> results = taskIds.isEmpty() ? List.of() : resultMapper.selectList(

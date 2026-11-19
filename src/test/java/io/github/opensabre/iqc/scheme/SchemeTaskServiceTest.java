@@ -169,7 +169,7 @@ class SchemeTaskServiceTest {
         detector.setRuleType("KEYWORD"); detector.setExpression("你好"); detector.setTargetRole("all");
         when(versions.selectOne(any())).thenReturn(detector);
         var resolver = new SchemeDependencyResolver(rules, versions,
-                mock(io.github.opensabre.iqc.agent.dao.QualityAgentMapper.class), mock(io.github.opensabre.iqc.agent.dao.QualityAgentVersionMapper.class),
+                mock(io.github.opensabre.iqc.integration.iac.IacAgentCatalog.class), mock(io.github.opensabre.iqc.integration.iac.IacAgentVersionCatalog.class),
                 mapper, mock(io.github.opensabre.iqc.agent.AgentAssetReferenceValidator.class),
                 mock(io.github.opensabre.iqc.scheme.dao.InspectionSchemeMapper.class), mock(io.github.opensabre.iqc.label.LabelResolutionService.class));
         var checked = resolver.previewRoutes(expanded);

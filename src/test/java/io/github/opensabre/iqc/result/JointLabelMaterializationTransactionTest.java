@@ -388,7 +388,7 @@ class JointLabelMaterializationTransactionTest {
         // Real rule mapper and transaction manager; only selection discovery is isolated from this lock test.
         var unified = new io.github.opensabre.iqc.task.UnifiedLabelPlanService(selectedLabels,
                 mock(io.github.opensabre.iqc.label.dao.InsightLabelMapper.class), ruleVersionMapper,
-                mock(io.github.opensabre.iqc.agent.dao.QualityAgentMapper.class), mock(io.github.opensabre.iqc.shared.IqcDataScope.class), mapper,
+                mock(io.github.opensabre.iqc.integration.iac.IacAgentCatalog.class), mock(io.github.opensabre.iqc.shared.IqcDataScope.class), mapper,
                 mock(io.github.opensabre.iqc.label.LabelActionService.class), ruleMapper);
         var definition = new io.github.opensabre.iqc.scheme.SchemeDefinition(io.github.opensabre.iqc.scheme.SchemeDefinition.SCHEMA,
                 List.of(new io.github.opensabre.iqc.scheme.SchemeDefinition.Item("item", "检查项",
@@ -406,7 +406,7 @@ class JointLabelMaterializationTransactionTest {
                             if ("RULE_SET".equals(kind)) ruleSets.create("引用集", "REFERENCE_SET", null, List.of("reference-rule"), "ALL");
                             else if ("ENGINE_PLAN".equals(kind)) {
                                 var plans = new io.github.opensabre.iqc.task.TaskEnginePlanService(ruleMapper,
-                                        mock(io.github.opensabre.iqc.agent.dao.QualityAgentMapper.class), mapper, null, null, null);
+                                        mock(io.github.opensabre.iqc.integration.iac.IacAgentCatalog.class), mapper, null, null, null);
                                 var engine = new io.github.opensabre.iqc.task.TaskProcessingConfiguration.Engine("check",
                                         io.github.opensabre.iqc.task.TaskProcessingConfiguration.EngineType.REGEX,
                                         mapper.createObjectNode().put("targetId", "check").put("ruleId", "reference-rule"));
@@ -1160,22 +1160,22 @@ class JointLabelMaterializationTransactionTest {
         var scope = mock(io.github.opensabre.iqc.shared.IqcDataScope.class);
         when(scope.canView(nullable(String.class), nullable(String.class))).thenReturn(true);
         var tasks = new InspectionTaskService(taskMapper, conversations,
-                mock(io.github.opensabre.iqc.agent.dao.QualityAgentMapper.class),
+                mock(io.github.opensabre.iqc.integration.iac.IacAgentCatalog.class),
                 mock(io.github.opensabre.iqc.rule.dao.QualityRuleMapper.class),
                 mock(io.github.opensabre.iqc.rule.QualityRuleSetService.class), mapper, executionMapper, scope,
                 mock(LabelResolutionService.class));
         var task = tasks.createSchemeTrial("scheme-1", 1, "纯画像试跑",
                 twoConversations ? List.of("conversation-1", "conversation-2") : List.of("conversation-1"), release);
         var llm = mock(io.github.opensabre.iqc.result.llm.LlmQualityProvider.class);
-        var agents = mock(io.github.opensabre.iqc.agent.dao.QualityAgentMapper.class);
-        var agentVersions = mock(io.github.opensabre.iqc.agent.dao.QualityAgentVersionMapper.class);
+        var agents = mock(io.github.opensabre.iqc.integration.iac.IacAgentCatalog.class);
+        var agentVersions = mock(io.github.opensabre.iqc.integration.iac.IacAgentVersionCatalog.class);
         if (failingLlmLabel) {
             var current = new io.github.opensabre.iqc.agent.model.QualityAgent(); current.setStatus("PUBLISHED");
-            when(agents.selectById("agent-1")).thenReturn(current);
+            when(agents.findById("agent-1")).thenReturn(current);
             var version = new io.github.opensabre.iqc.agent.model.QualityAgentVersion();
             version.setAgentId("agent-1"); version.setVersionNo(1); version.setStatus("PUBLISHED");
             version.setConfigJson(agentConfig);
-            when(agentVersions.selectOne(any())).thenReturn(version);
+            when(agentVersions.findPublishedVersion(anyString(), org.mockito.ArgumentMatchers.anyInt())).thenReturn(version);
             if (twoConversations) {
                 when(llm.evaluateConversation(anyList(), any(JsonNode.class), any(JsonNode.class), anyString()))
                         .thenAnswer(invocation -> {
@@ -1444,8 +1444,8 @@ class JointLabelMaterializationTransactionTest {
             org.mockito.Mockito.verifyNoMoreInteractions(harness.llm());
         }
         assertThatCode(selected.definition()::requireExecutable).doesNotThrowAnyException();
-        var agents = (io.github.opensabre.iqc.agent.dao.QualityAgentMapper) org.springframework.test.util.ReflectionTestUtils.getField(resolver, "agents");
-        when(agents.selectById("agent-1")).thenReturn(null);
+        var agents = (io.github.opensabre.iqc.integration.iac.IacAgentCatalog) org.springframework.test.util.ReflectionTestUtils.getField(resolver, "agents");
+        when(agents.findById("agent-1")).thenReturn(null);
         int existingTasks = count("iqc_inspection_task");
         assertThatThrownBy(() -> schemes.preview("scheme-1", 1)).hasMessageContaining("智能体不存在或已停用");
         assertThat(count("iqc_inspection_task")).isEqualTo(existingTasks);

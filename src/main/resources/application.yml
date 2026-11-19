@@ -8,6 +8,12 @@ spring:
   application:
     name: iqc-platform
   cloud:
+    openfeign:
+      client:
+        config:
+          iqcIacConsumer:
+            connectTimeout: ${IAC_RPC_CONNECT_TIMEOUT_MILLIS:5000}
+            readTimeout: ${IAC_RPC_READ_TIMEOUT_MILLIS:600000}
     nacos:
       discovery:
         server-addr: ${REGISTER_HOST:localhost}:${REGISTER_PORT:8848}

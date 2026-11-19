@@ -52,32 +52,23 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
     private final GovernanceRateLimiter rateLimiter;
     private final UsageCounterRecorder usageCounterRecorder;
     private final LlmQualityProperties properties;
-    private final SnapshotMcpToolProvider mcpTools;
 
     @Autowired
     public SpringAiLlmQualityProvider(ObjectProvider<ChatModel> chatModel, SnapshotChatModelRouter modelRouter, ObjectMapper objectMapper,
                                       GovernanceRateLimiter rateLimiter, UsageCounterRecorder usageCounterRecorder,
-                                      LlmQualityProperties properties, SnapshotMcpToolProvider mcpTools) {
-        this(chatModel.getIfAvailable(), modelRouter, objectMapper, rateLimiter, usageCounterRecorder, properties, mcpTools);
+                                      LlmQualityProperties properties) {
+        this(chatModel.getIfAvailable(), modelRouter, objectMapper, rateLimiter, usageCounterRecorder, properties);
     }
 
-    private SpringAiLlmQualityProvider(ChatModel chatModel, SnapshotChatModelRouter modelRouter, ObjectMapper objectMapper,
-                                       GovernanceRateLimiter rateLimiter, UsageCounterRecorder usageCounterRecorder,
-                                       LlmQualityProperties properties, SnapshotMcpToolProvider mcpTools) {
+    SpringAiLlmQualityProvider(ChatModel chatModel, SnapshotChatModelRouter modelRouter, ObjectMapper objectMapper,
+                               GovernanceRateLimiter rateLimiter, UsageCounterRecorder usageCounterRecorder,
+                               LlmQualityProperties properties) {
         this.chatModel = chatModel;
         this.modelRouter = modelRouter;
         this.objectMapper = objectMapper;
         this.rateLimiter = rateLimiter;
         this.usageCounterRecorder = usageCounterRecorder;
         this.properties = properties;
-        this.mcpTools = mcpTools;
-    }
-
-    SpringAiLlmQualityProvider(ChatModel chatModel, SnapshotChatModelRouter modelRouter, ObjectMapper objectMapper,
-                               GovernanceRateLimiter rateLimiter, UsageCounterRecorder usageCounterRecorder,
-                               LlmQualityProperties properties) {
-        this(chatModel, modelRouter, objectMapper, rateLimiter, usageCounterRecorder, properties,
-                new SnapshotMcpToolProvider(objectMapper, reference -> ""));
     }
 
     /** Evaluates one message with bounded retries, rate limiting, usage reporting and safe failure output. */
@@ -297,10 +288,8 @@ public class SpringAiLlmQualityProvider implements LlmQualityProvider {
                         new UserMessage("规则配置:" + rule + "\n本地预检结果:" + context
                                 + (conversation ? "\n待质检会话:" + content : "\n待质检话术:" + LlmTextSanitizer.sanitize(content)))));
                 ChatResponse response;
-                try (SnapshotMcpToolProvider.Session tools = mcpTools.open(agentSnapshot)) {
-                    response = modelRouter == null ? chatModel.call(prompt)
-                            : modelRouter.call(prompt, agentSnapshot, tools.callbacks());
-                }
+                response = modelRouter == null ? chatModel.call(prompt)
+                        : modelRouter.callWithTools(prompt, agentSnapshot);
                 String text = response == null || response.getResult() == null
                         ? null : response.getResult().getOutput().getText();
                 rawResponse.accept(text);

@@ -2,7 +2,7 @@ package io.github.opensabre.iqc.task;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.opensabre.iqc.agent.dao.QualityAgentMapper;
+import io.github.opensabre.iqc.integration.iac.IacAgentCatalog;
 import io.github.opensabre.iqc.governance.IqcException;
 import io.github.opensabre.iqc.rule.RuleMatcher;
 import io.github.opensabre.iqc.rule.dao.QualityRuleMapper;
@@ -19,13 +19,13 @@ import static io.github.opensabre.iqc.task.processing.EngineExecutionResultSet.*
 @Service
 public class TaskEnginePlanService {
     private final QualityRuleMapper rules;
-    private final QualityAgentMapper agents;
+    private final IacAgentCatalog agents;
     private final ObjectMapper mapper;
     private final RegexEngineAdapter regex;
     private final DlsEngineAdapter dls;
     private final LlmEngineAdapter llm;
 
-    public TaskEnginePlanService(QualityRuleMapper rules, QualityAgentMapper agents, ObjectMapper mapper,
+    public TaskEnginePlanService(QualityRuleMapper rules, IacAgentCatalog agents, ObjectMapper mapper,
                                 RegexEngineAdapter regex, DlsEngineAdapter dls, LlmEngineAdapter llm) {
         this.rules = rules; this.agents = agents; this.mapper = mapper;
         this.regex = regex; this.dls = dls; this.llm = llm;
@@ -76,7 +76,7 @@ public class TaskEnginePlanService {
             configuration.set("rule", mapper.valueToTree(rule));
             if (engine.type() == TaskProcessingConfiguration.EngineType.LLM) {
                 String agentId = text(parameters, "agentId");
-                var agent = agents.selectById(agentId);
+                var agent = agents.findById(agentId);
                 if (agent == null || !"PUBLISHED".equals(agent.getStatus()))
                     throw IqcException.invalidArgument("只能选择已发布大模型配置: " + agentId);
                 try {

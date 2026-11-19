@@ -1,7 +1,7 @@
 package io.github.opensabre.iqc.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.opensabre.iqc.agent.dao.QualityAgentMapper;
+import io.github.opensabre.iqc.integration.iac.IacAgentCatalog;
 import io.github.opensabre.iqc.agent.model.QualityAgent;
 import io.github.opensabre.iqc.result.dao.InspectionResultMapper;
 import io.github.opensabre.iqc.result.model.InspectionResult;
@@ -22,7 +22,7 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class AgentEffectServiceTest {
-    @Mock QualityAgentMapper agentMapper;
+    @Mock IacAgentCatalog agentMapper;
     @Mock InspectionTaskMapper taskMapper;
     @Mock InspectionResultMapper resultMapper;
 
@@ -37,7 +37,7 @@ class AgentEffectServiceTest {
 
     @Test
     void aggregatesOnlyTasksUsingRequestedVersionSnapshot() {
-        when(agentMapper.selectById("agent-1")).thenReturn(new QualityAgent());
+        when(agentMapper.findById("agent-1")).thenReturn(new QualityAgent());
         when(taskMapper.selectList(any())).thenReturn(List.of(task("t1", 1), task("t2", 2)));
         when(resultMapper.selectList(any())).thenReturn(List.of(result("HIT", "HIGH", 60), result("NOT_HIT", "LOW", 100)));
 
