@@ -2,7 +2,7 @@ name: Test, Build and Push with Jib
 
 on:
   push:
-    branches: [main]
+    branches: [main, "deploy/**"]
     tags: ["v*"]
   pull_request:
     branches: [main]
@@ -122,20 +122,26 @@ jobs:
               major_minor="${version%.*}"
               additional_tags="${major_minor},latest,${sha_tag}"
             fi
-          else
+          elif [[ "${GITHUB_REF_NAME}" == "main" ]]; then
             target_tag="main"
+            additional_tags="${sha_tag}"
+          else
+            target_tag="hwy"
             additional_tags="${sha_tag}"
           fi
 
           echo "target_image=${image_name}:${target_tag}" >> "${GITHUB_OUTPUT}"
           echo "additional_tags=${additional_tags}" >> "${GITHUB_OUTPUT}"
 
+      # JDK 25 on AArch64 requires a thread stack of at least 448k; override the shared 256k default.
       - name: Build and push with Jib
         run: >-
           mvn --batch-mode --no-transfer-progress
           -DskipTests
           compile
           jib:build
+          -Djib.from.platforms=linux/amd64,linux/arm64
+          -Djib.jvm.stack-size=512k
           -Djib.to.image=${{ steps.image.outputs.target_image }}
           -Djib.to.tags=${{ steps.image.outputs.additional_tags }}
           -Dsecret.id=${{ secrets.DOCKER_CLOUD_SECRET_ID }}
