@@ -1,7 +1,7 @@
 package io.github.opensabre.iqc.task;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.opensabre.iqc.agent.dao.QualityAgentMapper;
+import io.github.opensabre.iqc.integration.iac.IacAgentCatalog;
 import io.github.opensabre.iqc.conversation.dao.ConversationMessageMapper;
 import io.github.opensabre.iqc.conversation.model.ConversationMessage;
 import io.github.opensabre.iqc.result.dao.ConversationInspectionResultMapper;
@@ -82,7 +82,7 @@ class UnifiedTaskLifecycleTest {
         var executions = mock(TaskExecutionMapper.class); var items = mock(TaskItemMapper.class);
         var results = mock(ConversationInspectionResultMapper.class);
         var provider = mock(LlmQualityProvider.class);
-        var plans = new TaskEnginePlanService(mock(QualityRuleMapper.class), mock(QualityAgentMapper.class), mapper,
+        var plans = new TaskEnginePlanService(mock(QualityRuleMapper.class), mock(IacAgentCatalog.class), mapper,
                 new RegexEngineAdapter(mapper), new DlsEngineAdapter(mapper), new LlmEngineAdapter(provider, mapper));
         var regex = mapper.createObjectNode().put("schemaVersion", "iqc-unified-tags-v1");
         regex.putArray("tags").addObject().put("tagId", "10").put("ruleId", "20").put("ruleVersionNo", 1).put("expression", "退款");

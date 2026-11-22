@@ -30,11 +30,4 @@ class IqcDictionaryTest {
         assertTrue(DictionaryEnum.class.isAssignableFrom(IqcTargetRole.class));
     }
 
-    @Test
-    void agentModelAndMcpOptionsAreFrameworkDictionaries() {
-        assertEquals("iqc_model_provider", IqcModelProvider.class.getAnnotation(OpenSabreDictionary.class).code());
-        assertEquals("iqc_mcp_transport", IqcMcpTransport.class.getAnnotation(OpenSabreDictionary.class).code());
-        assertEquals("iqc_mcp_auth_type", IqcMcpAuthType.class.getAnnotation(OpenSabreDictionary.class).code());
-        assertEquals("iqc_agent_asset_status", IqcAssetStatus.class.getAnnotation(OpenSabreDictionary.class).code());
-    }
 }

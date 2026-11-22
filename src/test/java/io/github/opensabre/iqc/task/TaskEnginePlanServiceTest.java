@@ -1,7 +1,7 @@
 package io.github.opensabre.iqc.task;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.opensabre.iqc.agent.dao.QualityAgentMapper;
+import io.github.opensabre.iqc.integration.iac.IacAgentCatalog;
 import io.github.opensabre.iqc.agent.model.QualityAgent;
 import io.github.opensabre.iqc.rule.dao.QualityRuleMapper;
 import io.github.opensabre.iqc.rule.model.QualityRule;
@@ -19,7 +19,7 @@ import static org.mockito.Mockito.*;
 class TaskEnginePlanServiceTest {
     private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
     private final QualityRuleMapper rules = mock(QualityRuleMapper.class);
-    private final QualityAgentMapper agents = mock(QualityAgentMapper.class);
+    private final IacAgentCatalog agents = mock(IacAgentCatalog.class);
     private final LlmQualityProvider provider = new LlmQualityProvider() {
         public LlmEvaluation evaluate(String content, com.fasterxml.jackson.databind.JsonNode rule, String id) {
             throw new AssertionError("conversation required");
@@ -39,7 +39,7 @@ class TaskEnginePlanServiceTest {
     @Test void freezesTaskModelControlsWithoutEditingPublishedAgent() throws Exception {
         when(rules.selectById("r1")).thenReturn(rule("r1", "LLM", "检查"));
         var agent = new QualityAgent(); agent.setId("a1"); agent.setStatus("PUBLISHED"); agent.setConfigJson("{}");
-        when(agents.selectById("a1")).thenReturn(agent);
+        when(agents.findById("a1")).thenReturn(agent);
         var plan = service.freeze(request(single("LLM", "\"ruleId\":\"r1\",\"agentId\":\"a1\",\"prompt\":\" 检查退款 \",\"temperature\":0,\"timeoutSeconds\":30")));
         var overrides = service.steps(plan, "c1").getFirst().configuration().path("agentSnapshot").path("taskOverrides");
         assertThat(overrides.path("prompt").asText()).isEqualTo("检查退款");
@@ -81,7 +81,7 @@ class TaskEnginePlanServiceTest {
         when(rules.selectById("r1")).thenReturn(regex); when(rules.selectById("r2")).thenReturn(llm);
         var agent = new QualityAgent(); agent.setId("a1"); agent.setStatus("PUBLISHED"); agent.setVersionNo(3);
         agent.setConfigJson("{\"schemaVersion\":\"3.0\",\"systemPrompt\":\"识别会话\"}");
-        when(agents.selectById("a1")).thenReturn(agent);
+        when(agents.findById("a1")).thenReturn(agent);
         var request = request("""
                 {"schemaVersion":"iqc-task-processing-v1",
                  "inspection":{"engines":[
@@ -107,7 +107,7 @@ class TaskEnginePlanServiceTest {
         assertThat(result.engines().get(0).observations().getFirst().value().booleanValue()).isFalse();
         assertThat(result.engines().get(1).observations().getFirst().value().booleanValue()).isTrue();
         assertThat(result.engines().get(2).observations().getFirst().targetId()).isEqualTo("label-1");
-        verify(rules, times(2)).selectById("r1"); verify(agents, times(1)).selectById("a1");
+        verify(rules, times(2)).selectById("r1"); verify(agents, times(1)).findById("a1");
     }
 
     @Test void rejectsClientSnapshotsDraftRulesAndMismatchedTypes() throws Exception {
@@ -130,7 +130,7 @@ class TaskEnginePlanServiceTest {
         var config = request(single("LLM", "\"ruleId\":\"r1\",\"agentId\":\"a1\""));
         assertThatThrownBy(() -> service.freeze(config)).hasMessageContaining("已发布大模型配置");
         var agent = new QualityAgent(); agent.setStatus("PUBLISHED"); agent.setConfigJson("{\"mode\":\"RULE_ONLY\"}");
-        when(agents.selectById("a1")).thenReturn(agent);
+        when(agents.findById("a1")).thenReturn(agent);
         assertThatThrownBy(() -> service.freeze(config)).hasMessageContaining("不具备大模型能力");
     }
 

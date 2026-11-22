@@ -3,8 +3,8 @@ package io.github.opensabre.iqc.scheme;
 import com.baomidou.mybatisplus.core.conditions.AbstractWrapper;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.opensabre.iqc.agent.dao.QualityAgentMapper;
-import io.github.opensabre.iqc.agent.dao.QualityAgentVersionMapper;
+import io.github.opensabre.iqc.integration.iac.IacAgentCatalog;
+import io.github.opensabre.iqc.integration.iac.IacAgentVersionCatalog;
 import io.github.opensabre.iqc.agent.model.QualityAgent;
 import io.github.opensabre.iqc.agent.model.QualityAgentVersion;
 import io.github.opensabre.iqc.rule.dao.QualityRuleMapper;
@@ -113,8 +113,8 @@ class SchemeRouteDependencyPlanTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private final QualityRuleMapper rules = mock(QualityRuleMapper.class);
     private final QualityRuleVersionMapper versions = mock(QualityRuleVersionMapper.class);
-    private final QualityAgentMapper agents = mock(QualityAgentMapper.class);
-    private final QualityAgentVersionMapper agentVersions = mock(QualityAgentVersionMapper.class);
+    private final IacAgentCatalog agents = mock(IacAgentCatalog.class);
+    private final IacAgentVersionCatalog agentVersions = mock(IacAgentVersionCatalog.class);
     private final io.github.opensabre.iqc.scheme.dao.InspectionSchemeMapper schemes = mock(io.github.opensabre.iqc.scheme.dao.InspectionSchemeMapper.class);
     private final Map<String, QualityRuleVersion> published = new LinkedHashMap<>();
     private final io.github.opensabre.iqc.label.LabelResolutionService labels = mock(io.github.opensabre.iqc.label.LabelResolutionService.class);
@@ -137,10 +137,10 @@ class SchemeRouteDependencyPlanTest {
             return query.getParamNameValuePairs().values().stream().filter(published::containsKey)
                     .findFirst().map(published::get).orElse(null);
         });
-        var current = new QualityAgent(); current.setStatus("PUBLISHED"); when(agents.selectById("agent")).thenReturn(current);
+        var current = new QualityAgent(); current.setStatus("PUBLISHED"); when(agents.findById("agent")).thenReturn(current);
         var version = new QualityAgentVersion(); version.setVersionNo(1); version.setStatus("PUBLISHED");
         version.setConfigJson("{\"schemaVersion\":\"3.0\",\"systemPrompt\":\"质检\",\"primaryModelProfileId\":\"model\",\"assetSnapshots\":{\"primaryModel\":{\"id\":\"model\"}}}");
-        when(agentVersions.selectOne(any(Wrapper.class))).thenReturn(version);
+        when(agentVersions.findPublishedVersion(anyString(), anyInt())).thenReturn(version);
     }
 
     private RuleReference ref(String id) { return new RuleReference(id, 1); }

@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.github.opensabre.iqc.conversation.dao.ConversationMapper;
 import io.github.opensabre.iqc.conversation.model.Conversation;
-import io.github.opensabre.iqc.agent.dao.QualityAgentMapper;
+import io.github.opensabre.iqc.integration.iac.IacAgentCatalog;
 import io.github.opensabre.iqc.agent.model.QualityAgent;
 import io.github.opensabre.iqc.rule.dao.QualityRuleMapper;
 import io.github.opensabre.iqc.rule.model.QualityRule;
@@ -36,7 +36,7 @@ import java.security.MessageDigest;
 public class InspectionTaskService {
     private final InspectionTaskMapper taskMapper;
     private final ConversationMapper conversationMapper;
-    private final QualityAgentMapper agentMapper;
+    private final IacAgentCatalog agentMapper;
     private final QualityRuleMapper ruleMapper;
     private final QualityRuleSetService ruleSetService;
     private final ObjectMapper objectMapper;
@@ -598,7 +598,7 @@ public class InspectionTaskService {
 
     private void snapshotAgentAndRules(InspectionTask task, String agentId, String ruleSetId, List<String> requestedRuleIds, String executionMode) {
         TaskExecutionStrategy.Mode mode = TaskExecutionStrategy.parseRequested(executionMode);
-        QualityAgent agent = agentId == null || agentId.isBlank() ? null : agentMapper.selectById(agentId);
+        QualityAgent agent = agentId == null || agentId.isBlank() ? null : agentMapper.findById(agentId);
         if (agent == null && mode != TaskExecutionStrategy.Mode.RULE_ONLY)
             throw IqcException.invalidArgument("LLM 或旧版任务必须选择已发布 Agent，纯规则任务请显式选择 RULE_ONLY 策略");
         if (agentId != null && !agentId.isBlank() && (agent == null || !"PUBLISHED".equals(agent.getStatus())))

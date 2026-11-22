@@ -131,7 +131,6 @@ class RuleLifecycleWebSecurityTest {
         @Bean QualityRuleService ruleService(QualityRuleMapper rules, QualityRuleVersionMapper versions, RuleReferenceGuard refs) {
             return new QualityRuleService(rules, versions, new ObjectMapper(), refs, new IqcDataScope(null));
         }
-        @Bean QualityAgentService agents() { return mock(QualityAgentService.class); }
         @Bean AgentEffectService effects() { return mock(AgentEffectService.class); }
         @Bean QualityRuleSetService sets() { return mock(QualityRuleSetService.class); }
         @Bean DlsImportService imports() { return mock(DlsImportService.class); }

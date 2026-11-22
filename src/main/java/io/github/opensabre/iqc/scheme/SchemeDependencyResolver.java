@@ -4,8 +4,8 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.opensabre.iqc.agent.dao.QualityAgentMapper;
-import io.github.opensabre.iqc.agent.dao.QualityAgentVersionMapper;
+import io.github.opensabre.iqc.integration.iac.IacAgentCatalog;
+import io.github.opensabre.iqc.integration.iac.IacAgentVersionCatalog;
 import io.github.opensabre.iqc.agent.model.QualityAgentVersion;
 import io.github.opensabre.iqc.governance.IqcException;
 import io.github.opensabre.iqc.rule.RuleMatcher;
@@ -24,8 +24,8 @@ import java.util.List;
 public class SchemeDependencyResolver {
     private final QualityRuleMapper rules;
     private final QualityRuleVersionMapper ruleVersions;
-    private final QualityAgentMapper agents;
-    private final QualityAgentVersionMapper agentVersions;
+    private final IacAgentCatalog agents;
+    private final IacAgentVersionCatalog agentVersions;
     private final ObjectMapper mapper;
     private final io.github.opensabre.iqc.agent.AgentAssetReferenceValidator assets;
     private final io.github.opensabre.iqc.scheme.dao.InspectionSchemeMapper schemes;
@@ -268,12 +268,9 @@ public class SchemeDependencyResolver {
         if (requiresLlm) {
             if (definition.agent() == null) throw IqcException.invalidArgument("包含 LLM 检查的方案必须引用智能体版本");
             var reference = definition.agent();
-            var current = agents.selectById(reference.id());
+            var current = agents.findById(reference.id());
             if (current == null || "DISABLED".equals(current.getStatus())) throw IqcException.invalidState("智能体不存在或已停用");
-            var version = agentVersions.selectOne(Wrappers.<QualityAgentVersion>lambdaQuery()
-                    .eq(QualityAgentVersion::getAgentId, reference.id())
-                    .eq(QualityAgentVersion::getVersionNo, reference.versionNo())
-                    .eq(QualityAgentVersion::getStatus, "PUBLISHED"));
+            var version = agentVersions.findPublishedVersion(reference.id(), reference.versionNo());
             if (version == null) throw IqcException.invalidArgument("智能体版本未发布");
             try {
                 JsonNode config = mapper.readTree(version.getConfigJson());

@@ -2,8 +2,8 @@ package io.github.opensabre.iqc.scheme;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.opensabre.iqc.agent.dao.QualityAgentMapper;
-import io.github.opensabre.iqc.agent.dao.QualityAgentVersionMapper;
+import io.github.opensabre.iqc.integration.iac.IacAgentCatalog;
+import io.github.opensabre.iqc.integration.iac.IacAgentVersionCatalog;
 import io.github.opensabre.iqc.rule.dao.QualityRuleMapper;
 import io.github.opensabre.iqc.rule.dao.QualityRuleVersionMapper;
 import io.github.opensabre.iqc.rule.model.QualityRule;
@@ -48,11 +48,11 @@ class SchemeDependencyResolverTest {
     void scopedDependencyFreezesItsInputAndRejectsTamperedProjection() throws Exception {
         version.setRuleType("LLM");
         var agent = new io.github.opensabre.iqc.agent.model.QualityAgent(); agent.setStatus("PUBLISHED");
-        when(agents.selectById("agent")).thenReturn(agent);
+        when(agents.findById("agent")).thenReturn(agent);
         var agentVersion = new io.github.opensabre.iqc.agent.model.QualityAgentVersion();
         agentVersion.setVersionNo(1); agentVersion.setStatus("PUBLISHED");
         agentVersion.setConfigJson("{\"schemaVersion\":\"3.0\",\"systemPrompt\":\"质检\",\"primaryModelProfileId\":\"model\",\"assetSnapshots\":{\"primaryModel\":{\"id\":\"model\"}}}");
-        when(agentVersions.selectOne(any(Wrapper.class))).thenReturn(agentVersion);
+        when(agentVersions.findPublishedVersion(anyString(), anyInt())).thenReturn(agentVersion);
         var original = InspectionSchemeServiceTest.definition(); var item = original.items().getFirst();
         var definition = new SchemeDefinition(original.schemaVersion(), java.util.List.of(new SchemeDefinition.Item(
                 item.itemCode(), item.name(), item.rule(), item.hitMeaning(), null, SchemeDefinition.InputScope.CONVERSATION)),
@@ -87,8 +87,8 @@ class SchemeDependencyResolverTest {
     }
     private final QualityRuleMapper rules = mock(QualityRuleMapper.class);
     private final QualityRuleVersionMapper versions = mock(QualityRuleVersionMapper.class);
-    private final QualityAgentMapper agents = mock(QualityAgentMapper.class);
-    private final QualityAgentVersionMapper agentVersions = mock(QualityAgentVersionMapper.class);
+    private final IacAgentCatalog agents = mock(IacAgentCatalog.class);
+    private final IacAgentVersionCatalog agentVersions = mock(IacAgentVersionCatalog.class);
     private final io.github.opensabre.iqc.agent.AgentAssetReferenceValidator assets = mock(io.github.opensabre.iqc.agent.AgentAssetReferenceValidator.class);
     private final io.github.opensabre.iqc.scheme.dao.InspectionSchemeMapper schemes = mock(io.github.opensabre.iqc.scheme.dao.InspectionSchemeMapper.class);
     private final io.github.opensabre.iqc.label.LabelResolutionService labels = mock(io.github.opensabre.iqc.label.LabelResolutionService.class);
@@ -513,12 +513,12 @@ class SchemeDependencyResolverTest {
     void llmSchemeChecksAssetAvailabilityWithoutReplacingFrozenConfiguration() {
         version.setRuleType("LLM"); version.setExpression("判断开场白");
         var currentAgent = new io.github.opensabre.iqc.agent.model.QualityAgent(); currentAgent.setStatus("DRAFT");
-        when(agents.selectById("a1")).thenReturn(currentAgent);
+        when(agents.findById("a1")).thenReturn(currentAgent);
         var releasedAgent = new io.github.opensabre.iqc.agent.model.QualityAgentVersion();
         releasedAgent.setConfigJson("""
                 {"schemaVersion":"3.0","systemPrompt":"检查","primaryModelProfileId":"m1","assetSnapshots":{"primaryModel":{"id":"m1"}}}
                 """);
-        when(agentVersions.selectOne(any(Wrapper.class))).thenReturn(releasedAgent);
+        when(agentVersions.findPublishedVersion(anyString(), anyInt())).thenReturn(releasedAgent);
         var original = InspectionSchemeServiceTest.definition();
         var definition = new SchemeDefinition(original.schemaVersion(), original.items(), new SchemeDefinition.AgentReference("a1", 1), original.scoring());
         var result = resolver.resolve(definition);

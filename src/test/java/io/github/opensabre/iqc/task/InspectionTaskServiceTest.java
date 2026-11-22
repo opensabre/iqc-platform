@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.opensabre.governance.usage.UsageCounterRecorder;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
-import io.github.opensabre.iqc.agent.dao.QualityAgentMapper;
+import io.github.opensabre.iqc.integration.iac.IacAgentCatalog;
 import io.github.opensabre.iqc.conversation.dao.ConversationMapper;
 import io.github.opensabre.iqc.conversation.dao.ConversationMessageMapper;
 import io.github.opensabre.iqc.conversation.model.Conversation;
@@ -50,7 +50,7 @@ class InspectionTaskServiceTest {
 
     private final InspectionTaskMapper taskMapper = mock(InspectionTaskMapper.class);
     private final ConversationMapper conversationMapper = mock(ConversationMapper.class);
-    private final QualityAgentMapper agentMapper = mock(QualityAgentMapper.class);
+    private final IacAgentCatalog agentMapper = mock(IacAgentCatalog.class);
     private final QualityRuleMapper ruleMapper = mock(QualityRuleMapper.class);
     private final QualityRuleSetService ruleSetService = mock(QualityRuleSetService.class);
     private final ConversationMessageMapper messageMapper = mock(ConversationMessageMapper.class);
@@ -149,7 +149,7 @@ class InspectionTaskServiceTest {
         var snapshot = new ObjectMapper().readTree(task.getRuleSnapshotJson());
         assertThat(snapshot.path("executionStrategy").path("mode").asText()).isEqualTo("RULE_ONLY");
         assertThat(snapshot.path("rules")).hasSize(1);
-        verify(agentMapper, never()).selectById(any(String.class));
+        verify(agentMapper, never()).findById(any(String.class));
     }
 
     @Test
@@ -203,7 +203,7 @@ class InspectionTaskServiceTest {
         stubVisibleConversation();
         QualityAgent agent = new QualityAgent(); agent.setId("agent-1"); agent.setStatus("PUBLISHED");
         agent.setConfigJson("{\"schemaVersion\":\"3.0\",\"systemPrompt\":\"judge\"}");
-        when(agentMapper.selectById("agent-1")).thenReturn(agent);
+        when(agentMapper.findById("agent-1")).thenReturn(agent);
         stubPublishedRule("rule-1", "LLM");
         assertThatThrownBy(() -> taskService.createBatch("llm", List.of("conversation-1"), "agent-1", null, List.of("rule-1"), 1))
                 .hasMessageContaining("任务中选择执行策略");
@@ -216,7 +216,7 @@ class InspectionTaskServiceTest {
     void pureLlmStrategyCannotSilentlyOmitSelectedLocalChecks() {
         stubVisibleConversation();
         QualityAgent agent = new QualityAgent(); agent.setId("agent-1"); agent.setStatus("PUBLISHED");
-        when(agentMapper.selectById("agent-1")).thenReturn(agent);
+        when(agentMapper.findById("agent-1")).thenReturn(agent);
         stubPublishedRule("rule-1", "KEYWORD");
         assertThatThrownBy(() -> taskService.createBatch("llm", List.of("conversation-1"), "agent-1", null, List.of("rule-1"), 1, "AGENT_LLM"))
                 .hasMessageContaining("不能静默跳过");
@@ -255,7 +255,7 @@ class InspectionTaskServiceTest {
         QualityAgent agent = new QualityAgent();
         agent.setId("agent-1");
         agent.setStatus("PUBLISHED");
-        when(agentMapper.selectById("agent-1")).thenReturn(agent);
+        when(agentMapper.findById("agent-1")).thenReturn(agent);
 
         assertThatThrownBy(() -> taskService.create("task", "conversation-1", "agent-1", null, List.of()))
                 .isInstanceOf(IqcException.class)
@@ -270,7 +270,7 @@ class InspectionTaskServiceTest {
         when(conversationMapper.selectById("conversation-2")).thenReturn(second);
         when(dataScope.canView(null, null)).thenReturn(true);
         QualityAgent agent = new QualityAgent(); agent.setId("agent-1"); agent.setStatus("PUBLISHED");
-        when(agentMapper.selectById("agent-1")).thenReturn(agent);
+        when(agentMapper.findById("agent-1")).thenReturn(agent);
         io.github.opensabre.iqc.rule.model.QualityRule rule = new io.github.opensabre.iqc.rule.model.QualityRule();
         rule.setId("rule-1"); rule.setStatus("PUBLISHED");
         when(ruleMapper.lockById("rule-1")).thenReturn(rule);
@@ -292,7 +292,7 @@ class InspectionTaskServiceTest {
         when(conversationMapper.selectById("conversation-1")).thenReturn(conversation);
         when(dataScope.canView(null, null)).thenReturn(true);
         QualityAgent agent = new QualityAgent(); agent.setId("agent-1"); agent.setStatus("PUBLISHED");
-        when(agentMapper.selectById("agent-1")).thenReturn(agent);
+        when(agentMapper.findById("agent-1")).thenReturn(agent);
         var rule = new io.github.opensabre.iqc.rule.model.QualityRule(); rule.setId("rule-1"); rule.setStatus("PUBLISHED");
         when(ruleMapper.lockById("rule-1")).thenReturn(rule);
         when(ruleSetService.published("set-1")).thenReturn(
@@ -313,7 +313,7 @@ class InspectionTaskServiceTest {
     @Test
     void scheduledTaskResolvesCurrentMatchingConversationsOnlyWhenDue() {
         QualityAgent agent = new QualityAgent(); agent.setId("agent-1"); agent.setStatus("PUBLISHED");
-        when(agentMapper.selectById("agent-1")).thenReturn(agent);
+        when(agentMapper.findById("agent-1")).thenReturn(agent);
         io.github.opensabre.iqc.rule.model.QualityRule rule = new io.github.opensabre.iqc.rule.model.QualityRule();
         rule.setId("rule-1"); rule.setStatus("PUBLISHED"); when(ruleMapper.lockById("rule-1")).thenReturn(rule);
         when(dataScope.owner()).thenReturn("alice"); when(dataScope.groupId()).thenReturn("group-1");

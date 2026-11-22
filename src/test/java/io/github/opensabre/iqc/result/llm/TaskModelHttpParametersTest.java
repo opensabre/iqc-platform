@@ -20,39 +20,22 @@ import java.util.concurrent.Executors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
-/** Verifies task controls at the actual SDK HTTP boundary, including timeout-driven fallback. */
+/** Verifies overrides for the historical deployment model retained by IQC. */
 class TaskModelHttpParametersTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
-    @Test
-    void sendsTaskPromptAndExplicitZeroToPrimaryAndFallbackWithoutChangingPublishedSnapshot() throws Exception {
-        try (var endpoint = new Endpoint(true, false)) {
-            var snapshot = snapshot(endpoint);
-            String frozen = snapshot.toString();
-            var result = provider(new SnapshotChatModelRouter((org.springframework.ai.chat.model.ChatModel) null,
-                    mapper, reference -> "isolated-test-key")).evaluate("申请退款", mapper.readTree("{\"id\":\"refund-rule\"}"), snapshot, "http-fallback");
-            assertThat(result.supported()).as(result.reason()).isTrue();
-            assertThat(result.reason()).isEqualTo("fallback reply");
-            assertThat(endpoint.requests).extracting(Request::path).containsExactly("/primary/v1/chat/completions", "/fallback/v1/chat/completions");
-            for (var request : endpoint.requests) {
-                assertThat(request.body.path("temperature").isNumber()).isTrue();
-                assertThat(request.body.path("temperature").asDouble()).isZero();
-                assertThat(request.body.path("messages").toString()).contains("已发布行为", "本次退款要求", "申请退款");
-            }
-            assertThat(endpoint.requests).extracting(request -> request.body.path("model").asText()).containsExactly("primary-model", "fallback-model");
-            assertThat(snapshot.toString()).isEqualTo(frozen);
-        }
-    }
-
-    @Test
-    void taskTransportTimeoutMovesToFallbackInsteadOfAcceptingLatePrimaryReply() throws Exception {
-        try (var endpoint = new Endpoint(false, true)) {
-            var result = provider(new SnapshotChatModelRouter((org.springframework.ai.chat.model.ChatModel) null,
-                    mapper, reference -> "isolated-test-key")).evaluate("申请退款", mapper.readTree("{\"id\":\"refund-rule\"}"), snapshot(endpoint), "http-timeout");
-            assertThat(result.supported()).as(result.reason()).isTrue();
-            assertThat(result.reason()).isEqualTo("fallback reply");
-            assertThat(endpoint.requests).extracting(Request::path).containsExactly("/primary/v1/chat/completions", "/fallback/v1/chat/completions");
-        }
+    @Test void defaultOpenAiTransportUsesCopiedTimeoutAndTemperature() throws Exception {
+        var mapper = new ObjectMapper();
+        var original = org.springframework.ai.openai.OpenAiChatModel.builder().options(
+                org.springframework.ai.openai.OpenAiChatOptions.builder().apiKey("test-only").model("test-model")
+                        .temperature(0.8).timeout(java.time.Duration.ofSeconds(60)).build()).build();
+        var router = new SnapshotChatModelRouter(mock(io.github.opensabre.iqc.integration.iac.IacConsumerClient.class), original);
+        var snapshot = mapper.readTree("{\"taskOverrides\":{\"temperature\":0,\"timeoutSeconds\":12}}");
+        var configured = (org.springframework.ai.openai.OpenAiChatModel) router.taskDefault(snapshot);
+        assertThat(configured.getOptions().getTimeout()).isEqualTo(java.time.Duration.ofSeconds(12));
+        assertThat(configured.getOptions().getTemperature()).isZero();
+        assertThat(original.getOptions().getTimeout()).isEqualTo(java.time.Duration.ofSeconds(60));
+        assertThat(original.getOptions().getTemperature()).isEqualTo(0.8);
     }
 
     @Test
@@ -64,7 +47,7 @@ class TaskModelHttpParametersTest {
             var snapshot = mapper.createObjectNode();
             snapshot.putObject("configJson").put("systemPrompt", "已发布行为");
             snapshot.putObject("taskOverrides").put("prompt", "本次退款要求").put("temperature", 0).put("timeoutSeconds", 1);
-            var result = provider(new SnapshotChatModelRouter(original, mapper, reference -> "unused"))
+            var result = provider(new SnapshotChatModelRouter(mock(io.github.opensabre.iqc.integration.iac.IacConsumerClient.class), original))
                     .evaluate("申请退款", mapper.readTree("{\"id\":\"refund-rule\"}"), snapshot, "http-legacy");
             assertThat(result.supported()).as(result.reason()).isTrue();
             assertThat(endpoint.requests).hasSize(1);
@@ -79,23 +62,8 @@ class TaskModelHttpParametersTest {
     private SpringAiLlmQualityProvider provider(SnapshotChatModelRouter router) {
         var properties = new LlmQualityProperties();
         properties.setModel("isolated-model"); properties.setMaxAttempts(1);
-        return new SpringAiLlmQualityProvider(null, router, mapper, mock(GovernanceRateLimiter.class),
+        return new SpringAiLlmQualityProvider((org.springframework.ai.chat.model.ChatModel) null, router, mapper, mock(GovernanceRateLimiter.class),
                 mock(UsageCounterRecorder.class), properties);
-    }
-
-    private ObjectNode snapshot(Endpoint endpoint) {
-        var snapshot = mapper.createObjectNode();
-        var config = snapshot.putObject("configJson").put("schemaVersion", "3.0").put("systemPrompt", "已发布行为");
-        var assets = config.putObject("assetSnapshots");
-        assets.set("primaryModel", model(endpoint.url() + "/primary/v1", "primary-model"));
-        assets.putArray("fallbackModels").add(model(endpoint.url() + "/fallback/v1", "fallback-model"));
-        snapshot.putObject("taskOverrides").put("prompt", "本次退款要求").put("temperature", 0).put("timeoutSeconds", 1);
-        return snapshot;
-    }
-
-    private ObjectNode model(String endpoint, String name) {
-        return mapper.createObjectNode().put("provider", "OPENAI").put("endpoint", endpoint).put("modelName", name)
-                .put("secretRef", "test-reference").put("temperature", 0.8).put("timeoutSeconds", 30).put("maxRetries", 0);
     }
 
     private record Request(String path, JsonNode body) { }
