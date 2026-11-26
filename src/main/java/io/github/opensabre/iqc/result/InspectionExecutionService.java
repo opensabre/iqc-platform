@@ -1186,7 +1186,7 @@ public class InspectionExecutionService {
             for (var batch : batches) {
                 if ("CANDIDATE".equals(context.phase())) {
                     var decoded = ItemCandidateOutput.decode(objectMapper, llmQualityProvider.evaluateCandidates(batch, rule,
-                            readSnapshot(task.getAgentSnapshotJson()), recordId + ":" + batch.getFirst().getId()));
+                            invocationSnapshot(task), recordId + ":" + batch.getFirst().getId()));
                     results.add(decoded.result()); decodedQuotes.addAll(decoded.quotes());
                 } else {
                     var anchor = "CONVERSATION".equals(context.inputScope()) ? applicable.getFirst() : batch.getFirst();
@@ -1424,14 +1424,14 @@ public class InspectionExecutionService {
                         String conversationRecordId = "inspection-conversation:" + task.getId() + ":"
                                 + task.getCurrentExecutionId() + ":" + message.getConversationId() + ":rule:" + contextKey + ":run:" + nextRun;
                         priorRuns.add(preRuleFindings == null ? llmQualityProvider.evaluateConversation(conversationMessages, rule,
-                                readSnapshot(task.getAgentSnapshotJson()), conversationRecordId)
+                                invocationSnapshot(task), conversationRecordId)
                                 : llmQualityProvider.evaluateConversation(conversationMessages, rule,
-                                readSnapshot(task.getAgentSnapshotJson()), preRuleFindings, conversationRecordId));
+                                invocationSnapshot(task), preRuleFindings, conversationRecordId));
                     }
                     evaluation = priorRuns.get(runIndex);
                 } else evaluation = preRuleFindings == null
-                        ? llmQualityProvider.evaluate(message.getContent(), rule, readSnapshot(task.getAgentSnapshotJson()), recordId)
-                        : llmQualityProvider.evaluate(message.getContent(), rule, readSnapshot(task.getAgentSnapshotJson()), preRuleFindings, recordId);
+                        ? llmQualityProvider.evaluate(message.getContent(), rule, invocationSnapshot(task), recordId)
+                        : llmQualityProvider.evaluate(message.getContent(), rule, invocationSnapshot(task), preRuleFindings, recordId);
                 if (!evaluation.supported()) {
                     result.setResultStatus("ERROR"); result.setScore(0); result.setRiskLevel("HIGH"); result.setDeduction(0);
                     result.setReason(evaluation.reason()); result.setFindingJson("[]"); result.setEvidenceJson("[]"); result.setSuggestionJson("[]");
@@ -1635,6 +1635,14 @@ public class InspectionExecutionService {
     private String writeJson(Object value) {
         try { return objectMapper.writeValueAsString(value); }
         catch (Exception exception) { throw new IllegalStateException("结果解释结构生成失败", exception); }
+    }
+
+    /** Adds the IQC task ID to the outbound model call without modifying its frozen snapshot. */
+    private JsonNode invocationSnapshot(InspectionTask task) {
+        JsonNode snapshot = readSnapshot(task.getAgentSnapshotJson());
+        if (snapshot instanceof com.fasterxml.jackson.databind.node.ObjectNode object)
+            return object.put("iacBusinessReference", task.getId());
+        return snapshot;
     }
 
     private record Match(boolean hit, String text, int start, int end) { }

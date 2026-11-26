@@ -43,7 +43,14 @@ public class SnapshotChatModelRouter {
         }
         var turns = prompt.getInstructions().stream().map(message ->
                 new IacConsumerClient.Turn(message.getMessageType().getValue(), message.getText())).toList();
-        var reply = IacResponses.required(client.invoke(new IacConsumerClient.ModelRequest(snapshot, turns, tools)));
+        String businessReference = snapshot.path("iacBusinessReference").asText(null);
+        JsonNode frozen = snapshot;
+        if (businessReference != null && snapshot instanceof com.fasterxml.jackson.databind.node.ObjectNode object) {
+            var copy = object.deepCopy();
+            copy.remove("iacBusinessReference");
+            frozen = copy;
+        }
+        var reply = IacResponses.required(client.invoke(new IacConsumerClient.ModelRequest(frozen, turns, tools, businessReference)));
         if (reply.content() == null) throw new IllegalStateException("IAC 模型返回为空");
         var metadata = ChatResponseMetadata.builder();
         if (reply.model() != null) metadata.model(reply.model());

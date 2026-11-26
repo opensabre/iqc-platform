@@ -122,10 +122,19 @@ public class TaskEnginePlanService {
 
     /** Rebuilds executable steps without reading mutable rules or Agents; each operation owns its order. */
     public List<MultiEngineExecutor.Step> steps(FrozenPlan plan, String conversationId) {
+        return steps(plan, conversationId, null);
+    }
+
+    /** Adds task correlation to the runtime configuration without changing the frozen plan. */
+    public List<MultiEngineExecutor.Step> steps(FrozenPlan plan, String conversationId, String taskId) {
         if (conversationId == null || conversationId.isBlank()) throw IqcException.invalidArgument("执行会话标识不能为空");
         return plan.engines().stream().map(engine -> {
-            var config = (com.fasterxml.jackson.databind.node.ObjectNode) engine.configuration();
-            if (engine.type() == EngineType.LLM) config.put("conversationId", conversationId);
+            var config = (com.fasterxml.jackson.databind.node.ObjectNode) engine.configuration().deepCopy();
+            if (engine.type() == EngineType.LLM) {
+                config.put("conversationId", conversationId);
+                if (taskId != null && config.get("agentSnapshot") instanceof com.fasterxml.jackson.databind.node.ObjectNode agent)
+                    agent.put("iacBusinessReference", taskId);
+            }
             MultiEngineExecutor.Adapter adapter = "iqc-unified-tags-v1".equals(config.path("schemaVersion").asText())
                     ? new UnifiedTagEngineAdapter(mapper, regex, dls, llm, engine.type()) : switch (engine.type()) {
                 case REGEX -> regex; case DLS -> dls; case LLM -> llm;

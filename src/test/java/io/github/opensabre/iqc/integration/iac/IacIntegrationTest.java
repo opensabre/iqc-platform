@@ -34,6 +34,19 @@ class IacIntegrationTest {
         assertThat(snapshot.toString()).isEqualTo(before);
         verifyNoInteractions(legacy);
     }
+    @Test void sendsTaskIdOutsideTheFrozenCapabilitySnapshot() throws Exception {
+        var snapshot = json.createObjectNode().put("iacBusinessReference", "task-123");
+        snapshot.putObject("configJson").put("schemaVersion", "3.0");
+        when(client.invoke(any())).thenReturn(Result.success(new IacConsumerClient.ModelReply("answer", null, null, null)));
+
+        router.call(new Prompt("business prompt"), snapshot);
+
+        var request = org.mockito.ArgumentCaptor.forClass(IacConsumerClient.ModelRequest.class);
+        verify(client).invoke(request.capture());
+        assertThat(request.getValue().businessReference()).isEqualTo("task-123");
+        assertThat(request.getValue().snapshot().has("iacBusinessReference")).isFalse();
+        assertThat(snapshot.path("iacBusinessReference").asText()).isEqualTo("task-123");
+    }
     @Test void remoteTransportFailureDoesNotFallBackToDeploymentModel() throws Exception {
         when(client.invoke(any())).thenThrow(new IllegalStateException("IAC unavailable"));
         assertThatThrownBy(() -> router.call(new Prompt("q"),json.readTree("{\"configJson\":{\"schemaVersion\":\"3.0\"}}")))
