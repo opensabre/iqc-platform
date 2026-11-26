@@ -50,7 +50,7 @@ public final class TaskWizardRuntime {
         var frozenIds = saved.input().messages().stream().map(Message::messageId).collect(java.util.stream.Collectors.toSet());
         if (items.stream().anyMatch(item -> !frozenIds.contains(item.getMessageId())))
             throw new IllegalStateException("任务进度消息不属于冻结输入");
-        var completed = new MultiEngineExecutor(Clock.systemUTC()).execute(saved, plans.steps(snapshot.enginePlan(), conversationId),
+        var completed = new MultiEngineExecutor(Clock.systemUTC()).execute(saved, plans.steps(snapshot.enginePlan(), conversationId, task.getId()),
                 () -> cancelled(task.getId(), executionId), store::save);
         if (cancelled(task.getId(), executionId)) return;
         var processed = snapshot.unifiedLabels() == null

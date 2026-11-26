@@ -25,6 +25,11 @@ public interface IacConsumerClient {
     Result<ModelReply> invoke(@RequestBody ModelRequest request);
 
     record Turn(String role, String content) { }
-    record ModelRequest(com.fasterxml.jackson.databind.JsonNode snapshot, java.util.List<Turn> messages, boolean toolsEnabled) { }
-    record ModelReply(String content, String model, Integer inputTokens, Integer outputTokens) { }
+    record ModelRequest(com.fasterxml.jackson.databind.JsonNode snapshot, java.util.List<Turn> messages, boolean toolsEnabled,
+                        String businessReference) { }
+    record ModelReply(String content, String model, Integer inputTokens, Integer outputTokens, String requestId) {
+        public ModelReply(String content, String model, Integer inputTokens, Integer outputTokens) {
+            this(content, model, inputTokens, outputTokens, null);
+        }
+    }
 }
